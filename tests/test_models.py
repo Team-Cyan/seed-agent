@@ -40,3 +40,11 @@ def test_safe_url_identity_strips_common_secret_variants() -> None:
     identity = safe_url_identity(url)
 
     assert identity == "https://tracker.example/download.php?id=42"
+
+
+def test_safe_url_identity_strips_userinfo_and_keeps_safe_parts() -> None:
+    url = "https://user:pass@tracker.example/details.php?id=42"
+
+    identity = safe_url_identity(url)
+
+    assert identity == "https://tracker.example/details.php?id=42"

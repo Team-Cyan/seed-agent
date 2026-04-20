@@ -49,7 +49,19 @@ def safe_url_identity(url: str) -> str:
         for key, value in parse_qsl(parts.query, keep_blank_values=True)
         if _is_safe_query_key(key)
     ]
-    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(safe_query), ""))
+    netloc = _safe_netloc(parts)
+    return urlunsplit((parts.scheme, netloc, parts.path, urlencode(safe_query), ""))
+
+
+def _safe_netloc(parts) -> str:
+    hostname = parts.hostname
+    if hostname is None:
+        return parts.netloc
+    if ":" in hostname and not hostname.startswith("["):
+        hostname = f"[{hostname}]"
+    if parts.port is not None:
+        return f"{hostname}:{parts.port}"
+    return hostname
 
 
 def _is_safe_query_key(key: str) -> bool:
