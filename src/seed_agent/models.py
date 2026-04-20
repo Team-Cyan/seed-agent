@@ -8,7 +8,17 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-SENSITIVE_QUERY_KEYS = {"passkey", "token", "auth", "rsskey", "uid", "secret", "cookie"}
+SENSITIVE_QUERY_KEYS = {
+    "passkey",
+    "password",
+    "passphrase",
+    "token",
+    "auth",
+    "rsskey",
+    "uid",
+    "secret",
+    "cookie",
+}
 SENSITIVE_QUERY_EXACT_KEYS = {
     "authkey",
     "pass_key",

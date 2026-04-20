@@ -53,6 +53,19 @@ def test_safe_url_identity_strips_pt_secret_keys_but_keeps_safe_params() -> None
     assert identity == "https://tracker.example/details.php?id=42&safe=value&key=keep"
 
 
+def test_safe_url_identity_strips_explicit_password_query_keys() -> None:
+    url = (
+        "https://tracker.example/details.php?id=42"
+        "&password=hunter2"
+        "&passphrase=open-sesame"
+        "&safe=value"
+    )
+
+    identity = safe_url_identity(url)
+
+    assert identity == "https://tracker.example/details.php?id=42&safe=value"
+
+
 def test_safe_url_identity_strips_common_secret_variants() -> None:
     url = "https://tracker.example/download.php?id=42&token=abc&sign=sig&hash=deadbeef"
 
