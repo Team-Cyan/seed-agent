@@ -1,0 +1,35 @@
+mode: balanced
+sites:
+  - name: demo
+    type: nexusphp
+    enabled: true
+    rss_url: https://tracker.example/rss.php?passkey=secret
+    cookie_ref: local/secrets/demo.cookie
+discovery:
+  discounts: [free, 2xfree]
+  min_left_time_minutes: 120
+  min_leechers: 8
+  max_seeders: 80
+  allow_hr: false
+scoring:
+  min_score_to_enqueue: 70
+  weights:
+    discount: 30
+    leechers: 25
+    seeders: 15
+    left_time: 15
+    size: 10
+    site_history: 5
+downloader:
+  type: qbittorrent
+  target: unraid-qb
+  category: pt-auto
+  tags: [seed-agent, pt-auto]
+  secret_ref: local/secrets/qbittorrent.yaml
+cleanup:
+  cold_after_days: 7
+  min_upload_delta_gb: 1
+  protect_hr: true
+  protect_manual: true
+  protect_media_library: true
+  pause_before_delete_hours: 24
