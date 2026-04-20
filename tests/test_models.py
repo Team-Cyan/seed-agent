@@ -48,3 +48,11 @@ def test_safe_url_identity_strips_userinfo_and_keeps_safe_parts() -> None:
     identity = safe_url_identity(url)
 
     assert identity == "https://tracker.example/details.php?id=42"
+
+
+def test_safe_url_identity_strips_userinfo_and_preserves_port() -> None:
+    url = "https://user:pass@tracker.example:8443/details.php?id=42&passkey=secret"
+
+    identity = safe_url_identity(url)
+
+    assert identity == "https://tracker.example:8443/details.php?id=42"

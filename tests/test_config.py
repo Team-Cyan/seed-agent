@@ -216,3 +216,11 @@ def test_scoring_weights_must_sum_to_100() -> None:
 
     with pytest.raises(ValidationError, match="weights must sum to 100"):
         SeedAgentConfig(**data)
+
+
+def test_cleanup_pause_before_delete_hours_zero_raises_validation_error() -> None:
+    data = _valid_config_data("local/secrets/qb.yaml")
+    data["cleanup"] = {**data["cleanup"], "pause_before_delete_hours": 0}
+
+    with pytest.raises(ValidationError, match="pause_before_delete_hours"):
+        SeedAgentConfig(**data)
