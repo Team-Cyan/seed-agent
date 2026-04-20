@@ -1,15 +1,17 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import yaml
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from seed_agent.models import Discount
 
 
 class SiteConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     name: str
     type: str
     enabled: bool = True
@@ -18,6 +20,8 @@ class SiteConfig(BaseModel):
 
 
 class DiscoveryConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     discounts: list[Discount] = Field(default_factory=list)
     min_left_time_minutes: int
     min_leechers: int
@@ -34,16 +38,38 @@ class DiscoveryConfig(BaseModel):
         if value is None:
             return []
         if not isinstance(value, list):
-            raise TypeError("discounts must be a list")
+            raise ValueError("discounts must be a list")
         return [_normalize_discount(item) for item in value]
 
 
 class ScoringConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    EXPECTED_WEIGHT_KEYS: ClassVar[tuple[str, ...]] = (
+        "discount",
+        "leechers",
+        "seeders",
+        "left_time",
+        "size",
+        "site_history",
+    )
+
     min_score_to_enqueue: int
     weights: dict[str, int]
 
     @model_validator(mode="after")
     def validate_weights(self) -> ScoringConfig:
+        weight_keys = set(self.weights)
+        expected_keys = set(self.EXPECTED_WEIGHT_KEYS)
+        if weight_keys != expected_keys:
+            missing = sorted(expected_keys - weight_keys)
+            unknown = sorted(weight_keys - expected_keys)
+            details: list[str] = []
+            if missing:
+                details.append(f"missing keys: {', '.join(missing)}")
+            if unknown:
+                details.append(f"unknown keys: {', '.join(unknown)}")
+            raise ValueError(f"weights must use exact keys; {'; '.join(details)}")
         total = sum(self.weights.values())
         if total != 100:
             raise ValueError(f"weights must sum to 100, got {total}")
@@ -51,6 +77,8 @@ class ScoringConfig(BaseModel):
 
 
 class DownloaderConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     type: str
     target: str
     category: str
@@ -59,6 +87,8 @@ class DownloaderConfig(BaseModel):
 
 
 class CleanupConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     cold_after_days: int
     min_upload_delta_gb: float
     protect_hr: bool
@@ -74,6 +104,8 @@ class CleanupConfig(BaseModel):
 
 
 class SeedAgentConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     mode: str
     sites: list[SiteConfig]
     discovery: DiscoveryConfig
@@ -90,7 +122,7 @@ def _normalize_discount(value: Any) -> Discount:
     if isinstance(value, Discount):
         return value
     if not isinstance(value, str):
-        raise TypeError("discounts entries must be strings or Discount values")
+        raise ValueError("discounts entries must be strings or Discount values")
     normalized = value.strip().lower().replace(" ", "")
     aliases = {
         "free": Discount.FREE,
@@ -102,7 +134,9 @@ def _normalize_discount(value: Any) -> Discount:
         "normal": Discount.NORMAL,
         "none": Discount.NORMAL,
     }
-    return aliases.get(normalized, Discount.NORMAL)
+    if normalized not in aliases:
+        raise ValueError(f"unknown discount label: {value}")
+    return aliases[normalized]
 
 
 def load_downloader_secret(path: Path) -> dict[str, str]:

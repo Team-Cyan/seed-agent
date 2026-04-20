@@ -7,7 +7,20 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-SENSITIVE_QUERY_KEYS = {"passkey", "token", "auth", "key", "rsskey", "uid"}
+SENSITIVE_QUERY_KEYS = {"passkey", "token", "auth", "rsskey", "uid"}
+SENSITIVE_QUERY_EXACT_KEYS = {
+    "authkey",
+    "pass_key",
+    "torrent_pass",
+    "torrentpass",
+    "download_key",
+    "downloadkey",
+    "secure",
+    "signature",
+    "sign",
+    "hash",
+}
+SENSITIVE_QUERY_SUBSTRINGS = ("pass", "token", "secret", "auth", "cookie")
 
 
 class Discount(StrEnum):
@@ -34,9 +47,20 @@ def safe_url_identity(url: str) -> str:
     safe_query = [
         (key, value)
         for key, value in parse_qsl(parts.query, keep_blank_values=True)
-        if key.lower() not in SENSITIVE_QUERY_KEYS
+        if _is_safe_query_key(key)
     ]
     return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(safe_query), ""))
+
+
+def _is_safe_query_key(key: str) -> bool:
+    lower_key = key.lower()
+    if lower_key in SENSITIVE_QUERY_KEYS:
+        return False
+    if lower_key in SENSITIVE_QUERY_EXACT_KEYS:
+        return False
+    if any(token in lower_key for token in SENSITIVE_QUERY_SUBSTRINGS):
+        return False
+    return True
 
 
 class TorrentCandidate(BaseModel):
