@@ -4,7 +4,6 @@ import json
 import re
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qsl, quote_plus, urlsplit, urlunsplit
 
 from seed_agent.models import Decision, safe_url_identity
 
@@ -31,21 +30,23 @@ SENSITIVE_QUERY_KEYS = {
     "hash",
 }
 SENSITIVE_TOKEN_KEYS = {"pass", "token", "secret", "auth", "cookie"}
-KEY_VALUE_RE = re.compile(
-    r"(?P<key>[A-Za-z0-9_.-]+)\s*(?P<sep>=|:)\s*(?P<value>[^\s&;,]+)"
-)
 URL_RE = re.compile(r"(?P<url>\bhttps?://[^\s<>'\"]+)")
+SENSITIVE_ASSIGNMENT_RE = re.compile(
+    rf"(?<![A-Za-z0-9_.-])(?P<key>{'|'.join(sorted(SENSITIVE_QUERY_KEYS))})"
+    r"\s*(?P<sep>=|:)\s*(?P<value>[^\s&;,)\]}]+)",
+    re.IGNORECASE,
+)
 
 
 def redact_sensitive_text(value: str) -> str:
     redacted = URL_RE.sub(_redact_url_match, value)
-    return KEY_VALUE_RE.sub(_redact_assignment_match, redacted)
+    return _redact_sensitive_assignments(redacted)
 
 
 def redact_payload(value: Any) -> Any:
     if isinstance(value, str):
         stripped = URL_RE.sub(_strip_url_match, value)
-        return KEY_VALUE_RE.sub(_redact_assignment_match, stripped)
+        return _redact_sensitive_assignments(stripped)
     if isinstance(value, dict):
         return {
             key: REDACTED if _is_sensitive_key(key) else redact_payload(item)
@@ -71,53 +72,42 @@ class AuditLogger:
 
 
 def _redact_url_match(match: re.Match[str]) -> str:
-    return _redact_url(match.group("url"))
+    url, suffix = _split_trailing_punctuation(match.group("url"))
+    return f"{_redact_url(url)}{suffix}"
 
 
 def _strip_url_match(match: re.Match[str]) -> str:
-    return safe_url_identity(match.group("url"))
+    url, suffix = _split_trailing_punctuation(match.group("url"))
+    return f"{safe_url_identity(url)}{suffix}"
 
 
 def _redact_url(value: str) -> str:
-    parts = urlsplit(value)
-    if not parts.scheme:
-        return value
-
-    netloc = _safe_netloc(parts)
-    if not parts.query:
-        return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
-
-    query_parts = []
-    for key, item_value in parse_qsl(parts.query, keep_blank_values=True):
-        if _is_sensitive_key(key):
-            query_parts.append((key, REDACTED))
-        else:
-            query_parts.append((key, item_value))
-    query = "&".join(
-        f"{quote_plus(key)}={REDACTED if item_value == REDACTED else quote_plus(item_value)}"
-        for key, item_value in query_parts
-    )
-    return urlunsplit((parts.scheme, netloc, parts.path, query, parts.fragment))
+    return safe_url_identity(value)
 
 
-def _safe_netloc(parts: Any) -> str:
-    hostname = parts.hostname
-    if hostname is None:
-        return parts.netloc
-    if ":" in hostname and not hostname.startswith("["):
-        hostname = f"[{hostname}]"
-    if parts.port is not None:
-        return f"{hostname}:{parts.port}"
-    return hostname
+def _redact_sensitive_assignments(value: str) -> str:
+    previous = None
+    current = value
+    while current != previous:
+        previous = current
+        current = SENSITIVE_ASSIGNMENT_RE.sub(_redact_sensitive_assignment_match, current)
+    return current
 
 
-def _redact_assignment_match(match: re.Match[str]) -> str:
+def _redact_sensitive_assignment_match(match: re.Match[str]) -> str:
     key = match.group("key")
     sep = match.group("sep")
-    value = match.group("value")
-    if _is_sensitive_key(key):
-        return f"{key}{sep}{REDACTED}"
-    return f"{key}{sep}{value}"
+    return f"{key}{sep}{REDACTED}"
+
+
+def _split_trailing_punctuation(value: str) -> tuple[str, str]:
+    suffix = ""
+    core = value
+    trailing_chars = ")]}.,;:!?\"'"
+    while core and core[-1] in trailing_chars:
+        suffix = core[-1] + suffix
+        core = core[:-1]
+    return core, suffix
 
 
 def _is_sensitive_key(key: str) -> bool:

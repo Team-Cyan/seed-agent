@@ -11,8 +11,13 @@ def test_redact_sensitive_text_masks_credentials_in_urls_and_assignments() -> No
 
     assert "abc" not in redacted
     assert "hunter2" not in redacted
-    assert "uid=12" in redacted
+    assert "uid=12" not in redacted
     assert "<redacted>" in redacted
+
+
+def test_redact_sensitive_text_masks_nested_sensitive_assignments() -> None:
+    assert "hunter2" not in redact_sensitive_text("note=password=hunter2")
+    assert "hunter2" not in redact_sensitive_text("note: password=hunter2")
 
 
 def test_redact_sensitive_text_masks_common_secret_fields() -> None:
@@ -28,7 +33,25 @@ def test_redact_sensitive_text_masks_common_secret_fields() -> None:
     assert "abc" not in redacted
     assert "def" not in redacted
     assert "id=42" in redacted
-    assert redacted.count("<redacted>") >= 4
+
+
+def test_redact_sensitive_text_preserves_closing_punctuation_after_url() -> None:
+    value = "prefix (https://tracker.example/details.php?id=1&passkey=secret) suffix"
+
+    redacted = redact_sensitive_text(value)
+
+    assert "(https://tracker.example/details.php?id=1)" in redacted
+    assert "%29" not in redacted
+    assert "secret" not in redacted
+
+
+def test_redact_sensitive_text_preserves_closing_bracket_after_url() -> None:
+    value = "prefix [https://tracker.example/details.php?id=1&passkey=secret] suffix"
+
+    redacted = redact_sensitive_text(value)
+
+    assert "[https://tracker.example/details.php?id=1]" in redacted
+    assert "%5D" not in redacted
 
 
 def test_redact_payload_masks_nested_strings_and_dict_values() -> None:
