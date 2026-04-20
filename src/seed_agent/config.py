@@ -36,7 +36,7 @@ class DiscoveryConfig(BaseModel):
     @classmethod
     def normalize_discounts(cls, value: Any) -> list[Discount]:
         if value is None:
-            return []
+            raise ValueError("discounts must be a list")
         if not isinstance(value, list):
             raise ValueError("discounts must be a list")
         return [_normalize_discount(item) for item in value]

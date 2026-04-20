@@ -156,6 +156,14 @@ def test_discovery_discounts_must_be_a_list() -> None:
         SeedAgentConfig(**data)
 
 
+def test_discovery_null_discounts_raise_validation_error() -> None:
+    data = _valid_config_data("local/secrets/qb.yaml")
+    data["discovery"] = {**data["discovery"], "discounts": None}
+
+    with pytest.raises(ValidationError, match="discounts"):
+        SeedAgentConfig(**data)
+
+
 def test_scoring_weights_must_use_exact_keys() -> None:
     data = _valid_config_data("local/secrets/qb.yaml")
     data["scoring"] = {
