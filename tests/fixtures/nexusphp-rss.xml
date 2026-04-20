@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0" xmlns:nx="https://example.invalid/nexusphp">
+  <channel>
+    <title>NexusPHP RSS</title>
+    <item>
+      <title>Accepted Free Hot Torrent</title>
+      <link>https://tracker.example/details.php?id=1001&amp;passkey=source-secret</link>
+      <enclosure
+        url="https://tracker.example/download.php?id=1001&amp;passkey=download-secret"
+        length="123456789"
+        type="application/x-bittorrent"
+      />
+      <pubDate>Mon, 01 Apr 2024 12:00:00 GMT</pubDate>
+      <seeders>12</seeders>
+      <leechers>24</leechers>
+      <size>123456789</size>
+      <discount>free</discount>
+      <left_time_minutes>240</left_time_minutes>
+      <hr>false</hr>
+      <nx:custom_field>alpha</nx:custom_field>
+    </item>
+    <item>
+      <title>Normal Low Leecher Torrent</title>
+      <link>https://tracker.example/details.php?id=1002&amp;passkey=source-secret</link>
+      <enclosure
+        url="https://tracker.example/download.php?id=1002&amp;passkey=download-secret"
+        length="987654321"
+        type="application/x-bittorrent"
+      />
+      <pubDate>Tue, 02 Apr 2024 12:00:00 GMT</pubDate>
+      <seeders>3</seeders>
+      <leechers>1</leechers>
+      <size>987654321</size>
+      <discount></discount>
+      <left_time_minutes>30</left_time_minutes>
+      <hr>yes</hr>
+      <nx:custom_field>beta</nx:custom_field>
+    </item>
+  </channel>
+</rss>
