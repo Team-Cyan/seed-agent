@@ -12,14 +12,14 @@ def _valid_config_data(secret_ref: str) -> dict[str, object]:
         "sites": [
             {
                 "name": "demo-free",
-                "type": "rss",
+                "type": "nexusphp",
                 "enabled": True,
                 "rss_url": "https://tracker.example/rss.php",
                 "cookie_ref": None,
             },
             {
                 "name": "demo-disabled",
-                "type": "rss",
+                "type": "nexusphp",
                 "enabled": False,
                 "rss_url": "https://tracker.example/rss-disabled.php",
             },
@@ -70,12 +70,12 @@ def test_load_config_accepts_example_shape(tmp_path: Path) -> None:
 mode: balanced
 sites:
   - name: demo-free
-    type: rss
+    type: nexusphp
     enabled: true
     rss_url: https://tracker.example/rss.php
     cookie_ref: null
   - name: demo-disabled
-    type: rss
+    type: nexusphp
     enabled: false
     rss_url: https://tracker.example/rss-disabled.php
 discovery:
@@ -123,12 +123,59 @@ def test_unknown_config_key_raises_validation_error() -> None:
         SeedAgentConfig(**{**_valid_config_data("local/secrets/qb.yaml"), "unexpected": True})
 
 
+def test_invalid_mode_raises_validation_error() -> None:
+    data = {**_valid_config_data("local/secrets/qb.yaml"), "mode": "balaned"}
+
+    with pytest.raises(ValidationError, match="balanced"):
+        SeedAgentConfig(**data)
+
+
+def test_invalid_site_type_raises_validation_error() -> None:
+    data = _valid_config_data("local/secrets/qb.yaml")
+    data["sites"] = [
+        {
+            "name": "demo-free",
+            "type": "nexusphpp",
+            "enabled": True,
+            "rss_url": "https://tracker.example/rss.php",
+            "cookie_ref": None,
+        }
+    ]
+
+    with pytest.raises(ValidationError, match="nexusphp"):
+        SeedAgentConfig(**data)
+
+
+def test_invalid_downloader_type_raises_validation_error() -> None:
+    data = _valid_config_data("local/secrets/qb.yaml")
+    data["downloader"] = {**data["downloader"], "type": "qbittorrentx"}
+
+    with pytest.raises(ValidationError, match="qbittorrent"):
+        SeedAgentConfig(**data)
+
+
+def test_discovery_numeric_fields_reject_strings() -> None:
+    data = _valid_config_data("local/secrets/qb.yaml")
+    data["discovery"] = {**data["discovery"], "min_left_time_minutes": "120"}
+
+    with pytest.raises(ValidationError, match="min_left_time_minutes"):
+        SeedAgentConfig(**data)
+
+
+def test_discovery_bool_fields_reject_strings() -> None:
+    data = _valid_config_data("local/secrets/qb.yaml")
+    data["discovery"] = {**data["discovery"], "allow_hr": "false"}
+
+    with pytest.raises(ValidationError, match="allow_hr"):
+        SeedAgentConfig(**data)
+
+
 def test_unknown_site_key_raises_validation_error() -> None:
     data = _valid_config_data("local/secrets/qb.yaml")
     data["sites"] = [
         {
             "name": "demo-free",
-            "type": "rss",
+            "type": "nexusphp",
             "enabled": True,
             "rss_url": "https://tracker.example/rss.php",
             "cookie_ref": None,

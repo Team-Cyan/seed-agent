@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -10,17 +10,17 @@ from seed_agent.models import Discount
 
 
 class SiteConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
 
     name: str
-    type: str
+    type: Literal["nexusphp"]
     enabled: bool = True
     rss_url: str
     cookie_ref: str | None = None
 
 
 class DiscoveryConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
 
     discounts: list[Discount] = Field(default_factory=list)
     min_left_time_minutes: int
@@ -43,7 +43,7 @@ class DiscoveryConfig(BaseModel):
 
 
 class ScoringConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
 
     EXPECTED_WEIGHT_KEYS: ClassVar[tuple[str, ...]] = (
         "discount",
@@ -77,9 +77,9 @@ class ScoringConfig(BaseModel):
 
 
 class DownloaderConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
 
-    type: str
+    type: Literal["qbittorrent"]
     target: str
     category: str
     tags: list[str] = Field(default_factory=list)
@@ -87,7 +87,7 @@ class DownloaderConfig(BaseModel):
 
 
 class CleanupConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
 
     cold_after_days: int
     min_upload_delta_gb: float
@@ -104,9 +104,9 @@ class CleanupConfig(BaseModel):
 
 
 class SeedAgentConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
 
-    mode: str
+    mode: Literal["balanced"]
     sites: list[SiteConfig]
     discovery: DiscoveryConfig
     scoring: ScoringConfig

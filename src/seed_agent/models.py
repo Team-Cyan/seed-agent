@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
@@ -7,7 +8,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-SENSITIVE_QUERY_KEYS = {"passkey", "token", "auth", "rsskey", "uid"}
+SENSITIVE_QUERY_KEYS = {"passkey", "token", "auth", "rsskey", "uid", "secret", "cookie"}
 SENSITIVE_QUERY_EXACT_KEYS = {
     "authkey",
     "pass_key",
@@ -20,7 +21,8 @@ SENSITIVE_QUERY_EXACT_KEYS = {
     "sign",
     "hash",
 }
-SENSITIVE_QUERY_SUBSTRINGS = ("pass", "token", "secret", "auth", "cookie")
+SENSITIVE_QUERY_TOKEN_KEYS = {"pass", "token", "secret", "auth", "cookie"}
+QUERY_KEY_SPLIT_RE = re.compile(r"[^a-z0-9]+")
 
 
 class Discount(StrEnum):
@@ -70,7 +72,8 @@ def _is_safe_query_key(key: str) -> bool:
         return False
     if lower_key in SENSITIVE_QUERY_EXACT_KEYS:
         return False
-    if any(token in lower_key for token in SENSITIVE_QUERY_SUBSTRINGS):
+    key_parts = [part for part in QUERY_KEY_SPLIT_RE.split(lower_key) if part]
+    if any(part in SENSITIVE_QUERY_TOKEN_KEYS for part in key_parts):
         return False
     return True
 
@@ -96,8 +99,11 @@ class TorrentCandidate(BaseModel):
     def normalize_discount(cls, value: str | Discount) -> Discount:
         if isinstance(value, Discount):
             return value
+        if not isinstance(value, str):
+            raise ValueError("discount must be a string or Discount value")
         normalized = value.strip().lower().replace(" ", "")
         aliases = {
+            "": Discount.NORMAL,
             "free": Discount.FREE,
             "2xfree": Discount.TWO_X_FREE,
             "2x_free": Discount.TWO_X_FREE,
@@ -107,7 +113,9 @@ class TorrentCandidate(BaseModel):
             "normal": Discount.NORMAL,
             "none": Discount.NORMAL,
         }
-        return aliases.get(normalized, Discount.NORMAL)
+        if normalized not in aliases:
+            raise ValueError(f"unknown discount label: {value}")
+        return aliases[normalized]
 
     @property
     def stable_id(self) -> str:
