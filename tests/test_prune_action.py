@@ -51,6 +51,13 @@ class DummyDownloader:
         self.calls.append(("delete", hash, delete_files))
 
 
+class FailingSecondDownloader(DummyDownloader):
+    async def pause(self, hash: str) -> None:
+        await super().pause(hash)
+        if len(self.calls) == 2:
+            raise RuntimeError("pause failed")
+
+
 @pytest.mark.asyncio
 async def test_dry_run_prune_does_not_call_downloader() -> None:
     from seed_agent.actions.qb import prune_cold_torrents
@@ -118,3 +125,30 @@ async def test_execute_never_deletes_unmanaged_torrent() -> None:
     assert downloader.calls == []
     assert len(decisions) == 1
     assert decisions[0].action == "qb.cleanup.protect"
+
+
+@pytest.mark.asyncio
+async def test_execute_batch_failure_carries_prior_cleanup_decisions() -> None:
+    from seed_agent.actions.qb import MutationBatchError, prune_cold_torrents
+
+    downloader = FailingSecondDownloader()
+
+    with pytest.raises(MutationBatchError) as raised:
+        await prune_cold_torrents(
+            [_torrent(hash="first"), _torrent(hash="second")],
+            downloader,
+            _cleanup(),
+            managed_category="pt-auto",
+            managed_tags={"seed-agent", "pt-auto"},
+            execute=True,
+        )
+
+    decisions = raised.value.decisions
+    assert downloader.calls == [("pause", "first", None), ("pause", "second", None)]
+    assert [decision.action for decision in decisions] == [
+        "qb.cleanup.pause",
+        "qb.cleanup.pause.failed",
+    ]
+    assert decisions[0].target_id == "first"
+    assert decisions[1].target_id == "second"
+    assert "pause failed" in decisions[1].reason

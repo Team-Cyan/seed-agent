@@ -63,6 +63,8 @@ Phase 1 uses `balanced` cleanup by default:
 
 - [Inspiration Pool](docs/research/inspiration-pool.md)
 - [Seed Agent Design](docs/superpowers/specs/2026-04-20-seed-agent-design.md)
+- [Phase 1 Usage](docs/operations/phase-1-usage.md)
+- [Session Handoff](docs/operations/session-handoff.md)
 
 ## Local Development
 

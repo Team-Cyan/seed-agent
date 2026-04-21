@@ -9,7 +9,7 @@ import typer
 
 from seed_agent.actions.pt import daily_report as build_daily_report
 from seed_agent.actions.pt import discover_candidates, score_candidates
-from seed_agent.actions.qb import enqueue_candidates, prune_cold_torrents
+from seed_agent.actions.qb import MutationBatchError, enqueue_candidates, prune_cold_torrents
 from seed_agent.audit import AuditLogger, redact_payload
 from seed_agent.config import SeedAgentConfig, load_config, load_downloader_secret
 from seed_agent.downloaders.qbittorrent import QbittorrentClient
@@ -77,15 +77,20 @@ def enqueue(
     candidates = _run(discover_candidates(loaded))
     scored = score_candidates(candidates, loaded.discovery, loaded.scoring)
     downloader = build_downloader(loaded) if execute else _NullDownloader()
-    decisions = _run(
-        enqueue_candidates(
-            scored,
-            downloader,
-            loaded.downloader.category,
-            loaded.downloader.tags,
-            execute,
+    batch_error = None
+    try:
+        decisions = _run(
+            enqueue_candidates(
+                scored,
+                downloader,
+                loaded.downloader.category,
+                loaded.downloader.tags,
+                execute,
+            )
         )
-    )
+    except MutationBatchError as exc:
+        decisions = exc.decisions
+        batch_error = exc
     _write_audit_decisions(loaded, decisions)
     payload = {
         "command": "enqueue",
@@ -94,11 +99,14 @@ def enqueue(
         "discovered": len(candidates),
         "scored": len(scored),
         "accepted": sum(1 for item in scored if item.accepted),
-        "enqueued": len(decisions),
+        "enqueued": sum(1 for item in decisions if item.action == "qb.enqueue"),
         "scores": [_score_summary(item) for item in scored],
         "decisions": [_decision_summary(item) for item in decisions],
     }
+    if batch_error is not None:
+        payload["error"] = str(batch_error)
     _print_json(payload)
+    _raise_if_batch_failed(batch_error)
 
 
 @app.command()
@@ -141,26 +149,32 @@ def prune(
             downloader.list_torrents(loaded.downloader.category, set(loaded.downloader.tags))
         )
     else:
-        torrents = []
-        downloader = _NullDownloader()
-    decisions = _run(
-        prune_cold_torrents(
-            torrents,
-            downloader,
-            loaded.cleanup,
-            loaded.downloader.category,
-            loaded.downloader.tags,
-            execute,
+        downloader = _maybe_build_downloader(loaded)
+        if downloader is None:
+            torrents = []
+            downloader = _NullDownloader()
+        else:
+            torrents = _run(
+                downloader.list_torrents(loaded.downloader.category, set(loaded.downloader.tags))
+            )
+    batch_error = None
+    try:
+        decisions = _run(
+            prune_cold_torrents(
+                torrents,
+                downloader,
+                loaded.cleanup,
+                loaded.downloader.category,
+                loaded.downloader.tags,
+                execute,
+            )
         )
-    )
+    except MutationBatchError as exc:
+        decisions = exc.decisions
+        batch_error = exc
     _write_audit_decisions(loaded, decisions)
     if execute:
-        store = StateStore(_state_path())
-        for decision in decisions:
-            if decision.action == "qb.cleanup.pause":
-                store.update_by_torrent_hash(decision.target_id, LifecycleState.PAUSED)
-            elif decision.action == "qb.cleanup.delete":
-                store.update_by_torrent_hash(decision.target_id, LifecycleState.DELETED)
+        _persist_prune_state(StateStore(_state_path()), decisions)
     payload = {
         "command": "prune",
         "config": str(config),
@@ -168,7 +182,10 @@ def prune(
         "managed_count": len(torrents),
         "decisions": [_decision_summary(item) for item in decisions],
     }
+    if batch_error is not None:
+        payload["error"] = str(batch_error)
     _print_json(payload)
+    _raise_if_batch_failed(batch_error)
 
 
 @app.command(name="daily-report")
@@ -221,31 +238,24 @@ def run_once(
         )
 
     downloader = build_downloader(loaded) if execute else _NullDownloader()
-    decisions = _run(
-        enqueue_candidates(
-            scored,
-            downloader,
-            loaded.downloader.category,
-            loaded.downloader.tags,
-            execute,
+    batch_error = None
+    try:
+        decisions = _run(
+            enqueue_candidates(
+                scored,
+                downloader,
+                loaded.downloader.category,
+                loaded.downloader.tags,
+                execute,
+            )
         )
-    )
+    except MutationBatchError as exc:
+        decisions = exc.decisions
+        batch_error = exc
     _write_audit_decisions(loaded, decisions)
 
     if execute:
-        for decision in decisions:
-            scored_item = scored_by_id.get(decision.target_id)
-            if scored_item is None:
-                continue
-            torrent_hash = decision.new_state.get("torrent_hash")
-            store.upsert_candidate(
-                scored_item.candidate_id,
-                scored_item.candidate.title,
-                scored_item.candidate.site,
-                LifecycleState.ENQUEUED,
-                score=scored_item.score,
-                torrent_hash=str(torrent_hash) if torrent_hash is not None else None,
-            )
+        _persist_enqueue_state(store, scored_by_id, decisions)
 
     payload = {
         "command": "run-once",
@@ -254,11 +264,14 @@ def run_once(
         "discovered": len(candidates),
         "scored": len(scored),
         "accepted": sum(1 for item in scored if item.accepted),
-        "enqueued": len(decisions),
+        "enqueued": sum(1 for item in decisions if item.action == "qb.enqueue"),
         "scores": [_score_summary(item) for item in scored],
         "decisions": [_decision_summary(item) for item in decisions],
     }
+    if batch_error is not None:
+        payload["error"] = str(batch_error)
     _print_json(payload)
+    _raise_if_batch_failed(batch_error)
 
 
 def _run(value: Any) -> Any:
@@ -360,6 +373,42 @@ def _write_audit_decisions(config: SeedAgentConfig, decisions: list[Decision]) -
     logger = AuditLogger(audit_path)
     for decision in decisions:
         logger.write(decision)
+
+
+def _persist_enqueue_state(
+    store: StateStore,
+    scored_by_id: dict[str, ScoreBreakdown],
+    decisions: list[Decision],
+) -> None:
+    for decision in decisions:
+        if decision.action != "qb.enqueue":
+            continue
+        scored_item = scored_by_id.get(decision.target_id)
+        if scored_item is None:
+            continue
+        torrent_hash = decision.new_state.get("torrent_hash")
+        store.upsert_candidate(
+            scored_item.candidate_id,
+            scored_item.candidate.title,
+            scored_item.candidate.site,
+            LifecycleState.ENQUEUED,
+            score=scored_item.score,
+            torrent_hash=str(torrent_hash) if torrent_hash is not None else None,
+        )
+
+
+def _persist_prune_state(store: StateStore, decisions: list[Decision]) -> None:
+    for decision in decisions:
+        if decision.action == "qb.cleanup.pause":
+            store.update_by_torrent_hash(decision.target_id, LifecycleState.PAUSED)
+        elif decision.action == "qb.cleanup.delete":
+            store.update_by_torrent_hash(decision.target_id, LifecycleState.DELETED)
+
+
+def _raise_if_batch_failed(error: MutationBatchError | None) -> None:
+    if error is None:
+        return
+    raise typer.Exit(1)
 
 
 def _audit_path() -> Path:

@@ -365,6 +365,82 @@ def test_run_once_execute_marks_enqueued_without_hash_and_preserves_it_on_dry_ru
     assert preserved["torrent_hash"] is None
 
 
+def test_run_once_execute_failure_persists_prior_state_and_audit(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from seed_agent import cli
+
+    monkeypatch.chdir(tmp_path)
+
+    config_path = _config_file(tmp_path)
+    config = _config()
+    first = _candidate(title="First", source_url="https://tracker.example/details.php?id=1")
+    second = _candidate(
+        title="Second",
+        source_url="https://tracker.example/details.php?id=2",
+        download_url="https://tracker.example/download.php?id=2&passkey=secret",
+    )
+
+    async def fake_discover_candidates(config: SeedAgentConfig):
+        return [first, second]
+
+    def fake_score_candidates(candidates, discovery_config, scoring_config):
+        return [_scored(candidate=first), _scored(candidate=second)]
+
+    class FakeDownloader:
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+
+        async def add_url(self, url: str, category: str, tags: list[str]) -> str | None:
+            self.calls.append(url)
+            if len(self.calls) == 2:
+                raise RuntimeError("add failed")
+            return "0123456789abcdef0123456789abcdef01234567"
+
+        async def list_torrents(self, category: str | None = None, tags: set[str] | None = None):
+            return []
+
+        async def pause(self, hash: str) -> None:
+            return None
+
+        async def delete(self, hash: str, delete_files: bool) -> None:
+            return None
+
+    downloader = FakeDownloader()
+
+    monkeypatch.setattr(cli, "load_config", lambda path: config)
+    monkeypatch.setattr(cli, "discover_candidates", fake_discover_candidates)
+    monkeypatch.setattr(cli, "score_candidates", fake_score_candidates)
+    monkeypatch.setattr(cli, "build_downloader", lambda loaded: downloader)
+
+    result = CliRunner().invoke(
+        cli.app,
+        ["run-once", "--config", str(config_path), "--execute"],
+    )
+
+    assert result.exit_code == 1
+    payload = _json_output(result)
+    assert payload["error"] == "qBittorrent enqueue batch failed"
+    assert payload["enqueued"] == 1
+    assert [decision["action"] for decision in payload["decisions"]] == [
+        "qb.enqueue",
+        "qb.enqueue.failed",
+    ]
+
+    store = StateStore(tmp_path / ".seed-agent" / "state.db")
+    first_row = store.get_candidate(first.stable_id)
+    second_row = store.get_candidate(second.stable_id)
+    assert first_row is not None
+    assert first_row["state"] == LifecycleState.ENQUEUED.value
+    assert second_row is not None
+    assert second_row["state"] == LifecycleState.SCORED.value
+
+    audit = (tmp_path / ".seed-agent" / "audit.jsonl").read_text(encoding="utf-8")
+    assert "qb.enqueue" in audit
+    assert "qb.enqueue.failed" in audit
+    assert "passkey=secret" not in audit
+
+
 def test_run_once_execute_missing_secret_exits_non_zero(
     tmp_path: Path, monkeypatch
 ) -> None:

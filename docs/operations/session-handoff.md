@@ -35,13 +35,41 @@ This document captures the durable handoff state from the initial `seed-agent` p
 
 ## Current Implementation Handoff
 
-- Current plan: `docs/superpowers/plans/2026-04-20-phase-1-pt-upload-loop.md`
-- Recommended next mode: execute the plan task-by-task with `superpowers:subagent-driven-development` or `superpowers:executing-plans`.
-- First safe verification command: `uv run seed-agent run-once --config config/example.yaml`
-- First execute command: `uv run seed-agent run-once --config config/example.yaml --execute`
-- First implementation task: bootstrap the Python package with `pyproject.toml`, `.gitignore`, `src/seed_agent/__init__.py`, and `tests/test_package_import.py`.
-- First verification commands after bootstrap: `uv sync --dev`, `uv run pytest tests/test_package_import.py -q`, and `uv run ruff check .`.
+- Current plan: `docs/superpowers/plans/2026-04-20-phase-1-pt-upload-loop.md`.
+- Current implementation branch: `feat/phase-1-pt-upload-loop`.
+- Current implementation worktree: `/Users/lancer/.config/superpowers/worktrees/seed-agent/phase-1-pt-upload-loop`.
+- Latest Phase 1 safety fix commit at handoff time: `4fac72e fix: close phase one state safety gaps`.
+- Phase 1 is implemented as a CLI-first Python package under `src/seed_agent/`.
+- The implemented command surface is `discover`, `score`, `enqueue`, `review`, `prune`, `daily-report`, and `run-once`.
+- Mutating downloader operations still default to dry-run. Use `--execute` only after reviewing printed decisions and audit output.
+- First safe verification command: `uv run seed-agent run-once --config config/example.yaml`.
+- First execute command after review: `uv run seed-agent run-once --config config/example.yaml --execute`.
+- Full local verification commands: `uv run pytest -q`, `uv run ruff check .`, and `uv run seed-agent --help`.
+- Runtime state remains local to the active workspace at `.seed-agent/state.db`; audit records remain at `.seed-agent/audit.jsonl`.
+- qBittorrent credentials remain external to git in `local/secrets/qbittorrent.yaml`.
+- Known non-blocking warning: pytest currently emits `pytest_asyncio` loop-scope deprecation warnings under the local Python toolchain.
 - Keep Phase 2 intent routing, Telegram, WeChat bridge, Douban wanted-list sync, and optional UI outside the Phase 1 implementation path.
+
+## Phase 1 Implementation Summary
+
+The branch includes:
+
+- Strict Pydantic configuration and domain models.
+- RSS discovery for NexusPHP-style feeds.
+- Candidate scoring for free/hot upload strategy decisions.
+- Redacted JSONL audit logging.
+- SQLite lifecycle state with monotonic candidate state preservation.
+- qBittorrent Web API support for add, inspect, pause/stop, and delete.
+- Conservative cleanup policy that protects unmanaged, H&R, manual, and media-library torrents.
+- CLI dry-run and execute paths for discovery, scoring, enqueue, review, pruning, daily reporting, and the combined `run-once` loop.
+
+Important safety behavior preserved in the latest implementation:
+
+- `run-once --execute` records accepted enqueue decisions as `ENQUEUED` even when qBittorrent returns success without an info hash.
+- Later dry-runs do not downgrade candidates that already reached `ENQUEUED`, `PAUSED`, or `DELETED`.
+- `prune --execute` writes known torrent hashes back to the local state database as `PAUSED` or `DELETED`.
+- qBittorrent torrent rows infer cleanup protection metadata conservatively from tags and save paths.
+- Dry-run prune does not build a live downloader, call qBittorrent, or update lifecycle state.
 
 ## Inspiration Sources
 

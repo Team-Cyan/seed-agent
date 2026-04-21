@@ -422,6 +422,130 @@ def test_prune_dry_run_does_not_update_state_store(
     assert row["state"] == LifecycleState.ENQUEUED.value
 
 
+def test_prune_dry_run_previews_live_torrents_without_mutation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from seed_agent import cli
+
+    monkeypatch.chdir(tmp_path)
+
+    config_path = _config_file(tmp_path, secret_ref="local/secrets/qb.yaml")
+    config = _config(secret_ref="local/secrets/qb.yaml")
+    state_path = tmp_path / ".seed-agent" / "state.db"
+    store = StateStore(state_path)
+    store.upsert_candidate(
+        stable_id="demo-free:https://tracker.example/details.php?id=1",
+        title="High Confidence Torrent",
+        site="demo-free",
+        state=LifecycleState.ENQUEUED,
+        score=95,
+        torrent_hash="abcd1234",
+    )
+
+    class FakeDownloader:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, str, object]] = []
+
+        async def list_torrents(
+            self, category: str | None = None, tags: set[str] | None = None
+        ) -> list[ManagedTorrent]:
+            return [_managed_torrent(hash="abcd1234")]
+
+        async def pause(self, hash: str) -> None:
+            self.calls.append(("pause", hash, None))
+
+        async def delete(self, hash: str, delete_files: bool) -> None:
+            self.calls.append(("delete", hash, delete_files))
+
+    downloader = FakeDownloader()
+
+    monkeypatch.setattr(cli, "load_config", lambda path: config)
+    monkeypatch.setattr(cli, "_maybe_build_downloader", lambda loaded: downloader)
+
+    result = CliRunner().invoke(cli.app, ["prune", "--config", str(config_path)])
+
+    assert result.exit_code == 0
+    payload = _json_output(result)
+    assert payload["managed_count"] == 1
+    assert payload["decisions"][0]["action"] == "qb.cleanup.pause"
+    assert payload["decisions"][0]["execute"] is False
+    assert downloader.calls == []
+    row = store.get_candidate("demo-free:https://tracker.example/details.php?id=1")
+    assert row is not None
+    assert row["state"] == LifecycleState.ENQUEUED.value
+
+
+def test_prune_execute_failure_persists_prior_state_and_audit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from seed_agent import cli
+
+    monkeypatch.chdir(tmp_path)
+
+    config_path = _config_file(tmp_path, secret_ref="local/secrets/qb.yaml")
+    config = _config(secret_ref="local/secrets/qb.yaml")
+    state_path = tmp_path / ".seed-agent" / "state.db"
+    store = StateStore(state_path)
+    first_id = "demo-free:https://tracker.example/details.php?id=1"
+    second_id = "demo-free:https://tracker.example/details.php?id=2"
+    store.upsert_candidate(
+        stable_id=first_id,
+        title="First Torrent",
+        site="demo-free",
+        state=LifecycleState.ENQUEUED,
+        score=95,
+        torrent_hash="first",
+    )
+    store.upsert_candidate(
+        stable_id=second_id,
+        title="Second Torrent",
+        site="demo-free",
+        state=LifecycleState.ENQUEUED,
+        score=90,
+        torrent_hash="second",
+    )
+
+    class FakeDownloader:
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+
+        async def list_torrents(
+            self, category: str | None = None, tags: set[str] | None = None
+        ) -> list[ManagedTorrent]:
+            return [_managed_torrent(hash="first"), _managed_torrent(hash="second")]
+
+        async def pause(self, hash: str) -> None:
+            self.calls.append(hash)
+            if hash == "second":
+                raise RuntimeError("pause failed")
+
+        async def delete(self, hash: str, delete_files: bool) -> None:
+            raise AssertionError("delete should not be called")
+
+    downloader = FakeDownloader()
+
+    monkeypatch.setattr(cli, "load_config", lambda path: config)
+    monkeypatch.setattr(cli, "build_downloader", lambda loaded: downloader)
+
+    result = CliRunner().invoke(
+        cli.app, ["prune", "--config", str(config_path), "--execute"]
+    )
+
+    assert result.exit_code == 1
+    payload = _json_output(result)
+    assert payload["error"] == "qBittorrent cleanup batch failed"
+    assert [decision["action"] for decision in payload["decisions"]] == [
+        "qb.cleanup.pause",
+        "qb.cleanup.pause.failed",
+    ]
+    assert store.get_candidate(first_id)["state"] == LifecycleState.PAUSED.value
+    assert store.get_candidate(second_id)["state"] == LifecycleState.ENQUEUED.value
+    audit_path = tmp_path / ".seed-agent" / "audit.jsonl"
+    audit_text = audit_path.read_text(encoding="utf-8")
+    assert "qb.cleanup.pause" in audit_text
+    assert "qb.cleanup.pause.failed" in audit_text
+
+
 def test_execute_commands_fail_when_downloader_secret_missing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
