@@ -118,6 +118,61 @@ async def test_list_torrents_converts_rows_into_managed_torrents() -> None:
 
 @pytest.mark.asyncio
 @respx.mock
+async def test_list_torrents_infers_protection_metadata_from_qb_rows() -> None:
+    respx.post("https://qb.example/api/v2/auth/login").mock(
+        return_value=httpx.Response(200, text="Ok.")
+    )
+    respx.get("https://qb.example/api/v2/torrents/info").mock(
+        return_value=httpx.Response(
+            200,
+            json=[
+                {
+                    "hash": "abcd1234",
+                    "name": "Example Torrent",
+                    "category": "pt-auto",
+                    "tags": "seed-agent, hr, pt-auto",
+                    "state": "uploading",
+                    "size": 123456,
+                    "uploaded": 654321,
+                    "uploaded_session": 111,
+                    "downloaded": 123,
+                    "added_on": 1700000000,
+                    "completion_on": 1700000100,
+                    "last_activity": 1700000200,
+                    "save_path": "/mnt/media/movies/example",
+                }
+            ],
+        )
+    )
+    client = QbittorrentClient("https://qb.example", "alice", "secret")
+
+    torrents = await client.list_torrents(category="pt-auto", tags={"seed-agent"})
+
+    assert torrents == [
+        ManagedTorrent(
+            hash="abcd1234",
+            name="Example Torrent",
+            category="pt-auto",
+            tags={"seed-agent", "hr", "pt-auto"},
+            state="uploading",
+            size_bytes=123456,
+            uploaded_bytes=654321,
+            downloaded_bytes=123,
+            added_at=datetime.fromtimestamp(1700000000, tz=UTC),
+            completed_at=datetime.fromtimestamp(1700000100, tz=UTC),
+            last_activity_at=datetime.fromtimestamp(1700000200, tz=UTC),
+            save_path="/mnt/media/movies/example",
+            metadata={
+                "uploaded_session_bytes": 111,
+                "hr": True,
+                "media_library": True,
+            },
+        )
+    ]
+
+
+@pytest.mark.asyncio
+@respx.mock
 async def test_pause_posts_hashes() -> None:
     respx.post("https://qb.example/api/v2/auth/login").mock(
         return_value=httpx.Response(200, text="Ok.")

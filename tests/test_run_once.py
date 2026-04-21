@@ -307,6 +307,64 @@ def test_run_once_execute_reads_secret_and_preserves_state_monotonically(
     assert "download.php?id=1" in audit
 
 
+def test_run_once_execute_marks_enqueued_without_hash_and_preserves_it_on_dry_run(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from seed_agent import cli
+
+    monkeypatch.chdir(tmp_path)
+
+    config_path = _config_file(tmp_path)
+    config = _config()
+
+    async def fake_discover_candidates(config: SeedAgentConfig):
+        return [_candidate()]
+
+    def fake_score_candidates(candidates, discovery_config, scoring_config):
+        return [_scored()]
+
+    class FakeDownloader:
+        async def add_url(self, url: str, category: str, tags: list[str]) -> str | None:
+            return None
+
+        async def list_torrents(self, category: str | None = None, tags: set[str] | None = None):
+            return []
+
+        async def pause(self, hash: str) -> None:
+            return None
+
+        async def delete(self, hash: str, delete_files: bool) -> None:
+            return None
+
+    def fake_build_downloader(config: SeedAgentConfig):
+        return FakeDownloader()
+
+    monkeypatch.setattr(cli, "load_config", lambda path: config)
+    monkeypatch.setattr(cli, "discover_candidates", fake_discover_candidates)
+    monkeypatch.setattr(cli, "score_candidates", fake_score_candidates)
+    monkeypatch.setattr(cli, "build_downloader", fake_build_downloader)
+
+    execute_result = CliRunner().invoke(
+        cli.app,
+        ["run-once", "--config", str(config_path), "--execute"],
+    )
+
+    assert execute_result.exit_code == 0
+    store = StateStore(tmp_path / ".seed-agent" / "state.db")
+    row = store.get_candidate(_candidate().stable_id)
+    assert row is not None
+    assert row["state"] == LifecycleState.ENQUEUED.value
+    assert row["torrent_hash"] is None
+
+    dry_run_result = CliRunner().invoke(cli.app, ["run-once", "--config", str(config_path)])
+
+    assert dry_run_result.exit_code == 0
+    preserved = store.get_candidate(_candidate().stable_id)
+    assert preserved is not None
+    assert preserved["state"] == LifecycleState.ENQUEUED.value
+    assert preserved["torrent_hash"] is None
+
+
 def test_run_once_execute_missing_secret_exits_non_zero(
     tmp_path: Path, monkeypatch
 ) -> None:

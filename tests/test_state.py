@@ -69,6 +69,28 @@ def test_state_store_lists_candidates_by_state(tmp_path: Path) -> None:
     assert [row["stable_id"] for row in enqueued] == ["demo:two"]
 
 
+def test_state_store_lists_and_updates_candidates_by_torrent_hash(tmp_path: Path) -> None:
+    store = StateStore(tmp_path / "state.sqlite3")
+    store.upsert_candidate(
+        stable_id="demo:one",
+        title="One",
+        site="demo",
+        state=LifecycleState.SCORED,
+        score=10,
+        torrent_hash="deadbeef",
+    )
+
+    rows = store.list_by_torrent_hash("deadbeef")
+    assert [row["stable_id"] for row in rows] == ["demo:one"]
+
+    updated = store.update_by_torrent_hash("deadbeef", LifecycleState.PAUSED)
+    row = store.get_candidate("demo:one")
+
+    assert updated == 1
+    assert row is not None
+    assert row["state"] == LifecycleState.PAUSED.value
+
+
 def test_state_store_creates_parent_directory_for_nested_path(tmp_path: Path) -> None:
     path = tmp_path / "a" / "b" / "state.sqlite3"
 

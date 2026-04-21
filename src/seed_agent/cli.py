@@ -154,6 +154,13 @@ def prune(
         )
     )
     _write_audit_decisions(loaded, decisions)
+    if execute:
+        store = StateStore(_state_path())
+        for decision in decisions:
+            if decision.action == "qb.cleanup.pause":
+                store.update_by_torrent_hash(decision.target_id, LifecycleState.PAUSED)
+            elif decision.action == "qb.cleanup.delete":
+                store.update_by_torrent_hash(decision.target_id, LifecycleState.DELETED)
     payload = {
         "command": "prune",
         "config": str(config),
@@ -227,19 +234,17 @@ def run_once(
 
     if execute:
         for decision in decisions:
-            torrent_hash = decision.new_state.get("torrent_hash")
-            if not torrent_hash:
-                continue
             scored_item = scored_by_id.get(decision.target_id)
             if scored_item is None:
                 continue
+            torrent_hash = decision.new_state.get("torrent_hash")
             store.upsert_candidate(
                 scored_item.candidate_id,
                 scored_item.candidate.title,
                 scored_item.candidate.site,
                 LifecycleState.ENQUEUED,
                 score=scored_item.score,
-                torrent_hash=str(torrent_hash),
+                torrent_hash=str(torrent_hash) if torrent_hash is not None else None,
             )
 
     payload = {

@@ -104,6 +104,33 @@ class StateStore:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def list_by_torrent_hash(self, torrent_hash: str) -> list[dict[str, Any]]:
+        with sqlite3.connect(self.path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                """
+                SELECT stable_id, site, title, state, score, torrent_hash, first_seen_at, updated_at
+                FROM candidates
+                WHERE torrent_hash = ?
+                ORDER BY updated_at ASC, stable_id ASC
+                """,
+                (torrent_hash,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def update_by_torrent_hash(self, torrent_hash: str, state: LifecycleState) -> int:
+        rows = self.list_by_torrent_hash(torrent_hash)
+        for row in rows:
+            self.upsert_candidate(
+                stable_id=str(row["stable_id"]),
+                title=str(row["title"]),
+                site=str(row["site"]),
+                state=state,
+                score=row["score"],
+                torrent_hash=str(row["torrent_hash"]) if row["torrent_hash"] is not None else None,
+            )
+        return len(rows)
+
     def _initialize(self) -> None:
         with sqlite3.connect(self.path) as conn:
             conn.executescript(

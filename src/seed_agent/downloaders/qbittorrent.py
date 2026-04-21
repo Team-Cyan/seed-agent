@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
+from pathlib import PurePosixPath
 from typing import Any
 
 import httpx
@@ -126,11 +127,17 @@ def _torrent_from_row(row: dict[str, Any]) -> ManagedTorrent:
     metadata: dict[str, Any] = {}
     if uploaded_session is not None:
         metadata["uploaded_session_bytes"] = int(uploaded_session)
+    tags = _parse_tags(row.get("tags"))
+    if _looks_like_hr_tag(tags):
+        metadata["hr"] = True
+    save_path = _normalize_optional_str(row.get("save_path"))
+    if save_path is not None and _looks_like_media_library_path(save_path):
+        metadata["media_library"] = True
     return ManagedTorrent(
         hash=str(row.get("hash") or ""),
         name=str(row.get("name") or ""),
         category=_normalize_optional_str(row.get("category")),
-        tags=_parse_tags(row.get("tags")),
+        tags=tags,
         state=str(row.get("state") or ""),
         size_bytes=int(row.get("size") or 0),
         uploaded_bytes=uploaded,
@@ -138,7 +145,7 @@ def _torrent_from_row(row: dict[str, Any]) -> ManagedTorrent:
         added_at=datetime.fromtimestamp(int(added_on), tz=UTC),
         completed_at=_optional_datetime(row.get("completion_on")),
         last_activity_at=_optional_datetime(row.get("last_activity")),
-        save_path=_normalize_optional_str(row.get("save_path")),
+        save_path=save_path,
         metadata=metadata,
     )
 
@@ -158,6 +165,18 @@ def _normalize_optional_str(value: Any) -> str | None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def _looks_like_hr_tag(tags: set[str]) -> bool:
+    normalized = {tag.strip().lower() for tag in tags}
+    clear_tags = {"hr", "h&r", "hit-and-run", "hit and run", "hit_and_run"}
+    return bool(normalized.intersection(clear_tags))
+
+
+def _looks_like_media_library_path(save_path: str) -> bool:
+    path = PurePosixPath(save_path.replace("\\", "/"))
+    segments = {segment.lower() for segment in path.parts if segment not in {"/", ""}}
+    return bool(segments.intersection({"media", "library", "movies", "tv", "shows"}))
 
 
 def _optional_datetime(value: Any) -> datetime | None:
