@@ -70,7 +70,7 @@ Useful inspection commands:
 tail -n 20 .seed-agent/audit.jsonl
 rg '"action":"(discover|score|enqueue|pause|delete)"' .seed-agent/audit.jsonl
 sqlite3 .seed-agent/state.db '.tables'
-sqlite3 .seed-agent/state.db 'select count(*) from managed_torrents;'
+sqlite3 .seed-agent/state.db 'select state, count(*) from candidates group by state;'
 ```
 
 If you want a broader look at the latest records:
@@ -86,4 +86,3 @@ jq -c '.' .seed-agent/audit.jsonl | tail -n 20
 - Treat category and tag management as part of the safety boundary, not cosmetic metadata.
 - Do not delete unmanaged torrents.
 - Do not remove or rewrite audit history.
-
