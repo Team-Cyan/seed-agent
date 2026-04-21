@@ -41,6 +41,30 @@ async def test_add_url_logs_in_and_posts_category_tags_url() -> None:
 
 @pytest.mark.asyncio
 @respx.mock
+async def test_add_url_fails_on_failure_body() -> None:
+    respx.post("https://qb.example/api/v2/auth/login").mock(
+        return_value=httpx.Response(200, text="Ok.")
+    )
+    respx.post("https://qb.example/api/v2/torrents/add").mock(
+        return_value=httpx.Response(200, text="Fails.")
+    )
+    client = QbittorrentClient("https://qb.example", "alice", "secret")
+
+    with pytest.raises(QbittorrentError) as exc_info:
+        await client.add_url(
+            "https://tracker.example/download.php?id=42&passkey=secret",
+            category="pt-auto",
+            tags=["seed-agent"],
+        )
+
+    message = str(exc_info.value)
+    assert "add torrent failed" in message
+    assert "download.php?id=42" not in message
+    assert "passkey=secret" not in message
+
+
+@pytest.mark.asyncio
+@respx.mock
 async def test_list_torrents_converts_rows_into_managed_torrents() -> None:
     respx.post("https://qb.example/api/v2/auth/login").mock(
         return_value=httpx.Response(200, text="Ok.")
@@ -98,7 +122,7 @@ async def test_pause_posts_hashes() -> None:
     respx.post("https://qb.example/api/v2/auth/login").mock(
         return_value=httpx.Response(200, text="Ok.")
     )
-    pause_route = respx.post("https://qb.example/api/v2/torrents/pause").mock(
+    pause_route = respx.post("https://qb.example/api/v2/torrents/stop").mock(
         return_value=httpx.Response(200, text="Ok.")
     )
     client = QbittorrentClient("https://qb.example", "alice", "secret")

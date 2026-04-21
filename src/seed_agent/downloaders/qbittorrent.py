@@ -68,7 +68,7 @@ class QbittorrentClient:
                     "tags": ",".join(tags),
                 },
             )
-            return _extract_hash(response)
+            return _extract_add_hash(response)
 
     async def list_torrents(
         self, category: str | None = None, tags: set[str] | None = None
@@ -88,7 +88,7 @@ class QbittorrentClient:
 
     async def pause(self, hash: str) -> None:
         async with self._client() as client:
-            await self._post_form(client, "/api/v2/torrents/pause", {"hashes": hash})
+            await self._post_form(client, "/api/v2/torrents/stop", {"hashes": hash})
 
     async def delete(self, hash: str, delete_files: bool) -> None:
         async with self._client() as client:
@@ -102,22 +102,19 @@ class QbittorrentClient:
             )
 
 
-def _extract_hash(response: httpx.Response) -> str | None:
-    try:
-        payload = response.json()
-    except ValueError:
-        text = response.text.strip()
-        if not text or text.startswith("Ok"):
-            return None
-        return text
-    if isinstance(payload, dict):
-        value = payload.get("hash")
-        if value is None:
-            return None
-        return str(value)
-    if isinstance(payload, str):
-        return payload or None
-    return None
+def _extract_add_hash(response: httpx.Response) -> str | None:
+    body = response.text.strip()
+    if not body or body == "Ok.":
+        return None
+    if _looks_like_info_hash(body):
+        return body
+    raise QbittorrentError("qBittorrent add torrent failed: unexpected response body")
+
+
+def _looks_like_info_hash(value: str) -> bool:
+    if len(value) != 40:
+        return False
+    return all(character in "0123456789abcdefABCDEF" for character in value)
 
 
 def _torrent_from_row(row: dict[str, Any]) -> ManagedTorrent:
