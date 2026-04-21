@@ -1,0 +1,157 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from seed_agent.audit import AuditLogger
+from seed_agent.models import ScoreBreakdown, TorrentCandidate
+
+
+def _candidate(**overrides: object) -> TorrentCandidate:
+    data: dict[str, object] = {
+        "site": "demo-free",
+        "title": "High Confidence Torrent",
+        "source_url": "https://tracker.example/details.php?id=1",
+        "download_url": "https://tracker.example/download.php?id=1&passkey=secret",
+        "size_bytes": 10 * 1024 * 1024 * 1024,
+        "seeders": 20,
+        "leechers": 30,
+        "discount": "free",
+        "left_time_minutes": 240,
+        "hr": False,
+    }
+    data.update(overrides)
+    return TorrentCandidate(**data)
+
+
+def _scored(**overrides: object) -> ScoreBreakdown:
+    candidate = overrides.pop("candidate", _candidate())
+    data: dict[str, object] = {
+        "candidate_id": candidate.stable_id,
+        "score": 95,
+        "accepted": True,
+        "reasons": ["discount free accepted", "leechers strong"],
+        "candidate": candidate,
+    }
+    data.update(overrides)
+    return ScoreBreakdown(**data)
+
+
+class DummyDownloader:
+    def __init__(self, torrent_hash: str | None = None) -> None:
+        self.torrent_hash = torrent_hash
+        self.calls: list[tuple[str, str, list[str]]] = []
+
+    async def add_url(self, url: str, category: str, tags: list[str]) -> str | None:
+        self.calls.append((url, category, tags))
+        return self.torrent_hash
+
+
+@pytest.mark.asyncio
+async def test_dry_run_accepted_candidate_skips_downloader_and_returns_execute_false() -> None:
+    from seed_agent.actions.qb import enqueue_candidates
+
+    downloader = DummyDownloader(torrent_hash="deadbeef")
+
+    decisions = await enqueue_candidates(
+        [_scored()],
+        downloader,
+        category="pt-auto",
+        tags=["seed-agent", "pt-auto"],
+        execute=False,
+    )
+
+    assert downloader.calls == []
+    assert len(decisions) == 1
+    decision = decisions[0]
+    assert decision.action == "qb.enqueue"
+    assert decision.execute is False
+    assert decision.rollback == "Delete torrent from qBittorrent if enqueue was accidental"
+    assert decision.new_state["download_url"] == _scored().candidate.download_url
+    assert "passkey=secret" not in decision.reason
+    assert _scored().candidate.download_url not in decision.reason
+
+
+@pytest.mark.asyncio
+async def test_execute_accepted_candidate_calls_downloader_and_records_hash() -> None:
+    from seed_agent.actions.qb import enqueue_candidates
+
+    downloader = DummyDownloader(torrent_hash="0123456789abcdef0123456789abcdef01234567")
+
+    decisions = await enqueue_candidates(
+        [_scored()],
+        downloader,
+        category="pt-auto",
+        tags=["seed-agent", "pt-auto"],
+        execute=True,
+    )
+
+    assert downloader.calls == [
+        (
+            _scored().candidate.download_url,
+            "pt-auto",
+            ["seed-agent", "pt-auto"],
+        )
+    ]
+    assert len(decisions) == 1
+    decision = decisions[0]
+    assert decision.execute is True
+    assert decision.new_state["torrent_hash"] == "0123456789abcdef0123456789abcdef01234567"
+
+
+@pytest.mark.asyncio
+async def test_rejected_candidate_does_not_call_downloader() -> None:
+    from seed_agent.actions.qb import enqueue_candidates
+
+    downloader = DummyDownloader()
+
+    decisions = await enqueue_candidates(
+        [_scored(accepted=False, score=11, reasons=["rejected"])],
+        downloader,
+        category="pt-auto",
+        tags=["seed-agent"],
+        execute=True,
+    )
+
+    assert downloader.calls == []
+    assert decisions == []
+
+
+@pytest.mark.asyncio
+async def test_audit_logger_redacts_decision_with_download_url_passkey(tmp_path: Path) -> None:
+    from seed_agent.actions.qb import enqueue_candidates
+
+    downloader = DummyDownloader()
+    decisions = await enqueue_candidates(
+        [_scored()],
+        downloader,
+        category="pt-auto",
+        tags=["seed-agent"],
+        execute=False,
+    )
+
+    path = tmp_path / "audit.jsonl"
+    AuditLogger(path).write(decisions[0])
+
+    written = path.read_text(encoding="utf-8")
+    assert "passkey=secret" not in written
+    assert "download.php?id=1" in written
+
+
+@pytest.mark.asyncio
+async def test_downloader_exception_propagates() -> None:
+    from seed_agent.actions.qb import enqueue_candidates
+
+    class FailingDownloader:
+        async def add_url(self, url: str, category: str, tags: list[str]) -> str | None:
+            raise RuntimeError("network down")
+
+    with pytest.raises(RuntimeError, match="network down"):
+        await enqueue_candidates(
+            [_scored()],
+            FailingDownloader(),
+            category="pt-auto",
+            tags=["seed-agent"],
+            execute=True,
+        )
