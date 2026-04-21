@@ -6,6 +6,17 @@ from typing import Any
 
 from seed_agent.models import LifecycleState
 
+STATE_PRIORITY = {
+    LifecycleState.DISCOVERED.value: 0,
+    LifecycleState.SCORED.value: 1,
+    LifecycleState.ENQUEUED.value: 2,
+    LifecycleState.DOWNLOADING.value: 3,
+    LifecycleState.SEEDING.value: 4,
+    LifecycleState.COLD.value: 5,
+    LifecycleState.PAUSED.value: 6,
+    LifecycleState.DELETED.value: 7,
+}
+
 
 class StateStore:
     def __init__(self, path: Path) -> None:
@@ -25,6 +36,12 @@ class StateStore:
         current = self.get_candidate(stable_id)
         now = _utc_now()
         first_seen_at = current["first_seen_at"] if current is not None else now
+        state_value, score_value, torrent_hash_value = _monotonic_values(
+            current,
+            state,
+            score,
+            torrent_hash,
+        )
 
         with sqlite3.connect(self.path) as conn:
             conn.execute(
@@ -52,9 +69,9 @@ class StateStore:
                     stable_id,
                     site,
                     title,
-                    state.value,
-                    score,
-                    torrent_hash,
+                    state_value,
+                    score_value,
+                    torrent_hash_value,
                     first_seen_at,
                     now,
                 ),
@@ -111,3 +128,26 @@ def _utc_now() -> str:
     from datetime import UTC, datetime
 
     return datetime.now(UTC).isoformat()
+
+
+def _monotonic_values(
+    current: dict[str, Any] | None,
+    incoming_state: LifecycleState,
+    incoming_score: int | None,
+    incoming_torrent_hash: str | None,
+) -> tuple[str, int | None, str | None]:
+    if current is None:
+        return incoming_state.value, incoming_score, incoming_torrent_hash
+
+    current_state_value = str(current["state"])
+    current_rank = STATE_PRIORITY.get(current_state_value, -1)
+    incoming_rank = STATE_PRIORITY.get(incoming_state.value, -1)
+
+    if current_rank > incoming_rank:
+        return (
+            current_state_value,
+            current["score"],
+            current["torrent_hash"],
+        )
+
+    return incoming_state.value, incoming_score, incoming_torrent_hash

@@ -134,6 +134,20 @@ cleanup:
     return path
 
 
+def _secret_file(tmp_path: Path, secret_ref: str) -> Path:
+    path = tmp_path / secret_ref
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        """
+base_url: https://qb.example
+username: alice
+password: s3cr3t
+""",
+        encoding="utf-8",
+    )
+    return path
+
+
 def _json_output(result) -> dict[str, object]:
     parsed = json.loads(result.output)
     assert isinstance(parsed, dict)
@@ -201,15 +215,16 @@ def test_run_once_dry_run_updates_state_and_redacts_audit(
     assert "download.php?id=1" in audit
 
 
-def test_run_once_execute_updates_state_with_hash(
+def test_run_once_execute_reads_secret_and_preserves_state_monotonically(
     tmp_path: Path, monkeypatch
 ) -> None:
     from seed_agent import cli
 
     monkeypatch.chdir(tmp_path)
 
-    config_path = _config_file(tmp_path, secret_ref="local/secrets/qb.yaml")
-    config = _config(secret_ref="local/secrets/qb.yaml")
+    secret_ref = "local/secrets/qb.yaml"
+    config_path = _config_file(tmp_path, secret_ref=secret_ref)
+    _secret_file(tmp_path, secret_ref)
 
     async def fake_discover_candidates(config: SeedAgentConfig):
         return [_candidate()]
@@ -217,7 +232,12 @@ def test_run_once_execute_updates_state_with_hash(
     def fake_score_candidates(candidates, discovery_config, scoring_config):
         return [_scored()]
 
-    class FakeDownloader:
+    qb_calls: list[tuple[str, str, str]] = []
+
+    class FakeQbittorrentClient:
+        def __init__(self, base_url: str, username: str, password: str) -> None:
+            qb_calls.append((base_url, username, password))
+
         async def add_url(self, url: str, category: str, tags: list[str]) -> str | None:
             return "0123456789abcdef0123456789abcdef01234567"
 
@@ -230,13 +250,9 @@ def test_run_once_execute_updates_state_with_hash(
         async def delete(self, hash: str, delete_files: bool) -> None:
             return None
 
-    def fake_build_downloader(config: SeedAgentConfig):
-        return FakeDownloader()
-
-    monkeypatch.setattr(cli, "load_config", lambda path: config)
     monkeypatch.setattr(cli, "discover_candidates", fake_discover_candidates)
     monkeypatch.setattr(cli, "score_candidates", fake_score_candidates)
-    monkeypatch.setattr(cli, "build_downloader", fake_build_downloader)
+    monkeypatch.setattr(cli, "QbittorrentClient", FakeQbittorrentClient)
 
     result = CliRunner().invoke(
         cli.app,
@@ -248,6 +264,7 @@ def test_run_once_execute_updates_state_with_hash(
     assert payload["command"] == "run-once"
     assert payload["execute"] is True
     assert payload["enqueued"] == 1
+    assert qb_calls == [("https://qb.example", "alice", "s3cr3t")]
 
     state_path = tmp_path / ".seed-agent" / "state.db"
     audit_path = tmp_path / ".seed-agent" / "audit.jsonl"
@@ -261,6 +278,57 @@ def test_run_once_execute_updates_state_with_hash(
     assert row["score"] == 95
     assert row["torrent_hash"] == "0123456789abcdef0123456789abcdef01234567"
 
+    async def fake_dry_discover_candidates(config: SeedAgentConfig):
+        return [_candidate()]
+
+    def fake_dry_score_candidates(candidates, discovery_config, scoring_config):
+        return [_scored()]
+
+    monkeypatch.setattr(cli, "discover_candidates", fake_dry_discover_candidates)
+    monkeypatch.setattr(cli, "score_candidates", fake_dry_score_candidates)
+
+    dry_result = CliRunner().invoke(
+        cli.app,
+        ["run-once", "--config", str(config_path)],
+    )
+
+    assert dry_result.exit_code == 0
+    dry_payload = _json_output(dry_result)
+    assert dry_payload["execute"] is False
+
+    preserved = store.get_candidate(_candidate().stable_id)
+    assert preserved is not None
+    assert preserved["state"] == LifecycleState.ENQUEUED.value
+    assert preserved["score"] == 95
+    assert preserved["torrent_hash"] == "0123456789abcdef0123456789abcdef01234567"
+
     audit = audit_path.read_text(encoding="utf-8")
     assert "passkey=secret" not in audit
     assert "download.php?id=1" in audit
+
+
+def test_run_once_execute_missing_secret_exits_non_zero(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from seed_agent import cli
+
+    monkeypatch.chdir(tmp_path)
+
+    config_path = _config_file(tmp_path, secret_ref="local/secrets/missing.yaml")
+
+    async def fake_discover_candidates(config: SeedAgentConfig):
+        return [_candidate()]
+
+    def fake_score_candidates(candidates, discovery_config, scoring_config):
+        return [_scored()]
+
+    monkeypatch.setattr(cli, "discover_candidates", fake_discover_candidates)
+    monkeypatch.setattr(cli, "score_candidates", fake_score_candidates)
+
+    result = CliRunner().invoke(
+        cli.app,
+        ["run-once", "--config", str(config_path), "--execute"],
+    )
+
+    assert result.exit_code != 0
+    assert "missing downloader secret" in result.output
