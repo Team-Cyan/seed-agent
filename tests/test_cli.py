@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -133,6 +134,12 @@ cleanup:
     return path
 
 
+def _json_output(result) -> dict[str, object]:
+    parsed = json.loads(result.output)
+    assert isinstance(parsed, dict)
+    return parsed
+
+
 def test_cli_help_lists_phase_one_commands() -> None:
     from seed_agent.cli import app
 
@@ -184,8 +191,10 @@ def test_discover_command_prints_safe_output_without_raw_download_url(
     result = CliRunner().invoke(cli.app, ["discover", "--config", str(config_path)])
 
     assert result.exit_code == 0
-    assert "High Confidence Torrent" in result.output
-    assert "passkey=secret" not in result.output
+    payload = _json_output(result)
+    assert payload["command"] == "discover"
+    assert payload["candidates"][0]["title"] == "High Confidence Torrent"
+    assert "passkey" not in result.output
     assert _candidate().download_url not in result.output
     assert "download_url" not in result.output
 
@@ -230,12 +239,48 @@ def test_mutating_dry_run_does_not_require_qb_secret_or_real_downloader(
     monkeypatch.setattr(cli, "build_downloader", fail_if_called)
     monkeypatch.setattr(cli, "_write_audit_decisions", fake_write_audit_decisions)
 
-    result = CliRunner().invoke(cli.app, ["run-once", "--config", str(config_path)])
+    result = CliRunner().invoke(cli.app, ["prune", "--config", str(config_path)])
 
     assert result.exit_code == 0
-    assert events
+    payload = _json_output(result)
+    assert payload["command"] == "prune"
+    assert payload["managed_count"] == 0
+    assert payload["decisions"] == []
+    assert events == []
     assert "download_url" not in result.output
-    assert "passkey=secret" not in result.output
+    assert "passkey" not in result.output
+
+
+def test_execute_commands_fail_when_downloader_secret_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from seed_agent import cli
+
+    config_path = _config_file(tmp_path, secret_ref=None)
+    config = _config()
+
+    async def fake_discover_candidates(config: SeedAgentConfig):
+        return [_candidate()]
+
+    def fake_score_candidates(candidates, discovery_config, scoring_config):
+        return [_scored()]
+
+    monkeypatch.setattr(cli, "load_config", lambda path: config)
+    monkeypatch.setattr(cli, "discover_candidates", fake_discover_candidates)
+    monkeypatch.setattr(cli, "score_candidates", fake_score_candidates)
+
+    commands = [
+        ["enqueue", "--config", str(config_path), "--execute"],
+        ["prune", "--config", str(config_path), "--execute"],
+        ["run-once", "--config", str(config_path), "--execute"],
+    ]
+
+    for command in commands:
+        result = CliRunner().invoke(cli.app, command)
+        assert result.exit_code != 0
+        assert "missing downloader secret" in result.output
+        assert str(config_path) not in result.output
+        assert "passkey" not in result.output
 
 
 def test_run_once_invoke_with_execute_flag(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -292,4 +337,6 @@ def test_run_once_invoke_with_execute_flag(monkeypatch: pytest.MonkeyPatch, tmp_
     result = CliRunner().invoke(cli.app, ["run-once", "--config", str(config_path), "--execute"])
 
     assert result.exit_code == 0
+    payload = _json_output(result)
+    assert payload["command"] == "run-once"
     assert events

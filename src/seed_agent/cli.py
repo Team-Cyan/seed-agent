@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import Annotated, Any
 
 import typer
-from rich.console import Console
 
 from seed_agent.actions.pt import daily_report as build_daily_report
 from seed_agent.actions.pt import discover_candidates, score_candidates
@@ -23,7 +22,6 @@ from seed_agent.models import (
 )
 
 app = typer.Typer(help="AI-first PT and downloader operations toolkit.")
-_console = Console()
 DEFAULT_CONFIG = Path("config/example.yaml")
 
 
@@ -135,7 +133,14 @@ def prune(
     execute: Annotated[bool, typer.Option("--execute")] = False,
 ) -> None:
     loaded = load_config(config)
-    torrents, downloader = _managed_torrents_and_downloader(loaded, execute)
+    if execute:
+        downloader = build_downloader(loaded)
+        torrents = _run(
+            downloader.list_torrents(loaded.downloader.category, set(loaded.downloader.tags))
+        )
+    else:
+        torrents = []
+        downloader = _NullDownloader()
     decisions = _run(
         prune_cold_torrents(
             torrents,
@@ -213,8 +218,7 @@ def _run(value: Any) -> Any:
 
 
 def _print_json(payload: dict[str, Any]) -> None:
-    json_payload = json.dumps(redact_payload(payload), ensure_ascii=False, sort_keys=True)
-    _console.print_json(data=json_payload)
+    typer.echo(json.dumps(redact_payload(payload), ensure_ascii=False, sort_keys=True))
 
 
 def _candidate_summary(candidate: TorrentCandidate) -> dict[str, Any]:
@@ -265,20 +269,6 @@ def _managed_torrent_summary(torrent: ManagedTorrent) -> dict[str, Any]:
     }
 
 
-def _managed_torrents_and_downloader(
-    config: SeedAgentConfig, execute: bool
-) -> tuple[list[ManagedTorrent], Any]:
-    downloader = _maybe_build_downloader(config)
-    if downloader is None:
-        return [], _NullDownloader()
-    torrents = _run(
-        downloader.list_torrents(config.downloader.category, set(config.downloader.tags))
-    )
-    if execute:
-        return torrents, downloader
-    return torrents, _NullDownloader()
-
-
 def _managed_torrents_for_report(config: SeedAgentConfig) -> list[ManagedTorrent]:
     downloader = _maybe_build_downloader(config)
     if downloader is None:
@@ -303,9 +293,15 @@ def _maybe_build_downloader(config: SeedAgentConfig) -> QbittorrentClient | None
 
 
 def build_downloader(config: SeedAgentConfig) -> QbittorrentClient:
+    secret_ref = config.downloader.secret_ref
+    if not secret_ref:
+        raise typer.BadParameter("missing downloader secret")
+    secret_path = _resolve_path(secret_ref, config.config_dir)
+    if secret_path is None or not secret_path.is_file():
+        raise typer.BadParameter("missing downloader secret")
     downloader = _maybe_build_downloader(config)
     if downloader is None:
-        raise typer.BadParameter("downloader secret_ref is missing or unreadable")
+        raise typer.BadParameter("missing downloader secret")
     return downloader
 
 
