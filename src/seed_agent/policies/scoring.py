@@ -100,7 +100,9 @@ def _score_left_time(
 ) -> _ComponentScore:
     weight = scoring.weights["left_time"]
     left_time = candidate.left_time_minutes
-    if left_time is None or left_time < discovery.min_left_time_minutes:
+    if left_time is None:
+        return _ComponentScore(0.0, "left_time missing", True)
+    if left_time < discovery.min_left_time_minutes:
         reason = f"left_time {left_time} < min {discovery.min_left_time_minutes}"
         return _ComponentScore(0.0, reason, True)
     reason = f"left_time {left_time} >= min {discovery.min_left_time_minutes}"
@@ -117,14 +119,7 @@ def _score_leechers(
     minimum = discovery.min_leechers
     if leechers < minimum:
         return _ComponentScore(0.0, f"leechers {leechers} < min {minimum}", True)
-    cap = max(minimum * 2, 1)
-    factor = min(leechers / cap, 1.0)
-    score = weight * factor
-    if factor >= 1.0:
-        reason = f"leechers {leechers} >= 2x min {minimum}"
-    else:
-        reason = f"leechers {leechers} >= min {minimum}"
-    return _ComponentScore(score, reason)
+    return _ComponentScore(weight, f"leechers {leechers} >= min {minimum}")
 
 
 def _score_seeders(

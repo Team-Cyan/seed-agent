@@ -75,6 +75,47 @@ def test_low_leecher_candidate_is_rejected() -> None:
     assert "leechers 7 < min 8" in result.reasons
 
 
+def test_leecher_minimum_gets_full_contribution() -> None:
+    leecher_only = scoring(
+        weights={
+            "discount": 0,
+            "leechers": 100,
+            "seeders": 0,
+            "left_time": 0,
+            "size": 0,
+            "site_history": 0,
+        }
+    )
+    at_min = score_candidate(make_candidate(leechers=8), discovery(), leecher_only)
+    above_min = score_candidate(make_candidate(leechers=16), discovery(), leecher_only)
+
+    assert at_min.score == 100
+    assert above_min.score == 100
+    assert "leechers 8 >= min 8" in at_min.reasons
+
+
+def test_zero_min_leechers_does_not_drop_leecher_score_to_zero() -> None:
+    result = score_candidate(
+        make_candidate(leechers=0),
+        discovery(min_leechers=0),
+        scoring(
+            min_score_to_enqueue=1,
+            weights={
+                "discount": 0,
+                "leechers": 100,
+                "seeders": 0,
+                "left_time": 0,
+                "size": 0,
+                "site_history": 0,
+            },
+        ),
+    )
+
+    assert result.accepted is True
+    assert result.score == 100
+    assert "leechers 0 >= min 0" in result.reasons
+
+
 def test_seeder_taper_reduces_score_for_very_high_seeder_count() -> None:
     low_seeders = score_candidate(make_candidate(seeders=20), discovery(), scoring())
     high_seeders = score_candidate(make_candidate(seeders=160), discovery(), scoring())
@@ -135,3 +176,15 @@ def test_normal_discount_not_in_config_is_rejected() -> None:
     assert result.accepted is False
     assert result.score == 0
     assert "discount normal not accepted" in result.reasons
+
+
+def test_missing_left_time_has_clear_reason() -> None:
+    result = score_candidate(
+        make_candidate(left_time_minutes=None),
+        discovery(),
+        scoring(),
+    )
+
+    assert result.accepted is False
+    assert result.score == 0
+    assert "left_time missing" in result.reasons
