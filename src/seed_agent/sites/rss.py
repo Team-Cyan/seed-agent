@@ -24,10 +24,31 @@ KNOWN_ENTRY_KEYS = {
     "discount",
     "left_time_minutes",
     "hr",
+    "download_url",
+}
+
+EXPLICIT_FIELD_ALIASES = {
+    "seeders": ("seeders",),
+    "leechers": ("leechers",),
+    "size": ("size",),
+    "left_time_minutes": ("left_time_minutes",),
+    "download_url": ("download_url",),
+    "discount": ("discount",),
+}
+
+SITE_FIELD_ALIASES = {
+    "seeders": ("nexusphp_seeders",),
+    "leechers": ("nexusphp_leechers",),
+    "size": ("nexusphp_size",),
+    "left_time_minutes": ("nexusphp_left_time_minutes",),
+    "download_url": ("nexusphp_download_url",),
+    "discount": ("nexusphp_discount",),
 }
 
 KNOWN_DISCOUNT_ALIASES = {
     "free": "free",
+    "freeleech": "free",
+    "free_leech": "free",
     "2xfree": "2xfree",
     "2x_free": "2xfree",
     "50%": "50%",
@@ -71,9 +92,9 @@ async def fetch_rss_candidates(
 def _parse_entry(entry: Any, site: str) -> TorrentCandidate | None:
     metadata = _entry_metadata(entry)
 
-    title = _first_text(entry, "title")
-    source_url = _first_text(entry, "link")
-    download_url = _download_url(entry) or source_url
+    title = _first_text(entry, "title", site=site)
+    source_url = _first_text(entry, "link", site=site)
+    download_url = _download_url(entry, site=site)
     if title is None or source_url is None or download_url is None:
         metadata["rss_missing_fields"] = {
             "title": title is None,
@@ -82,17 +103,27 @@ def _parse_entry(entry: Any, site: str) -> TorrentCandidate | None:
         }
         return None
 
-    size_bytes = _first_int(entry, "size")
+    size_bytes = _first_int(entry, "size", site=site)
     if size_bytes is None:
-        size_bytes = _first_int_from_enclosure(entry, "length")
-    if size_bytes is None:
-        size_bytes = 0
+        metadata["rss_missing_fields"] = {
+            **metadata.get("rss_missing_fields", {}),
+            "size": True,
+        }
+        return None
 
-    seeders = _first_int(entry, "seeders") or 0
-    leechers = _first_int(entry, "leechers") or 0
-    left_time_minutes = _first_int(entry, "left_time_minutes")
-    hr = _first_bool(entry, "hr")
-    discount = _normalize_discount(_first_text(entry, "discount"), metadata)
+    seeders = _first_int(entry, "seeders", site=site)
+    leechers = _first_int(entry, "leechers", site=site)
+    if seeders is None or leechers is None:
+        metadata["rss_missing_fields"] = {
+            **metadata.get("rss_missing_fields", {}),
+            "seeders": seeders is None,
+            "leechers": leechers is None,
+        }
+        return None
+
+    left_time_minutes = _first_int(entry, "left_time_minutes", site=site)
+    hr = _first_bool(entry, "hr", site=site)
+    discount = _normalize_discount(_first_text(entry, "discount", site=site), metadata)
     published_at = _parse_published_at(entry)
 
     try:
@@ -115,7 +146,10 @@ def _parse_entry(entry: Any, site: str) -> TorrentCandidate | None:
         return None
 
 
-def _download_url(entry: Any) -> str | None:
+def _download_url(entry: Any, site: str) -> str | None:
+    explicit_download_url = _first_text(entry, "download_url", site=site)
+    if explicit_download_url is not None:
+        return explicit_download_url
     enclosures = getattr(entry, "enclosures", None) or entry.get("enclosures", [])
     if not enclosures:
         return None
@@ -144,16 +178,16 @@ def _parse_published_at(entry: Any) -> datetime | None:
     return dt
 
 
-def _first_text(entry: Any, field: str) -> str | None:
-    value = _first_value(entry, field)
+def _first_text(entry: Any, field: str, site: str | None = None) -> str | None:
+    value = _first_value(entry, field, site=site)
     if value is None:
         return None
     text = str(value).strip()
     return text or None
 
 
-def _first_int(entry: Any, field: str) -> int | None:
-    value = _first_value(entry, field)
+def _first_int(entry: Any, field: str, site: str | None = None) -> int | None:
+    value = _first_value(entry, field, site=site)
     if value is None:
         return None
     text = str(value).strip().replace(",", "")
@@ -168,22 +202,8 @@ def _first_int(entry: Any, field: str) -> int | None:
             return None
 
 
-def _first_int_from_enclosure(entry: Any, field: str) -> int | None:
-    enclosures = getattr(entry, "enclosures", None) or entry.get("enclosures", [])
-    if not enclosures:
-        return None
-    first = enclosures[0]
-    if isinstance(first, dict):
-        value = first.get(field)
-    else:
-        value = getattr(first, field, None)
-    if value is None:
-        return None
-    return _first_int({"_value": value}, "_value")
-
-
-def _first_bool(entry: Any, field: str) -> bool:
-    value = _first_value(entry, field)
+def _first_bool(entry: Any, field: str, site: str | None = None) -> bool:
+    value = _first_value(entry, field, site=site)
     if isinstance(value, bool):
         return value
     if value is None:
@@ -201,7 +221,8 @@ def _normalize_discount(raw_discount: str | None, metadata: dict[str, Any]) -> D
 
     alias = KNOWN_DISCOUNT_ALIASES.get(normalized)
     if alias is None:
-        metadata["rss_discount_raw"] = raw_discount
+        metadata["raw_discount"] = raw_discount
+        metadata["discount_reason"] = "unknown_label"
         return Discount.NORMAL
     return alias
 
@@ -209,29 +230,29 @@ def _normalize_discount(raw_discount: str | None, metadata: dict[str, Any]) -> D
 def _entry_metadata(entry: Any) -> dict[str, Any]:
     metadata: dict[str, Any] = {}
     for key, value in entry.items():
-        if key not in KNOWN_ENTRY_KEYS:
+        if key not in _recognized_entry_keys():
             metadata[key] = value
     return metadata
 
 
-def _first_value(entry: Any, field: str) -> Any:
-    if field in entry:
-        return entry[field]
-
-    for key, value in entry.items():
-        if _matches_field_key(key, field):
-            return value
-
+def _first_value(entry: Any, field: str, site: str | None = None) -> Any:
+    for key in _field_aliases(field, site=site):
+        if key in entry:
+            return entry[key]
     return None
 
 
-def _matches_field_key(key: str, field: str) -> bool:
-    if key == field:
-        return True
-    if key.endswith(f"_{field}") or key.endswith(f":{field}"):
-        return True
-    if key.rsplit("_", 1)[-1] == field:
-        return True
-    if key.rsplit(":", 1)[-1] == field:
-        return True
-    return False
+def _field_aliases(field: str, site: str | None = None) -> tuple[str, ...]:
+    aliases = list(EXPLICIT_FIELD_ALIASES.get(field, (field,)))
+    if site is not None:
+        aliases.extend(SITE_FIELD_ALIASES.get(field, ()))
+    return tuple(dict.fromkeys(aliases))
+
+
+def _recognized_entry_keys() -> set[str]:
+    keys = set(KNOWN_ENTRY_KEYS)
+    for aliases in EXPLICIT_FIELD_ALIASES.values():
+        keys.update(aliases)
+    for aliases in SITE_FIELD_ALIASES.values():
+        keys.update(aliases)
+    return keys

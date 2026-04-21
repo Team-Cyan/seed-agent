@@ -36,5 +36,31 @@
       <hr>yes</hr>
       <nx:custom_field>beta</nx:custom_field>
     </item>
+    <item>
+      <title>Missing Enclosure Torrent</title>
+      <link>https://tracker.example/details.php?id=1003&amp;passkey=source-secret</link>
+      <pubDate>Wed, 03 Apr 2024 12:00:00 GMT</pubDate>
+      <seeders>8</seeders>
+      <leechers>2</leechers>
+      <size>111111111</size>
+      <discount>freeleech</discount>
+      <left_time_minutes>90</left_time_minutes>
+      <hr>no</hr>
+    </item>
+    <item>
+      <title>Missing Size Torrent</title>
+      <link>https://tracker.example/details.php?id=1004&amp;passkey=source-secret</link>
+      <enclosure
+        url="https://tracker.example/download.php?id=1004&amp;passkey=download-secret"
+        length="222222222"
+        type="application/x-bittorrent"
+      />
+      <pubDate>Thu, 04 Apr 2024 12:00:00 GMT</pubDate>
+      <seeders>5</seeders>
+      <leechers>4</leechers>
+      <discount>free_leech</discount>
+      <left_time_minutes>45</left_time_minutes>
+      <nx:hr>true</nx:hr>
+    </item>
   </channel>
 </rss>
