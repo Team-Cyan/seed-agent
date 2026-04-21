@@ -5,6 +5,8 @@ This document captures the durable handoff state from the initial `seed-agent` p
 ## Repository State
 
 - Local repository: `/Users/lancer/projects/seed-agent`
+- Implementation worktree: `/Users/lancer/.config/superpowers/worktrees/seed-agent/phase-1-pt-upload-loop`
+- Implementation branch: `feat/phase-1-pt-upload-loop`
 - GitHub remote: `git@github.com:Team-Cyan/seed-agent.git`
 - Default branch: `main`
 - Latest known synchronized commit during setup: `a013fa7 chore: align local and remote histories`
@@ -15,6 +17,7 @@ This document captures the durable handoff state from the initial `seed-agent` p
 - `docs/research/inspiration-pool.md`: inspiration pool from PT and NAS automation projects, including Phase 1, Phase 2, and future ideas.
 - `docs/superpowers/specs/2026-04-20-seed-agent-design.md`: full product and architecture spec covering discovery, scoring, qBittorrent execution, lifecycle state, cleanup, audit records, intent sources, roadmap, config design, modules, structured actions, tests, and open decisions.
 - `docs/superpowers/plans/2026-04-20-phase-1-pt-upload-loop.md`: executable Phase 1 implementation plan for the PT upload strategy loop, including package bootstrap, config/models, audit, RSS discovery, scoring, SQLite state, qBittorrent executor, safe dry-run actions, cleanup policy, CLI, docs, and verification.
+- `docs/operations/phase-1-usage.md`: operator-facing Phase 1 usage guide for config setup, dry-run review, execution, and audit inspection.
 
 ## Core Decisions
 
@@ -34,6 +37,8 @@ This document captures the durable handoff state from the initial `seed-agent` p
 
 - Current plan: `docs/superpowers/plans/2026-04-20-phase-1-pt-upload-loop.md`
 - Recommended next mode: execute the plan task-by-task with `superpowers:subagent-driven-development` or `superpowers:executing-plans`.
+- First safe verification command: `uv run seed-agent run-once --config config/example.yaml`
+- First execute command: `uv run seed-agent run-once --config config/example.yaml --execute`
 - First implementation task: bootstrap the Python package with `pyproject.toml`, `.gitignore`, `src/seed_agent/__init__.py`, and `tests/test_package_import.py`.
 - First verification commands after bootstrap: `uv sync --dev`, `uv run pytest tests/test_package_import.py -q`, and `uv run ruff check .`.
 - Keep Phase 2 intent routing, Telegram, WeChat bridge, Douban wanted-list sync, and optional UI outside the Phase 1 implementation path.

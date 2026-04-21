@@ -64,6 +64,40 @@ Phase 1 uses `balanced` cleanup by default:
 - [Inspiration Pool](docs/research/inspiration-pool.md)
 - [Seed Agent Design](docs/superpowers/specs/2026-04-20-seed-agent-design.md)
 
+## Local Development
+
+Use `uv` for the local development loop:
+
+```bash
+uv sync --dev
+uv run pytest
+uv run ruff check .
+```
+
+## Phase 1 CLI
+
+Phase 1 commands default to dry-run for mutating downloader actions. Pass `--execute` only when you are ready for qBittorrent changes to be applied.
+
+Example commands:
+
+```bash
+uv run seed-agent discover --config config/example.yaml
+uv run seed-agent score --config config/example.yaml
+uv run seed-agent run-once --config config/example.yaml
+uv run seed-agent run-once --config config/example.yaml --execute
+```
+
+## Runtime Files
+
+Phase 1 stores local state and audit records in the repository workspace:
+
+- `.seed-agent/state.db`
+- `.seed-agent/audit.jsonl`
+
+## Downloader Credentials
+
+qBittorrent credentials belong in `local/secrets/qbittorrent.yaml`, and that file is gitignored.
+
 ## Early Configuration Shape
 
 ```yaml
