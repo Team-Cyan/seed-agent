@@ -17,6 +17,7 @@ This document captures the durable handoff state from the initial `seed-agent` p
 - `docs/research/inspiration-pool.md`: inspiration pool from PT and NAS automation projects, including Phase 1, Phase 2, and future ideas.
 - `docs/superpowers/specs/2026-04-20-seed-agent-design.md`: full product and architecture spec covering discovery, scoring, qBittorrent execution, lifecycle state, cleanup, audit records, intent sources, roadmap, config design, modules, structured actions, tests, and open decisions.
 - `docs/superpowers/plans/2026-04-20-phase-1-pt-upload-loop.md`: executable Phase 1 implementation plan for the PT upload strategy loop, including package bootstrap, config/models, audit, RSS discovery, scoring, SQLite state, qBittorrent executor, safe dry-run actions, cleanup policy, CLI, docs, and verification.
+- `docs/superpowers/plans/2026-04-22-phase-2-resource-intent-loop.md`: executable Phase 2 implementation plan for resource intents, search, ranking, confirmation, and enqueue reuse.
 - `docs/operations/phase-1-usage.md`: operator-facing Phase 1 usage guide for config setup, dry-run review, execution, and audit inspection.
 
 ## Core Decisions
@@ -38,7 +39,8 @@ This document captures the durable handoff state from the initial `seed-agent` p
 - Current plan: `docs/superpowers/plans/2026-04-20-phase-1-pt-upload-loop.md`.
 - Current implementation branch: `feat/phase-1-pt-upload-loop`.
 - Current implementation worktree: `/Users/lancer/.config/superpowers/worktrees/seed-agent/phase-1-pt-upload-loop`.
-- Latest Phase 1 safety fix commit at handoff time: `4fac72e fix: close phase one state safety gaps`.
+- Latest Phase 1 safety baseline before Phase 2 planning: `970b49d fix: preserve audit state during batch failures`.
+- Current Phase 2 plan: `docs/superpowers/plans/2026-04-22-phase-2-resource-intent-loop.md`.
 - Phase 1 is implemented as a CLI-first Python package under `src/seed_agent/`.
 - The implemented command surface is `discover`, `score`, `enqueue`, `review`, `prune`, `daily-report`, and `run-once`.
 - Mutating downloader operations still default to dry-run. Use `--execute` only after reviewing printed decisions and audit output.
@@ -70,6 +72,21 @@ Important safety behavior preserved in the latest implementation:
 - `prune --execute` writes known torrent hashes back to the local state database as `PAUSED` or `DELETED`.
 - qBittorrent torrent rows infer cleanup protection metadata conservatively from tags and save paths.
 - Dry-run prune does not build a live downloader, call qBittorrent, or update lifecycle state.
+
+## Phase 1 Review Notes
+
+Review performed before Phase 2 planning:
+
+- `uv run pytest -q` passed with 104 tests.
+- `uv run ruff check .` passed.
+- `uv run seed-agent --help` loaded all Phase 1 commands.
+- `uv run seed-agent run-once --config config/example.yaml` completed as a dry-run smoke.
+- One Phase 1 state durability issue was fixed: repeated same-state writes now preserve existing score and torrent hash when the incoming update does not provide replacement values.
+
+Recommended next branch:
+
+- `feat/phase-2-resource-intent-loop`
+- Suggested worktree: `/Users/lancer/.config/superpowers/worktrees/seed-agent/phase-2-resource-intent-loop`
 
 ## Inspiration Sources
 

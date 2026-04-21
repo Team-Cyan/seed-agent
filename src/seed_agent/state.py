@@ -177,4 +177,10 @@ def _monotonic_values(
             current["torrent_hash"],
         )
 
-    return incoming_state.value, incoming_score, incoming_torrent_hash
+    return (
+        incoming_state.value,
+        incoming_score if incoming_score is not None else current["score"],
+        incoming_torrent_hash
+        if incoming_torrent_hash is not None
+        else current["torrent_hash"],
+    )

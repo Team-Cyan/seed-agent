@@ -69,6 +69,35 @@ def test_state_store_lists_candidates_by_state(tmp_path: Path) -> None:
     assert [row["stable_id"] for row in enqueued] == ["demo:two"]
 
 
+def test_state_store_preserves_existing_score_and_hash_when_incoming_values_are_missing(
+    tmp_path: Path,
+) -> None:
+    store = StateStore(tmp_path / "state.sqlite3")
+    store.upsert_candidate(
+        stable_id="demo:one",
+        title="One",
+        site="demo",
+        state=LifecycleState.ENQUEUED,
+        score=91,
+        torrent_hash="deadbeef",
+    )
+
+    store.upsert_candidate(
+        stable_id="demo:one",
+        title="One",
+        site="demo",
+        state=LifecycleState.ENQUEUED,
+        score=None,
+        torrent_hash=None,
+    )
+    row = store.get_candidate("demo:one")
+
+    assert row is not None
+    assert row["state"] == LifecycleState.ENQUEUED.value
+    assert row["score"] == 91
+    assert row["torrent_hash"] == "deadbeef"
+
+
 def test_state_store_lists_and_updates_candidates_by_torrent_hash(tmp_path: Path) -> None:
     store = StateStore(tmp_path / "state.sqlite3")
     store.upsert_candidate(
