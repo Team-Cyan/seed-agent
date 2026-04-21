@@ -9,8 +9,6 @@ from pydantic import BaseModel, ConfigDict
 from seed_agent.config import CleanupConfig
 from seed_agent.models import ManagedTorrent
 
-GIB = 1024**3
-
 CleanupAction = Literal["protect", "keep", "pause", "delete"]
 
 
@@ -44,7 +42,7 @@ def classify_cleanup(
         )
 
     metadata = torrent.metadata or {}
-    for rule in _protection_rules(torrent, cleanup, metadata):
+    for rule in _protection_rules(cleanup, metadata):
         return CleanupDecision(
             action="protect",
             reason=_reason(rule.reason),
@@ -91,13 +89,13 @@ def classify_cleanup(
             managed=True,
         )
 
-    upload_delta_gb = _upload_delta_gb(torrent, metadata)
-    if upload_delta_gb is not None and upload_delta_gb >= cleanup.min_upload_delta_gb:
+    recent_upload_gb = _recent_upload_gb(metadata)
+    if recent_upload_gb is not None and recent_upload_gb >= cleanup.min_upload_delta_gb:
         return CleanupDecision(
             action="keep",
             reason=_reason(
-                f"upload delta {upload_delta_gb:.2f} GiB >= min "
-                f"{cleanup.min_upload_delta_gb:.2f} GiB"
+                f"recent upload {recent_upload_gb:.2f} GiB >= min "
+                f"{cleanup.min_upload_delta_gb:.2f} GiB; retain cold managed torrent"
             ),
             managed=True,
         )
@@ -120,7 +118,6 @@ def _is_managed(
 
 
 def _protection_rules(
-    torrent: ManagedTorrent,
     cleanup: CleanupConfig,
     metadata: dict[str, object],
 ) -> list[_MatchedRule]:
@@ -136,16 +133,15 @@ def _protection_rules(
     return rules
 
 
-def _upload_delta_gb(torrent: ManagedTorrent, metadata: dict[str, object]) -> float | None:
-    for key in ("upload_delta_gb", "recent_upload_gb"):
+def _recent_upload_gb(metadata: dict[str, object]) -> float | None:
+    # Cleanup uses explicit recent-upload metadata only. `recent_upload_gb` is the
+    # preferred field; `upload_delta_gb` is kept as a legacy alias for the same
+    # semantic value when present.
+    for key in ("recent_upload_gb", "upload_delta_gb"):
         raw_value = metadata.get(key)
         if isinstance(raw_value, (int, float)):
             return float(raw_value)
-
-    delta_bytes = torrent.uploaded_bytes - torrent.downloaded_bytes
-    if delta_bytes <= 0:
-        return None
-    return delta_bytes / GIB
+    return None
 
 
 def _paused_at(metadata: dict[str, object]) -> datetime | None:

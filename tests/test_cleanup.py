@@ -56,11 +56,20 @@ def test_protects_unmanaged_torrent() -> None:
     assert "unmanaged" in decision.reason
 
 
-def test_pauses_cold_managed_torrent() -> None:
+@pytest.mark.parametrize(
+    ("metadata",),
+    [
+        ({"recent_upload_gb": 0.25},),
+        ({"upload_delta_gb": 0.5},),
+    ],
+)
+def test_cold_managed_torrent_with_insufficient_recent_upload_still_pauses(
+    metadata: dict[str, object],
+) -> None:
     from seed_agent.policies.cleanup import classify_cleanup
 
     decision = classify_cleanup(
-        _torrent(),
+        _torrent(metadata=metadata),
         _cleanup(),
         managed_category="pt-auto",
         managed_tags={"seed-agent", "pt-auto"},
@@ -68,6 +77,29 @@ def test_pauses_cold_managed_torrent() -> None:
 
     assert decision.action == "pause"
     assert "cold" in decision.reason
+
+
+@pytest.mark.parametrize(
+    ("metadata",),
+    [
+        ({"recent_upload_gb": 1.25},),
+        ({"upload_delta_gb": 1.5},),
+    ],
+)
+def test_cold_managed_torrent_with_meaningful_recent_upload_is_kept(
+    metadata: dict[str, object],
+) -> None:
+    from seed_agent.policies.cleanup import classify_cleanup
+
+    decision = classify_cleanup(
+        _torrent(metadata=metadata),
+        _cleanup(),
+        managed_category="pt-auto",
+        managed_tags={"seed-agent", "pt-auto"},
+    )
+
+    assert decision.action == "keep"
+    assert "recent upload" in decision.reason.lower()
 
 
 @pytest.mark.parametrize(
@@ -96,13 +128,13 @@ def test_protects_hr_manual_and_media_library_when_configured(
     assert reason_fragment in decision.reason.lower()
 
 
-def test_deletes_paused_managed_torrent_only_after_pause_delay() -> None:
+def test_deletes_stopped_managed_torrent_only_after_pause_delay_without_recent_upload() -> None:
     from seed_agent.policies.cleanup import classify_cleanup
 
     now = datetime.now(UTC)
     decision = classify_cleanup(
         _torrent(
-            state="paused",
+            state="stopped",
             metadata={"paused_at": now - timedelta(hours=30)},
             last_activity_at=now - timedelta(days=10),
         ),
