@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 
+from seed_agent.config import CleanupConfig
 from seed_agent.downloaders.base import Downloader
-from seed_agent.models import Decision, ScoreBreakdown
+from seed_agent.models import Decision, ManagedTorrent, ScoreBreakdown
+from seed_agent.policies.cleanup import CleanupDecision, classify_cleanup
 
 ROLLBACK_INSTRUCTION = "Delete torrent from qBittorrent if enqueue was accidental"
 
@@ -58,3 +60,51 @@ def _build_reason(item: ScoreBreakdown) -> str:
     if item.reasons:
         return f"accepted for enqueue: score={item.score}; reasons={'; '.join(item.reasons)}"
     return f"accepted for enqueue: score={item.score}"
+
+
+async def prune_cold_torrents(
+    torrents: Sequence[ManagedTorrent] | Iterable[ManagedTorrent],
+    downloader: Downloader,
+    cleanup: CleanupConfig,
+    managed_category: str,
+    managed_tags: Sequence[str] | set[str],
+    execute: bool,
+) -> list[Decision]:
+    decisions: list[Decision] = []
+    tags = set(managed_tags)
+
+    for torrent in torrents:
+        classification = classify_cleanup(torrent, cleanup, managed_category, tags)
+        decision = _decision_for_cleanup(torrent, classification, execute)
+        decisions.append(decision)
+
+        if not execute:
+            continue
+        if classification.action == "pause":
+            await downloader.pause(torrent.hash)
+        elif classification.action == "delete":
+            await downloader.delete(torrent.hash, delete_files=True)
+
+    return decisions
+
+
+def _decision_for_cleanup(
+    torrent: ManagedTorrent,
+    classification: CleanupDecision,
+    execute: bool,
+) -> Decision:
+    action = f"qb.cleanup.{classification.action}"
+    reason = f"cleanup {classification.action}: {classification.reason}"
+    return Decision(
+        action=action,
+        target_id=torrent.hash,
+        execute=execute,
+        reason=reason,
+        old_state=torrent.model_dump(mode="json"),
+        new_state={
+            "torrent_hash": torrent.hash,
+            "cleanup_action": classification.action,
+            "managed": classification.managed,
+            "protected": classification.protected,
+        },
+    )
