@@ -15,11 +15,13 @@ from seed_agent.config import SeedAgentConfig, load_config, load_downloader_secr
 from seed_agent.downloaders.qbittorrent import QbittorrentClient
 from seed_agent.models import (
     Decision,
+    LifecycleState,
     ManagedTorrent,
     ScoreBreakdown,
     TorrentCandidate,
     safe_url_identity,
 )
+from seed_agent.state import StateStore
 
 app = typer.Typer(help="AI-first PT and downloader operations toolkit.")
 DEFAULT_CONFIG = Path("config/example.yaml")
@@ -186,8 +188,31 @@ def run_once(
     execute: Annotated[bool, typer.Option("--execute")] = False,
 ) -> None:
     loaded = load_config(config)
+    store = StateStore(_state_path())
+
     candidates = _run(discover_candidates(loaded))
+    for candidate in candidates:
+        store.upsert_candidate(
+            candidate.stable_id,
+            candidate.title,
+            candidate.site,
+            LifecycleState.DISCOVERED,
+            score=None,
+            torrent_hash=None,
+        )
+
     scored = score_candidates(candidates, loaded.discovery, loaded.scoring)
+    scored_by_id = {item.candidate_id: item for item in scored}
+    for item in scored:
+        store.upsert_candidate(
+            item.candidate_id,
+            item.candidate.title,
+            item.candidate.site,
+            LifecycleState.SCORED,
+            score=item.score,
+            torrent_hash=None,
+        )
+
     downloader = build_downloader(loaded) if execute else _NullDownloader()
     decisions = _run(
         enqueue_candidates(
@@ -199,6 +224,24 @@ def run_once(
         )
     )
     _write_audit_decisions(loaded, decisions)
+
+    if execute:
+        for decision in decisions:
+            torrent_hash = decision.new_state.get("torrent_hash")
+            if not torrent_hash:
+                continue
+            scored_item = scored_by_id.get(decision.target_id)
+            if scored_item is None:
+                continue
+            store.upsert_candidate(
+                scored_item.candidate_id,
+                scored_item.candidate.title,
+                scored_item.candidate.site,
+                LifecycleState.ENQUEUED,
+                score=scored_item.score,
+                torrent_hash=str(torrent_hash),
+            )
+
     payload = {
         "command": "run-once",
         "config": str(config),
@@ -308,15 +351,18 @@ def build_downloader(config: SeedAgentConfig) -> QbittorrentClient:
 def _write_audit_decisions(config: SeedAgentConfig, decisions: list[Decision]) -> None:
     if not decisions:
         return
-    audit_path = _audit_path(config)
+    audit_path = _audit_path()
     logger = AuditLogger(audit_path)
     for decision in decisions:
         logger.write(decision)
 
 
-def _audit_path(config: SeedAgentConfig) -> Path:
-    root = config.config_dir or Path.cwd()
-    return root / ".seed-agent" / "audit.jsonl"
+def _audit_path() -> Path:
+    return Path.cwd() / ".seed-agent" / "audit.jsonl"
+
+
+def _state_path() -> Path:
+    return Path.cwd() / ".seed-agent" / "state.db"
 
 
 class _NullDownloader:
