@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Iterable, Sequence
 from pathlib import Path
 
@@ -10,12 +11,21 @@ from seed_agent.sites.rss import fetch_rss_candidates
 
 
 async def discover_candidates(config: SeedAgentConfig) -> list[TorrentCandidate]:
-    candidates: list[TorrentCandidate] = []
+    tasks = [
+        fetch_rss_candidates(
+            site.rss_url,
+            site.name,
+            cookie=_read_cookie(site.cookie_ref, config.config_dir),
+        )
+        for site in config.enabled_sites
+    ]
+    results = await asyncio.gather(*tasks, return_exceptions=True) if tasks else []
 
-    for site in config.enabled_sites:
-        cookie = _read_cookie(site.cookie_ref)
-        site_candidates = await fetch_rss_candidates(site.rss_url, site.name, cookie=cookie)
-        candidates.extend(site_candidates)
+    candidates: list[TorrentCandidate] = []
+    for result in results:
+        if isinstance(result, Exception):
+            continue
+        candidates.extend(result)
 
     return candidates
 
@@ -60,11 +70,13 @@ def daily_report(
     }
 
 
-def _read_cookie(cookie_ref: str | None) -> str | None:
+def _read_cookie(cookie_ref: str | None, config_dir: Path | None = None) -> str | None:
     if not cookie_ref:
         return None
 
     path = Path(cookie_ref)
+    if not path.is_absolute() and config_dir is not None:
+        path = config_dir / path
     try:
         if not path.is_file():
             return None

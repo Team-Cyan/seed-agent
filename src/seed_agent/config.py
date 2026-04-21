@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any, ClassVar, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 
 from seed_agent.models import Discount
 
@@ -112,10 +112,15 @@ class SeedAgentConfig(BaseModel):
     scoring: ScoringConfig
     downloader: DownloaderConfig
     cleanup: CleanupConfig
+    _config_dir: Path | None = PrivateAttr(default=None)
 
     @property
     def enabled_sites(self) -> list[SiteConfig]:
         return [site for site in self.sites if site.enabled]
+
+    @property
+    def config_dir(self) -> Path | None:
+        return self._config_dir
 
 
 def _normalize_discount(value: Any) -> Discount:
@@ -151,4 +156,6 @@ def load_config(path: Path) -> SeedAgentConfig:
     data = loaded or {}
     if not isinstance(data, dict):
         raise ValueError("configuration root must be a mapping")
-    return SeedAgentConfig.model_validate(data)
+    config = SeedAgentConfig.model_validate(data)
+    config._config_dir = path.resolve().parent
+    return config

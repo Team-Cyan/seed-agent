@@ -116,6 +116,8 @@ cleanup:
     assert len(config.enabled_sites) == 1
     assert config.enabled_sites[0].name == "demo-free"
     assert config.downloader.secret_ref == secret_path.as_posix()
+    assert config.config_dir == config_path.parent.resolve()
+    assert "config_dir" not in config.model_dump()
 
 
 def test_unknown_config_key_raises_validation_error() -> None:

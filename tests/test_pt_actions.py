@@ -115,6 +115,51 @@ async def test_discover_candidates_skips_disabled_sites_and_calls_enabled_site(m
 
 
 @pytest.mark.asyncio
+async def test_discover_candidates_keeps_going_when_one_site_fails(monkeypatch) -> None:
+    from seed_agent.actions import pt as pt_actions
+
+    config = SeedAgentConfig(
+        mode="balanced",
+        sites=[
+            {
+                "name": "demo-bad",
+                "type": "nexusphp",
+                "enabled": True,
+                "rss_url": "https://tracker.example/rss-bad.php",
+                "cookie_ref": None,
+            },
+            {
+                "name": "demo-good",
+                "type": "nexusphp",
+                "enabled": True,
+                "rss_url": "https://tracker.example/rss-good.php",
+                "cookie_ref": None,
+            },
+        ],
+        discovery=_config().discovery,
+        scoring=_config().scoring,
+        downloader=_config().downloader,
+        cleanup=_config().cleanup,
+    )
+
+    calls: list[str] = []
+
+    async def fake_fetch_rss_candidates(url: str, site: str, cookie: str | None = None):
+        calls.append(site)
+        if site == "demo-bad":
+            raise RuntimeError("boom")
+        return [_candidate(site=site, title="Recovered Torrent")]
+
+    monkeypatch.setattr(pt_actions, "fetch_rss_candidates", fake_fetch_rss_candidates)
+
+    candidates = await pt_actions.discover_candidates(config)
+
+    assert calls == ["demo-bad", "demo-good"]
+    assert len(candidates) == 1
+    assert candidates[0].site == "demo-good"
+
+
+@pytest.mark.asyncio
 async def test_discover_candidates_reads_cookie_ref(tmp_path: Path, monkeypatch) -> None:
     from seed_agent.actions import pt as pt_actions
 
@@ -133,6 +178,79 @@ async def test_discover_candidates_reads_cookie_ref(tmp_path: Path, monkeypatch)
     await pt_actions.discover_candidates(config)
 
     assert seen == ["session=abc123"]
+
+
+@pytest.mark.asyncio
+async def test_discover_candidates_resolves_relative_cookie_ref_against_config_path(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from seed_agent.actions import pt as pt_actions
+    from seed_agent.config import load_config
+
+    config_dir = tmp_path / "config-root"
+    cookie_path = config_dir / "local" / "secrets" / "demo.cookie"
+    cookie_path.parent.mkdir(parents=True)
+    cookie_path.write_text("session=relative-cookie\n", encoding="utf-8")
+
+    config_path = config_dir / "seed-agent.yaml"
+    config_path.write_text(
+        """
+mode: balanced
+sites:
+  - name: demo-free
+    type: nexusphp
+    enabled: true
+    rss_url: https://tracker.example/rss.php
+    cookie_ref: local/secrets/demo.cookie
+discovery:
+  discounts: ["free", "2xfree"]
+  min_left_time_minutes: 120
+  min_leechers: 8
+  max_seeders: 80
+  allow_hr: false
+scoring:
+  min_score_to_enqueue: 70
+  weights:
+    discount: 30
+    leechers: 25
+    seeders: 15
+    left_time: 15
+    size: 10
+    site_history: 5
+downloader:
+  type: qbittorrent
+  target: unraid-qb
+  category: pt-auto
+  tags: ["seed-agent", "pt-auto"]
+  secret_ref: null
+cleanup:
+  cold_after_days: 7
+  min_upload_delta_gb: 1
+  protect_hr: true
+  protect_manual: true
+  protect_media_library: true
+  pause_before_delete_hours: 24
+""",
+        encoding="utf-8",
+    )
+
+    config = load_config(config_path)
+
+    seen: list[str | None] = []
+
+    async def fake_fetch_rss_candidates(url: str, site: str, cookie: str | None = None):
+        seen.append(cookie)
+        return []
+
+    other_working_dir = tmp_path / "other-working-dir"
+    other_working_dir.mkdir()
+    monkeypatch.chdir(other_working_dir)
+    monkeypatch.setattr(pt_actions, "fetch_rss_candidates", fake_fetch_rss_candidates)
+
+    await pt_actions.discover_candidates(config)
+
+    assert seen == ["session=relative-cookie"]
+    assert config.config_dir == config_dir
 
 
 def test_daily_report_returns_stable_counts() -> None:
