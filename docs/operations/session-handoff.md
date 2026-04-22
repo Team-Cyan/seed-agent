@@ -107,6 +107,7 @@ Completed Phase 2 slices:
 - Task 7: Intent search/rank/review actions and CLI commands, with ranked release candidate persistence and redacted output.
 - Task 8: Local confirmation and rejection commands with selected release persistence and audit records.
 - Task 9: Intent enqueue command that reuses the existing qB enqueue path and only mutates qBittorrent with explicit `--execute`.
+- Task 10: Source adapter skeletons for file inbox, Telegram payloads, WeChat bridge payloads, and local Douban wanted-list exports.
 
 Current Phase 2 commits:
 
@@ -119,20 +120,22 @@ Current Phase 2 commits:
 - `cd93eea feat: add intent search review commands`
 - `62cc979 feat: add intent confirmation commands`
 - `9e3b186 feat: add intent enqueue command`
+- `bb1e02b feat: add intent source adapter skeletons`
 
 Latest verification:
 
-- `uv run pytest -q` passed with 153 tests.
+- `uv run pytest -q` passed with 158 tests.
 - `uv run ruff check .` passed.
 - `uv run seed-agent --help` shows `intent-add`, `intent-inbox`, `intent-search`, `intent-rank`, `intent-review`, `intent-confirm`, `intent-reject`, and `intent-enqueue`.
 - `uv run seed-agent intent-add "Inception 2010 1080p" --config config/example.yaml` writes a local normalized intent without downloader mutation.
 - Focused CLI verification: `uv run pytest tests/test_intent_cli.py tests/test_intent_search_cli.py -q`.
 - Focused confirmation verification: `uv run pytest tests/test_intent_confirmation.py tests/test_intent_cli.py -q`.
 - Focused enqueue verification: `uv run pytest tests/test_intent_enqueue.py tests/test_intent_cli.py tests/test_cli.py -q`.
+- Focused source verification: `uv run pytest tests/test_intent_sources.py tests/test_intent_actions.py tests/test_intent_cli.py -q`.
 
 Recommended next task:
 
-- Task 10 from `docs/superpowers/plans/2026-04-22-phase-2-resource-intent-loop.md`: add source adapter stubs for Telegram, WeChat bridge, Douban wanted-list, and subscription integrations.
+- Task 11 from `docs/superpowers/plans/2026-04-22-phase-2-resource-intent-loop.md`: implement `intent-run-once` as ingest -> search -> rank -> maybe enqueue, keeping the command dry-run by default.
 
 ## Inspiration Sources
 
