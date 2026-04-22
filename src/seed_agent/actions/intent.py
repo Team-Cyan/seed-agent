@@ -6,7 +6,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from seed_agent.actions.qb import enqueue_candidates
 from seed_agent.config import IntentConfig, SearchConfig
+from seed_agent.downloaders.base import Downloader
 from seed_agent.intent.parse import parse_resource_intent
 from seed_agent.models import (
     Decision,
@@ -15,6 +17,8 @@ from seed_agent.models import (
     RankedRelease,
     ReleaseCandidate,
     ResourceIntent,
+    ScoreBreakdown,
+    TorrentCandidate,
 )
 from seed_agent.policies.intent_ranking import rank_releases
 from seed_agent.search.base import SearchProvider
@@ -123,6 +127,38 @@ def reject_intent(intent_id: str, store: StateStore) -> tuple[ResourceIntent, De
     return updated, _reject_decision(intent)
 
 
+async def enqueue_intent(
+    intent_id: str,
+    store: StateStore,
+    downloader: Downloader,
+    category: str,
+    tags: Iterable[str],
+    execute: bool,
+) -> tuple[ResourceIntent, RankedRelease, list[Decision]]:
+    intent, selected_release_id = _load_intent_with_selected(store, intent_id)
+    ranked = _enqueueable_release(
+        intent,
+        selected_release_id,
+        store.list_release_candidates(intent.intent_id),
+    )
+    decisions = await enqueue_candidates(
+        [_score_breakdown_from_ranked(ranked)],
+        downloader,
+        category,
+        list(tags),
+        execute,
+    )
+    updated = intent
+    if execute and any(decision.action == "qb.enqueue" for decision in decisions):
+        store.update_intent_state(
+            intent.intent_id,
+            IntentState.ENQUEUED,
+            selected_release_id=ranked.release.release_id,
+        )
+        updated = intent.model_copy(update={"state": IntentState.ENQUEUED})
+    return updated, ranked, decisions
+
+
 def review_intents(
     store: StateStore,
     *,
@@ -159,10 +195,20 @@ def _ingest_decision(intent: ResourceIntent, *, existed: bool) -> Decision:
 
 
 def _load_intent(store: StateStore, intent_id: str) -> ResourceIntent:
+    intent, _ = _load_intent_with_selected(store, intent_id)
+    return intent
+
+
+def _load_intent_with_selected(
+    store: StateStore,
+    intent_id: str,
+) -> tuple[ResourceIntent, str | None]:
     row = store.get_intent(intent_id)
     if row is None:
         raise ValueError(f"unknown intent: {intent_id}")
-    return ResourceIntent.model_validate(json.loads(str(row["normalized_json"])))
+    intent = ResourceIntent.model_validate(json.loads(str(row["normalized_json"])))
+    selected = row["selected_release_id"]
+    return intent, str(selected) if selected is not None else None
 
 
 def _unranked_candidate(intent_id: str, release: ReleaseCandidate) -> RankedRelease:
@@ -203,6 +249,55 @@ def _find_ranked_release(rows: list[dict[str, Any]], release_id: str) -> RankedR
         if ranked.release.release_id == release_id:
             return ranked
     return None
+
+
+def _enqueueable_release(
+    intent: ResourceIntent,
+    selected_release_id: str | None,
+    rows: list[dict[str, Any]],
+) -> RankedRelease:
+    ranked = _stored_ranked(rows)
+    if intent.state == IntentState.REJECTED:
+        raise ValueError(f"intent is rejected: {intent.intent_id}")
+    if selected_release_id is not None:
+        selected = next(
+            (item for item in ranked if item.release.release_id == selected_release_id),
+            None,
+        )
+        if selected is None:
+            raise ValueError(f"selected release is missing: {selected_release_id}")
+        return selected
+    for item in ranked:
+        if item.accepted and not item.confirmation_required:
+            return item
+    if ranked:
+        raise ValueError("intent requires confirmation before enqueue")
+    raise ValueError("intent has no release candidates")
+
+
+def _score_breakdown_from_ranked(ranked: RankedRelease) -> ScoreBreakdown:
+    release = ranked.release
+    candidate = TorrentCandidate(
+        site=release.site,
+        title=release.title,
+        source_url=release.source_url,
+        download_url=release.download_url,
+        size_bytes=release.size_bytes,
+        seeders=release.seeders,
+        leechers=release.leechers,
+        discount=release.discount,
+        left_time_minutes=None,
+        hr=bool(release.metadata.get("hr", False)),
+        published_at=release.published_at,
+        metadata=release.metadata,
+    )
+    return ScoreBreakdown(
+        candidate_id=release.release_id,
+        score=ranked.score,
+        accepted=True,
+        reasons=[*ranked.reasons, "selected for intent enqueue"],
+        candidate=candidate,
+    )
 
 
 def _ranked_state(ranked: list[RankedRelease]) -> IntentState:

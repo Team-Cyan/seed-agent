@@ -10,6 +10,7 @@ import typer
 from seed_agent.actions.intent import (
     add_intent,
     confirm_intent,
+    enqueue_intent,
     ingest_inbox,
     rank_intent,
     reject_intent,
@@ -281,6 +282,50 @@ def intent_reject(
         "decision": _decision_summary(decision),
     }
     _print_json(payload)
+
+
+@app.command(name="intent-enqueue")
+def intent_enqueue(
+    intent_id: Annotated[str, typer.Argument()],
+    config: Annotated[Path, typer.Option("--config")] = DEFAULT_CONFIG,
+    execute: Annotated[bool, typer.Option("--execute")] = False,
+) -> None:
+    loaded = load_config(config)
+    store = StateStore(_state_path())
+    downloader = build_downloader(loaded) if execute else _NullDownloader()
+    batch_error = None
+    try:
+        intent, ranked, decisions = _run(
+            enqueue_intent(
+                intent_id,
+                store,
+                downloader,
+                loaded.downloader.category,
+                loaded.downloader.tags,
+                execute,
+            )
+        )
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    except MutationBatchError as exc:
+        intent = None
+        ranked = None
+        decisions = exc.decisions
+        batch_error = exc
+    _write_audit_decisions(loaded, decisions)
+    payload = {
+        "command": "intent-enqueue",
+        "config": str(config),
+        "execute": execute,
+        "intent": _intent_summary(intent) if intent is not None else None,
+        "selected": _ranked_release_summary(ranked) if ranked is not None else None,
+        "enqueued": sum(1 for item in decisions if item.action == "qb.enqueue"),
+        "decisions": [_decision_summary(item) for item in decisions],
+    }
+    if batch_error is not None:
+        payload["error"] = str(batch_error)
+    _print_json(payload)
+    _raise_if_batch_failed(batch_error)
 
 
 @app.command()
