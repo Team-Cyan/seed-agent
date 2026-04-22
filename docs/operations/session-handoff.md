@@ -43,7 +43,7 @@ This document captures the durable handoff state from the initial `seed-agent` p
 - Current Phase 2 plan: `docs/superpowers/plans/2026-04-22-phase-2-resource-intent-loop.md`.
 - Phase 1 is implemented as a CLI-first Python package under `src/seed_agent/`.
 - The implemented Phase 1 command surface is `discover`, `score`, `enqueue`, `review`, `prune`, `daily-report`, and `run-once`.
-- The implemented Phase 2 intent command surface is `intent-add`, `intent-inbox`, `intent-search`, `intent-rank`, and `intent-review`.
+- The implemented Phase 2 intent command surface is `intent-add`, `intent-inbox`, `intent-search`, `intent-rank`, `intent-review`, `intent-confirm`, and `intent-reject`.
 - Mutating downloader operations still default to dry-run. Use `--execute` only after reviewing printed decisions and audit output.
 - First safe verification command: `uv run seed-agent run-once --config config/example.yaml`.
 - First execute command after review: `uv run seed-agent run-once --config config/example.yaml --execute`.
@@ -105,6 +105,7 @@ Completed Phase 2 slices:
 - Task 5: Search provider protocol and RSS-backed intent search provider.
 - Task 6: Explainable intent ranking policy with reasons, risks, ambiguity detection, and confirmation gating.
 - Task 7: Intent search/rank/review actions and CLI commands, with ranked release candidate persistence and redacted output.
+- Task 8: Local confirmation and rejection commands with selected release persistence and audit records.
 
 Current Phase 2 commits:
 
@@ -115,18 +116,20 @@ Current Phase 2 commits:
 - `de1523c feat: add rss-backed intent search provider`
 - `48bb8c5 feat: add explainable intent ranking`
 - `cd93eea feat: add intent search review commands`
+- `62cc979 feat: add intent confirmation commands`
 
 Latest verification:
 
-- `uv run pytest -q` passed with 147 tests.
+- `uv run pytest -q` passed with 150 tests.
 - `uv run ruff check .` passed.
-- `uv run seed-agent --help` shows `intent-add`, `intent-inbox`, `intent-search`, `intent-rank`, and `intent-review`.
+- `uv run seed-agent --help` shows `intent-add`, `intent-inbox`, `intent-search`, `intent-rank`, `intent-review`, `intent-confirm`, and `intent-reject`.
 - `uv run seed-agent intent-add "Inception 2010 1080p" --config config/example.yaml` writes a local normalized intent without downloader mutation.
 - Focused CLI verification: `uv run pytest tests/test_intent_cli.py tests/test_intent_search_cli.py -q`.
+- Focused confirmation verification: `uv run pytest tests/test_intent_confirmation.py tests/test_intent_cli.py -q`.
 
 Recommended next task:
 
-- Task 8 from `docs/superpowers/plans/2026-04-22-phase-2-resource-intent-loop.md`: add confirmation and intent-to-enqueue reuse, keeping qBittorrent mutation behind explicit confirmation/execute gates.
+- Task 9 from `docs/superpowers/plans/2026-04-22-phase-2-resource-intent-loop.md`: add intent-to-enqueue reuse, keeping qBittorrent mutation behind explicit `--execute` and using confirmed or high-confidence releases only.
 
 ## Inspiration Sources
 
