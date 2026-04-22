@@ -102,6 +102,7 @@ Completed Phase 2 slices:
 - Task 3: Deterministic resource-intent parser for CLI/file/source events.
 - Task 4: Local intent ingestion actions and CLI commands, including `intent-add` and `intent-inbox`.
 - Task 5: Search provider protocol and RSS-backed intent search provider.
+- Task 6: Explainable intent ranking policy with reasons, risks, ambiguity detection, and confirmation gating.
 
 Current Phase 2 commits:
 
@@ -110,17 +111,18 @@ Current Phase 2 commits:
 - `350f1c7 feat: add deterministic intent parser`
 - `617b556 feat: add local intent ingestion cli`
 - `de1523c feat: add rss-backed intent search provider`
+- `48bb8c5 feat: add explainable intent ranking`
 
 Latest verification:
 
-- `uv run pytest -q` passed with 140 tests.
+- `uv run pytest -q` passed with 145 tests.
 - `uv run ruff check .` passed.
 - `uv run seed-agent --help` shows `intent-add` and `intent-inbox`.
 - `uv run seed-agent intent-add "Inception 2010 1080p" --config config/example.yaml` writes a local normalized intent without downloader mutation.
 
 Recommended next task:
 
-- Task 6 from `docs/superpowers/plans/2026-04-22-phase-2-resource-intent-loop.md`: explainable intent ranking policy.
+- Task 7 from `docs/superpowers/plans/2026-04-22-phase-2-resource-intent-loop.md`: wire intent search/rank actions and CLI commands, then persist ranked release candidates in SQLite.
 
 ## Inspiration Sources
 
