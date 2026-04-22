@@ -5,5 +5,7 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 .seed-agent/
+local/inbox/*
+!local/inbox/.gitkeep
 local/secrets/*
 !local/secrets/.gitkeep
