@@ -15,6 +15,7 @@ from seed_agent.actions.intent import (
     rank_intent,
     reject_intent,
     review_intents,
+    run_intent_once,
     search_intent,
 )
 from seed_agent.actions.pt import daily_report as build_daily_report
@@ -322,6 +323,58 @@ def intent_enqueue(
         "enqueued": sum(1 for item in decisions if item.action == "qb.enqueue"),
         "decisions": [_decision_summary(item) for item in decisions],
     }
+    if batch_error is not None:
+        payload["error"] = str(batch_error)
+    _print_json(payload)
+    _raise_if_batch_failed(batch_error)
+
+
+@app.command(name="intent-run-once")
+def intent_run_once(
+    config: Annotated[Path, typer.Option("--config")] = DEFAULT_CONFIG,
+    execute: Annotated[bool, typer.Option("--execute")] = False,
+) -> None:
+    loaded = load_config(config)
+    store = StateStore(_state_path())
+    providers = _build_search_providers(loaded)
+    inbox_path = _resolve_path(loaded.intent.inbox_ref, loaded.config_dir)
+    downloader = build_downloader(loaded) if execute else _NullDownloader()
+    batch_error = None
+    try:
+        result = _run(
+            run_intent_once(
+                inbox_path=inbox_path,
+                store=store,
+                providers=providers,
+                intent_config=loaded.intent,
+                search_config=loaded.search,
+                downloader=downloader,
+                category=loaded.downloader.category,
+                tags=loaded.downloader.tags,
+                execute=execute,
+            )
+        )
+        decisions = result.decisions
+    except MutationBatchError as exc:
+        result = None
+        decisions = exc.decisions
+        batch_error = exc
+    _write_audit_decisions(loaded, decisions)
+    payload = {
+        "command": "intent-run-once",
+        "config": str(config),
+        "execute": execute,
+        "ingested": len(result.ingested) if result is not None else 0,
+        "searched": len(result.searched) if result is not None else 0,
+        "ranked": len(result.ranked) if result is not None else 0,
+        "enqueue_candidates": len(result.enqueue_selected) if result is not None else 0,
+        "decisions": [_decision_summary(item) for item in decisions],
+    }
+    if result is not None:
+        payload["intents"] = [_intent_summary(intent) for intent in result.searched]
+        payload["selected"] = [
+            _ranked_release_summary(item) for item in result.enqueue_selected
+        ]
     if batch_error is not None:
         payload["error"] = str(batch_error)
     _print_json(payload)

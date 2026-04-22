@@ -152,3 +152,4 @@ def test_intent_commands_show_in_help() -> None:
     assert "intent-confirm" in result.output
     assert "intent-reject" in result.output
     assert "intent-enqueue" in result.output
+    assert "intent-run-once" in result.output

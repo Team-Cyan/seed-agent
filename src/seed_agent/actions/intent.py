@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterable
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -24,6 +25,15 @@ from seed_agent.policies.intent_ranking import rank_releases
 from seed_agent.search.base import SearchProvider
 from seed_agent.sources.file_inbox import read_file_inbox
 from seed_agent.state import StateStore
+
+
+@dataclass(frozen=True)
+class IntentRunResult:
+    ingested: list[ResourceIntent] = field(default_factory=list)
+    searched: list[ResourceIntent] = field(default_factory=list)
+    ranked: list[RankedRelease] = field(default_factory=list)
+    enqueue_selected: list[RankedRelease] = field(default_factory=list)
+    decisions: list[Decision] = field(default_factory=list)
 
 
 def add_intent(
@@ -154,6 +164,66 @@ async def enqueue_intent(
         )
         updated = intent.model_copy(update={"state": IntentState.ENQUEUED})
     return updated, ranked, decisions
+
+
+async def run_intent_once(
+    *,
+    inbox_path: Path | None,
+    store: StateStore,
+    providers: Iterable[SearchProvider],
+    intent_config: IntentConfig,
+    search_config: SearchConfig,
+    downloader: Downloader,
+    category: str,
+    tags: Iterable[str],
+    execute: bool,
+) -> IntentRunResult:
+    ingested_pairs = ingest_inbox(inbox_path, store) if inbox_path is not None else []
+    ingested = [item[0] for item in ingested_pairs]
+    decisions = [item[1] for item in ingested_pairs]
+    searched: list[ResourceIntent] = []
+    ranked_releases: list[RankedRelease] = []
+    enqueue_selected: list[RankedRelease] = []
+    provider_list = list(providers)
+    tags_list = list(tags)
+
+    for intent in ingested:
+        searched_intent, _, search_decision = await search_intent(
+            intent.intent_id,
+            store,
+            provider_list,
+        )
+        searched.append(searched_intent)
+        decisions.append(search_decision)
+
+        _, ranked, rank_decision = rank_intent(
+            intent.intent_id,
+            store,
+            intent_config,
+            search_config,
+        )
+        ranked_releases.extend(ranked)
+        decisions.append(rank_decision)
+
+        if ranked and ranked[0].accepted and not ranked[0].confirmation_required:
+            _, selected, enqueue_decisions = await enqueue_intent(
+                intent.intent_id,
+                store,
+                downloader,
+                category,
+                tags_list,
+                execute,
+            )
+            enqueue_selected.append(selected)
+            decisions.extend(enqueue_decisions)
+
+    return IntentRunResult(
+        ingested=ingested,
+        searched=searched,
+        ranked=ranked_releases,
+        enqueue_selected=enqueue_selected,
+        decisions=decisions,
+    )
 
 
 def review_intents(
@@ -374,4 +444,3 @@ def _reject_decision(intent: ResourceIntent) -> Decision:
         confirmation_required=False,
         confirmation_received=True,
     )
-
