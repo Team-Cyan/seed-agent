@@ -19,6 +19,7 @@ This document captures the durable handoff state from the initial `seed-agent` p
 - `docs/superpowers/plans/2026-04-20-phase-1-pt-upload-loop.md`: executable Phase 1 implementation plan for the PT upload strategy loop, including package bootstrap, config/models, audit, RSS discovery, scoring, SQLite state, qBittorrent executor, safe dry-run actions, cleanup policy, CLI, docs, and verification.
 - `docs/superpowers/plans/2026-04-22-phase-2-resource-intent-loop.md`: executable Phase 2 implementation plan for resource intents, search, ranking, confirmation, and enqueue reuse.
 - `docs/operations/phase-1-usage.md`: operator-facing Phase 1 usage guide for config setup, dry-run review, execution, and audit inspection.
+- `docs/operations/phase-2-usage.md`: operator-facing Phase 2 usage guide for local inbox setup, intent commands, confirmation, enqueue, run-once, audit, and integration source boundaries.
 
 ## Core Decisions
 
@@ -109,6 +110,7 @@ Completed Phase 2 slices:
 - Task 9: Intent enqueue command that reuses the existing qB enqueue path and only mutates qBittorrent with explicit `--execute`.
 - Task 10: Source adapter skeletons for file inbox, Telegram payloads, WeChat bridge payloads, and local Douban wanted-list exports.
 - Task 11: Combined `intent-run-once` command for inbox ingest, search, rank, and dry-run/execute enqueue decisions.
+- Task 12: README and Phase 2 operator documentation.
 
 Current Phase 2 commits:
 
@@ -131,6 +133,7 @@ Latest verification:
 - `uv run seed-agent --help` shows `intent-add`, `intent-inbox`, `intent-search`, `intent-rank`, `intent-review`, `intent-confirm`, `intent-reject`, `intent-enqueue`, and `intent-run-once`.
 - `uv run seed-agent intent-add "Inception 2010 1080p" --config config/example.yaml` writes a local normalized intent without downloader mutation.
 - `uv run seed-agent intent-run-once --config config/example.yaml` is an empty dry-run when the configured inbox is absent.
+- Docs gate: `rg "intent-run-once|confirmation_required|local/inbox|phase-2" README.md docs/operations`.
 - Focused CLI verification: `uv run pytest tests/test_intent_cli.py tests/test_intent_search_cli.py -q`.
 - Focused confirmation verification: `uv run pytest tests/test_intent_confirmation.py tests/test_intent_cli.py -q`.
 - Focused enqueue verification: `uv run pytest tests/test_intent_enqueue.py tests/test_intent_cli.py tests/test_cli.py -q`.
@@ -139,7 +142,7 @@ Latest verification:
 
 Recommended next task:
 
-- Task 12 from `docs/superpowers/plans/2026-04-22-phase-2-resource-intent-loop.md`: update README and add Phase 2 operator docs.
+- Review Phase 2 end-to-end, then decide whether to merge, polish docs further, or start a Phase 3 branch for long-running integration loops.
 
 ## Inspiration Sources
 

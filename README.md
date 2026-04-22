@@ -64,6 +64,7 @@ Phase 1 uses `balanced` cleanup by default:
 - [Inspiration Pool](docs/research/inspiration-pool.md)
 - [Seed Agent Design](docs/superpowers/specs/2026-04-20-seed-agent-design.md)
 - [Phase 1 Usage](docs/operations/phase-1-usage.md)
+- [Phase 2 Usage](docs/operations/phase-2-usage.md)
 - [Phase 2 Resource Intent Plan](docs/superpowers/plans/2026-04-22-phase-2-resource-intent-loop.md)
 - [Session Handoff](docs/operations/session-handoff.md)
 
@@ -90,12 +91,34 @@ uv run seed-agent run-once --config config/example.yaml
 uv run seed-agent run-once --config config/example.yaml --execute
 ```
 
+## Phase 2 CLI
+
+Phase 2 commands are also dry-run first. `intent-confirm` and `intent-reject` only change local state. `intent-enqueue --execute` and `intent-run-once --execute` are the commands that may touch qBittorrent.
+
+Example commands:
+
+```bash
+uv run seed-agent intent-add "download Inception 2010 1080p" --config config/example.yaml
+uv run seed-agent intent-inbox --config config/example.yaml
+uv run seed-agent intent-search <intent-id> --config config/example.yaml
+uv run seed-agent intent-rank <intent-id> --config config/example.yaml
+uv run seed-agent intent-review --config config/example.yaml
+uv run seed-agent intent-confirm <intent-id> <release-id> --config config/example.yaml
+uv run seed-agent intent-reject <intent-id> --config config/example.yaml
+uv run seed-agent intent-enqueue <intent-id> --config config/example.yaml
+uv run seed-agent intent-enqueue <intent-id> --config config/example.yaml --execute
+uv run seed-agent intent-run-once --config config/example.yaml
+uv run seed-agent intent-run-once --config config/example.yaml --execute
+```
+
 ## Runtime Files
 
-Phase 1 stores local state and audit records in the repository workspace:
+Phase 1 and Phase 2 store local state and audit records in the repository workspace:
 
 - `.seed-agent/state.db`
 - `.seed-agent/audit.jsonl`
+
+Local intent inbox files live under `local/inbox/`. This directory is gitignored except for `.gitkeep`, because inbox exports can contain private media preferences.
 
 ## Downloader Credentials
 
@@ -136,6 +159,21 @@ cleanup:
   protect_manual: true
   protect_media_library: true
   pause_before_delete_hours: 24
+
+intent:
+  confirmation_threshold: 0.82
+  auto_enqueue_threshold: 0.94
+  ambiguity_gap: 0.08
+  default_resolution: 1080p
+  preferred_languages: ["zh", "en"]
+  inbox_ref: local/inbox/intents.jsonl
+
+search:
+  site_priority:
+    demo-free: 10
+  max_results_per_site: 20
+  prefer_free: true
+  reject_hr_by_default: true
 ```
 
 ## AI Operating Notes
