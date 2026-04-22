@@ -103,6 +103,72 @@ class CleanupConfig(BaseModel):
         return self
 
 
+class IntentConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    confirmation_threshold: float = 0.82
+    auto_enqueue_threshold: float = 0.94
+    ambiguity_gap: float = 0.08
+    default_resolution: str | None = "1080p"
+    preferred_languages: list[str] = Field(default_factory=lambda: ["zh", "en"])
+    inbox_ref: str = "local/inbox/intents.jsonl"
+
+    @model_validator(mode="after")
+    def validate_thresholds(self) -> IntentConfig:
+        for field_name in ("confirmation_threshold", "auto_enqueue_threshold", "ambiguity_gap"):
+            value = getattr(self, field_name)
+            if not 0 <= value <= 1:
+                raise ValueError(f"{field_name} must be between 0 and 1")
+        if self.auto_enqueue_threshold < self.confirmation_threshold:
+            raise ValueError("auto_enqueue_threshold must be >= confirmation_threshold")
+        return self
+
+
+class SearchConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    site_priority: dict[str, int] = Field(default_factory=dict)
+    max_results_per_site: int = 20
+    prefer_free: bool = True
+    reject_hr_by_default: bool = True
+
+    @model_validator(mode="after")
+    def validate_limits(self) -> SearchConfig:
+        if self.max_results_per_site < 1:
+            raise ValueError("max_results_per_site must be >= 1")
+        return self
+
+
+class SecretSourceConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    enabled: bool = False
+    secret_ref: str | None = None
+
+
+class DoubanWantedSourceConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    enabled: bool = False
+    export_ref: str | None = None
+
+
+class SubscriptionSourceConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    enabled: bool = False
+    rules_ref: str | None = None
+
+
+class SourcesConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    telegram: SecretSourceConfig = Field(default_factory=SecretSourceConfig)
+    wechat_bridge: SecretSourceConfig = Field(default_factory=SecretSourceConfig)
+    douban_wanted: DoubanWantedSourceConfig = Field(default_factory=DoubanWantedSourceConfig)
+    subscription: SubscriptionSourceConfig = Field(default_factory=SubscriptionSourceConfig)
+
+
 class SeedAgentConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
@@ -112,6 +178,9 @@ class SeedAgentConfig(BaseModel):
     scoring: ScoringConfig
     downloader: DownloaderConfig
     cleanup: CleanupConfig
+    intent: IntentConfig = Field(default_factory=IntentConfig)
+    search: SearchConfig = Field(default_factory=SearchConfig)
+    sources: SourcesConfig = Field(default_factory=SourcesConfig)
     _config_dir: Path | None = PrivateAttr(default=None)
 
     @property

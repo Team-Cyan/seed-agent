@@ -33,3 +33,29 @@ cleanup:
   protect_manual: true
   protect_media_library: true
   pause_before_delete_hours: 24
+intent:
+  confirmation_threshold: 0.82
+  auto_enqueue_threshold: 0.94
+  ambiguity_gap: 0.08
+  default_resolution: 1080p
+  preferred_languages: [zh, en]
+  inbox_ref: local/inbox/intents.jsonl
+search:
+  site_priority:
+    demo: 10
+  max_results_per_site: 20
+  prefer_free: true
+  reject_hr_by_default: true
+sources:
+  telegram:
+    enabled: false
+    secret_ref: local/secrets/telegram.yaml
+  wechat_bridge:
+    enabled: false
+    secret_ref: local/secrets/wechat-bridge.yaml
+  douban_wanted:
+    enabled: false
+    export_ref: local/inbox/douban-wanted.json
+  subscription:
+    enabled: false
+    rules_ref: config/subscriptions.yaml

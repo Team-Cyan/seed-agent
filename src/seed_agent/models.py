@@ -54,6 +54,33 @@ class LifecycleState(StrEnum):
     DELETED = "deleted"
 
 
+class IntentSource(StrEnum):
+    CLI = "cli"
+    FILE_INBOX = "file_inbox"
+    TELEGRAM = "telegram"
+    WECHAT_BRIDGE = "wechat_bridge"
+    DOUBAN_WANTED = "douban_wanted"
+    SUBSCRIPTION = "subscription"
+
+
+class IntentKind(StrEnum):
+    MOVIE = "movie"
+    SHOW = "show"
+    EPISODE = "episode"
+    UNKNOWN = "unknown"
+
+
+class IntentState(StrEnum):
+    RECEIVED = "received"
+    NORMALIZED = "normalized"
+    SEARCHED = "searched"
+    CONFIRMATION_REQUIRED = "confirmation_required"
+    CONFIRMED = "confirmed"
+    REJECTED = "rejected"
+    ENQUEUED = "enqueued"
+    FAILED = "failed"
+
+
 def safe_url_identity(url: str) -> str:
     parts = urlsplit(url)
     safe_query = [
@@ -130,6 +157,59 @@ class TorrentCandidate(BaseModel):
     @property
     def stable_id(self) -> str:
         return f"{self.site}:{safe_url_identity(self.source_url)}"
+
+
+class ResourceIntent(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    intent_id: str = Field(min_length=1)
+    source: IntentSource
+    raw_text: str = Field(min_length=1)
+    kind: IntentKind = IntentKind.UNKNOWN
+    title: str = Field(min_length=1)
+    year: int | None = Field(default=None, ge=1800, le=2200)
+    season: int | None = Field(default=None, ge=1)
+    episode: int | None = Field(default=None, ge=1)
+    resolution: str | None = None
+    quality: str | None = None
+    language: str | None = None
+    requested_at: datetime
+    state: IntentState = IntentState.RECEIVED
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ReleaseCandidate(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    release_id: str = Field(min_length=1)
+    site: str = Field(min_length=1)
+    title: str = Field(min_length=1)
+    source_url: str
+    download_url: str
+    size_bytes: int = Field(ge=0)
+    seeders: int = Field(ge=0)
+    leechers: int = Field(ge=0)
+    discount: Discount = Discount.NORMAL
+    published_at: datetime | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("discount", mode="before")
+    @classmethod
+    def normalize_discount(cls, value: str | Discount) -> Discount:
+        return TorrentCandidate.normalize_discount(value)
+
+
+class RankedRelease(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    intent_id: str = Field(min_length=1)
+    release: ReleaseCandidate
+    score: int = Field(ge=0, le=100)
+    confidence: float = Field(ge=0, le=1)
+    accepted: bool
+    confirmation_required: bool
+    reasons: list[str]
+    risks: list[str]
 
 
 class ScoreBreakdown(BaseModel):
