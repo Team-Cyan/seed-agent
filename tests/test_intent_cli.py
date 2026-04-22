@@ -146,3 +146,6 @@ def test_intent_commands_show_in_help() -> None:
     assert result.exit_code == 0
     assert "intent-add" in result.output
     assert "intent-inbox" in result.output
+    assert "intent-search" in result.output
+    assert "intent-rank" in result.output
+    assert "intent-review" in result.output

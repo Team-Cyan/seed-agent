@@ -7,7 +7,13 @@ from typing import Annotated, Any
 
 import typer
 
-from seed_agent.actions.intent import add_intent, ingest_inbox
+from seed_agent.actions.intent import (
+    add_intent,
+    ingest_inbox,
+    rank_intent,
+    review_intents,
+    search_intent,
+)
 from seed_agent.actions.pt import daily_report as build_daily_report
 from seed_agent.actions.pt import discover_candidates, score_candidates
 from seed_agent.actions.qb import MutationBatchError, enqueue_candidates, prune_cold_torrents
@@ -19,11 +25,13 @@ from seed_agent.models import (
     IntentSource,
     LifecycleState,
     ManagedTorrent,
+    RankedRelease,
     ResourceIntent,
     ScoreBreakdown,
     TorrentCandidate,
     safe_url_identity,
 )
+from seed_agent.search.rss import RssSearchProvider
 from seed_agent.state import StateStore
 
 app = typer.Typer(help="AI-first PT and downloader operations toolkit.")
@@ -155,6 +163,76 @@ def intent_inbox(
         "ingested": len(intents),
         "intents": [_intent_summary(intent) for intent in intents],
         "decisions": [_decision_summary(decision) for decision in decisions],
+    }
+    _print_json(payload)
+
+
+@app.command(name="intent-search")
+def intent_search(
+    intent_id: Annotated[str, typer.Argument()],
+    config: Annotated[Path, typer.Option("--config")] = DEFAULT_CONFIG,
+) -> None:
+    loaded = load_config(config)
+    store = StateStore(_state_path())
+    providers = _build_search_providers(loaded)
+    try:
+        intent, ranked, decision = _run(search_intent(intent_id, store, providers))
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    _write_audit_decisions(loaded, [decision])
+    payload = {
+        "command": "intent-search",
+        "config": str(config),
+        "intent": _intent_summary(intent),
+        "found": len(ranked),
+        "candidates": [_ranked_release_summary(item) for item in ranked],
+        "decision": _decision_summary(decision),
+    }
+    _print_json(payload)
+
+
+@app.command(name="intent-rank")
+def intent_rank(
+    intent_id: Annotated[str, typer.Argument()],
+    config: Annotated[Path, typer.Option("--config")] = DEFAULT_CONFIG,
+) -> None:
+    loaded = load_config(config)
+    store = StateStore(_state_path())
+    try:
+        intent, ranked, decision = rank_intent(intent_id, store, loaded.intent, loaded.search)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    _write_audit_decisions(loaded, [decision])
+    payload = {
+        "command": "intent-rank",
+        "config": str(config),
+        "intent": _intent_summary(intent),
+        "ranked": len(ranked),
+        "candidates": [_ranked_release_summary(item) for item in ranked],
+        "decision": _decision_summary(decision),
+    }
+    _print_json(payload)
+
+
+@app.command(name="intent-review")
+def intent_review(
+    config: Annotated[Path, typer.Option("--config")] = DEFAULT_CONFIG,
+) -> None:
+    load_config(config)
+    store = StateStore(_state_path())
+    reviewable = review_intents(store)
+    payload = {
+        "command": "intent-review",
+        "config": str(config),
+        "count": len(reviewable),
+        "intents": [
+            {
+                "intent": _intent_summary(intent),
+                "candidate_count": len(candidates),
+                "candidates": [_ranked_release_summary(item) for item in candidates],
+            }
+            for intent, candidates in reviewable
+        ],
     }
     _print_json(payload)
 
@@ -379,6 +457,26 @@ def _intent_summary(intent: ResourceIntent) -> dict[str, Any]:
     }
 
 
+def _ranked_release_summary(item: RankedRelease) -> dict[str, Any]:
+    return {
+        "release_id": item.release.release_id,
+        "site": item.release.site,
+        "title": item.release.title,
+        "source_url": safe_url_identity(item.release.source_url),
+        "download_url": safe_url_identity(item.release.download_url),
+        "size_gb": round(item.release.size_bytes / (1024**3), 2),
+        "seeders": item.release.seeders,
+        "leechers": item.release.leechers,
+        "discount": item.release.discount.value,
+        "score": item.score,
+        "confidence": item.confidence,
+        "accepted": item.accepted,
+        "confirmation_required": item.confirmation_required,
+        "reasons": list(item.reasons),
+        "risks": list(item.risks),
+    }
+
+
 def _managed_torrent_summary(torrent: ManagedTorrent) -> dict[str, Any]:
     return {
         "hash": torrent.hash,
@@ -430,6 +528,41 @@ def build_downloader(config: SeedAgentConfig) -> QbittorrentClient:
     if downloader is None:
         raise typer.BadParameter("missing downloader secret")
     return downloader
+
+
+def _build_search_providers(config: SeedAgentConfig) -> list[RssSearchProvider]:
+    providers: list[RssSearchProvider] = []
+    for site in config.enabled_sites:
+        providers.append(
+            RssSearchProvider(
+                url=site.rss_url,
+                site=site.name,
+                cookie=_read_cookie_ref(site.cookie_ref, config.config_dir),
+                max_results=config.search.max_results_per_site,
+            )
+        )
+    return providers
+
+
+def _read_cookie_ref(cookie_ref: str | None, config_dir: Path | None) -> str | None:
+    if not cookie_ref:
+        return None
+    path = _resolve_path(cookie_ref, config_dir)
+    if path is None or not path.is_file():
+        return None
+    raw = path.read_text(encoding="utf-8").strip()
+    if not raw:
+        return None
+    try:
+        loaded = json.loads(raw)
+    except json.JSONDecodeError:
+        return raw
+    if isinstance(loaded, dict):
+        for key in ("cookie", "Cookie", "header"):
+            value = loaded.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    return raw
 
 
 def _write_audit_decisions(config: SeedAgentConfig, decisions: list[Decision]) -> None:
