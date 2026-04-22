@@ -98,6 +98,31 @@ def rank_intent(
     return intent, ranked, _rank_decision(intent, ranked, next_state)
 
 
+def confirm_intent(
+    intent_id: str,
+    release_id: str,
+    store: StateStore,
+) -> tuple[ResourceIntent, RankedRelease, Decision]:
+    intent = _load_intent(store, intent_id)
+    ranked = _find_ranked_release(store.list_release_candidates(intent.intent_id), release_id)
+    if ranked is None:
+        raise ValueError(f"unknown release for intent: {release_id}")
+    store.update_intent_state(
+        intent.intent_id,
+        IntentState.CONFIRMED,
+        selected_release_id=ranked.release.release_id,
+    )
+    updated = intent.model_copy(update={"state": IntentState.CONFIRMED})
+    return updated, ranked, _confirm_decision(intent, ranked)
+
+
+def reject_intent(intent_id: str, store: StateStore) -> tuple[ResourceIntent, Decision]:
+    intent = _load_intent(store, intent_id)
+    store.update_intent_state(intent.intent_id, IntentState.REJECTED)
+    updated = intent.model_copy(update={"state": IntentState.REJECTED})
+    return updated, _reject_decision(intent)
+
+
 def review_intents(
     store: StateStore,
     *,
@@ -173,6 +198,13 @@ def _stored_ranked(rows: list[dict[str, Any]]) -> list[RankedRelease]:
     return ranked
 
 
+def _find_ranked_release(rows: list[dict[str, Any]], release_id: str) -> RankedRelease | None:
+    for ranked in _stored_ranked(rows):
+        if ranked.release.release_id == release_id:
+            return ranked
+    return None
+
+
 def _ranked_state(ranked: list[RankedRelease]) -> IntentState:
     if not ranked:
         return IntentState.CONFIRMATION_REQUIRED
@@ -216,6 +248,39 @@ def _rank_decision(
             "confirmation_required": top.confirmation_required if top is not None else True,
         },
         confirmation_required=top.confirmation_required if top is not None else True,
+    )
+
+
+def _confirm_decision(intent: ResourceIntent, ranked: RankedRelease) -> Decision:
+    return Decision(
+        action="intent.confirm",
+        target_id=intent.intent_id,
+        execute=True,
+        reason="intent release confirmed",
+        old_state={"state": intent.state.value},
+        new_state={
+            "state": IntentState.CONFIRMED.value,
+            "selected_release_id": ranked.release.release_id,
+            "release_title": ranked.release.title,
+            "site": ranked.release.site,
+            "score": ranked.score,
+            "confidence": ranked.confidence,
+        },
+        confirmation_required=False,
+        confirmation_received=True,
+    )
+
+
+def _reject_decision(intent: ResourceIntent) -> Decision:
+    return Decision(
+        action="intent.reject",
+        target_id=intent.intent_id,
+        execute=True,
+        reason="intent rejected by operator",
+        old_state={"state": intent.state.value},
+        new_state={"state": IntentState.REJECTED.value},
+        confirmation_required=False,
+        confirmation_received=True,
     )
 
 

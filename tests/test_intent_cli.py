@@ -149,3 +149,5 @@ def test_intent_commands_show_in_help() -> None:
     assert "intent-search" in result.output
     assert "intent-rank" in result.output
     assert "intent-review" in result.output
+    assert "intent-confirm" in result.output
+    assert "intent-reject" in result.output

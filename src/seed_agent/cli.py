@@ -9,8 +9,10 @@ import typer
 
 from seed_agent.actions.intent import (
     add_intent,
+    confirm_intent,
     ingest_inbox,
     rank_intent,
+    reject_intent,
     review_intents,
     search_intent,
 )
@@ -233,6 +235,50 @@ def intent_review(
             }
             for intent, candidates in reviewable
         ],
+    }
+    _print_json(payload)
+
+
+@app.command(name="intent-confirm")
+def intent_confirm(
+    intent_id: Annotated[str, typer.Argument()],
+    release_id: Annotated[str, typer.Argument()],
+    config: Annotated[Path, typer.Option("--config")] = DEFAULT_CONFIG,
+) -> None:
+    loaded = load_config(config)
+    store = StateStore(_state_path())
+    try:
+        intent, ranked, decision = confirm_intent(intent_id, release_id, store)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    _write_audit_decisions(loaded, [decision])
+    payload = {
+        "command": "intent-confirm",
+        "config": str(config),
+        "intent": _intent_summary(intent),
+        "selected": _ranked_release_summary(ranked),
+        "decision": _decision_summary(decision),
+    }
+    _print_json(payload)
+
+
+@app.command(name="intent-reject")
+def intent_reject(
+    intent_id: Annotated[str, typer.Argument()],
+    config: Annotated[Path, typer.Option("--config")] = DEFAULT_CONFIG,
+) -> None:
+    loaded = load_config(config)
+    store = StateStore(_state_path())
+    try:
+        intent, decision = reject_intent(intent_id, store)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    _write_audit_decisions(loaded, [decision])
+    payload = {
+        "command": "intent-reject",
+        "config": str(config),
+        "intent": _intent_summary(intent),
+        "decision": _decision_summary(decision),
     }
     _print_json(payload)
 
