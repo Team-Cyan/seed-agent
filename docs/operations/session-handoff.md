@@ -43,7 +43,7 @@ This document captures the durable handoff state from the initial `seed-agent` p
 - Current Phase 2 plan: `docs/superpowers/plans/2026-04-22-phase-2-resource-intent-loop.md`.
 - Phase 1 is implemented as a CLI-first Python package under `src/seed_agent/`.
 - The implemented Phase 1 command surface is `discover`, `score`, `enqueue`, `review`, `prune`, `daily-report`, and `run-once`.
-- The implemented Phase 2 intent command surface is `intent-add`, `intent-inbox`, `intent-search`, `intent-rank`, `intent-review`, `intent-confirm`, `intent-reject`, and `intent-enqueue`.
+- The implemented Phase 2 intent command surface is `intent-add`, `intent-inbox`, `intent-search`, `intent-rank`, `intent-review`, `intent-confirm`, `intent-reject`, `intent-enqueue`, and `intent-run-once`.
 - Mutating downloader operations still default to dry-run. Use `--execute` only after reviewing printed decisions and audit output.
 - First safe verification command: `uv run seed-agent run-once --config config/example.yaml`.
 - First execute command after review: `uv run seed-agent run-once --config config/example.yaml --execute`.
@@ -108,6 +108,7 @@ Completed Phase 2 slices:
 - Task 8: Local confirmation and rejection commands with selected release persistence and audit records.
 - Task 9: Intent enqueue command that reuses the existing qB enqueue path and only mutates qBittorrent with explicit `--execute`.
 - Task 10: Source adapter skeletons for file inbox, Telegram payloads, WeChat bridge payloads, and local Douban wanted-list exports.
+- Task 11: Combined `intent-run-once` command for inbox ingest, search, rank, and dry-run/execute enqueue decisions.
 
 Current Phase 2 commits:
 
@@ -121,21 +122,24 @@ Current Phase 2 commits:
 - `62cc979 feat: add intent confirmation commands`
 - `9e3b186 feat: add intent enqueue command`
 - `bb1e02b feat: add intent source adapter skeletons`
+- `115e824 feat: add intent run once command`
 
 Latest verification:
 
-- `uv run pytest -q` passed with 158 tests.
+- `uv run pytest -q` passed with 160 tests.
 - `uv run ruff check .` passed.
-- `uv run seed-agent --help` shows `intent-add`, `intent-inbox`, `intent-search`, `intent-rank`, `intent-review`, `intent-confirm`, `intent-reject`, and `intent-enqueue`.
+- `uv run seed-agent --help` shows `intent-add`, `intent-inbox`, `intent-search`, `intent-rank`, `intent-review`, `intent-confirm`, `intent-reject`, `intent-enqueue`, and `intent-run-once`.
 - `uv run seed-agent intent-add "Inception 2010 1080p" --config config/example.yaml` writes a local normalized intent without downloader mutation.
+- `uv run seed-agent intent-run-once --config config/example.yaml` is an empty dry-run when the configured inbox is absent.
 - Focused CLI verification: `uv run pytest tests/test_intent_cli.py tests/test_intent_search_cli.py -q`.
 - Focused confirmation verification: `uv run pytest tests/test_intent_confirmation.py tests/test_intent_cli.py -q`.
 - Focused enqueue verification: `uv run pytest tests/test_intent_enqueue.py tests/test_intent_cli.py tests/test_cli.py -q`.
 - Focused source verification: `uv run pytest tests/test_intent_sources.py tests/test_intent_actions.py tests/test_intent_cli.py -q`.
+- Focused run-once verification: `uv run pytest tests/test_intent_run_once.py tests/test_run_once.py tests/test_cli.py tests/test_intent_cli.py -q`.
 
 Recommended next task:
 
-- Task 11 from `docs/superpowers/plans/2026-04-22-phase-2-resource-intent-loop.md`: implement `intent-run-once` as ingest -> search -> rank -> maybe enqueue, keeping the command dry-run by default.
+- Task 12 from `docs/superpowers/plans/2026-04-22-phase-2-resource-intent-loop.md`: update README and add Phase 2 operator docs.
 
 ## Inspiration Sources
 
