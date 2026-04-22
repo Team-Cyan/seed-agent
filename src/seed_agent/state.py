@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from pathlib import Path
 from typing import Any
 
-from seed_agent.models import LifecycleState
+from seed_agent.models import IntentState, LifecycleState, RankedRelease, ResourceIntent
 
 STATE_PRIORITY = {
     LifecycleState.DISCOVERED.value: 0,
@@ -131,6 +132,187 @@ class StateStore:
             )
         return len(rows)
 
+    def upsert_intent(
+        self,
+        intent: ResourceIntent,
+        selected_release_id: str | None = None,
+    ) -> None:
+        current = self.get_intent(intent.intent_id)
+        now = _utc_now()
+        created_at = current["created_at"] if current is not None else now
+        selected_value = selected_release_id
+        if selected_value is None and current is not None:
+            selected_value = current["selected_release_id"]
+
+        with sqlite3.connect(self.path) as conn:
+            conn.execute(
+                """
+                INSERT INTO intents (
+                    intent_id,
+                    source,
+                    raw_text,
+                    title,
+                    kind,
+                    state,
+                    normalized_json,
+                    selected_release_id,
+                    created_at,
+                    updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(intent_id) DO UPDATE SET
+                    source = excluded.source,
+                    raw_text = excluded.raw_text,
+                    title = excluded.title,
+                    kind = excluded.kind,
+                    state = excluded.state,
+                    normalized_json = excluded.normalized_json,
+                    selected_release_id = excluded.selected_release_id,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    intent.intent_id,
+                    intent.source.value,
+                    intent.raw_text,
+                    intent.title,
+                    intent.kind.value,
+                    intent.state.value,
+                    _json_dumps(intent.model_dump(mode="json")),
+                    selected_value,
+                    created_at,
+                    now,
+                ),
+            )
+
+    def get_intent(self, intent_id: str) -> dict[str, Any] | None:
+        with sqlite3.connect(self.path) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                """
+                SELECT
+                    intent_id,
+                    source,
+                    raw_text,
+                    title,
+                    kind,
+                    state,
+                    normalized_json,
+                    selected_release_id,
+                    created_at,
+                    updated_at
+                FROM intents
+                WHERE intent_id = ?
+                """,
+                (intent_id,),
+            ).fetchone()
+        return dict(row) if row is not None else None
+
+    def list_intents_by_state(self, state: IntentState) -> list[dict[str, Any]]:
+        with sqlite3.connect(self.path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                """
+                SELECT
+                    intent_id,
+                    source,
+                    raw_text,
+                    title,
+                    kind,
+                    state,
+                    normalized_json,
+                    selected_release_id,
+                    created_at,
+                    updated_at
+                FROM intents
+                WHERE state = ?
+                ORDER BY updated_at ASC, intent_id ASC
+                """,
+                (state.value,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def update_intent_state(
+        self,
+        intent_id: str,
+        state: IntentState,
+        selected_release_id: str | None = None,
+    ) -> bool:
+        current = self.get_intent(intent_id)
+        if current is None:
+            return False
+        normalized = json.loads(str(current["normalized_json"]))
+        normalized["state"] = state.value
+        intent = ResourceIntent.model_validate(normalized)
+        self.upsert_intent(intent, selected_release_id=selected_release_id)
+        return True
+
+    def save_ranked_releases(self, releases: list[RankedRelease]) -> None:
+        now = _utc_now()
+        with sqlite3.connect(self.path) as conn:
+            for ranked in releases:
+                conn.execute(
+                    """
+                    INSERT INTO release_candidates (
+                        release_id,
+                        intent_id,
+                        site,
+                        title,
+                        score,
+                        confidence,
+                        accepted,
+                        confirmation_required,
+                        release_json,
+                        created_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(release_id) DO UPDATE SET
+                        intent_id = excluded.intent_id,
+                        site = excluded.site,
+                        title = excluded.title,
+                        score = excluded.score,
+                        confidence = excluded.confidence,
+                        accepted = excluded.accepted,
+                        confirmation_required = excluded.confirmation_required,
+                        release_json = excluded.release_json
+                    """,
+                    (
+                        ranked.release.release_id,
+                        ranked.intent_id,
+                        ranked.release.site,
+                        ranked.release.title,
+                        ranked.score,
+                        ranked.confidence,
+                        int(ranked.accepted),
+                        int(ranked.confirmation_required),
+                        _json_dumps(ranked.model_dump(mode="json")),
+                        now,
+                    ),
+                )
+
+    def list_release_candidates(self, intent_id: str) -> list[dict[str, Any]]:
+        with sqlite3.connect(self.path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                """
+                SELECT
+                    release_id,
+                    intent_id,
+                    site,
+                    title,
+                    score,
+                    confidence,
+                    accepted,
+                    confirmation_required,
+                    release_json,
+                    created_at
+                FROM release_candidates
+                WHERE intent_id = ?
+                ORDER BY score DESC, confidence DESC, release_id ASC
+                """,
+                (intent_id,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def _initialize(self) -> None:
         with sqlite3.connect(self.path) as conn:
             conn.executescript(
@@ -147,6 +329,33 @@ class StateStore:
                 );
                 CREATE INDEX IF NOT EXISTS idx_candidates_state ON candidates(state);
                 CREATE INDEX IF NOT EXISTS idx_candidates_hash ON candidates(torrent_hash);
+                CREATE TABLE IF NOT EXISTS intents (
+                  intent_id TEXT PRIMARY KEY,
+                  source TEXT NOT NULL,
+                  raw_text TEXT NOT NULL,
+                  title TEXT NOT NULL,
+                  kind TEXT NOT NULL,
+                  state TEXT NOT NULL,
+                  normalized_json TEXT NOT NULL,
+                  selected_release_id TEXT,
+                  created_at TEXT NOT NULL,
+                  updated_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS release_candidates (
+                  release_id TEXT PRIMARY KEY,
+                  intent_id TEXT NOT NULL,
+                  site TEXT NOT NULL,
+                  title TEXT NOT NULL,
+                  score INTEGER,
+                  confidence REAL,
+                  accepted INTEGER NOT NULL,
+                  confirmation_required INTEGER NOT NULL,
+                  release_json TEXT NOT NULL,
+                  created_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_intents_state ON intents(state);
+                CREATE INDEX IF NOT EXISTS idx_release_candidates_intent
+                  ON release_candidates(intent_id);
                 """
             )
 
@@ -155,6 +364,10 @@ def _utc_now() -> str:
     from datetime import UTC, datetime
 
     return datetime.now(UTC).isoformat()
+
+
+def _json_dumps(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True)
 
 
 def _monotonic_values(
