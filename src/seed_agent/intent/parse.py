@@ -13,6 +13,10 @@ SEASON_RE = re.compile(r"\bS(?P<season>\d{1,2})\b", re.IGNORECASE)
 QUALITY_RE = re.compile(r"\b(BluRay|WEB[-_. ]?DL|WEBRip|HDRip|Remux|DVDRip)\b", re.IGNORECASE)
 LANGUAGE_RE = re.compile(r"\b(zh|chi|chs|cht|cn|en|eng|jpn|jp)\b", re.IGNORECASE)
 KIND_PREFIX_RE = re.compile(r"^\s*(?P<kind>movie|film|show|series|episode)\s+", re.IGNORECASE)
+SENSITIVE_ASSIGNMENT_RE = re.compile(
+    r"\b[\w.-]*(passkey|password|passphrase|token|secret|cookie|auth)[\w.-]*\s*=\s*\S+",
+    re.IGNORECASE,
+)
 SPACE_RE = re.compile(r"\s+")
 
 
@@ -110,7 +114,15 @@ def _kind(
 
 def _title_from_text(value: str) -> str:
     title = value
-    for pattern in (EPISODE_RE, SEASON_RE, YEAR_RE, RESOLUTION_RE, QUALITY_RE, LANGUAGE_RE):
+    for pattern in (
+        SENSITIVE_ASSIGNMENT_RE,
+        EPISODE_RE,
+        SEASON_RE,
+        YEAR_RE,
+        RESOLUTION_RE,
+        QUALITY_RE,
+        LANGUAGE_RE,
+    ):
         title = pattern.sub(" ", title)
     title = title.replace(".", " ").replace("_", " ").replace("-", " ")
     title = _normalize_space(title)

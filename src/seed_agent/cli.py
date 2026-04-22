@@ -7,6 +7,7 @@ from typing import Annotated, Any
 
 import typer
 
+from seed_agent.actions.intent import add_intent, ingest_inbox
 from seed_agent.actions.pt import daily_report as build_daily_report
 from seed_agent.actions.pt import discover_candidates, score_candidates
 from seed_agent.actions.qb import MutationBatchError, enqueue_candidates, prune_cold_torrents
@@ -15,8 +16,10 @@ from seed_agent.config import SeedAgentConfig, load_config, load_downloader_secr
 from seed_agent.downloaders.qbittorrent import QbittorrentClient
 from seed_agent.models import (
     Decision,
+    IntentSource,
     LifecycleState,
     ManagedTorrent,
+    ResourceIntent,
     ScoreBreakdown,
     TorrentCandidate,
     safe_url_identity,
@@ -107,6 +110,53 @@ def enqueue(
         payload["error"] = str(batch_error)
     _print_json(payload)
     _raise_if_batch_failed(batch_error)
+
+
+@app.command(name="intent-add")
+def intent_add(
+    text: Annotated[str, typer.Argument()],
+    config: Annotated[Path, typer.Option("--config")] = DEFAULT_CONFIG,
+) -> None:
+    loaded = load_config(config)
+    store = StateStore(_state_path())
+    intent, decision = add_intent(text, store)
+    _write_audit_decisions(loaded, [decision])
+    payload = {
+        "command": "intent-add",
+        "config": str(config),
+        "intent": _intent_summary(intent),
+        "decision": _decision_summary(decision),
+    }
+    _print_json(payload)
+
+
+@app.command(name="intent-inbox")
+def intent_inbox(
+    config: Annotated[Path, typer.Option("--config")] = DEFAULT_CONFIG,
+) -> None:
+    loaded = load_config(config)
+    store = StateStore(_state_path())
+    inbox_path = _resolve_path(loaded.intent.inbox_ref, loaded.config_dir)
+    if inbox_path is None:
+        intents_and_decisions = []
+    else:
+        intents_and_decisions = ingest_inbox(
+            inbox_path,
+            store,
+            source=IntentSource.FILE_INBOX,
+        )
+    intents = [item[0] for item in intents_and_decisions]
+    decisions = [item[1] for item in intents_and_decisions]
+    _write_audit_decisions(loaded, decisions)
+    payload = {
+        "command": "intent-inbox",
+        "config": str(config),
+        "inbox_ref": loaded.intent.inbox_ref,
+        "ingested": len(intents),
+        "intents": [_intent_summary(intent) for intent in intents],
+        "decisions": [_decision_summary(decision) for decision in decisions],
+    }
+    _print_json(payload)
 
 
 @app.command()
@@ -311,6 +361,22 @@ def _score_summary(item: ScoreBreakdown) -> dict[str, Any]:
 
 def _decision_summary(item: Decision) -> dict[str, Any]:
     return redact_payload(item.model_dump(mode="json"))
+
+
+def _intent_summary(intent: ResourceIntent) -> dict[str, Any]:
+    return {
+        "intent_id": intent.intent_id,
+        "source": intent.source.value,
+        "kind": intent.kind.value,
+        "title": intent.title,
+        "year": intent.year,
+        "season": intent.season,
+        "episode": intent.episode,
+        "resolution": intent.resolution,
+        "quality": intent.quality,
+        "language": intent.language,
+        "state": intent.state.value,
+    }
 
 
 def _managed_torrent_summary(torrent: ManagedTorrent) -> dict[str, Any]:

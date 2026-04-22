@@ -66,6 +66,16 @@ def test_parse_unknown_request_keeps_title_and_raw_text() -> None:
     assert intent.raw_text == "some obscure documentary"
 
 
+def test_parse_removes_sensitive_assignments_from_title() -> None:
+    intent = parse_resource_intent(
+        "movie Secret passkey=abc123 2020 1080p",
+        requested_at=REQUESTED_AT,
+    )
+
+    assert intent.title == "Secret"
+    assert "passkey=abc123" in intent.raw_text
+
+
 def test_parse_uses_source_event_id_for_stable_identity() -> None:
     first = parse_resource_intent(
         "Inception 2010 1080p",
