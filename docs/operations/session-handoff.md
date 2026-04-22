@@ -100,21 +100,25 @@ Completed Phase 2 slices:
 - Task 1: Phase 2 intent/release/ranking models and strict config sections.
 - Task 2: Additive SQLite state tables and store methods for intents and ranked releases.
 - Task 3: Deterministic resource-intent parser for CLI/file/source events.
+- Task 4: Local intent ingestion actions and CLI commands, including `intent-add` and `intent-inbox`.
 
 Current Phase 2 commits:
 
 - `6118231 feat: add phase two intent models and config`
 - `1f3ecbd feat: add phase two intent state store`
 - `350f1c7 feat: add deterministic intent parser`
+- `617b556 feat: add local intent ingestion cli`
 
 Latest verification:
 
-- `uv run pytest -q` passed with 126 tests.
+- `uv run pytest -q` passed with 135 tests.
 - `uv run ruff check .` passed.
+- `uv run seed-agent --help` shows `intent-add` and `intent-inbox`.
+- `uv run seed-agent intent-add "Inception 2010 1080p" --config config/example.yaml` writes a local normalized intent without downloader mutation.
 
 Recommended next task:
 
-- Task 4 from `docs/superpowers/plans/2026-04-22-phase-2-resource-intent-loop.md`: local intent ingestion actions and CLI commands, starting with `intent-add` and `intent-inbox`.
+- Task 5 from `docs/superpowers/plans/2026-04-22-phase-2-resource-intent-loop.md`: search provider interface and RSS-backed search.
 
 ## Inspiration Sources
 
