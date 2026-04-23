@@ -50,7 +50,11 @@ def add_intent(
         requested_at=requested_at,
         source_event_id=source_event_id,
     )
-    existed = store.get_intent(intent.intent_id) is not None
+    existing = store.get_intent(intent.intent_id)
+    existed = existing is not None
+    if existing is not None:
+        persisted = ResourceIntent.model_validate(json.loads(str(existing["normalized_json"])))
+        return persisted, _ingest_decision(persisted, existed=True)
     store.upsert_intent(intent)
     return intent, _ingest_decision(intent, existed=existed)
 

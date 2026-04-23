@@ -130,7 +130,7 @@ def intent_add(
     config: Annotated[Path, typer.Option("--config")] = DEFAULT_CONFIG,
 ) -> None:
     loaded = load_config(config)
-    store = StateStore(_state_path())
+    store = StateStore(_state_path(loaded))
     intent, decision = add_intent(text, store)
     _write_audit_decisions(loaded, [decision])
     payload = {
@@ -147,7 +147,7 @@ def intent_inbox(
     config: Annotated[Path, typer.Option("--config")] = DEFAULT_CONFIG,
 ) -> None:
     loaded = load_config(config)
-    store = StateStore(_state_path())
+    store = StateStore(_state_path(loaded))
     inbox_path = _resolve_path(loaded.intent.inbox_ref, loaded.config_dir)
     if inbox_path is None:
         intents_and_decisions = []
@@ -177,7 +177,7 @@ def intent_search(
     config: Annotated[Path, typer.Option("--config")] = DEFAULT_CONFIG,
 ) -> None:
     loaded = load_config(config)
-    store = StateStore(_state_path())
+    store = StateStore(_state_path(loaded))
     providers = _build_search_providers(loaded)
     try:
         intent, ranked, decision = _run(search_intent(intent_id, store, providers))
@@ -201,7 +201,7 @@ def intent_rank(
     config: Annotated[Path, typer.Option("--config")] = DEFAULT_CONFIG,
 ) -> None:
     loaded = load_config(config)
-    store = StateStore(_state_path())
+    store = StateStore(_state_path(loaded))
     try:
         intent, ranked, decision = rank_intent(intent_id, store, loaded.intent, loaded.search)
     except ValueError as exc:
@@ -222,8 +222,8 @@ def intent_rank(
 def intent_review(
     config: Annotated[Path, typer.Option("--config")] = DEFAULT_CONFIG,
 ) -> None:
-    load_config(config)
-    store = StateStore(_state_path())
+    loaded = load_config(config)
+    store = StateStore(_state_path(loaded))
     reviewable = review_intents(store)
     payload = {
         "command": "intent-review",
@@ -248,7 +248,7 @@ def intent_confirm(
     config: Annotated[Path, typer.Option("--config")] = DEFAULT_CONFIG,
 ) -> None:
     loaded = load_config(config)
-    store = StateStore(_state_path())
+    store = StateStore(_state_path(loaded))
     try:
         intent, ranked, decision = confirm_intent(intent_id, release_id, store)
     except ValueError as exc:
@@ -270,7 +270,7 @@ def intent_reject(
     config: Annotated[Path, typer.Option("--config")] = DEFAULT_CONFIG,
 ) -> None:
     loaded = load_config(config)
-    store = StateStore(_state_path())
+    store = StateStore(_state_path(loaded))
     try:
         intent, decision = reject_intent(intent_id, store)
     except ValueError as exc:
@@ -292,7 +292,7 @@ def intent_enqueue(
     execute: Annotated[bool, typer.Option("--execute")] = False,
 ) -> None:
     loaded = load_config(config)
-    store = StateStore(_state_path())
+    store = StateStore(_state_path(loaded))
     downloader = build_downloader(loaded) if execute else _NullDownloader()
     batch_error = None
     try:
@@ -335,7 +335,7 @@ def intent_run_once(
     execute: Annotated[bool, typer.Option("--execute")] = False,
 ) -> None:
     loaded = load_config(config)
-    store = StateStore(_state_path())
+    store = StateStore(_state_path(loaded))
     providers = _build_search_providers(loaded)
     inbox_path = _resolve_path(loaded.intent.inbox_ref, loaded.config_dir)
     downloader = build_downloader(loaded) if execute else _NullDownloader()
@@ -386,6 +386,7 @@ def review(
     config: Annotated[Path, typer.Option("--config")] = DEFAULT_CONFIG,
 ) -> None:
     loaded = load_config(config)
+    store = StateStore(_state_path(loaded))
     downloader = _maybe_build_downloader(loaded)
     if downloader is None:
         payload = {
@@ -400,6 +401,7 @@ def review(
 
     torrent_tags = set(loaded.downloader.tags)
     torrents = _run(downloader.list_torrents(loaded.downloader.category, torrent_tags))
+    torrents = store.apply_torrent_runtime(torrents)
     payload = {
         "command": "review",
         "config": str(config),
@@ -415,6 +417,7 @@ def prune(
     execute: Annotated[bool, typer.Option("--execute")] = False,
 ) -> None:
     loaded = load_config(config)
+    store = StateStore(_state_path(loaded))
     if execute:
         downloader = build_downloader(loaded)
         torrents = _run(
@@ -429,6 +432,7 @@ def prune(
             torrents = _run(
                 downloader.list_torrents(loaded.downloader.category, set(loaded.downloader.tags))
             )
+    torrents = store.apply_torrent_runtime(torrents)
     batch_error = None
     try:
         decisions = _run(
@@ -446,7 +450,7 @@ def prune(
         batch_error = exc
     _write_audit_decisions(loaded, decisions)
     if execute:
-        _persist_prune_state(StateStore(_state_path()), decisions)
+        _persist_prune_state(store, decisions)
     payload = {
         "command": "prune",
         "config": str(config),
@@ -484,7 +488,7 @@ def run_once(
     execute: Annotated[bool, typer.Option("--execute")] = False,
 ) -> None:
     loaded = load_config(config)
-    store = StateStore(_state_path())
+    store = StateStore(_state_path(loaded))
 
     candidates = _run(discover_candidates(loaded))
     for candidate in candidates:
@@ -642,7 +646,10 @@ def _managed_torrents_for_report(config: SeedAgentConfig) -> list[ManagedTorrent
     downloader = _maybe_build_downloader(config)
     if downloader is None:
         return []
-    return _run(downloader.list_torrents(config.downloader.category, set(config.downloader.tags)))
+    torrents = _run(
+        downloader.list_torrents(config.downloader.category, set(config.downloader.tags))
+    )
+    return StateStore(_state_path(config)).apply_torrent_runtime(torrents)
 
 
 def _maybe_build_downloader(config: SeedAgentConfig) -> QbittorrentClient | None:
@@ -712,7 +719,7 @@ def _read_cookie_ref(cookie_ref: str | None, config_dir: Path | None) -> str | N
 def _write_audit_decisions(config: SeedAgentConfig, decisions: list[Decision]) -> None:
     if not decisions:
         return
-    audit_path = _audit_path()
+    audit_path = _audit_path(config)
     logger = AuditLogger(audit_path)
     for decision in decisions:
         logger.write(decision)
@@ -743,8 +750,10 @@ def _persist_enqueue_state(
 def _persist_prune_state(store: StateStore, decisions: list[Decision]) -> None:
     for decision in decisions:
         if decision.action == "qb.cleanup.pause":
+            store.mark_torrent_paused(decision.target_id)
             store.update_by_torrent_hash(decision.target_id, LifecycleState.PAUSED)
         elif decision.action == "qb.cleanup.delete":
+            store.clear_torrent_runtime(decision.target_id)
             store.update_by_torrent_hash(decision.target_id, LifecycleState.DELETED)
 
 
@@ -754,12 +763,24 @@ def _raise_if_batch_failed(error: MutationBatchError | None) -> None:
     raise typer.Exit(1)
 
 
-def _audit_path() -> Path:
-    return Path.cwd() / ".seed-agent" / "audit.jsonl"
+def _audit_path(config: SeedAgentConfig) -> Path:
+    return _runtime_root(config) / "audit.jsonl"
 
 
-def _state_path() -> Path:
-    return Path.cwd() / ".seed-agent" / "state.db"
+def _state_path(config: SeedAgentConfig) -> Path:
+    return _runtime_root(config) / "state.db"
+
+
+def _runtime_root(config: SeedAgentConfig) -> Path:
+    return _workspace_root(config) / ".seed-agent"
+
+
+def _workspace_root(config: SeedAgentConfig) -> Path:
+    if config.config_dir is None:
+        return Path.cwd()
+    if config.config_dir.name == "config":
+        return config.config_dir.parent
+    return config.config_dir
 
 
 class _NullDownloader:

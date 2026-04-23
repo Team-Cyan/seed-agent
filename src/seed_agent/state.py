@@ -2,10 +2,17 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from seed_agent.models import IntentState, LifecycleState, RankedRelease, ResourceIntent
+from seed_agent.models import (
+    IntentState,
+    LifecycleState,
+    ManagedTorrent,
+    RankedRelease,
+    ResourceIntent,
+)
 
 STATE_PRIORITY = {
     LifecycleState.DISCOVERED.value: 0,
@@ -131,6 +138,65 @@ class StateStore:
                 torrent_hash=str(row["torrent_hash"]) if row["torrent_hash"] is not None else None,
             )
         return len(rows)
+
+    def mark_torrent_paused(self, torrent_hash: str, paused_at: datetime | None = None) -> None:
+        now = _utc_now()
+        paused_value = (paused_at or _utc_now_datetime()).isoformat()
+        with sqlite3.connect(self.path) as conn:
+            conn.execute(
+                """
+                INSERT INTO torrent_runtime (
+                    torrent_hash,
+                    paused_at,
+                    updated_at
+                )
+                VALUES (?, ?, ?)
+                ON CONFLICT(torrent_hash) DO UPDATE SET
+                    paused_at = excluded.paused_at,
+                    updated_at = excluded.updated_at
+                """,
+                (torrent_hash, paused_value, now),
+            )
+
+    def clear_torrent_runtime(self, torrent_hash: str) -> None:
+        with sqlite3.connect(self.path) as conn:
+            conn.execute(
+                """
+                DELETE FROM torrent_runtime
+                WHERE torrent_hash = ?
+                """,
+                (torrent_hash,),
+            )
+
+    def get_torrent_runtime(self, torrent_hash: str) -> dict[str, Any] | None:
+        with sqlite3.connect(self.path) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                """
+                SELECT torrent_hash, paused_at, updated_at
+                FROM torrent_runtime
+                WHERE torrent_hash = ?
+                """,
+                (torrent_hash,),
+            ).fetchone()
+        return dict(row) if row is not None else None
+
+    def apply_torrent_runtime(self, torrents: list[ManagedTorrent]) -> list[ManagedTorrent]:
+        enriched: list[ManagedTorrent] = []
+        for torrent in torrents:
+            runtime = self.get_torrent_runtime(torrent.hash)
+            if runtime is None:
+                enriched.append(torrent)
+                continue
+            if not _is_paused_state(torrent.state):
+                enriched.append(torrent)
+                continue
+            metadata = dict(torrent.metadata)
+            paused_at = _parse_datetime(runtime.get("paused_at"))
+            if paused_at is not None:
+                metadata["paused_at"] = paused_at
+            enriched.append(torrent.model_copy(update={"metadata": metadata}))
+        return enriched
 
     def upsert_intent(
         self,
@@ -265,8 +331,7 @@ class StateStore:
                         created_at
                     )
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(release_id) DO UPDATE SET
-                        intent_id = excluded.intent_id,
+                    ON CONFLICT(intent_id, release_id) DO UPDATE SET
                         site = excluded.site,
                         title = excluded.title,
                         score = excluded.score,
@@ -342,8 +407,8 @@ class StateStore:
                   updated_at TEXT NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS release_candidates (
-                  release_id TEXT PRIMARY KEY,
                   intent_id TEXT NOT NULL,
+                  release_id TEXT NOT NULL,
                   site TEXT NOT NULL,
                   title TEXT NOT NULL,
                   score INTEGER,
@@ -351,23 +416,105 @@ class StateStore:
                   accepted INTEGER NOT NULL,
                   confirmation_required INTEGER NOT NULL,
                   release_json TEXT NOT NULL,
-                  created_at TEXT NOT NULL
+                  created_at TEXT NOT NULL,
+                  PRIMARY KEY (intent_id, release_id)
+                );
+                CREATE TABLE IF NOT EXISTS torrent_runtime (
+                  torrent_hash TEXT PRIMARY KEY,
+                  paused_at TEXT,
+                  updated_at TEXT NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS idx_intents_state ON intents(state);
                 CREATE INDEX IF NOT EXISTS idx_release_candidates_intent
                   ON release_candidates(intent_id);
                 """
             )
+            self._migrate_release_candidates(conn)
+
+    def _migrate_release_candidates(self, conn: sqlite3.Connection) -> None:
+        row = conn.execute(
+            """
+            SELECT sql
+            FROM sqlite_master
+            WHERE type = 'table' AND name = 'release_candidates'
+            """
+        ).fetchone()
+        sql = row[0] if row is not None else ""
+        if "PRIMARY KEY (intent_id, release_id)" in sql:
+            return
+        conn.executescript(
+            """
+            ALTER TABLE release_candidates RENAME TO release_candidates_old;
+            CREATE TABLE release_candidates (
+              intent_id TEXT NOT NULL,
+              release_id TEXT NOT NULL,
+              site TEXT NOT NULL,
+              title TEXT NOT NULL,
+              score INTEGER,
+              confidence REAL,
+              accepted INTEGER NOT NULL,
+              confirmation_required INTEGER NOT NULL,
+              release_json TEXT NOT NULL,
+              created_at TEXT NOT NULL,
+              PRIMARY KEY (intent_id, release_id)
+            );
+            INSERT INTO release_candidates (
+              intent_id,
+              release_id,
+              site,
+              title,
+              score,
+              confidence,
+              accepted,
+              confirmation_required,
+              release_json,
+              created_at
+            )
+            SELECT
+              intent_id,
+              release_id,
+              site,
+              title,
+              score,
+              confidence,
+              accepted,
+              confirmation_required,
+              release_json,
+              created_at
+            FROM release_candidates_old;
+            DROP TABLE release_candidates_old;
+            CREATE INDEX IF NOT EXISTS idx_release_candidates_intent
+              ON release_candidates(intent_id);
+            """
+        )
 
 
 def _utc_now() -> str:
+    return _utc_now_datetime().isoformat()
+
+
+def _utc_now_datetime() -> datetime:
     from datetime import UTC, datetime
 
-    return datetime.now(UTC).isoformat()
+    return datetime.now(UTC)
 
 
 def _json_dumps(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True)
+
+
+def _parse_datetime(value: Any) -> datetime | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+def _is_paused_state(state: str) -> bool:
+    normalized = state.strip().lower()
+    return normalized.startswith("paused") or normalized.startswith("stopped")
 
 
 def _monotonic_values(

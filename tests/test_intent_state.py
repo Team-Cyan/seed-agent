@@ -169,3 +169,29 @@ def test_state_store_replaces_ranked_release_without_duplicate_rows(tmp_path: Pa
     assert len(rows) == 1
     assert rows[0]["score"] == 95
     assert rows[0]["confidence"] == 0.97
+
+
+def test_state_store_keeps_same_release_for_multiple_intents(tmp_path: Path) -> None:
+    store = StateStore(tmp_path / "state.sqlite3")
+    first = _intent()
+    second = _intent(
+        intent_id="cli:inception-2010-2160p",
+        raw_text="Inception 2010 2160p",
+        resolution="2160p",
+    )
+    shared_release = _release(release_id="demo:https://tracker.example/details.php?id=shared")
+    store.upsert_intent(first)
+    store.upsert_intent(second)
+
+    store.save_ranked_releases(
+        [
+            _ranked(intent_id=first.intent_id, release=shared_release),
+            _ranked(intent_id=second.intent_id, release=shared_release),
+        ]
+    )
+
+    first_rows = store.list_release_candidates(first.intent_id)
+    second_rows = store.list_release_candidates(second.intent_id)
+
+    assert [row["release_id"] for row in first_rows] == [shared_release.release_id]
+    assert [row["release_id"] for row in second_rows] == [shared_release.release_id]

@@ -388,6 +388,79 @@ def test_prune_execute_updates_state_to_deleted_for_old_paused_torrent(
     assert row["state"] == LifecycleState.DELETED.value
 
 
+def test_prune_execute_uses_persisted_pause_timestamp_for_delete(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from seed_agent import cli
+
+    monkeypatch.chdir(tmp_path)
+
+    config_path = _config_file(tmp_path)
+    config = _config()
+    state_path = tmp_path / ".seed-agent" / "state.db"
+    store = StateStore(state_path)
+    store.upsert_candidate(
+        stable_id="demo-free:https://tracker.example/details.php?id=1",
+        title="High Confidence Torrent",
+        site="demo-free",
+        state=LifecycleState.PAUSED,
+        score=95,
+        torrent_hash="abcd1234",
+    )
+    store.mark_torrent_paused("abcd1234", datetime.now(UTC) - timedelta(days=10))
+
+    class FakeDownloader:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, str, object]] = []
+
+        async def list_torrents(
+            self, category: str | None = None, tags: set[str] | None = None
+        ) -> list[ManagedTorrent]:
+            return [_managed_torrent(hash="abcd1234", state="pausedUP", metadata={})]
+
+        async def pause(self, hash: str) -> None:
+            self.calls.append(("pause", hash, None))
+
+        async def delete(self, hash: str, delete_files: bool) -> None:
+            self.calls.append(("delete", hash, delete_files))
+
+    downloader = FakeDownloader()
+
+    monkeypatch.setattr(cli, "load_config", lambda path: config)
+    monkeypatch.setattr(cli, "build_downloader", lambda loaded: downloader)
+
+    result = CliRunner().invoke(
+        cli.app, ["prune", "--config", str(config_path), "--execute"]
+    )
+
+    assert result.exit_code == 0
+    assert downloader.calls == [("delete", "abcd1234", True)]
+    assert store.get_torrent_runtime("abcd1234") is None
+
+
+def test_cli_runtime_files_follow_config_workspace_not_invocation_cwd(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from seed_agent import cli
+
+    workspace = tmp_path / "workspace"
+    runtime_cwd = tmp_path / "elsewhere"
+    workspace.mkdir()
+    runtime_cwd.mkdir()
+    config_path = _config_file(workspace)
+    monkeypatch.chdir(runtime_cwd)
+
+    result = CliRunner().invoke(
+        cli.app,
+        ["intent-add", "Inception 2010 1080p", "--config", str(config_path)],
+    )
+
+    assert result.exit_code == 0
+    assert (workspace / ".seed-agent" / "state.db").exists()
+    assert (workspace / ".seed-agent" / "audit.jsonl").exists()
+    assert not (runtime_cwd / ".seed-agent" / "state.db").exists()
+
+
 def test_prune_dry_run_does_not_update_state_store(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

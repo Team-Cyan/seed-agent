@@ -93,3 +93,31 @@ def test_ingest_inbox_missing_file_returns_empty_list(tmp_path: Path) -> None:
     store = StateStore(tmp_path / "state.db")
 
     assert ingest_inbox(tmp_path / "missing.jsonl", store) == []
+
+
+def test_add_intent_preserves_existing_advanced_state(tmp_path: Path) -> None:
+    store = StateStore(tmp_path / "state.db")
+
+    intent, _ = add_intent(
+        "Inception 2010 1080p",
+        store,
+        source=IntentSource.FILE_INBOX,
+        source_event_id="event-1",
+        requested_at=REQUESTED_AT,
+    )
+    updated = store.update_intent_state(intent.intent_id, IntentState.REJECTED)
+    repeated, decision = add_intent(
+        "Inception 2010 2160p",
+        store,
+        source=IntentSource.FILE_INBOX,
+        source_event_id="event-1",
+        requested_at=REQUESTED_AT,
+    )
+    row = store.get_intent(intent.intent_id)
+
+    assert updated is True
+    assert repeated.intent_id == intent.intent_id
+    assert repeated.state == IntentState.REJECTED
+    assert decision.new_state["existed"] is True
+    assert row is not None
+    assert row["state"] == IntentState.REJECTED.value

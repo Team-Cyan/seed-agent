@@ -84,7 +84,7 @@ class QbittorrentClient:
             if category is not None:
                 torrents = [torrent for torrent in torrents if torrent.category == category]
             if tags is not None:
-                torrents = [torrent for torrent in torrents if tags.issubset(torrent.tags)]
+                torrents = [torrent for torrent in torrents if tags.intersection(torrent.tags)]
             return torrents
 
     async def pause(self, hash: str) -> None:
