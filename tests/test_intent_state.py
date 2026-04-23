@@ -195,3 +195,27 @@ def test_state_store_keeps_same_release_for_multiple_intents(tmp_path: Path) -> 
 
     assert [row["release_id"] for row in first_rows] == [shared_release.release_id]
     assert [row["release_id"] for row in second_rows] == [shared_release.release_id]
+
+
+def test_state_store_clears_stale_paused_runtime_when_torrent_is_active(tmp_path: Path) -> None:
+    from seed_agent.models import ManagedTorrent
+
+    store = StateStore(tmp_path / "state.sqlite3")
+    store.mark_torrent_paused("abcd1234", datetime(2026, 4, 1, tzinfo=UTC))
+    active = ManagedTorrent(
+        hash="abcd1234",
+        name="Demo Torrent",
+        category="pt-auto",
+        tags={"seed-agent"},
+        state="uploading",
+        size_bytes=10 * 1024**3,
+        uploaded_bytes=1,
+        downloaded_bytes=1,
+        added_at=datetime(2026, 4, 1, tzinfo=UTC),
+        last_activity_at=datetime(2026, 4, 2, tzinfo=UTC),
+    )
+
+    enriched = store.apply_torrent_runtime([active])
+
+    assert "paused_at" not in enriched[0].metadata
+    assert store.get_torrent_runtime("abcd1234") is None

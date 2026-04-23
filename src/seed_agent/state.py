@@ -189,6 +189,7 @@ class StateStore:
                 enriched.append(torrent)
                 continue
             if not _is_paused_state(torrent.state):
+                self.clear_torrent_runtime(torrent.hash)
                 enriched.append(torrent)
                 continue
             metadata = dict(torrent.metadata)
