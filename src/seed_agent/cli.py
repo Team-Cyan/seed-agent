@@ -40,9 +40,9 @@ from seed_agent.models import (
     TorrentCandidate,
     safe_url_identity,
 )
+from seed_agent.policies.category_policy import usage_by_pool
 from seed_agent.search.rss import RssSearchProvider
 from seed_agent.state import StateStore
-from seed_agent.policies.category_policy import usage_by_pool
 
 app = typer.Typer(help="AI-first PT and downloader operations toolkit.")
 DEFAULT_CONFIG = Path("config/example.yaml")
@@ -496,7 +496,6 @@ def prune(
     torrents = store.apply_torrent_runtime(torrents)
     batch_error = None
     decisions: list[Decision] = []
-    policy_by_name = _policy_lookup(loaded)
     torrents_by_category: dict[str, list[ManagedTorrent]] = {}
     for torrent in torrents:
         if torrent.category is None:
@@ -748,7 +747,7 @@ def _default_category_policy(config: SeedAgentConfig) -> CategoryPolicyConfig:
 
 
 def _load_policy_torrents(
-    downloader: QbittorrentClient | "_NullDownloader",
+    downloader: QbittorrentClient | _NullDownloader,
     config: SeedAgentConfig,
     *,
     policies: list[CategoryPolicyConfig] | None = None,
@@ -786,7 +785,7 @@ def _pool_usage_summary(
 
 def _default_category_paused(
     config: SeedAgentConfig,
-    downloader: QbittorrentClient | "_NullDownloader" | None = None,
+    downloader: QbittorrentClient | _NullDownloader | None = None,
 ) -> bool:
     if downloader is None:
         downloader = _maybe_build_downloader(config)

@@ -66,8 +66,18 @@ def _config(cookie_ref: str | None = None, api_key_ref: str | None = None) -> Se
         downloader={
             "type": "qbittorrent",
             "target": "unraid-qb",
-            "category": "pt-auto",
-            "tags": ["seed-agent", "pt-auto"],
+            "default_category": "seed",
+            "category_policies": [
+                {
+                    "name": "seed",
+                    "mode": "mutable",
+                    "budget_pool": "downloads",
+                    "delete_enabled": True,
+                    "over_budget_behavior": "add_paused",
+                    "tags": ["seed-agent", "seed"],
+                }
+            ],
+            "budget_pools": [{"name": "downloads", "max_size_tib": 10}],
             "secret_ref": None,
         },
         cleanup={
@@ -242,8 +252,17 @@ scoring:
 downloader:
   type: qbittorrent
   target: unraid-qb
-  category: pt-auto
-  tags: ["seed-agent", "pt-auto"]
+  default_category: seed
+  category_policies:
+    - name: seed
+      mode: mutable
+      budget_pool: downloads
+      delete_enabled: true
+      over_budget_behavior: add_paused
+      tags: ["seed-agent", "seed"]
+  budget_pools:
+    - name: downloads
+      max_size_tib: 10
   secret_ref: null
 cleanup:
   cold_after_days: 7

@@ -83,8 +83,8 @@ class DownloaderConfig(BaseModel):
     type: Literal["qbittorrent"]
     target: str
     default_category: str
-    category_policies: list["CategoryPolicyConfig"] = Field(default_factory=list)
-    budget_pools: list["BudgetPoolConfig"] = Field(default_factory=list)
+    category_policies: list[CategoryPolicyConfig] = Field(default_factory=list)
+    budget_pools: list[BudgetPoolConfig] = Field(default_factory=list)
     secret_ref: str | None = None
 
     @model_validator(mode="after")
