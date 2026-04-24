@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from seed_agent.audit import AuditLogger
+from seed_agent.config import CategoryPolicyConfig
 from seed_agent.models import ScoreBreakdown, TorrentCandidate
 
 
@@ -38,13 +39,28 @@ def _scored(**overrides: object) -> ScoreBreakdown:
     return ScoreBreakdown(**data)
 
 
+def _policy(**overrides: object) -> CategoryPolicyConfig:
+    data: dict[str, object] = {
+        "name": "seed",
+        "mode": "mutable",
+        "budget_pool": "downloads",
+        "delete_enabled": True,
+        "over_budget_behavior": "add_paused",
+        "tags": ["seed-agent", "seed"],
+    }
+    data.update(overrides)
+    return CategoryPolicyConfig(**data)
+
+
 class DummyDownloader:
     def __init__(self, torrent_hash: str | None = None) -> None:
         self.torrent_hash = torrent_hash
-        self.calls: list[tuple[str, str, list[str]]] = []
+        self.calls: list[tuple[str, str, list[str], bool]] = []
 
-    async def add_url(self, url: str, category: str, tags: list[str]) -> str | None:
-        self.calls.append((url, category, tags))
+    async def add_url(
+        self, url: str, category: str, tags: list[str], *, paused: bool = False
+    ) -> str | None:
+        self.calls.append((url, category, tags, paused))
         return self.torrent_hash
 
 
@@ -52,7 +68,9 @@ class FailingSecondDownloader:
     def __init__(self) -> None:
         self.calls: list[str] = []
 
-    async def add_url(self, url: str, category: str, tags: list[str]) -> str | None:
+    async def add_url(
+        self, url: str, category: str, tags: list[str], *, paused: bool = False
+    ) -> str | None:
         self.calls.append(url)
         if len(self.calls) == 2:
             raise RuntimeError("qB add failed")
@@ -68,8 +86,7 @@ async def test_dry_run_accepted_candidate_skips_downloader_and_returns_execute_f
     decisions = await enqueue_candidates(
         [_scored()],
         downloader,
-        category="pt-auto",
-        tags=["seed-agent", "pt-auto"],
+        _policy(),
         execute=False,
     )
 
@@ -93,16 +110,16 @@ async def test_execute_accepted_candidate_calls_downloader_and_records_hash() ->
     decisions = await enqueue_candidates(
         [_scored()],
         downloader,
-        category="pt-auto",
-        tags=["seed-agent", "pt-auto"],
+        _policy(),
         execute=True,
     )
 
     assert downloader.calls == [
         (
             _scored().candidate.download_url,
-            "pt-auto",
-            ["seed-agent", "pt-auto"],
+            "seed",
+            ["seed-agent", "seed"],
+            False,
         )
     ]
     assert len(decisions) == 1
@@ -120,8 +137,7 @@ async def test_rejected_candidate_does_not_call_downloader() -> None:
     decisions = await enqueue_candidates(
         [_scored(accepted=False, score=11, reasons=["rejected"])],
         downloader,
-        category="pt-auto",
-        tags=["seed-agent"],
+        _policy(),
         execute=True,
     )
 
@@ -141,8 +157,7 @@ async def test_execute_batch_failure_carries_prior_enqueue_decisions() -> None:
         await enqueue_candidates(
             [first, second],
             downloader,
-            category="pt-auto",
-            tags=["seed-agent"],
+            _policy(),
             execute=True,
         )
 
@@ -161,8 +176,7 @@ async def test_audit_logger_redacts_decision_with_download_url_passkey(tmp_path:
     decisions = await enqueue_candidates(
         [_scored()],
         downloader,
-        category="pt-auto",
-        tags=["seed-agent"],
+        _policy(),
         execute=False,
     )
 
@@ -179,16 +193,42 @@ async def test_downloader_exception_propagates() -> None:
     from seed_agent.actions.qb import MutationBatchError, enqueue_candidates
 
     class FailingDownloader:
-        async def add_url(self, url: str, category: str, tags: list[str]) -> str | None:
+        async def add_url(
+            self, url: str, category: str, tags: list[str], *, paused: bool = False
+        ) -> str | None:
             raise RuntimeError("network down")
 
     with pytest.raises(MutationBatchError) as raised:
         await enqueue_candidates(
             [_scored()],
             FailingDownloader(),
-            category="pt-auto",
-            tags=["seed-agent"],
+            _policy(),
             execute=True,
         )
 
     assert "network down" in raised.value.decisions[0].reason
+
+
+@pytest.mark.asyncio
+async def test_execute_accepted_candidate_adds_paused_when_pool_is_over_budget() -> None:
+    from seed_agent.actions.qb import enqueue_candidates
+
+    downloader = DummyDownloader(torrent_hash="0123456789abcdef0123456789abcdef01234567")
+
+    decisions = await enqueue_candidates(
+        [_scored()],
+        downloader,
+        _policy(),
+        execute=True,
+        paused=True,
+    )
+
+    assert downloader.calls == [
+        (
+            _scored().candidate.download_url,
+            "seed",
+            ["seed-agent", "seed"],
+            True,
+        )
+    ]
+    assert decisions[0].new_state["paused"] is True

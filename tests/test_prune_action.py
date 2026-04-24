@@ -4,7 +4,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from seed_agent.config import CleanupConfig
+from seed_agent.config import CategoryPolicyConfig, CleanupConfig
 from seed_agent.models import ManagedTorrent
 
 
@@ -40,6 +40,19 @@ def _torrent(**overrides: object) -> ManagedTorrent:
     return ManagedTorrent(**data)
 
 
+def _policy(**overrides: object) -> CategoryPolicyConfig:
+    data: dict[str, object] = {
+        "name": "seed",
+        "mode": "mutable",
+        "budget_pool": "downloads",
+        "delete_enabled": True,
+        "over_budget_behavior": "add_paused",
+        "tags": ["seed-agent", "seed"],
+    }
+    data.update(overrides)
+    return CategoryPolicyConfig(**data)
+
+
 class DummyDownloader:
     def __init__(self) -> None:
         self.calls: list[tuple[str, str, object]] = []
@@ -68,8 +81,7 @@ async def test_dry_run_prune_does_not_call_downloader() -> None:
         [_torrent()],
         downloader,
         _cleanup(),
-        managed_category="pt-auto",
-        managed_tags={"seed-agent", "pt-auto"},
+        _policy(),
         execute=False,
     )
 
@@ -89,8 +101,7 @@ async def test_execute_prune_pauses_cold_managed_torrent() -> None:
         [_torrent()],
         downloader,
         _cleanup(),
-        managed_category="pt-auto",
-        managed_tags={"seed-agent", "pt-auto"},
+        _policy(),
         execute=True,
     )
 
@@ -109,16 +120,15 @@ async def test_execute_never_deletes_unmanaged_torrent() -> None:
     decisions = await prune_cold_torrents(
         [
             _torrent(
-                category="other",
-                tags={"unmanaged"},
+                category="movie",
+                tags={"seed-agent", "movie"},
                 state="paused",
                 metadata={"paused_at": datetime.now(UTC) - timedelta(days=10)},
             )
         ],
         downloader,
         _cleanup(),
-        managed_category="pt-auto",
-        managed_tags={"seed-agent", "pt-auto"},
+        _policy(name="movie", mode="add_only", budget_pool="media", delete_enabled=False),
         execute=True,
     )
 
@@ -138,8 +148,7 @@ async def test_execute_batch_failure_carries_prior_cleanup_decisions() -> None:
             [_torrent(hash="first"), _torrent(hash="second")],
             downloader,
             _cleanup(),
-            managed_category="pt-auto",
-            managed_tags={"seed-agent", "pt-auto"},
+            _policy(),
             execute=True,
         )
 
