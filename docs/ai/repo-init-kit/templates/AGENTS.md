@@ -1,10 +1,3 @@
-# OpenAI-Aligned `AGENTS.md` Template
-
-Use this template when initializing another repository for agent-first work.
-
-The goal is to keep `AGENTS.md` short and make it act as a table of contents into `docs/`.
-
-```md
 # AGENTS.md
 
 This file is the repository entrypoint for coding agents.
@@ -57,30 +50,3 @@ Do not start by reading every spec or every plan.
 - `docs/ai/reference-repos.md`
 - `docs/ai/modules/*.md`
 - `docs/ai/templates/*.md`
-```
-
-## Suggested Matching Docs Layout
-
-```text
-AGENTS.md
-README.md
-docs/
-├── ai/
-│   ├── project-overview.md
-│   ├── harness-workflow.md
-│   ├── reference-repos.md
-│   ├── modules/
-│   └── templates/
-├── roadmap.md
-├── operations/
-├── specs/
-└── plans/
-```
-
-## What To Customize Per Repo
-
-- project-specific safety rules
-- canonical verification commands
-- module list
-- roadmap categories
-- external references that are actually useful for that repo

@@ -12,7 +12,7 @@
 
 ## Source Inputs
 
-- Product spec: `docs/superpowers/specs/2026-04-20-seed-agent-design.md`
+- Product spec: `docs/specs/2026-04-20-seed-agent-design.md`
 - Repo handoff: `docs/operations/session-handoff.md`
 - Research map: `docs/research/inspiration-pool.md`
 - Product positioning: `README.md`
@@ -1466,7 +1466,7 @@ Append a new section to `docs/operations/session-handoff.md`:
 ```markdown
 ## Phase 1 Implementation Plan
 
-- Plan file: `docs/superpowers/plans/2026-04-20-phase-1-pt-upload-loop.md`
+- Plan file: `docs/plans/2026-04-20-phase-1-pt-upload-loop.md`
 - Runtime state path: `.seed-agent/state.db`
 - Audit log path: `.seed-agent/audit.jsonl`
 - Local qB secret path: `local/secrets/qbittorrent.yaml`

@@ -9,7 +9,7 @@ Handle M-Team-specific discovery, detail enrichment, and download-token generati
 - `src/seed_agent/sites/mteam.py`
 - `src/seed_agent/sites/rss.py`
 - `tests/test_mteam_site.py`
-- `docs/superpowers/specs/2026-04-24-mteam-api-driven-discovery.md`
+- `docs/specs/2026-04-24-mteam-api-driven-discovery.md`
 
 ## Current Status
 
@@ -49,4 +49,4 @@ Current fallback still present in code:
 Read:
 
 - `docs/ai/reference-repos.md`
-- `docs/superpowers/specs/2026-04-24-mteam-api-driven-discovery.md`
+- `docs/specs/2026-04-24-mteam-api-driven-discovery.md`

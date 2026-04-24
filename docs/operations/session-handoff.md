@@ -23,10 +23,10 @@ This document captures the durable handoff state from the initial `seed-agent` p
 - `README.md`: project positioning, config-first/no-custom-UI-for-v1 stance, API-ready internal boundary, Phase 1, Phase 2, roadmap, early config shape, and AI operating notes.
 - `docs/roadmap.md`: current completed functionality plus next/later work in a fast-refresh format.
 - `docs/research/inspiration-pool.md`: inspiration pool from PT and NAS automation projects, including Phase 1, Phase 2, and future ideas.
-- `docs/superpowers/specs/2026-04-20-seed-agent-design.md`: full product and architecture spec covering discovery, scoring, qBittorrent execution, lifecycle state, cleanup, audit records, intent sources, roadmap, config design, modules, structured actions, tests, and open decisions.
-- `docs/superpowers/specs/2026-04-24-mteam-api-driven-discovery.md`: follow-up spec for making M-Team discovery API-driven with `api_key_ref` while retaining RSS as a fallback and reusable adapter path.
-- `docs/superpowers/plans/2026-04-20-phase-1-pt-upload-loop.md`: executable Phase 1 implementation plan for the PT upload strategy loop, including package bootstrap, config/models, audit, RSS discovery, scoring, SQLite state, qBittorrent executor, safe dry-run actions, cleanup policy, CLI, docs, and verification.
-- `docs/superpowers/plans/2026-04-22-phase-2-resource-intent-loop.md`: executable Phase 2 implementation plan for resource intents, search, ranking, confirmation, and enqueue reuse.
+- `docs/specs/2026-04-20-seed-agent-design.md`: full product and architecture spec covering discovery, scoring, qBittorrent execution, lifecycle state, cleanup, audit records, intent sources, roadmap, config design, modules, structured actions, tests, and open decisions.
+- `docs/specs/2026-04-24-mteam-api-driven-discovery.md`: follow-up spec for making M-Team discovery API-driven with `api_key_ref` while retaining RSS as a fallback and reusable adapter path.
+- `docs/plans/2026-04-20-phase-1-pt-upload-loop.md`: executable Phase 1 implementation plan for the PT upload strategy loop, including package bootstrap, config/models, audit, RSS discovery, scoring, SQLite state, qBittorrent executor, safe dry-run actions, cleanup policy, CLI, docs, and verification.
+- `docs/plans/2026-04-22-phase-2-resource-intent-loop.md`: executable Phase 2 implementation plan for resource intents, search, ranking, confirmation, and enqueue reuse.
 - `docs/operations/phase-1-usage.md`: operator-facing Phase 1 usage guide for config setup, dry-run review, execution, and audit inspection.
 - `docs/operations/phase-2-usage.md`: operator-facing Phase 2 usage guide for local inbox setup, intent commands, confirmation, enqueue, run-once, audit, and integration source boundaries.
 
@@ -46,11 +46,11 @@ This document captures the durable handoff state from the initial `seed-agent` p
 
 ## Current Implementation Handoff
 
-- Current plan: `docs/superpowers/plans/2026-04-20-phase-1-pt-upload-loop.md`.
+- Current plan: `docs/plans/2026-04-20-phase-1-pt-upload-loop.md`.
 - Current implementation branch: `feat/phase-2-resource-intent-loop`.
 - Current implementation worktree: `/Users/lancer/.config/superpowers/worktrees/seed-agent/phase-2-resource-intent-loop`.
 - Latest Phase 1 safety baseline before Phase 2 planning: `970b49d fix: preserve audit state during batch failures`.
-- Current Phase 2 plan: `docs/superpowers/plans/2026-04-22-phase-2-resource-intent-loop.md`.
+- Current Phase 2 plan: `docs/plans/2026-04-22-phase-2-resource-intent-loop.md`.
 - Phase 1 is implemented as a CLI-first Python package under `src/seed_agent/`.
 - The implemented Phase 1 command surface is `discover`, `score`, `enqueue`, `review`, `prune`, `daily-report`, and `run-once`.
 - The implemented Phase 2 intent command surface is `intent-add`, `intent-inbox`, `intent-search`, `intent-rank`, `intent-review`, `intent-confirm`, `intent-reject`, `intent-enqueue`, and `intent-run-once`.

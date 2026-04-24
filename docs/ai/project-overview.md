@@ -76,8 +76,8 @@ Use docs in layers:
 - README for humans and high-level orientation
 - root `AGENTS.md` for agent entry routing
 - `docs/ai/` for shared AI session efficiency
-- `docs/superpowers/specs/` for durable product/design decisions
-- `docs/superpowers/plans/` for implementation sequencing
+- `docs/specs/` for durable product/design decisions
+- `docs/plans/` for implementation sequencing
 - `docs/operations/` for operator procedures
 - `docs/roadmap.md` for current state and next work
 

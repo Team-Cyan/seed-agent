@@ -80,13 +80,16 @@ Phase 1 uses `balanced` cleanup by default:
 
 ## Documentation
 
+- [Docs Index](docs/README.md)
 - [Roadmap](docs/roadmap.md)
+- [Repo Init Kit](docs/ai/repo-init-kit/README.md)
 - [Inspiration Pool](docs/research/inspiration-pool.md)
-- [Seed Agent Design](docs/superpowers/specs/2026-04-20-seed-agent-design.md)
-- [M-Team API-Driven Discovery Spec](docs/superpowers/specs/2026-04-24-mteam-api-driven-discovery.md)
+- [Seed Agent Design](docs/specs/2026-04-20-seed-agent-design.md)
+- [M-Team API-Driven Discovery Spec](docs/specs/2026-04-24-mteam-api-driven-discovery.md)
 - [Phase 1 Usage](docs/operations/phase-1-usage.md)
 - [Phase 2 Usage](docs/operations/phase-2-usage.md)
-- [Phase 2 Resource Intent Plan](docs/superpowers/plans/2026-04-22-phase-2-resource-intent-loop.md)
+- [Phase 1 PT Upload Plan](docs/plans/2026-04-20-phase-1-pt-upload-loop.md)
+- [Phase 2 Resource Intent Plan](docs/plans/2026-04-22-phase-2-resource-intent-loop.md)
 - [Session Handoff](docs/operations/session-handoff.md)
 
 ## Local Development
@@ -223,3 +226,5 @@ This project has learned from several open-source projects and public references
 - [`mteam-active-top-rss`](https://hub.docker.com/r/xiaohaigreen/mteam-active-top-rss)
 
 For AI-session-specific notes on what each reference is useful for, see `docs/ai/reference-repos.md`.
+
+For a reusable OpenAI-aligned repo bootstrap kit that can be copied into other repositories, see `docs/ai/repo-init-kit/`.

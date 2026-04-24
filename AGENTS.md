@@ -22,8 +22,8 @@ Do not start by reading every spec or every plan.
 - `docs/ai/`: reusable AI knowledge base
 - `docs/roadmap.md`: current project state and next work
 - `docs/operations/`: operator workflows and handoff notes
-- `docs/superpowers/specs/`: durable design decisions
-- `docs/superpowers/plans/`: implementation sequencing
+- `docs/specs/`: durable design decisions
+- `docs/plans/`: implementation sequencing
 
 ## Working Rules
 

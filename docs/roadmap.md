@@ -52,7 +52,7 @@ This file tracks the current project status at a level that is easy for both hum
 
 Reference:
 
-- `docs/superpowers/specs/2026-04-24-mteam-api-driven-discovery.md`
+- `docs/specs/2026-04-24-mteam-api-driven-discovery.md`
 
 ### qBittorrent Live-State-Grounded Strategy
 
