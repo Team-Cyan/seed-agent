@@ -5,6 +5,15 @@ sites:
     enabled: true
     rss_url: https://tracker.example/rss.php?passkey=secret
     cookie_ref: local/secrets/demo.cookie
+  # Example M-Team shape:
+  # - name: mt
+  #   type: mteam
+  #   enabled: false
+  #   rss_url: https://rss.m-team.cc/api/rss/fetch?dl=1&pageSize=10&sign=secret
+  #   # Preferred: M-Team laboratory access token for x-api-key detail enrichment.
+  #   api_key_ref: local/secrets/mt.api-key
+  #   # Optional compatibility fallback: a logged-in M-Team site cookie.
+  #   cookie_ref: local/secrets/mt.cookie
 discovery:
   discounts: [free, 2xfree]
   min_left_time_minutes: 120

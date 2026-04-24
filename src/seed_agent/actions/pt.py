@@ -16,6 +16,8 @@ async def discover_candidates(config: SeedAgentConfig) -> list[TorrentCandidate]
             site.rss_url,
             site.name,
             cookie=_read_cookie(site.cookie_ref, config.config_dir),
+            api_key=_read_secret(site.api_key_ref, config.config_dir),
+            site_type=site.type,
         )
         for site in config.enabled_sites
     ]
@@ -71,17 +73,21 @@ def daily_report(
 
 
 def _read_cookie(cookie_ref: str | None, config_dir: Path | None = None) -> str | None:
-    if not cookie_ref:
+    return _read_secret(cookie_ref, config_dir)
+
+
+def _read_secret(secret_ref: str | None, config_dir: Path | None = None) -> str | None:
+    if not secret_ref:
         return None
 
-    path = Path(cookie_ref)
+    path = Path(secret_ref)
     if not path.is_absolute() and config_dir is not None:
         path = config_dir / path
     try:
         if not path.is_file():
             return None
-        cookie = path.read_text(encoding="utf-8").strip()
+        secret = path.read_text(encoding="utf-8").strip()
     except OSError:
         return None
 
-    return cookie or None
+    return secret or None

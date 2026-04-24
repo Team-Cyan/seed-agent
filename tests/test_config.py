@@ -16,6 +16,7 @@ def _valid_config_data(secret_ref: str) -> dict[str, object]:
                 "enabled": True,
                 "rss_url": "https://tracker.example/rss.php",
                 "cookie_ref": None,
+                "api_key_ref": None,
             },
             {
                 "name": "demo-disabled",
@@ -141,11 +142,31 @@ def test_invalid_site_type_raises_validation_error() -> None:
             "enabled": True,
             "rss_url": "https://tracker.example/rss.php",
             "cookie_ref": None,
+            "api_key_ref": None,
         }
     ]
 
-    with pytest.raises(ValidationError, match="nexusphp"):
+    with pytest.raises(ValidationError, match="nexusphp|mteam"):
         SeedAgentConfig(**data)
+
+
+def test_mteam_site_type_is_accepted() -> None:
+    data = _valid_config_data("local/secrets/qb.yaml")
+    data["sites"] = [
+        {
+            "name": "mt",
+            "type": "mteam",
+            "enabled": True,
+            "rss_url": "https://rss.m-team.cc/api/rss/fetch?dl=1",
+            "cookie_ref": None,
+            "api_key_ref": "local/secrets/mt.api-key",
+        }
+    ]
+
+    config = SeedAgentConfig(**data)
+
+    assert config.enabled_sites[0].type == "mteam"
+    assert config.enabled_sites[0].api_key_ref == "local/secrets/mt.api-key"
 
 
 def test_invalid_downloader_type_raises_validation_error() -> None:

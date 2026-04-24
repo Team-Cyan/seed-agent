@@ -16,6 +16,25 @@ The first interface is documentation plus configuration, not a custom UI.
 
 The implementation should be API-ready internally, even before a long-running HTTP API exists. Every core operation should accept structured input and return structured output so Telegram, Douban, a future API server, or a lightweight UI can be added later without rewriting the policy engine.
 
+Current RSS adapters:
+
+- `nexusphp`: full RSS candidate parsing with peer stats and size fields.
+- `mteam`: RSS list parsing with direct torrent download links and category metadata. The public feed shape does not currently expose peer stats or size, so those candidates are marked as sparse by default. If `api_key_ref` points to an M-Team laboratory access token, `seed-agent` will use `x-api-key` detail enrichment to fill `size`, `seeders`, `leechers`, and `times_completed`. `cookie_ref` remains available as a compatibility fallback for a logged-in browser session.
+
+## Agent Docs
+
+This repository follows the thin-entrypoint pattern described by OpenAI for agent-oriented repos:
+
+- root `AGENTS.md` as the agent entrypoint
+- `docs/` as the structured system of record
+
+Recommended AI read order:
+
+1. `AGENTS.md`
+2. `docs/roadmap.md`
+3. matching `docs/ai/modules/*.md`
+4. only then the relevant spec, plan, or handoff note
+
 ## Phases
 
 ### Phase 1: PT Upload Strategy Loop
@@ -61,8 +80,10 @@ Phase 1 uses `balanced` cleanup by default:
 
 ## Documentation
 
+- [Roadmap](docs/roadmap.md)
 - [Inspiration Pool](docs/research/inspiration-pool.md)
 - [Seed Agent Design](docs/superpowers/specs/2026-04-20-seed-agent-design.md)
+- [M-Team API-Driven Discovery Spec](docs/superpowers/specs/2026-04-24-mteam-api-driven-discovery.md)
 - [Phase 1 Usage](docs/operations/phase-1-usage.md)
 - [Phase 2 Usage](docs/operations/phase-2-usage.md)
 - [Phase 2 Resource Intent Plan](docs/superpowers/plans/2026-04-22-phase-2-resource-intent-loop.md)
@@ -186,3 +207,19 @@ When an AI agent works in this repository:
 - Never delete unmanaged torrents automatically.
 - Treat cleanup actions as high-risk unless the torrent is clearly managed by `seed-agent`.
 - Preserve a complete audit trail for downloader changes.
+
+## Thanks And References
+
+This project has learned from several open-source projects and public references. `seed-agent` does not aim to clone their product shape, but they have been valuable for patterns, constraints, and troubleshooting clues.
+
+- [`pt-tools`](https://github.com/sunerpy/pt-tools)
+- [`PT-Plugin-Plus`](https://github.com/pt-plugins/PT-Plugin-Plus)
+- [`MoviePilot`](https://github.com/jxxghp/MoviePilot)
+- [`nas-tools`](https://github.com/NAStool/nas-tools)
+- [`vertex`](https://github.com/vertex-app/vertex)
+- [`Auto_Bangumi`](https://github.com/EstrellaXD/Auto_Bangumi)
+- [`ani-rss`](https://github.com/walse0/ani-rss)
+- [`bgmi`](https://github.com/BGmi/BGmi)
+- [`mteam-active-top-rss`](https://hub.docker.com/r/xiaohaigreen/mteam-active-top-rss)
+
+For AI-session-specific notes on what each reference is useful for, see `docs/ai/reference-repos.md`.

@@ -13,10 +13,11 @@ class SiteConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     name: str
-    type: Literal["nexusphp"]
+    type: Literal["nexusphp", "mteam"]
     enabled: bool = True
     rss_url: str
     cookie_ref: str | None = None
+    api_key_ref: str | None = None
 
 
 class DiscoveryConfig(BaseModel):

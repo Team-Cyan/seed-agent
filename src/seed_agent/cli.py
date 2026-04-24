@@ -64,6 +64,55 @@ def discover(
     _print_json(payload)
 
 
+@app.command(name="site-probe")
+def site_probe(
+    config: Annotated[Path, typer.Option("--config")] = DEFAULT_CONFIG,
+) -> None:
+    loaded = load_config(config)
+    candidates = _run(discover_candidates(loaded))
+
+    summary_by_site: dict[str, dict[str, Any]] = {}
+    for site in loaded.enabled_sites:
+        summary_by_site[site.name] = {
+            "site_type": site.type,
+            "rss_url_configured": bool(site.rss_url),
+            "access_mode": _site_access_mode(site, loaded.config_dir),
+            "discovered": 0,
+            "sparse": 0,
+            "detail_enriched": 0,
+            "sample_titles": [],
+        }
+
+    for candidate in candidates:
+        site_summary = summary_by_site.setdefault(
+            candidate.site,
+            {
+                "site_type": "unknown",
+                "rss_url_configured": True,
+                "access_mode": "anonymous",
+                "discovered": 0,
+                "sparse": 0,
+                "detail_enriched": 0,
+                "sample_titles": [],
+            },
+        )
+        site_summary["discovered"] += 1
+        if candidate.metadata.get("rss_sparse_candidate"):
+            site_summary["sparse"] += 1
+        if candidate.metadata.get("mteam_detail_enriched"):
+            site_summary["detail_enriched"] += 1
+        sample_titles = site_summary["sample_titles"]
+        if len(sample_titles) < 3:
+            sample_titles.append(candidate.title)
+
+    payload = {
+        "command": "site-probe",
+        "config": str(config),
+        "sites": summary_by_site,
+    }
+    _print_json(payload)
+
+
 @app.command()
 def score(
     config: Annotated[Path, typer.Option("--config")] = DEFAULT_CONFIG,
@@ -570,6 +619,8 @@ def _candidate_summary(candidate: TorrentCandidate) -> dict[str, Any]:
         "discount": candidate.discount.value,
         "left_time_minutes": candidate.left_time_minutes,
         "hr": candidate.hr,
+        "sparse": bool(candidate.metadata.get("rss_sparse_candidate")),
+        "detail_enriched": bool(candidate.metadata.get("mteam_detail_enriched")),
     }
 
 
@@ -688,21 +739,26 @@ def _build_search_providers(config: SeedAgentConfig) -> list[RssSearchProvider]:
             RssSearchProvider(
                 url=site.rss_url,
                 site=site.name,
+                site_type=site.type,
                 cookie=_read_cookie_ref(site.cookie_ref, config.config_dir),
+                api_key=_read_secret_ref(site.api_key_ref, config.config_dir),
                 max_results=config.search.max_results_per_site,
             )
         )
     return providers
 
 
+def _site_access_mode(site: Any, config_dir: Path | None) -> str:
+    if _read_secret_ref(getattr(site, "api_key_ref", None), config_dir):
+        return "api_key"
+    if _read_cookie_ref(getattr(site, "cookie_ref", None), config_dir):
+        return "logged_in"
+    return "anonymous"
+
+
 def _read_cookie_ref(cookie_ref: str | None, config_dir: Path | None) -> str | None:
-    if not cookie_ref:
-        return None
-    path = _resolve_path(cookie_ref, config_dir)
-    if path is None or not path.is_file():
-        return None
-    raw = path.read_text(encoding="utf-8").strip()
-    if not raw:
+    raw = _read_secret_ref(cookie_ref, config_dir)
+    if raw is None:
         return None
     try:
         loaded = json.loads(raw)
@@ -714,6 +770,16 @@ def _read_cookie_ref(cookie_ref: str | None, config_dir: Path | None) -> str | N
             if isinstance(value, str) and value.strip():
                 return value.strip()
     return raw
+
+
+def _read_secret_ref(secret_ref: str | None, config_dir: Path | None) -> str | None:
+    if not secret_ref:
+        return None
+    path = _resolve_path(secret_ref, config_dir)
+    if path is None or not path.is_file():
+        return None
+    raw = path.read_text(encoding="utf-8").strip()
+    return raw or None
 
 
 def _write_audit_decisions(config: SeedAgentConfig, decisions: list[Decision]) -> None:

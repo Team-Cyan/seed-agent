@@ -61,22 +61,26 @@ def _xml() -> str:
 
 @pytest.mark.asyncio
 async def test_rss_search_provider_filters_by_intent_tokens_and_resolution() -> None:
-    calls: list[tuple[str, str, str | None]] = []
+    calls: list[tuple[str, str, str | None, str | None]] = []
 
-    async def fake_fetcher(url: str, site: str, cookie: str | None):
-        calls.append((url, site, cookie))
-        return parse_rss_candidates(_xml(), site=site)
+    async def fake_fetcher(
+        url: str, site: str, cookie: str | None, api_key: str | None, site_type: str
+    ):
+        calls.append((url, site, cookie, api_key))
+        assert site_type == "nexusphp"
+        return parse_rss_candidates(_xml(), site=site, site_type=site_type)
 
     provider = RssSearchProvider(
         url="https://tracker.example/rss.php",
         site="demo",
+        site_type="nexusphp",
         cookie="session=abc",
         fetcher=fake_fetcher,
     )
 
     releases = await provider.search(_intent())
 
-    assert calls == [("https://tracker.example/rss.php", "demo", "session=abc")]
+    assert calls == [("https://tracker.example/rss.php", "demo", "session=abc", None)]
     assert len(releases) == 1
     assert releases[0].title == "Inception 2010 1080p BluRay"
     assert releases[0].discount == Discount.FREE
@@ -113,12 +117,15 @@ async def test_rss_search_provider_matches_episode_tokens() -> None:
     </rss>
     """
 
-    async def fake_fetcher(url: str, site: str, cookie: str | None):
-        return parse_rss_candidates(xml, site=site)
+    async def fake_fetcher(
+        url: str, site: str, cookie: str | None, api_key: str | None, site_type: str
+    ):
+        return parse_rss_candidates(xml, site=site, site_type=site_type)
 
     provider = RssSearchProvider(
         url="https://tracker.example/rss.php",
         site="demo",
+        site_type="nexusphp",
         fetcher=fake_fetcher,
     )
     releases = await provider.search(
@@ -138,12 +145,15 @@ async def test_rss_search_provider_matches_episode_tokens() -> None:
 
 @pytest.mark.asyncio
 async def test_rss_search_provider_respects_max_results() -> None:
-    async def fake_fetcher(url: str, site: str, cookie: str | None):
-        return parse_rss_candidates(_xml(), site=site)
+    async def fake_fetcher(
+        url: str, site: str, cookie: str | None, api_key: str | None, site_type: str
+    ):
+        return parse_rss_candidates(_xml(), site=site, site_type=site_type)
 
     provider = RssSearchProvider(
         url="https://tracker.example/rss.php",
         site="demo",
+        site_type="nexusphp",
         max_results=1,
         fetcher=fake_fetcher,
     )
@@ -155,3 +165,44 @@ async def test_rss_search_provider_respects_max_results() -> None:
 def test_rss_search_provider_rejects_invalid_max_results() -> None:
     with pytest.raises(ValueError, match="max_results"):
         RssSearchProvider(url="https://tracker.example/rss.php", site="demo", max_results=0)
+
+
+@pytest.mark.asyncio
+async def test_rss_search_provider_supports_mteam_sparse_candidates() -> None:
+    xml = """
+    <rss version="2.0">
+      <channel>
+        <item>
+          <title>Inception 2010 1080p BluRay x264</title>
+          <link>https://kp.m-team.cc/detail/123456</link>
+          <category>Movie/Blu-Ray</category>
+          <enclosure
+            url="https://rss.m-team.cc/api/rss/dlv2?tid=123456&amp;uid=305694&amp;sign=redacted"
+            type="application/x-bittorrent"
+          />
+        </item>
+      </channel>
+    </rss>
+    """
+
+    async def fake_fetcher(
+        url: str, site: str, cookie: str | None, api_key: str | None, site_type: str
+    ):
+        return parse_rss_candidates(xml, site=site, site_type=site_type)
+
+    provider = RssSearchProvider(
+        url="https://rss.m-team.cc/api/rss/fetch?dl=1",
+        site="mt",
+        site_type="mteam",
+        api_key="secret-api-key",
+        fetcher=fake_fetcher,
+    )
+
+    releases = await provider.search(_intent())
+
+    assert len(releases) == 1
+    assert releases[0].site == "mt"
+    assert releases[0].size_bytes == 0
+    assert releases[0].seeders == 0
+    assert releases[0].leechers == 0
+    assert releases[0].metadata["categories"] == ["Movie/Blu-Ray"]

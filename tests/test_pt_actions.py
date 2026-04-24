@@ -26,7 +26,7 @@ def _candidate(**overrides: object) -> TorrentCandidate:
     return TorrentCandidate(**data)
 
 
-def _config(cookie_ref: str | None = None) -> SeedAgentConfig:
+def _config(cookie_ref: str | None = None, api_key_ref: str | None = None) -> SeedAgentConfig:
     return SeedAgentConfig(
         mode="balanced",
         sites=[
@@ -36,6 +36,7 @@ def _config(cookie_ref: str | None = None) -> SeedAgentConfig:
                 "enabled": True,
                 "rss_url": "https://tracker.example/rss.php",
                 "cookie_ref": cookie_ref,
+                "api_key_ref": api_key_ref,
             },
             {
                 "name": "demo-disabled",
@@ -99,17 +100,24 @@ def test_score_candidates_returns_structured_breakdown() -> None:
 async def test_discover_candidates_skips_disabled_sites_and_calls_enabled_site(monkeypatch) -> None:
     from seed_agent.actions import pt as pt_actions
 
-    calls: list[tuple[str, str, str | None]] = []
+    calls: list[tuple[str, str, str | None, str | None, str]] = []
 
-    async def fake_fetch_rss_candidates(url: str, site: str, cookie: str | None = None):
-        calls.append((url, site, cookie))
+    async def fake_fetch_rss_candidates(
+        url: str,
+        site: str,
+        cookie: str | None = None,
+        api_key: str | None = None,
+        *,
+        site_type: str = "nexusphp",
+    ):
+        calls.append((url, site, cookie, api_key, site_type))
         return [_candidate(site=site)]
 
     monkeypatch.setattr(pt_actions, "fetch_rss_candidates", fake_fetch_rss_candidates)
 
     candidates = await pt_actions.discover_candidates(_config())
 
-    assert calls == [("https://tracker.example/rss.php", "demo-free", None)]
+    assert calls == [("https://tracker.example/rss.php", "demo-free", None, None, "nexusphp")]
     assert len(candidates) == 1
     assert candidates[0].site == "demo-free"
 
@@ -144,7 +152,14 @@ async def test_discover_candidates_keeps_going_when_one_site_fails(monkeypatch) 
 
     calls: list[str] = []
 
-    async def fake_fetch_rss_candidates(url: str, site: str, cookie: str | None = None):
+    async def fake_fetch_rss_candidates(
+        url: str,
+        site: str,
+        cookie: str | None = None,
+        api_key: str | None = None,
+        *,
+        site_type: str = "nexusphp",
+    ):
         calls.append(site)
         if site == "demo-bad":
             raise RuntimeError("boom")
@@ -168,7 +183,14 @@ async def test_discover_candidates_reads_cookie_ref(tmp_path: Path, monkeypatch)
 
     seen: list[str | None] = []
 
-    async def fake_fetch_rss_candidates(url: str, site: str, cookie: str | None = None):
+    async def fake_fetch_rss_candidates(
+        url: str,
+        site: str,
+        cookie: str | None = None,
+        api_key: str | None = None,
+        *,
+        site_type: str = "nexusphp",
+    ):
         seen.append(cookie)
         return []
 
@@ -238,7 +260,14 @@ cleanup:
 
     seen: list[str | None] = []
 
-    async def fake_fetch_rss_candidates(url: str, site: str, cookie: str | None = None):
+    async def fake_fetch_rss_candidates(
+        url: str,
+        site: str,
+        cookie: str | None = None,
+        api_key: str | None = None,
+        *,
+        site_type: str = "nexusphp",
+    ):
         seen.append(cookie)
         return []
 
@@ -251,6 +280,34 @@ cleanup:
 
     assert seen == ["session=relative-cookie"]
     assert config.config_dir == config_dir
+
+
+@pytest.mark.asyncio
+async def test_discover_candidates_reads_api_key_ref(tmp_path: Path, monkeypatch) -> None:
+    from seed_agent.actions import pt as pt_actions
+
+    api_key_path = tmp_path / "mteam.api-key"
+    api_key_path.write_text("secret-api-key\n", encoding="utf-8")
+
+    seen: list[str | None] = []
+
+    async def fake_fetch_rss_candidates(
+        url: str,
+        site: str,
+        cookie: str | None = None,
+        api_key: str | None = None,
+        *,
+        site_type: str = "nexusphp",
+    ):
+        seen.append(api_key)
+        return []
+
+    monkeypatch.setattr(pt_actions, "fetch_rss_candidates", fake_fetch_rss_candidates)
+
+    config = _config(api_key_ref=str(api_key_path))
+    await pt_actions.discover_candidates(config)
+
+    assert seen == ["secret-api-key"]
 
 
 def test_daily_report_returns_stable_counts() -> None:

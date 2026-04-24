@@ -187,3 +187,48 @@ async def test_fetch_rss_candidates_uses_httpx_async_client() -> None:
     assert route.called
     assert len(candidates) == 2
     assert candidates[0].download_url.endswith("passkey=download-secret")
+
+
+def test_parse_rss_candidates_supports_mteam_sparse_feed() -> None:
+    xml = """
+    <rss version="2.0">
+      <channel>
+        <item>
+          <title>Alien Rubicon 2024 Blu-ray 1080p AVC DTS-HD MA 5.1 2Audio</title>
+          <link>https://kp.m-team.cc/detail/1171443</link>
+          <pubDate>Thu, 24 Apr 2026 12:34:56 +0800</pubDate>
+          <comments>https://kp.m-team.cc/detail/1171443#comments</comments>
+          <category>Movie/Blu-Ray</category>
+          <description><![CDATA[
+            <p><strong>◎年　　代</strong> 2024</p>
+          ]]></description>
+          <enclosure
+            url="https://rss.m-team.cc/api/rss/dlv2?tid=1171443&amp;uid=305694&amp;sign=redacted"
+            type="application/x-bittorrent"
+          />
+        </item>
+      </channel>
+    </rss>
+    """
+
+    candidates = parse_rss_candidates(xml, site="mt", site_type="mteam")
+
+    assert len(candidates) == 1
+    candidate = candidates[0]
+    assert candidate.site == "mt"
+    assert candidate.title.startswith("Alien Rubicon 2024")
+    assert candidate.source_url == "https://kp.m-team.cc/detail/1171443"
+    assert candidate.download_url.startswith("https://rss.m-team.cc/api/rss/dlv2?")
+    assert candidate.size_bytes == 0
+    assert candidate.seeders == 0
+    assert candidate.leechers == 0
+    assert candidate.discount == Discount.NORMAL
+    assert candidate.metadata["rss_sparse_candidate"] is True
+    assert candidate.metadata["rss_missing_fields"] == {
+        "size": True,
+        "seeders": True,
+        "leechers": True,
+    }
+    assert candidate.metadata["categories"] == ["Movie/Blu-Ray"]
+    assert candidate.metadata["comments_url"] == "https://kp.m-team.cc/detail/1171443#comments"
+    assert candidate.published_at is not None

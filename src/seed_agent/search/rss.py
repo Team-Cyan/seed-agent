@@ -6,7 +6,10 @@ from collections.abc import Awaitable, Callable
 from seed_agent.models import ReleaseCandidate, ResourceIntent, TorrentCandidate, safe_url_identity
 from seed_agent.sites.rss import fetch_rss_candidates
 
-FetchCandidates = Callable[[str, str, str | None], Awaitable[list[TorrentCandidate]]]
+FetchCandidates = Callable[
+    [str, str, str | None, str | None, str],
+    Awaitable[list[TorrentCandidate]],
+]
 TOKEN_RE = re.compile(r"[a-z0-9]+", re.IGNORECASE)
 
 
@@ -16,7 +19,9 @@ class RssSearchProvider:
         *,
         url: str,
         site: str,
+        site_type: str = "nexusphp",
         cookie: str | None = None,
+        api_key: str | None = None,
         max_results: int = 20,
         fetcher: FetchCandidates = fetch_rss_candidates,
     ) -> None:
@@ -24,12 +29,20 @@ class RssSearchProvider:
             raise ValueError("max_results must be >= 1")
         self.url = url
         self.site = site
+        self.site_type = site_type
         self.cookie = cookie
+        self.api_key = api_key
         self.max_results = max_results
         self.fetcher = fetcher
 
     async def search(self, intent: ResourceIntent) -> list[ReleaseCandidate]:
-        candidates = await self.fetcher(self.url, self.site, self.cookie)
+        candidates = await self.fetcher(
+            self.url,
+            self.site,
+            self.cookie,
+            self.api_key,
+            self.site_type,
+        )
         releases: list[ReleaseCandidate] = []
         for candidate in candidates:
             if not _matches_intent(candidate, intent):

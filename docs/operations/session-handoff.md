@@ -13,9 +13,18 @@ This document captures the durable handoff state from the initial `seed-agent` p
 
 ## Durable Knowledge Already Recorded
 
+- `AGENTS.md`: root agent entrypoint and read-order table of contents.
+- `docs/ai/project-overview.md`: fast shared AI refresh for product shape, module map, and durable runtime surfaces.
+- `docs/ai/harness-workflow.md`: preferred short-session workflow for roadmap-item and module-focused tasks.
+- `docs/ai/harness-engineering.md`: rationale for the repo's harness-oriented documentation structure.
+- `docs/ai/reference-repos.md`: reference repository index for troubleshooting and pattern transfer.
+- `docs/ai/modules/*.md`: module ownership notes, verification entrypoints, and task expectations.
+- `docs/ai/templates/*.md`: reusable session/task/checklist templates for future focused sessions.
 - `README.md`: project positioning, config-first/no-custom-UI-for-v1 stance, API-ready internal boundary, Phase 1, Phase 2, roadmap, early config shape, and AI operating notes.
+- `docs/roadmap.md`: current completed functionality plus next/later work in a fast-refresh format.
 - `docs/research/inspiration-pool.md`: inspiration pool from PT and NAS automation projects, including Phase 1, Phase 2, and future ideas.
 - `docs/superpowers/specs/2026-04-20-seed-agent-design.md`: full product and architecture spec covering discovery, scoring, qBittorrent execution, lifecycle state, cleanup, audit records, intent sources, roadmap, config design, modules, structured actions, tests, and open decisions.
+- `docs/superpowers/specs/2026-04-24-mteam-api-driven-discovery.md`: follow-up spec for making M-Team discovery API-driven with `api_key_ref` while retaining RSS as a fallback and reusable adapter path.
 - `docs/superpowers/plans/2026-04-20-phase-1-pt-upload-loop.md`: executable Phase 1 implementation plan for the PT upload strategy loop, including package bootstrap, config/models, audit, RSS discovery, scoring, SQLite state, qBittorrent executor, safe dry-run actions, cleanup policy, CLI, docs, and verification.
 - `docs/superpowers/plans/2026-04-22-phase-2-resource-intent-loop.md`: executable Phase 2 implementation plan for resource intents, search, ranking, confirmation, and enqueue reuse.
 - `docs/operations/phase-1-usage.md`: operator-facing Phase 1 usage guide for config setup, dry-run review, execution, and audit inspection.
@@ -143,6 +152,7 @@ Latest verification:
 Recommended next task:
 
 - Review Phase 2 end-to-end, then decide whether to merge, polish docs further, or start a Phase 3 branch for long-running integration loops.
+- M-Team follow-up: implement API-driven discovery for `mteam` so FREE filtering and activity-based sorting do not depend on RSS ordering alone. Keep the existing RSS path intact.
 
 ## Inspiration Sources
 

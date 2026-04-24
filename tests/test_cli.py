@@ -182,6 +182,7 @@ def test_cli_help_lists_phase_one_commands() -> None:
     assert "prune" in result.output
     assert "daily-report" in result.output
     assert "run-once" in result.output
+    assert "site-probe" in result.output
 
 
 def test_enqueue_help_includes_execute_flag() -> None:
@@ -223,9 +224,67 @@ def test_discover_command_prints_safe_output_without_raw_download_url(
     payload = _json_output(result)
     assert payload["command"] == "discover"
     assert payload["candidates"][0]["title"] == "High Confidence Torrent"
+    assert payload["candidates"][0]["sparse"] is False
+    assert payload["candidates"][0]["detail_enriched"] is False
     assert "passkey" not in result.output
     assert _candidate().download_url not in result.output
     assert "download_url" not in result.output
+
+
+def test_site_probe_reports_sparse_and_enriched_counts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from seed_agent import cli
+
+    config_path = _config_file(tmp_path)
+    config = SeedAgentConfig(
+        **{
+            **_config().model_dump(),
+            "sites": [
+                {
+                    "name": "mt",
+                    "type": "mteam",
+                    "enabled": True,
+                    "rss_url": "https://rss.m-team.cc/api/rss/fetch?dl=1",
+                    "cookie_ref": "local/secrets/mt.cookie",
+                    "api_key_ref": "local/secrets/mt.api-key",
+                }
+            ],
+        }
+    )
+
+    async def fake_discover_candidates(config: SeedAgentConfig):
+        return [
+            _candidate(
+                site="mt",
+                source_url="https://kp.m-team.cc/detail/1",
+                metadata={"rss_sparse_candidate": True},
+            ),
+            _candidate(
+                site="mt",
+                title="Enriched",
+                source_url="https://kp.m-team.cc/detail/2",
+                metadata={"rss_sparse_candidate": True, "mteam_detail_enriched": True},
+            ),
+        ]
+
+    monkeypatch.setattr(cli, "load_config", lambda path: config)
+    monkeypatch.setattr(cli, "discover_candidates", fake_discover_candidates)
+    monkeypatch.setattr(cli, "_read_secret_ref", lambda secret_ref, config_dir: "secret-api-key")
+    monkeypatch.setattr(cli, "_read_cookie_ref", lambda cookie_ref, config_dir: None)
+
+    result = CliRunner().invoke(cli.app, ["site-probe", "--config", str(config_path)])
+
+    assert result.exit_code == 0
+    payload = _json_output(result)
+    assert payload["command"] == "site-probe"
+    mt = payload["sites"]["mt"]
+    assert mt["site_type"] == "mteam"
+    assert mt["access_mode"] == "api_key"
+    assert mt["discovered"] == 2
+    assert mt["sparse"] == 2
+    assert mt["detail_enriched"] == 1
+    assert mt["sample_titles"] == ["High Confidence Torrent", "Enriched"]
 
 
 def test_mutating_dry_run_does_not_require_qb_secret_or_real_downloader(
