@@ -169,6 +169,91 @@ def test_mteam_site_type_is_accepted() -> None:
     assert config.enabled_sites[0].api_key_ref == "local/secrets/mt.api-key"
 
 
+def test_mteam_site_accepts_api_discovery_mode() -> None:
+    data = _valid_config_data("local/secrets/qb.yaml")
+    data["sites"] = [
+        {
+            "name": "mt",
+            "type": "mteam",
+            "enabled": True,
+            "rss_url": "https://rss.m-team.cc/api/rss/fetch?dl=1",
+            "api_key_ref": "local/secrets/mt.api-key",
+            "discovery_mode": "api",
+            "api_discovery": {
+                "mode": "adult",
+                "only_free": True,
+                "sort_field": "downloads",
+                "sort_order": "desc",
+                "page_size": 50,
+                "min_seeders": 0,
+                "max_seeders": 200,
+                "min_leechers": 0,
+                "min_times_completed": 0,
+            },
+        }
+    ]
+
+    config = SeedAgentConfig(**data)
+
+    site = config.enabled_sites[0]
+    assert site.discovery_mode == "api"
+    assert site.api_discovery is not None
+    assert site.api_discovery.sort_field == "downloads"
+
+
+def test_non_mteam_site_rejects_api_discovery_mode() -> None:
+    data = _valid_config_data("local/secrets/qb.yaml")
+    data["sites"][0] = {
+        "name": "demo-free",
+        "type": "nexusphp",
+        "enabled": True,
+        "rss_url": "https://tracker.example/rss.php",
+        "discovery_mode": "api",
+        "api_discovery": {
+            "mode": "adult",
+            "only_free": True,
+            "sort_field": "downloads",
+            "sort_order": "desc",
+            "page_size": 50,
+            "min_seeders": 0,
+            "max_seeders": 200,
+            "min_leechers": 0,
+            "min_times_completed": 0,
+        },
+    }
+
+    with pytest.raises(ValidationError, match="mteam"):
+        SeedAgentConfig(**data)
+
+
+def test_mteam_api_discovery_requires_api_key_ref() -> None:
+    data = _valid_config_data("local/secrets/qb.yaml")
+    data["sites"] = [
+        {
+            "name": "mt",
+            "type": "mteam",
+            "enabled": True,
+            "rss_url": "https://rss.m-team.cc/api/rss/fetch?dl=1",
+            "api_key_ref": None,
+            "discovery_mode": "api",
+            "api_discovery": {
+                "mode": "adult",
+                "only_free": True,
+                "sort_field": "downloads",
+                "sort_order": "desc",
+                "page_size": 50,
+                "min_seeders": 0,
+                "max_seeders": 200,
+                "min_leechers": 0,
+                "min_times_completed": 0,
+            },
+        }
+    ]
+
+    with pytest.raises(ValidationError, match="api_key_ref"):
+        SeedAgentConfig(**data)
+
+
 def test_invalid_downloader_type_raises_validation_error() -> None:
     data = _valid_config_data("local/secrets/qb.yaml")
     data["downloader"] = {**data["downloader"], "type": "qbittorrentx"}

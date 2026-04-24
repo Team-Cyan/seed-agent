@@ -9,6 +9,34 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator,
 from seed_agent.models import Discount
 
 
+class MTeamApiDiscoveryConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    mode: Literal["adult", "movie", "tvshow", "normal"] = "adult"
+    only_free: bool = True
+    sort_field: Literal["createdDate", "id", "downloads", "seeders", "size"] = "downloads"
+    sort_order: Literal["asc", "desc"] = "desc"
+    page_size: int = 50
+    min_seeders: int = 0
+    max_seeders: int | None = 200
+    min_leechers: int = 0
+    min_times_completed: int = 0
+
+    @model_validator(mode="after")
+    def validate_limits(self) -> MTeamApiDiscoveryConfig:
+        if self.page_size < 1:
+            raise ValueError("page_size must be >= 1")
+        if self.min_seeders < 0:
+            raise ValueError("min_seeders must be >= 0")
+        if self.min_leechers < 0:
+            raise ValueError("min_leechers must be >= 0")
+        if self.min_times_completed < 0:
+            raise ValueError("min_times_completed must be >= 0")
+        if self.max_seeders is not None and self.max_seeders < self.min_seeders:
+            raise ValueError("max_seeders must be >= min_seeders")
+        return self
+
+
 class SiteConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
@@ -18,6 +46,21 @@ class SiteConfig(BaseModel):
     rss_url: str
     cookie_ref: str | None = None
     api_key_ref: str | None = None
+    discovery_mode: Literal["rss", "api"] = "rss"
+    api_discovery: MTeamApiDiscoveryConfig | None = None
+
+    @model_validator(mode="after")
+    def validate_discovery_mode(self) -> SiteConfig:
+        if self.discovery_mode == "api":
+            if self.type != "mteam":
+                raise ValueError("discovery_mode=api is only supported for mteam")
+            if self.api_discovery is None:
+                raise ValueError("api_discovery must be set when discovery_mode=api")
+            if not self.api_key_ref:
+                raise ValueError("api_key_ref is required when discovery_mode=api")
+        if self.type != "mteam" and self.api_discovery is not None:
+            raise ValueError("api_discovery is only supported for mteam")
+        return self
 
 
 class DiscoveryConfig(BaseModel):
