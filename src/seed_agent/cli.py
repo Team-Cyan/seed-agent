@@ -77,6 +77,7 @@ def site_probe(
             "site_type": site.type,
             "rss_url_configured": bool(site.rss_url),
             "access_mode": _site_access_mode(site, loaded.config_dir),
+            "discovery_mode": _site_discovery_mode(site),
             "discovered": 0,
             "sparse": 0,
             "detail_enriched": 0,
@@ -90,6 +91,7 @@ def site_probe(
                 "site_type": "unknown",
                 "rss_url_configured": True,
                 "access_mode": "anonymous",
+                "discovery_mode": "rss",
                 "discovered": 0,
                 "sparse": 0,
                 "detail_enriched": 0,
@@ -754,6 +756,12 @@ def _site_access_mode(site: Any, config_dir: Path | None) -> str:
     if _read_cookie_ref(getattr(site, "cookie_ref", None), config_dir):
         return "logged_in"
     return "anonymous"
+
+
+def _site_discovery_mode(site: Any) -> str:
+    if getattr(site, "type", None) == "mteam":
+        return str(getattr(site, "discovery_mode", "rss"))
+    return "rss"
 
 
 def _read_cookie_ref(cookie_ref: str | None, config_dir: Path | None) -> str | None:

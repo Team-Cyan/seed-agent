@@ -248,6 +248,18 @@ def test_site_probe_reports_sparse_and_enriched_counts(
                     "rss_url": "https://rss.m-team.cc/api/rss/fetch?dl=1",
                     "cookie_ref": "local/secrets/mt.cookie",
                     "api_key_ref": "local/secrets/mt.api-key",
+                    "discovery_mode": "api",
+                    "api_discovery": {
+                        "mode": "adult",
+                        "only_free": True,
+                        "sort_field": "downloads",
+                        "sort_order": "desc",
+                        "page_size": 50,
+                        "min_seeders": 0,
+                        "max_seeders": 200,
+                        "min_leechers": 0,
+                        "min_times_completed": 0,
+                    },
                 }
             ],
         }
@@ -281,6 +293,7 @@ def test_site_probe_reports_sparse_and_enriched_counts(
     mt = payload["sites"]["mt"]
     assert mt["site_type"] == "mteam"
     assert mt["access_mode"] == "api_key"
+    assert mt["discovery_mode"] == "api"
     assert mt["discovered"] == 2
     assert mt["sparse"] == 2
     assert mt["detail_enriched"] == 1
