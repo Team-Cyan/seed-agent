@@ -36,7 +36,31 @@ async def test_add_url_logs_in_and_posts_category_tags_url() -> None:
         "urls": ["https://tracker.example/download.php?id=42"],
         "category": ["pt-auto"],
         "tags": ["seed-agent,pt-auto"],
+        "stopped": ["false"],
     }
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_add_url_can_request_paused_state() -> None:
+    respx.post("https://qb.example/api/v2/auth/login").mock(
+        return_value=httpx.Response(200, text="Ok.")
+    )
+    add_route = respx.post("https://qb.example/api/v2/torrents/add").mock(
+        return_value=httpx.Response(200, text="Ok.")
+    )
+
+    client = QbittorrentClient("https://qb.example", "alice", "secret")
+
+    await client.add_url(
+        "https://tracker.example/download.php?id=42",
+        category="seed",
+        tags=["seed-agent", "seed"],
+        paused=True,
+    )
+
+    payload = parse_qs(add_route.calls[0].request.content.decode())
+    assert payload["stopped"] == ["true"]
 
 
 @pytest.mark.asyncio
