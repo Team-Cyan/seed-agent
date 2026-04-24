@@ -7,20 +7,15 @@ from pathlib import Path
 from seed_agent.config import DiscoveryConfig, ScoringConfig, SeedAgentConfig
 from seed_agent.models import ManagedTorrent, ScoreBreakdown, TorrentCandidate
 from seed_agent.policies.scoring import score_candidate
+from seed_agent.sites.mteam import (
+    MTeamApiDiscoveryOptions,
+    fetch_api_candidates as fetch_mteam_api_candidates,
+)
 from seed_agent.sites.rss import fetch_rss_candidates
 
 
 async def discover_candidates(config: SeedAgentConfig) -> list[TorrentCandidate]:
-    tasks = [
-        fetch_rss_candidates(
-            site.rss_url,
-            site.name,
-            cookie=_read_cookie(site.cookie_ref, config.config_dir),
-            api_key=_read_secret(site.api_key_ref, config.config_dir),
-            site_type=site.type,
-        )
-        for site in config.enabled_sites
-    ]
+    tasks = [_discover_site_candidates(site, config.config_dir) for site in config.enabled_sites]
     results = await asyncio.gather(*tasks, return_exceptions=True) if tasks else []
 
     candidates: list[TorrentCandidate] = []
@@ -30,6 +25,27 @@ async def discover_candidates(config: SeedAgentConfig) -> list[TorrentCandidate]
         candidates.extend(result)
 
     return candidates
+
+
+async def _discover_site_candidates(site, config_dir: Path | None) -> list[TorrentCandidate]:
+    cookie = _read_cookie(site.cookie_ref, config_dir)
+    api_key = _read_secret(site.api_key_ref, config_dir)
+
+    if site.type == "mteam" and site.discovery_mode == "api" and site.api_discovery is not None:
+        return await fetch_mteam_api_candidates(
+            site=site.name,
+            api_key=api_key or "",
+            cookie=cookie,
+            options=MTeamApiDiscoveryOptions.model_validate(site.api_discovery.model_dump()),
+        )
+
+    return await fetch_rss_candidates(
+        site.rss_url,
+        site.name,
+        cookie=cookie,
+        api_key=api_key,
+        site_type=site.type,
+    )
 
 
 def score_candidates(
