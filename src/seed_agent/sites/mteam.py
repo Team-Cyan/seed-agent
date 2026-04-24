@@ -6,14 +6,31 @@ import hmac
 import time
 import uuid
 from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import parse_qsl, urlparse
 
 import httpx
+from pydantic import BaseModel, ConfigDict
 
-from seed_agent.models import TorrentCandidate
+from seed_agent.models import Discount, TorrentCandidate
 
 DetailFetcher = Callable[[str], Awaitable[dict[str, Any] | None]]
+DiscoverFetcher = Callable[[str, "MTeamApiDiscoveryOptions"], Awaitable[list[TorrentCandidate]]]
+
+
+class MTeamApiDiscoveryOptions(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    mode: str = "adult"
+    only_free: bool = True
+    sort_field: str = "downloads"
+    sort_order: str = "desc"
+    page_size: int = 50
+    min_seeders: int = 0
+    max_seeders: int | None = 200
+    min_leechers: int = 0
+    min_times_completed: int = 0
 
 
 class MTeamApiClient:
@@ -34,6 +51,46 @@ class MTeamApiClient:
         self.api_key = api_key
         self.visitor_id = visitor_id or str(uuid.uuid4())
         self.timeout = timeout
+
+    async def discover_torrents(
+        self,
+        *,
+        site: str,
+        options: MTeamApiDiscoveryOptions,
+    ) -> list[TorrentCandidate]:
+        if not self.api_key:
+            return []
+
+        headers = {
+            "Accept": "application/json, text/plain, */*",
+            "Content-Type": "application/json",
+            "Referer": "https://kp.m-team.cc/browse",
+            "User-Agent": "Mozilla/5.0",
+            "x-api-key": self.api_key,
+        }
+
+        async with httpx.AsyncClient(follow_redirects=True, timeout=self.timeout) as client:
+            response = await client.post(
+                f"{self.API_BASE_URL}/torrent/search",
+                headers=headers,
+                json=_search_payload(options),
+            )
+            response.raise_for_status()
+
+        payload = response.json()
+        if not isinstance(payload, dict) or str(payload.get("code")) != "0":
+            return []
+
+        rows = _extract_search_rows(payload)
+        candidates: list[TorrentCandidate] = []
+        for row in rows:
+            if not _row_meets_thresholds(row, options):
+                continue
+            candidate = await self._candidate_from_search_row(site, row)
+            if candidate is None:
+                continue
+            candidates.append(candidate)
+        return candidates
 
     async def fetch_torrent_detail(self, torrent_id: str) -> dict[str, Any] | None:
         if self.api_key:
@@ -104,6 +161,65 @@ class MTeamApiClient:
         data["_auth_mode"] = "api_key"
         return data
 
+    async def fetch_download_url(self, torrent_id: str) -> str | None:
+        if not self.api_key:
+            return None
+
+        headers = {
+            "Accept": "application/json, text/plain, */*",
+            "Content-Type": "application/x-www-form-urlencoded",
+            "User-Agent": "Mozilla/5.0",
+            "x-api-key": self.api_key,
+        }
+
+        async with httpx.AsyncClient(follow_redirects=True, timeout=self.timeout) as client:
+            response = await client.post(
+                f"{self.API_BASE_URL}/torrent/genDlToken",
+                headers=headers,
+                content=f"id={torrent_id}",
+            )
+            response.raise_for_status()
+
+        payload = response.json()
+        if not isinstance(payload, dict) or str(payload.get("code")) != "0":
+            return None
+        data = payload.get("data")
+        if not isinstance(data, str):
+            return None
+        return data.strip() or None
+
+    async def _candidate_from_search_row(
+        self, site: str, row: dict[str, Any]
+    ) -> TorrentCandidate | None:
+        torrent_id = _coerce_int(row.get("id"))
+        title = str(row.get("name") or "").strip()
+        if torrent_id is None or not title:
+            return None
+
+        download_url = await self.fetch_download_url(str(torrent_id))
+        if not download_url:
+            return None
+
+        status = row.get("status")
+        status_data = status if isinstance(status, dict) else {}
+        times_completed = _coerce_int(status_data.get("timesCompleted")) or 0
+
+        return TorrentCandidate(
+            site=site,
+            title=title,
+            source_url=f"https://kp.m-team.cc/detail/{torrent_id}",
+            download_url=download_url,
+            size_bytes=_coerce_int(row.get("size")) or 0,
+            seeders=_coerce_int(status_data.get("seeders")) or 0,
+            leechers=_coerce_int(status_data.get("leechers")) or 0,
+            discount=_normalize_discount_label(row.get("discount")),
+            published_at=_parse_api_datetime(row.get("createdDate")),
+            metadata={
+                "mteam_discovery_mode": "api",
+                "times_completed": times_completed,
+            },
+        )
+
 
 async def enrich_candidates(
     candidates: list[TorrentCandidate],
@@ -134,6 +250,26 @@ async def enrich_candidates(
         enriched.append(_merge_detail(candidate, detail))
 
     return enriched
+
+
+async def fetch_api_candidates(
+    *,
+    site: str,
+    api_key: str,
+    options: MTeamApiDiscoveryOptions,
+    cookie: str | None = None,
+    discover: DiscoverFetcher | None = None,
+    fetch_detail: DetailFetcher | None = None,
+) -> list[TorrentCandidate]:
+    client = MTeamApiClient(cookie=cookie, api_key=api_key)
+    discover_fn = discover or client.discover_torrents
+    candidates = await discover_fn(site, options)
+    return await enrich_candidates(
+        candidates,
+        cookie=cookie,
+        api_key=api_key,
+        fetch_detail=fetch_detail or client.fetch_torrent_detail,
+    )
 
 
 def extract_torrent_id(url: str) -> str | None:
@@ -209,3 +345,87 @@ def _coerce_int(value: Any) -> int | None:
             return int(float(text))
         except ValueError:
             return None
+
+
+def _search_payload(options: MTeamApiDiscoveryOptions) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "mode": options.mode,
+        "visible": 1,
+        "pageNumber": 1,
+        "pageSize": options.page_size,
+        "sortDirection": options.sort_order.upper(),
+        "sortField": options.sort_field,
+    }
+    if options.only_free:
+        payload["discount"] = "FREE"
+    return payload
+
+
+def _extract_search_rows(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    data = payload.get("data")
+    if isinstance(data, list):
+        return [row for row in data if isinstance(row, dict)]
+    if not isinstance(data, dict):
+        return []
+    nested = data.get("data")
+    if isinstance(nested, list):
+        return [row for row in nested if isinstance(row, dict)]
+    return []
+
+
+def _meets_thresholds(candidate: TorrentCandidate, options: MTeamApiDiscoveryOptions) -> bool:
+    if candidate.seeders < options.min_seeders:
+        return False
+    if options.max_seeders is not None and candidate.seeders > options.max_seeders:
+        return False
+    if candidate.leechers < options.min_leechers:
+        return False
+    times_completed = _coerce_int(candidate.metadata.get("times_completed")) or 0
+    if times_completed < options.min_times_completed:
+        return False
+    return True
+
+
+def _row_meets_thresholds(row: dict[str, Any], options: MTeamApiDiscoveryOptions) -> bool:
+    status = row.get("status")
+    status_data = status if isinstance(status, dict) else {}
+    seeders = _coerce_int(status_data.get("seeders")) or 0
+    leechers = _coerce_int(status_data.get("leechers")) or 0
+    times_completed = _coerce_int(status_data.get("timesCompleted")) or 0
+    if seeders < options.min_seeders:
+        return False
+    if options.max_seeders is not None and seeders > options.max_seeders:
+        return False
+    if leechers < options.min_leechers:
+        return False
+    if times_completed < options.min_times_completed:
+        return False
+    return True
+
+
+def _normalize_discount_label(value: Any) -> Discount:
+    text = str(value or "").strip().lower()
+    if text in {"free", "freeleech"}:
+        return Discount.FREE
+    if text in {"2xfree", "two_x_free"}:
+        return Discount.TWO_X_FREE
+    if text in {"50%", "half"}:
+        return Discount.HALF
+    if text in {"2x50%", "two_x_half"}:
+        return Discount.TWO_X_HALF
+    return Discount.NORMAL
+
+
+def _parse_api_datetime(value: Any) -> datetime | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        dt = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=UTC)
+    return dt
