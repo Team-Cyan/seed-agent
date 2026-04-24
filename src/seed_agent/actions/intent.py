@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from seed_agent.actions.qb import enqueue_candidates
-from seed_agent.config import IntentConfig, SearchConfig
+from seed_agent.config import CategoryPolicyConfig, IntentConfig, SearchConfig
 from seed_agent.downloaders.base import Downloader
 from seed_agent.intent.parse import parse_resource_intent
 from seed_agent.models import (
@@ -142,9 +142,10 @@ async def enqueue_intent(
     intent_id: str,
     store: StateStore,
     downloader: Downloader,
-    category: str,
-    tags: Iterable[str],
+    policy: CategoryPolicyConfig,
     execute: bool,
+    *,
+    paused: bool = False,
 ) -> tuple[ResourceIntent, RankedRelease, list[Decision]]:
     intent, selected_release_id = _load_intent_with_selected(store, intent_id)
     ranked = _enqueueable_release(
@@ -155,9 +156,9 @@ async def enqueue_intent(
     decisions = await enqueue_candidates(
         [_score_breakdown_from_ranked(ranked)],
         downloader,
-        category,
-        list(tags),
+        policy,
         execute,
+        paused=paused,
     )
     updated = intent
     if execute and any(decision.action == "qb.enqueue" for decision in decisions):
@@ -171,16 +172,16 @@ async def enqueue_intent(
 
 
 async def run_intent_once(
-    *,
     inbox_path: Path | None,
     store: StateStore,
     providers: Iterable[SearchProvider],
     intent_config: IntentConfig,
     search_config: SearchConfig,
     downloader: Downloader,
-    category: str,
-    tags: Iterable[str],
+    policy: CategoryPolicyConfig,
     execute: bool,
+    *,
+    paused: bool = False,
 ) -> IntentRunResult:
     ingested_pairs = ingest_inbox(inbox_path, store) if inbox_path is not None else []
     ingested = [item[0] for item in ingested_pairs]
@@ -189,8 +190,6 @@ async def run_intent_once(
     ranked_releases: list[RankedRelease] = []
     enqueue_selected: list[RankedRelease] = []
     provider_list = list(providers)
-    tags_list = list(tags)
-
     for intent in ingested:
         searched_intent, _, search_decision = await search_intent(
             intent.intent_id,
@@ -214,9 +213,9 @@ async def run_intent_once(
                 intent.intent_id,
                 store,
                 downloader,
-                category,
-                tags_list,
+                policy,
                 execute,
+                paused=paused,
             )
             enqueue_selected.append(selected)
             decisions.extend(enqueue_decisions)

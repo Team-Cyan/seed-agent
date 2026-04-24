@@ -37,8 +37,17 @@ scoring:
 downloader:
   type: qbittorrent
   target: unraid-qb
-  category: pt-auto
-  tags: ["seed-agent", "pt-auto"]
+  default_category: seed
+  category_policies:
+    - name: seed
+      mode: mutable
+      budget_pool: downloads
+      delete_enabled: true
+      over_budget_behavior: add_paused
+      tags: ["seed-agent", "seed"]
+  budget_pools:
+    - name: downloads
+      max_size_tib: 10
   secret_ref: null
 cleanup:
   cold_after_days: 7
@@ -91,9 +100,14 @@ class _DummyDownloader:
     def __init__(self) -> None:
         self.calls: list[tuple[str, str, list[str]]] = []
 
-    async def add_url(self, url: str, category: str, tags: list[str]) -> str | None:
+    async def add_url(
+        self, url: str, category: str, tags: list[str], *, paused: bool = False
+    ) -> str | None:
         self.calls.append((url, category, tags))
         return "0123456789abcdef0123456789abcdef01234567"
+
+    async def list_torrents(self, category: str | None = None, tags: set[str] | None = None):
+        return []
 
 
 def test_intent_enqueue_dry_run_does_not_touch_downloader_or_state(
@@ -161,8 +175,8 @@ def test_intent_enqueue_execute_uses_confirmed_release_and_updates_state(
     assert downloader.calls == [
         (
             ranked.release.download_url,
-            "pt-auto",
-            ["seed-agent", "pt-auto"],
+            "seed",
+            ["seed-agent", "seed"],
         )
     ]
     row = store.get_intent(intent.intent_id)
