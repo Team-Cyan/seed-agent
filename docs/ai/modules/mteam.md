@@ -17,8 +17,9 @@ Implemented today:
 
 - RSS candidate parsing for M-Team feed shape
 - `x-api-key` detail enrichment
-- `genDlToken` viability confirmed outside tests
-- `site-probe` visibility for authenticated M-Team access
+- API-driven discovery with FREE filtering and activity-based sorting
+- `genDlToken`-backed download URL generation for API-discovered candidates
+- `site-probe` visibility for authenticated M-Team access and discovery mode
 
 Current preferred auth:
 
@@ -36,8 +37,8 @@ Current fallback still present in code:
 
 ## Desired Future State
 
-- API-driven discovery for FREE filtering and activity-based sorting
-- RSS retained as a secondary path
+- keep API discovery as the preferred M-Team path,
+- retain RSS as a tested fallback and reusable adapter.
 
 ## Verification
 

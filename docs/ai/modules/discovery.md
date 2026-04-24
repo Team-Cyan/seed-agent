@@ -14,6 +14,7 @@ Turn external site-specific list sources into `TorrentCandidate` objects.
 ## Current Responsibilities
 
 - fetch RSS feeds,
+- fetch M-Team API-discovered candidates when configured,
 - parse site-specific candidate fields,
 - support M-Team detail enrichment,
 - hand discovered candidates to scoring and search flows.
@@ -34,4 +35,5 @@ Turn external site-specific list sources into `TorrentCandidate` objects.
 ## Near-Term Work
 
 - keep RSS solid,
-- add M-Team API-driven discovery without removing RSS.
+- prefer `discovery_mode: api` for M-Team when `api_key_ref` is available,
+- keep `TorrentCandidate` as the stable boundary between discovery and scoring.
