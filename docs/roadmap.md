@@ -58,6 +58,11 @@ Reference:
 
 - ingest richer qB runtime state for better ROI decisions
 - improve visibility into active upload/download conditions before enqueue
+- replace the single managed-category assumption with per-category policy and logical budget control
+
+Reference:
+
+- `docs/specs/2026-04-25-qb-category-policy-budgeting.md`
 
 ## Later
 

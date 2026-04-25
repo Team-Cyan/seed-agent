@@ -748,6 +748,72 @@ def test_execute_commands_fail_when_downloader_secret_missing(
         assert "passkey" not in result.output
 
 
+def test_build_downloader_resolves_repo_relative_secret_for_config_dir_named_config(
+    tmp_path: Path,
+) -> None:
+    from seed_agent.cli import build_downloader
+    from seed_agent.config import load_config
+
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    secret_dir = tmp_path / "local" / "secrets"
+    secret_dir.mkdir(parents=True)
+
+    config_path = config_dir / "example.yaml"
+    config_path.write_text(
+        """
+mode: balanced
+sites:
+  - name: demo-free
+    type: nexusphp
+    enabled: true
+    rss_url: https://tracker.example/rss.php
+    cookie_ref: null
+discovery:
+  discounts: ["free", "2xfree"]
+  min_left_time_minutes: 120
+  min_leechers: 8
+  max_seeders: 80
+  allow_hr: false
+scoring:
+  min_score_to_enqueue: 70
+  weights:
+    discount: 30
+    leechers: 25
+    seeders: 15
+    left_time: 15
+    size: 10
+    site_history: 5
+downloader:
+  type: qbittorrent
+  target: unraid-qb
+  category: pt-auto
+  tags: ["seed-agent", "pt-auto"]
+  secret_ref: local/secrets/qb.yaml
+cleanup:
+  cold_after_days: 7
+  min_upload_delta_gb: 1
+  protect_hr: true
+  protect_manual: true
+  protect_media_library: true
+  pause_before_delete_hours: 24
+""",
+        encoding="utf-8",
+    )
+    (secret_dir / "qb.yaml").write_text(
+        "base_url: http://qb.local:8080\nusername: alice\npassword: secret\n",
+        encoding="utf-8",
+    )
+
+    config = load_config(config_path)
+
+    downloader = build_downloader(config)
+
+    assert downloader.base_url == "http://qb.local:8080"
+    assert downloader.username == "alice"
+    assert downloader.password == "secret"
+
+
 def test_run_once_invoke_with_execute_flag(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     from seed_agent import cli
 

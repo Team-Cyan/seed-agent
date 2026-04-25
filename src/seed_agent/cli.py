@@ -969,7 +969,8 @@ class _NullDownloader:
 def _resolve_path(path_value: str, config_dir: Path | None) -> Path | None:
     path = Path(path_value)
     if not path.is_absolute() and config_dir is not None:
-        path = config_dir / path
+        base_dir = config_dir.parent if config_dir.name == "config" else config_dir
+        path = base_dir / path
     try:
         return path.resolve()
     except OSError:
