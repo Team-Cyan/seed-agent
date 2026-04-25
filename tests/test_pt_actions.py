@@ -329,6 +329,79 @@ async def test_discover_candidates_reads_api_key_ref(tmp_path: Path, monkeypatch
     assert seen == ["secret-api-key"]
 
 
+@pytest.mark.asyncio
+async def test_discover_candidates_uses_mteam_api_mode_when_configured(tmp_path: Path, monkeypatch) -> None:
+    from seed_agent.actions import pt as pt_actions
+
+    api_key_path = tmp_path / "mt.api-key"
+    api_key_path.write_text("secret-api-key\n", encoding="utf-8")
+
+    config = SeedAgentConfig(
+        **{
+            **_config().model_dump(),
+            "sites": [
+                {
+                    "name": "mt",
+                    "type": "mteam",
+                    "enabled": True,
+                    "rss_url": "https://rss.m-team.cc/api/rss/fetch?dl=1",
+                    "api_key_ref": str(api_key_path),
+                    "discovery_mode": "api",
+                    "api_discovery": {
+                        "mode": "adult",
+                        "only_free": True,
+                        "sort_field": "downloads",
+                        "sort_order": "desc",
+                        "page_size": 50,
+                        "min_seeders": 0,
+                        "max_seeders": 200,
+                        "min_leechers": 0,
+                        "min_times_completed": 0,
+                    },
+                }
+            ],
+        }
+    )
+
+    called: list[tuple[str, str, str | None, str]] = []
+
+    async def fake_fetch_api_candidates(*, site: str, api_key: str, options, cookie: str | None = None):
+        called.append((site, api_key, cookie, options.sort_field))
+        return [_candidate(site=site, metadata={"mteam_discovery_mode": "api"})]
+
+    monkeypatch.setattr(pt_actions, "fetch_mteam_api_candidates", fake_fetch_api_candidates)
+
+    candidates = await pt_actions.discover_candidates(config)
+
+    assert called == [("mt", "secret-api-key", None, "downloads")]
+    assert candidates[0].metadata["mteam_discovery_mode"] == "api"
+
+
+@pytest.mark.asyncio
+async def test_discover_candidates_keeps_rss_mode_for_non_api_sites(monkeypatch) -> None:
+    from seed_agent.actions import pt as pt_actions
+
+    rss_calls: list[str] = []
+
+    async def fake_fetch_rss_candidates(
+        url: str,
+        site: str,
+        cookie: str | None = None,
+        api_key: str | None = None,
+        *,
+        site_type: str = "nexusphp",
+    ):
+        rss_calls.append(site)
+        return [_candidate(site=site)]
+
+    monkeypatch.setattr(pt_actions, "fetch_rss_candidates", fake_fetch_rss_candidates)
+
+    candidates = await pt_actions.discover_candidates(_config())
+
+    assert rss_calls == ["demo-free"]
+    assert candidates[0].site == "demo-free"
+
+
 def test_daily_report_returns_stable_counts() -> None:
     from seed_agent.actions.pt import daily_report
 

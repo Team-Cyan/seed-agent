@@ -36,23 +36,14 @@ This file tracks the current project status at a level that is easy for both hum
 - M-Team RSS parsing
 - M-Team `x-api-key` detail enrichment
 - real-world confirmation that `genDlToken` and `torrent/detail` work with the laboratory access token
-- `site-probe` reporting for authenticated M-Team access
+- M-Team API-driven discovery with FREE filtering and activity-based sorting
+- `site-probe` reporting for authenticated M-Team access and discovery mode
 
 ## In Progress
 
 - Codex project initialization and harness-oriented AI docs
 
 ## Next
-
-### M-Team API-Driven Discovery
-
-- add API-driven discovery for M-Team
-- support FREE filtering and activity-based sorting
-- keep RSS intact as fallback and reusable adapter logic
-
-Reference:
-
-- `docs/specs/2026-04-24-mteam-api-driven-discovery.md`
 
 ### qBittorrent Live-State-Grounded Strategy
 

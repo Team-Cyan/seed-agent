@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import json
 
 import httpx
 import pytest
@@ -10,9 +11,11 @@ import respx
 
 from seed_agent.models import TorrentCandidate
 from seed_agent.sites.mteam import (
+    MTeamApiDiscoveryOptions,
     MTeamApiClient,
     enrich_candidates,
     extract_torrent_id,
+    fetch_api_candidates,
 )
 
 
@@ -41,6 +44,168 @@ def test_extract_torrent_id_from_query_string() -> None:
 
 def test_extract_torrent_id_returns_none_for_unknown_shape() -> None:
     assert extract_torrent_id("https://kp.m-team.cc/browse/adult") is None
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_mteam_api_client_discovers_free_candidates_with_sorting() -> None:
+    search_route = respx.post("https://api.m-team.cc/api/torrent/search").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "code": "0",
+                "data": {
+                    "data": [
+                        {
+                            "id": 1171443,
+                            "name": "Inception 2010 1080p BluRay",
+                            "discount": "FREE",
+                            "size": "1234567890",
+                            "status": {
+                                "seeders": 15,
+                                "leechers": 3,
+                                "timesCompleted": 28,
+                            },
+                            "createdDate": "2026-04-24T01:02:03+00:00",
+                        }
+                    ]
+                },
+            },
+        )
+    )
+    token_route = respx.post("https://api.m-team.cc/api/torrent/genDlToken").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "code": "0",
+                "data": "https://dl.m-team.cc/download.php?id=1171443&passkey=secret",
+            },
+        )
+    )
+
+    client = MTeamApiClient(api_key="secret-api-key")
+    candidates = await client.discover_torrents(
+        site="mt",
+        options=MTeamApiDiscoveryOptions(
+            mode="adult",
+            only_free=True,
+            sort_field="downloads",
+            sort_order="desc",
+            page_size=50,
+            min_seeders=0,
+            max_seeders=200,
+            min_leechers=0,
+            min_times_completed=0,
+        ),
+    )
+
+    assert search_route.called
+    search_request = search_route.calls[0].request
+    assert search_request.headers["x-api-key"] == "secret-api-key"
+    assert json.loads(search_request.content.decode("utf-8")) == {
+        "mode": "adult",
+        "visible": 1,
+        "pageNumber": 1,
+        "pageSize": 50,
+        "sortDirection": "DESC",
+        "sortField": "downloads",
+        "discount": "FREE",
+    }
+    assert token_route.called
+    token_request = token_route.calls[0].request
+    assert token_request.headers["x-api-key"] == "secret-api-key"
+    assert token_request.content.decode("utf-8") == "id=1171443"
+
+    assert len(candidates) == 1
+    candidate = candidates[0]
+    assert candidate.site == "mt"
+    assert candidate.download_url == "https://dl.m-team.cc/download.php?id=1171443&passkey=secret"
+    assert candidate.discount.value == "free"
+    assert candidate.seeders == 15
+    assert candidate.leechers == 3
+    assert candidate.metadata["mteam_discovery_mode"] == "api"
+    assert candidate.metadata["times_completed"] == 28
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_mteam_api_client_filters_out_candidates_below_thresholds() -> None:
+    search_route = respx.post("https://api.m-team.cc/api/torrent/search").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "code": "0",
+                "data": {
+                    "data": [
+                        {
+                            "id": 1,
+                            "name": "Too Cold",
+                            "discount": "FREE",
+                            "size": "1000",
+                            "status": {"seeders": 1, "leechers": 0, "timesCompleted": 0},
+                        }
+                    ]
+                },
+            },
+        )
+    )
+
+    client = MTeamApiClient(api_key="secret-api-key")
+    candidates = await client.discover_torrents(
+        site="mt",
+        options=MTeamApiDiscoveryOptions(
+            mode="adult",
+            only_free=True,
+            sort_field="downloads",
+            sort_order="desc",
+            page_size=50,
+            min_seeders=5,
+            max_seeders=200,
+            min_leechers=1,
+            min_times_completed=1,
+        ),
+    )
+
+    assert search_route.called
+    assert candidates == []
+
+
+@pytest.mark.asyncio
+async def test_fetch_api_candidates_reuses_detail_enrichment() -> None:
+    async def fake_discover(site: str, options: MTeamApiDiscoveryOptions) -> list[TorrentCandidate]:
+        assert site == "mt"
+        assert options.sort_field == "downloads"
+        return [_candidate(metadata={"mteam_discovery_mode": "api"})]
+
+    async def fake_fetch_detail(torrent_id: str) -> dict[str, object] | None:
+        assert torrent_id == "1171443"
+        return {
+            "_auth_mode": "api_key",
+            "size": 9_999,
+            "status": {"seeders": 7, "leechers": 2, "timesCompleted": 11},
+        }
+
+    candidates = await fetch_api_candidates(
+        site="mt",
+        api_key="secret-api-key",
+        options=MTeamApiDiscoveryOptions(
+            mode="adult",
+            only_free=True,
+            sort_field="downloads",
+            sort_order="desc",
+            page_size=50,
+            min_seeders=0,
+            max_seeders=200,
+            min_leechers=0,
+            min_times_completed=0,
+        ),
+        discover=fake_discover,
+        fetch_detail=fake_fetch_detail,
+    )
+
+    assert candidates[0].size_bytes == 9_999
+    assert candidates[0].metadata["mteam_detail_enriched"] is True
+    assert candidates[0].metadata["mteam_discovery_mode"] == "api"
 
 
 @pytest.mark.asyncio

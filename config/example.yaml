@@ -10,8 +10,20 @@ sites:
   #   type: mteam
   #   enabled: false
   #   rss_url: https://rss.m-team.cc/api/rss/fetch?dl=1&pageSize=10&sign=secret
-  #   # Preferred: M-Team laboratory access token for x-api-key detail enrichment.
+  #   # Secret reference only. The token value itself stays in local/secrets/mt.api-key.
   #   api_key_ref: local/secrets/mt.api-key
+  #   discovery_mode: api
+  #   # Versioned strategy config. Keep this block in config, not in secrets.
+  #   api_discovery:
+  #     mode: adult
+  #     only_free: true
+  #     sort_field: downloads
+  #     sort_order: desc
+  #     page_size: 50
+  #     min_seeders: 0
+  #     max_seeders: 200
+  #     min_leechers: 0
+  #     min_times_completed: 0
   #   # Optional compatibility fallback: a logged-in M-Team site cookie.
   #   cookie_ref: local/secrets/mt.cookie
 discovery:
