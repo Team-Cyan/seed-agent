@@ -71,7 +71,7 @@ Later work can add rule import/export, auto-reseed, local HTTP APIs, richer repo
 
 Phase 1 uses `balanced` cleanup by default:
 
-- Managed `pt-auto` torrents may be paused or deleted automatically when rules are explicit.
+- Mutable qB categories such as `seed` may be paused or deleted automatically when rules are explicit.
 - H&R torrents are protected.
 - Manually added torrents are protected.
 - Media-library-associated torrents are protected.
@@ -173,8 +173,31 @@ scoring:
 downloader:
   type: qbittorrent
   target: unraid-qb
-  category: pt-auto
-  tags: ["seed-agent", "pt-auto"]
+  default_category: seed
+  category_policies:
+    - name: seed
+      mode: mutable
+      budget_pool: downloads
+      delete_enabled: true
+      over_budget_behavior: add_paused
+      tags: ["seed-agent", "seed"]
+    - name: movie
+      mode: add_only
+      budget_pool: media
+      delete_enabled: false
+      over_budget_behavior: add_paused
+      tags: ["seed-agent", "movie"]
+    - name: tv
+      mode: add_only
+      budget_pool: media
+      delete_enabled: false
+      over_budget_behavior: add_paused
+      tags: ["seed-agent", "tv"]
+  budget_pools:
+    - name: downloads
+      max_size_tib: 10
+    - name: media
+      max_size_tib: 10
 
 cleanup:
   cold_after_days: 7
@@ -199,6 +222,8 @@ search:
   prefer_free: true
   reject_hr_by_default: true
 ```
+
+Budget pools are logical qB budgets computed from torrent `size`, not from NAS share inspection. If a budget pool is already over limit, `seed-agent` can still add new torrents to qB in a paused state. Mutable categories may evict lower-value torrents automatically; add-only categories never auto-delete.
 
 ## AI Operating Notes
 

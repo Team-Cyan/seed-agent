@@ -58,7 +58,14 @@ class QbittorrentClient:
         self._ensure_success(response, f"qBittorrent request to {path}")
         return response
 
-    async def add_url(self, url: str, category: str, tags: list[str]) -> str | None:
+    async def add_url(
+        self,
+        url: str,
+        category: str,
+        tags: list[str],
+        *,
+        paused: bool = False,
+    ) -> str | None:
         async with self._client() as client:
             response = await self._post_form(
                 client,
@@ -67,6 +74,7 @@ class QbittorrentClient:
                     "urls": url,
                     "category": category,
                     "tags": ",".join(tags),
+                    "stopped": "true" if paused else "false",
                 },
             )
             return _extract_add_hash(response)

@@ -38,8 +38,17 @@ scoring:
 downloader:
   type: qbittorrent
   target: unraid-qb
-  category: pt-auto
-  tags: ["seed-agent", "pt-auto"]
+  default_category: seed
+  category_policies:
+    - name: seed
+      mode: mutable
+      budget_pool: downloads
+      delete_enabled: true
+      over_budget_behavior: add_paused
+      tags: ["seed-agent", "seed"]
+  budget_pools:
+    - name: downloads
+      max_size_tib: 10
   secret_ref: null
 cleanup:
   cold_after_days: 7
@@ -94,7 +103,9 @@ class _DummyDownloader:
     def __init__(self) -> None:
         self.calls: list[str] = []
 
-    async def add_url(self, url: str, category: str, tags: list[str]) -> str | None:
+    async def add_url(
+        self, url: str, category: str, tags: list[str], *, paused: bool = False
+    ) -> str | None:
         self.calls.append(url)
         return "0123456789abcdef0123456789abcdef01234567"
 

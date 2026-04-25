@@ -51,8 +51,29 @@ def _config(secret_ref: str | None = None) -> SeedAgentConfig:
         downloader={
             "type": "qbittorrent",
             "target": "unraid-qb",
-            "category": "pt-auto",
-            "tags": ["seed-agent", "pt-auto"],
+            "default_category": "seed",
+            "category_policies": [
+                {
+                    "name": "seed",
+                    "mode": "mutable",
+                    "budget_pool": "downloads",
+                    "delete_enabled": True,
+                    "over_budget_behavior": "add_paused",
+                    "tags": ["seed-agent", "seed"],
+                },
+                {
+                    "name": "movie",
+                    "mode": "add_only",
+                    "budget_pool": "media",
+                    "delete_enabled": False,
+                    "over_budget_behavior": "add_paused",
+                    "tags": ["seed-agent", "movie"],
+                },
+            ],
+            "budget_pools": [
+                {"name": "downloads", "max_size_tib": 10},
+                {"name": "media", "max_size_tib": 10},
+            ],
             "secret_ref": secret_ref,
         },
         cleanup={
@@ -101,8 +122,8 @@ def _managed_torrent(**overrides: object) -> ManagedTorrent:
     data: dict[str, object] = {
         "hash": "abcd1234",
         "name": "Managed Torrent",
-        "category": "pt-auto",
-        "tags": {"seed-agent", "pt-auto"},
+        "category": "seed",
+        "tags": {"seed-agent", "seed"},
         "state": "uploading",
         "size_bytes": 10 * 1024 * 1024 * 1024,
         "uploaded_bytes": 512 * 1024 * 1024,
@@ -147,8 +168,25 @@ scoring:
 downloader:
   type: qbittorrent
   target: unraid-qb
-  category: pt-auto
-  tags: ["seed-agent", "pt-auto"]
+  default_category: seed
+  category_policies:
+    - name: seed
+      mode: mutable
+      budget_pool: downloads
+      delete_enabled: true
+      over_budget_behavior: add_paused
+      tags: ["seed-agent", "seed"]
+    - name: movie
+      mode: add_only
+      budget_pool: media
+      delete_enabled: false
+      over_budget_behavior: add_paused
+      tags: ["seed-agent", "movie"]
+  budget_pools:
+    - name: downloads
+      max_size_tib: 10
+    - name: media
+      max_size_tib: 10
   secret_ref: {secret_line}
 cleanup:
   cold_after_days: 7
@@ -302,7 +340,7 @@ def test_mutating_dry_run_does_not_require_qb_secret_or_real_downloader(
     def fake_score_candidates(candidates, discovery_config, scoring_config):
         return [_scored()]
 
-    async def fake_enqueue_candidates(scored, downloader, category, tags, execute):
+    async def fake_enqueue_candidates(scored, downloader, policy, execute, paused=False):
         assert execute is False
         return [
             Decision(
@@ -723,8 +761,9 @@ def test_run_once_invoke_with_execute_flag(monkeypatch: pytest.MonkeyPatch, tmp_
     def fake_score_candidates(candidates, discovery_config, scoring_config):
         return [_scored()]
 
-    async def fake_enqueue_candidates(scored, downloader, category, tags, execute):
+    async def fake_enqueue_candidates(scored, downloader, policy, execute, paused=False):
         assert execute is True
+        assert policy.name == "seed"
         return [
             Decision(
                 action="qb.enqueue",
@@ -736,7 +775,9 @@ def test_run_once_invoke_with_execute_flag(monkeypatch: pytest.MonkeyPatch, tmp_
         ]
 
     class FakeDownloader:
-        async def add_url(self, url: str, category: str, tags: list[str]) -> str | None:
+        async def add_url(
+            self, url: str, category: str, tags: list[str], *, paused: bool = False
+        ) -> str | None:
             return "0123456789abcdef0123456789abcdef01234567"
 
         async def list_torrents(self, category: str | None = None, tags: set[str] | None = None):

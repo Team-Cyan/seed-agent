@@ -46,8 +46,35 @@ def _valid_config_data(secret_ref: str) -> dict[str, object]:
         "downloader": {
             "type": "qbittorrent",
             "target": "unraid-qb",
-            "category": "pt-auto",
-            "tags": ["seed-agent", "pt-auto"],
+            "default_category": "seed",
+            "category_policies": [
+                {
+                    "name": "seed",
+                    "mode": "mutable",
+                    "budget_pool": "downloads",
+                    "delete_enabled": True,
+                    "over_budget_behavior": "add_paused",
+                    "tags": ["seed-agent", "seed"],
+                },
+                {
+                    "name": "movie",
+                    "mode": "add_only",
+                    "budget_pool": "media",
+                    "delete_enabled": False,
+                    "over_budget_behavior": "add_paused",
+                    "tags": ["seed-agent", "movie"],
+                },
+            ],
+            "budget_pools": [
+                {
+                    "name": "downloads",
+                    "max_size_tib": 10,
+                },
+                {
+                    "name": "media",
+                    "max_size_tib": 10,
+                },
+            ],
             "secret_ref": secret_ref,
         },
         "cleanup": {
@@ -97,8 +124,25 @@ scoring:
 downloader:
   type: qbittorrent
   target: unraid-qb
-  category: pt-auto
-  tags: ["seed-agent", "pt-auto"]
+  default_category: seed
+  category_policies:
+    - name: seed
+      mode: mutable
+      budget_pool: downloads
+      delete_enabled: true
+      over_budget_behavior: add_paused
+      tags: ["seed-agent", "seed"]
+    - name: movie
+      mode: add_only
+      budget_pool: media
+      delete_enabled: false
+      over_budget_behavior: add_paused
+      tags: ["seed-agent", "movie"]
+  budget_pools:
+    - name: downloads
+      max_size_tib: 10
+    - name: media
+      max_size_tib: 10
   secret_ref: {secret_path.as_posix()}
 cleanup:
   cold_after_days: 7
@@ -117,8 +161,77 @@ cleanup:
     assert len(config.enabled_sites) == 1
     assert config.enabled_sites[0].name == "demo-free"
     assert config.downloader.secret_ref == secret_path.as_posix()
+    assert config.downloader.default_category == "seed"
+    assert [policy.name for policy in config.downloader.category_policies] == ["seed", "movie"]
+    assert [pool.name for pool in config.downloader.budget_pools] == ["downloads", "media"]
     assert config.config_dir == config_path.parent.resolve()
     assert "config_dir" not in config.model_dump()
+
+
+def test_load_config_supports_category_policies_and_budget_pools(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+mode: balanced
+sites:
+  - name: demo
+    type: nexusphp
+    enabled: true
+    rss_url: https://tracker.example/rss.php
+discovery:
+  discounts: ["free"]
+  min_left_time_minutes: 120
+  min_leechers: 8
+  max_seeders: 80
+  allow_hr: false
+scoring:
+  min_score_to_enqueue: 70
+  weights:
+    discount: 30
+    leechers: 25
+    seeders: 15
+    left_time: 15
+    size: 10
+    site_history: 5
+downloader:
+  type: qbittorrent
+  target: unraid-qb
+  default_category: seed
+  secret_ref: local/secrets/qbittorrent.yaml
+  category_policies:
+    - name: seed
+      mode: mutable
+      budget_pool: downloads
+      delete_enabled: true
+      over_budget_behavior: add_paused
+      tags: ["seed-agent", "seed"]
+    - name: movie
+      mode: add_only
+      budget_pool: media
+      delete_enabled: false
+      over_budget_behavior: add_paused
+      tags: ["seed-agent", "movie"]
+  budget_pools:
+    - name: downloads
+      max_size_tib: 10
+    - name: media
+      max_size_tib: 10
+cleanup:
+  cold_after_days: 7
+  min_upload_delta_gb: 1
+  protect_hr: true
+  protect_manual: true
+  protect_media_library: true
+  pause_before_delete_hours: 24
+""",
+        encoding="utf-8",
+    )
+
+    config = load_config(config_path)
+
+    assert config.downloader.default_category == "seed"
+    assert [policy.name for policy in config.downloader.category_policies] == ["seed", "movie"]
+    assert [pool.name for pool in config.downloader.budget_pools] == ["downloads", "media"]
 
 
 def test_unknown_config_key_raises_validation_error() -> None:

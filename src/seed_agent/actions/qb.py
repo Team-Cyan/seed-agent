@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 
-from seed_agent.config import CleanupConfig
+from seed_agent.config import CategoryPolicyConfig, CleanupConfig
 from seed_agent.downloaders.base import Downloader
 from seed_agent.models import Decision, ManagedTorrent, ScoreBreakdown
 from seed_agent.policies.cleanup import CleanupDecision, classify_cleanup
@@ -19,12 +19,13 @@ class MutationBatchError(RuntimeError):
 async def enqueue_candidates(
     scored: Sequence[ScoreBreakdown] | Iterable[ScoreBreakdown],
     downloader: Downloader,
-    category: str,
-    tags: Sequence[str],
+    policy: CategoryPolicyConfig,
     execute: bool,
+    *,
+    paused: bool = False,
 ) -> list[Decision]:
     decisions: list[Decision] = []
-    tags_list = list(tags)
+    tags_list = list(policy.tags)
 
     for item in scored:
         if not item.accepted:
@@ -36,8 +37,9 @@ async def enqueue_candidates(
             "candidate_id": item.candidate_id,
             "candidate_title": candidate.title,
             "download_url": candidate.download_url,
-            "category": category,
+            "category": policy.name,
             "tags": tags_list,
+            "paused": paused,
             "score": item.score,
             "reasons": list(item.reasons),
         }
@@ -45,7 +47,12 @@ async def enqueue_candidates(
         torrent_hash = None
         if execute:
             try:
-                torrent_hash = await downloader.add_url(candidate.download_url, category, tags_list)
+                torrent_hash = await downloader.add_url(
+                    candidate.download_url,
+                    policy.name,
+                    tags_list,
+                    paused=paused,
+                )
             except Exception as exc:
                 decisions.append(
                     Decision(
@@ -88,15 +95,34 @@ async def prune_cold_torrents(
     torrents: Sequence[ManagedTorrent] | Iterable[ManagedTorrent],
     downloader: Downloader,
     cleanup: CleanupConfig,
-    managed_category: str,
-    managed_tags: Sequence[str] | set[str],
+    policy: CategoryPolicyConfig,
     execute: bool,
 ) -> list[Decision]:
+    if policy.mode != "mutable" or not policy.delete_enabled:
+        return [
+            Decision(
+                action="qb.cleanup.protect",
+                target_id=torrent.hash,
+                execute=execute,
+                reason=(
+                    f"cleanup protect: category {policy.name} is add_only or delete-disabled"
+                ),
+                old_state=torrent.model_dump(mode="json"),
+                new_state={
+                    "torrent_hash": torrent.hash,
+                    "cleanup_action": "protect",
+                    "managed": False,
+                    "protected": True,
+                },
+            )
+            for torrent in torrents
+        ]
+
     decisions: list[Decision] = []
-    tags = set(managed_tags)
+    tags = set(policy.tags)
 
     for torrent in torrents:
-        classification = classify_cleanup(torrent, cleanup, managed_category, tags)
+        classification = classify_cleanup(torrent, cleanup, policy.name, tags)
         decision = _decision_for_cleanup(torrent, classification, execute)
 
         if not execute:

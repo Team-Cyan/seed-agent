@@ -16,8 +16,31 @@ Example:
 downloader:
   type: qbittorrent
   target: unraid-qb
-  category: pt-auto
-  tags: [seed-agent, pt-auto]
+  default_category: seed
+  category_policies:
+    - name: seed
+      mode: mutable
+      budget_pool: downloads
+      delete_enabled: true
+      over_budget_behavior: add_paused
+      tags: [seed-agent, seed]
+    - name: movie
+      mode: add_only
+      budget_pool: media
+      delete_enabled: false
+      over_budget_behavior: add_paused
+      tags: [seed-agent, movie]
+    - name: tv
+      mode: add_only
+      budget_pool: media
+      delete_enabled: false
+      over_budget_behavior: add_paused
+      tags: [seed-agent, tv]
+  budget_pools:
+    - name: downloads
+      max_size_tib: 10
+    - name: media
+      max_size_tib: 10
   secret_ref: local/secrets/qbittorrent.yaml
 ```
 
@@ -47,8 +70,9 @@ Use the dry-run output to confirm:
 
 - candidate filtering looks sane,
 - scoring matches your expectations,
-- managed torrents are the only ones being considered for cleanup,
-- category and tag assignment are what you want for new downloads.
+- mutable-category torrents are the only ones being considered for cleanup,
+- default category and tag assignment are what you want for new downloads,
+- shared budget pools reflect your intended logical capacity boundaries.
 
 ## Execute Flow
 
@@ -81,8 +105,15 @@ jq -c '.' .seed-agent/audit.jsonl | tail -n 20
 
 ## Safety Notes
 
-- Managed `pt-auto` torrents are the only ones eligible for Phase 1 cleanup decisions.
+- Only mutable configured categories such as `seed` are eligible for automatic cleanup decisions.
 - Keep H&R, manual, media-library-associated, and unknown-origin torrents protected.
 - Treat category and tag management as part of the safety boundary, not cosmetic metadata.
 - Do not delete unmanaged torrents.
 - Do not remove or rewrite audit history.
+
+## Budget Notes
+
+- Budget pools are logical qB budgets computed from torrent `size`, not from NAS share inspection.
+- A pool may be shared by multiple categories, such as `movie` and `tv` sharing `media`.
+- If a pool is already over budget, new torrents may still be added to qB in a paused state.
+- Add-only categories may exceed budget, but they never trigger automatic delete.

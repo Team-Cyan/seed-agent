@@ -32,8 +32,31 @@ scoring:
 downloader:
   type: qbittorrent
   target: unraid-qb
-  category: pt-auto
-  tags: [seed-agent, pt-auto]
+  default_category: seed
+  category_policies:
+    - name: seed
+      mode: mutable
+      budget_pool: downloads
+      delete_enabled: true
+      over_budget_behavior: add_paused
+      tags: [seed-agent, seed]
+    - name: movie
+      mode: add_only
+      budget_pool: media
+      delete_enabled: false
+      over_budget_behavior: add_paused
+      tags: [seed-agent, movie]
+    - name: tv
+      mode: add_only
+      budget_pool: media
+      delete_enabled: false
+      over_budget_behavior: add_paused
+      tags: [seed-agent, tv]
+  budget_pools:
+    - name: downloads
+      max_size_tib: 10
+    - name: media
+      max_size_tib: 10
   secret_ref: local/secrets/qbittorrent.yaml
 cleanup:
   cold_after_days: 7

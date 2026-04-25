@@ -39,8 +39,23 @@ def _valid_config_data(secret_ref: str) -> dict[str, object]:
         "downloader": {
             "type": "qbittorrent",
             "target": "unraid-qb",
-            "category": "pt-auto",
-            "tags": ["seed-agent", "pt-auto"],
+            "default_category": "seed",
+            "category_policies": [
+                {
+                    "name": "seed",
+                    "mode": "mutable",
+                    "budget_pool": "downloads",
+                    "delete_enabled": True,
+                    "over_budget_behavior": "add_paused",
+                    "tags": ["seed-agent", "seed"],
+                }
+            ],
+            "budget_pools": [
+                {
+                    "name": "downloads",
+                    "max_size_tib": 10,
+                }
+            ],
             "secret_ref": secret_ref,
         },
         "cleanup": {
@@ -143,8 +158,17 @@ scoring:
 downloader:
   type: qbittorrent
   target: unraid-qb
-  category: pt-auto
-  tags: ["seed-agent", "pt-auto"]
+  default_category: seed
+  category_policies:
+    - name: seed
+      mode: mutable
+      budget_pool: downloads
+      delete_enabled: true
+      over_budget_behavior: add_paused
+      tags: ["seed-agent", "seed"]
+  budget_pools:
+    - name: downloads
+      max_size_tib: 10
   secret_ref: local/secrets/qbittorrent.yaml
 cleanup:
   cold_after_days: 7
@@ -188,6 +212,14 @@ sources:
     assert config.intent.default_resolution == "1080p"
     assert config.search.site_priority["demo-free"] == 10
     assert config.sources.subscription.rules_ref == "config/subscriptions.yaml"
+    assert config.downloader.default_category == "seed"
+
+
+def test_phase2_config_accepts_category_policy_downloader_shape() -> None:
+    config = SeedAgentConfig(**_phase2_data())
+
+    assert config.downloader.default_category == "seed"
+    assert config.downloader.category_policies[0].budget_pool == "downloads"
 
 
 def test_phase2_config_rejects_unknown_intent_key() -> None:

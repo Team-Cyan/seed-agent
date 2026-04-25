@@ -43,8 +43,18 @@ def _config(secret_ref: str | None = None) -> SeedAgentConfig:
         downloader={
             "type": "qbittorrent",
             "target": "unraid-qb",
-            "category": "pt-auto",
-            "tags": ["seed-agent", "pt-auto"],
+            "default_category": "seed",
+            "category_policies": [
+                {
+                    "name": "seed",
+                    "mode": "mutable",
+                    "budget_pool": "downloads",
+                    "delete_enabled": True,
+                    "over_budget_behavior": "add_paused",
+                    "tags": ["seed-agent", "seed"],
+                }
+            ],
+            "budget_pools": [{"name": "downloads", "max_size_tib": 10}],
             "secret_ref": secret_ref,
         },
         cleanup={
@@ -118,8 +128,17 @@ scoring:
 downloader:
   type: qbittorrent
   target: unraid-qb
-  category: pt-auto
-  tags: ["seed-agent", "pt-auto"]
+  default_category: seed
+  category_policies:
+    - name: seed
+      mode: mutable
+      budget_pool: downloads
+      delete_enabled: true
+      over_budget_behavior: add_paused
+      tags: ["seed-agent", "seed"]
+  budget_pools:
+    - name: downloads
+      max_size_tib: 10
   secret_ref: {secret_line}
 cleanup:
   cold_after_days: 7
@@ -170,8 +189,9 @@ def test_run_once_dry_run_updates_state_and_redacts_audit(
     def fake_score_candidates(candidates, discovery_config, scoring_config):
         return [_scored()]
 
-    async def fake_enqueue_candidates(scored, downloader, category, tags, execute):
+    async def fake_enqueue_candidates(scored, downloader, policy, execute, paused=False):
         assert execute is False
+        assert policy.name == "seed"
         return [
             Decision(
                 action="qb.enqueue",
@@ -238,7 +258,9 @@ def test_run_once_execute_reads_secret_and_preserves_state_monotonically(
         def __init__(self, base_url: str, username: str, password: str) -> None:
             qb_calls.append((base_url, username, password))
 
-        async def add_url(self, url: str, category: str, tags: list[str]) -> str | None:
+        async def add_url(
+            self, url: str, category: str, tags: list[str], *, paused: bool = False
+        ) -> str | None:
             return "0123456789abcdef0123456789abcdef01234567"
 
         async def list_torrents(self, category: str | None = None, tags: set[str] | None = None):
@@ -324,7 +346,9 @@ def test_run_once_execute_marks_enqueued_without_hash_and_preserves_it_on_dry_ru
         return [_scored()]
 
     class FakeDownloader:
-        async def add_url(self, url: str, category: str, tags: list[str]) -> str | None:
+        async def add_url(
+            self, url: str, category: str, tags: list[str], *, paused: bool = False
+        ) -> str | None:
             return None
 
         async def list_torrents(self, category: str | None = None, tags: set[str] | None = None):
@@ -391,7 +415,9 @@ def test_run_once_execute_failure_persists_prior_state_and_audit(
         def __init__(self) -> None:
             self.calls: list[str] = []
 
-        async def add_url(self, url: str, category: str, tags: list[str]) -> str | None:
+        async def add_url(
+            self, url: str, category: str, tags: list[str], *, paused: bool = False
+        ) -> str | None:
             self.calls.append(url)
             if len(self.calls) == 2:
                 raise RuntimeError("add failed")

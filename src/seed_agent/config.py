@@ -82,9 +82,55 @@ class DownloaderConfig(BaseModel):
 
     type: Literal["qbittorrent"]
     target: str
-    category: str
-    tags: list[str] = Field(default_factory=list)
+    default_category: str
+    category_policies: list[CategoryPolicyConfig] = Field(default_factory=list)
+    budget_pools: list[BudgetPoolConfig] = Field(default_factory=list)
     secret_ref: str | None = None
+
+    @model_validator(mode="after")
+    def validate_category_policy_links(self) -> DownloaderConfig:
+        policy_names = [policy.name for policy in self.category_policies]
+        if len(policy_names) != len(set(policy_names)):
+            raise ValueError("category policy names must be unique")
+        pool_names = [pool.name for pool in self.budget_pools]
+        if len(pool_names) != len(set(pool_names)):
+            raise ValueError("budget pool names must be unique")
+        if self.default_category not in set(policy_names):
+            raise ValueError("default_category must match a configured category policy")
+        known_pools = set(pool_names)
+        for policy in self.category_policies:
+            if policy.budget_pool not in known_pools:
+                raise ValueError(
+                    f"category policy {policy.name} references unknown budget pool "
+                    f"{policy.budget_pool}"
+                )
+            if policy.mode == "add_only" and policy.delete_enabled:
+                raise ValueError("add_only category policies cannot enable delete")
+        return self
+
+
+class CategoryPolicyConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    name: str
+    mode: Literal["mutable", "add_only"]
+    budget_pool: str
+    delete_enabled: bool
+    over_budget_behavior: Literal["add_paused"]
+    tags: list[str] = Field(default_factory=list)
+
+
+class BudgetPoolConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    name: str
+    max_size_tib: float
+
+    @model_validator(mode="after")
+    def validate_positive_size(self) -> BudgetPoolConfig:
+        if self.max_size_tib <= 0:
+            raise ValueError("max_size_tib must be > 0")
+        return self
 
 
 class CleanupConfig(BaseModel):
