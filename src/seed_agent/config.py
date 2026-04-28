@@ -156,6 +156,8 @@ class DiscoveryConfig(BaseModel):
     allow_hr: bool = False
     min_seeders: int | None = None
     max_leechers: int | None = None
+    min_size_gb: float | None = None
+    max_size_gb: float | None = None
     preferred_size_min_gb: float | None = None
     preferred_size_max_gb: float | None = None
 
@@ -167,6 +169,33 @@ class DiscoveryConfig(BaseModel):
         if not isinstance(value, list):
             raise ValueError("discounts must be a list")
         return [_normalize_discount(item) for item in value]
+
+    @model_validator(mode="after")
+    def validate_optional_limits(self) -> DiscoveryConfig:
+        for field_name in (
+            "min_seeders",
+            "max_leechers",
+            "min_size_gb",
+            "max_size_gb",
+            "preferred_size_min_gb",
+            "preferred_size_max_gb",
+        ):
+            value = getattr(self, field_name)
+            if value is not None and value < 0:
+                raise ValueError(f"{field_name} must be >= 0")
+        if (
+            self.min_size_gb is not None
+            and self.max_size_gb is not None
+            and self.max_size_gb < self.min_size_gb
+        ):
+            raise ValueError("max_size_gb must be >= min_size_gb")
+        if (
+            self.preferred_size_min_gb is not None
+            and self.preferred_size_max_gb is not None
+            and self.preferred_size_max_gb < self.preferred_size_min_gb
+        ):
+            raise ValueError("preferred_size_max_gb must be >= preferred_size_min_gb")
+        return self
 
 
 class ScoringConfig(BaseModel):

@@ -13,6 +13,10 @@ All notable project changes are tracked here.
   categories, sources, mediums, standards, codecs, teams, processings, labels,
   keyword/IMDB/Douban/DMM fields, date ranges, `hot`, `offer`, and explicit
   discount enums.
+- Discovery scoring now supports hard candidate size bounds through
+  `min_size_gb` and `max_size_gb`, plus configurable soft preferred size ranges.
+- `min_seeders` and `max_leechers` discovery settings now participate in scoring
+  as hard bounds when configured.
 - qBittorrent category policies and logical budget pools, including mutable seed
   categories, add-only media categories, over-budget paused enqueue behavior, and
   pool usage summaries.
@@ -27,6 +31,8 @@ All notable project changes are tracked here.
 - Config files under `config/` resolve `local/secrets/...` against the repository
   root.
 - Local live operation configs matching `config/live-*.yaml` are ignored by git.
+- The example config caps mutable seed candidates at 150 GiB while keeping
+  2-80 GiB as the preferred scoring range and requiring at least one seeder.
 
 ### Fixed
 

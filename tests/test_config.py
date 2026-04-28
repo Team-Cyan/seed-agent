@@ -360,6 +360,18 @@ def test_mteam_api_discovery_rejects_invalid_openapi_filter_limits() -> None:
         SeedAgentConfig(**data)
 
 
+def test_discovery_rejects_invalid_size_limits() -> None:
+    data = _valid_config_data("local/secrets/qb.yaml")
+    data["discovery"] = {
+        **data["discovery"],
+        "min_size_gb": 200,
+        "max_size_gb": 150,
+    }
+
+    with pytest.raises(ValidationError, match="max_size_gb"):
+        SeedAgentConfig(**data)
+
+
 def test_non_mteam_site_rejects_api_discovery_mode() -> None:
     data = _valid_config_data("local/secrets/qb.yaml")
     data["sites"][0] = {

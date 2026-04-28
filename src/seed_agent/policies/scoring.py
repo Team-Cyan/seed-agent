@@ -49,9 +49,10 @@ def score_candidate(
     reasons.append(seeder_component.reason)
     hard_reject = hard_reject or seeder_component.hard_reject
 
-    size_component = _score_size(candidate, scoring)
+    size_component = _score_size(candidate, discovery, scoring)
     total += size_component.score
     reasons.append(size_component.reason)
+    hard_reject = hard_reject or size_component.hard_reject
 
     site_history_component = _score_site_history(candidate, scoring)
     total += site_history_component.score
@@ -132,6 +133,9 @@ def _score_leechers(
     minimum = discovery.min_leechers
     if leechers < minimum:
         return _ComponentScore(0.0, f"leechers {leechers} < min {minimum}", True)
+    maximum = discovery.max_leechers
+    if maximum is not None and leechers > maximum:
+        return _ComponentScore(0.0, f"leechers {leechers} > max {maximum}", True)
     return _ComponentScore(weight, f"leechers {leechers} >= min {minimum}")
 
 
@@ -142,6 +146,9 @@ def _score_seeders(
 ) -> _ComponentScore:
     weight = scoring.weights["seeders"]
     seeders = candidate.seeders
+    minimum = discovery.min_seeders
+    if minimum is not None and seeders < minimum:
+        return _ComponentScore(0.0, f"seeders {seeders} < min {minimum}", True)
     maximum = discovery.max_seeders
     if seeders <= maximum:
         return _ComponentScore(weight, f"seeders {seeders} <= max {maximum}")
@@ -154,14 +161,38 @@ def _score_seeders(
     return _ComponentScore(score, f"seeders {seeders} tapered above max {maximum}")
 
 
-def _score_size(candidate: TorrentCandidate, scoring: ScoringConfig) -> _ComponentScore:
+def _score_size(
+    candidate: TorrentCandidate,
+    discovery: DiscoveryConfig,
+    scoring: ScoringConfig,
+) -> _ComponentScore:
     weight = scoring.weights["size"]
     size_gib = candidate.size_bytes / GIB
-    if 2 <= size_gib <= 80:
+    if discovery.min_size_gb is not None and size_gib < discovery.min_size_gb:
+        return _ComponentScore(
+            0.0,
+            f"size {size_gib:.1f} GiB < min {discovery.min_size_gb:.1f} GiB",
+            True,
+        )
+    if discovery.max_size_gb is not None and size_gib > discovery.max_size_gb:
+        return _ComponentScore(
+            0.0,
+            f"size {size_gib:.1f} GiB > max {discovery.max_size_gb:.1f} GiB",
+            True,
+        )
+
+    preferred_min = discovery.preferred_size_min_gb
+    if preferred_min is None:
+        preferred_min = 2.0
+    preferred_max = discovery.preferred_size_max_gb
+    if preferred_max is None:
+        preferred_max = 80.0
+    partial_max = max(preferred_max, 150.0)
+    if preferred_min <= size_gib <= preferred_max:
         return _ComponentScore(weight, f"size {size_gib:.1f} GiB preferred")
-    if 80 < size_gib <= 150:
+    if preferred_max < size_gib <= partial_max:
         return _ComponentScore(weight * 0.5, f"size {size_gib:.1f} GiB above preferred range")
-    if size_gib < 2:
+    if size_gib < preferred_min:
         return _ComponentScore(0.0, f"size {size_gib:.1f} GiB below preferred range")
     return _ComponentScore(0.0, f"size {size_gib:.1f} GiB above preferred range")
 

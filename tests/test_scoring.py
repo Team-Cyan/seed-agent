@@ -75,6 +75,30 @@ def test_low_leecher_candidate_is_rejected() -> None:
     assert "leechers 7 < min 8" in result.reasons
 
 
+def test_high_leecher_candidate_is_rejected_when_max_configured() -> None:
+    result = score_candidate(
+        make_candidate(leechers=51),
+        discovery(max_leechers=50),
+        scoring(),
+    )
+
+    assert result.accepted is False
+    assert result.score == 0
+    assert "leechers 51 > max 50" in result.reasons
+
+
+def test_low_seeder_candidate_is_rejected_when_min_configured() -> None:
+    result = score_candidate(
+        make_candidate(seeders=0),
+        discovery(min_seeders=1),
+        scoring(),
+    )
+
+    assert result.accepted is False
+    assert result.score == 0
+    assert "seeders 0 < min 1" in result.reasons
+
+
 def test_leecher_minimum_gets_full_contribution() -> None:
     leecher_only = scoring(
         weights={
@@ -164,6 +188,29 @@ def test_size_outside_preferred_range_reduces_size_contribution() -> None:
     assert "size 10.0 GiB preferred" in preferred.reasons
     assert "size 1.0 GiB below preferred range" in small.reasons
     assert "size 100.0 GiB above preferred range" in large.reasons
+
+
+def test_size_hard_max_rejects_oversized_candidate() -> None:
+    result = score_candidate(
+        make_candidate(size_bytes=200 * 1024 * 1024 * 1024),
+        discovery(max_size_gb=150),
+        scoring(),
+    )
+
+    assert result.accepted is False
+    assert result.score == 0
+    assert "size 200.0 GiB > max 150.0 GiB" in result.reasons
+
+
+def test_configured_preferred_size_range_changes_size_contribution() -> None:
+    result = score_candidate(
+        make_candidate(size_bytes=100 * 1024 * 1024 * 1024),
+        discovery(preferred_size_min_gb=10, preferred_size_max_gb=120),
+        scoring(),
+    )
+
+    assert result.accepted is True
+    assert "size 100.0 GiB preferred" in result.reasons
 
 
 def test_normal_discount_not_in_config_is_rejected() -> None:

@@ -42,8 +42,15 @@ sites:
 discovery:
   discounts: [free, 2xfree]
   min_left_time_minutes: 120
+  min_seeders: 1
   min_leechers: 8
   max_seeders: 80
+  # Hard candidate size bounds. Use these to keep giant packs out of mutable seed pools.
+  max_size_gb: 150
+  # Soft scoring preference range. Candidates outside this range lose size points
+  # but are not rejected unless they violate min_size_gb/max_size_gb.
+  preferred_size_min_gb: 2
+  preferred_size_max_gb: 80
   allow_hr: false
 scoring:
   min_score_to_enqueue: 70

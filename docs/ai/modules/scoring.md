@@ -27,6 +27,11 @@ Score discovered torrents or ranked releases using explicit policy weights and e
 - M-Team API candidates may omit discount expiry; if the adapter marks that case,
   scoring gives no left-time points but does not hard-reject an otherwise strong
   current FREE/2xFREE candidate.
+- `discovery.min_size_gb` and `discovery.max_size_gb` are hard candidate size
+  bounds; `preferred_size_min_gb` and `preferred_size_max_gb` only affect the
+  size score contribution.
+- `discovery.min_seeders` and `discovery.max_leechers` are hard bounds when
+  configured; they protect the seed pool from dead or overly crowded candidates.
 
 ## Verification
 
