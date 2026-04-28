@@ -37,7 +37,8 @@ This file tracks the current project status at a level that is easy for both hum
 - M-Team `x-api-key` detail enrichment
 - real-world confirmation that `torrent/detail` works with the laboratory access token
 - deferred `genDlToken` resolution for accepted API candidates during execute-mode enqueue
-- M-Team API-driven discovery with FREE filtering and activity-based sorting
+- M-Team API-driven discovery with native OpenAPI filters, FREE/discount filtering,
+  and activity-based sorting
 - `site-probe` reporting for authenticated M-Team access and discovery mode
 
 ## In Progress

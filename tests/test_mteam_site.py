@@ -166,6 +166,92 @@ async def test_resolve_deferred_download_url_fetches_mteam_token() -> None:
 
 @pytest.mark.asyncio
 @respx.mock
+async def test_mteam_api_client_sends_openapi_search_filters() -> None:
+    route = respx.post("https://api.m-team.cc/api/torrent/search").mock(
+        return_value=httpx.Response(200, json={"code": "0", "data": {"data": []}})
+    )
+
+    client = MTeamApiClient(api_key="secret-api-key")
+    await client.discover_torrents(
+        site="mt",
+        options=MTeamApiDiscoveryOptions(
+            mode="movie",
+            page_number=2,
+            only_free=False,
+            discount="_2X_FREE",
+            sort_field="leechers",
+            sort_order="asc",
+            page_size=100,
+            last_id=123,
+            keyword="inception",
+            categories=[401, 419],
+            imdb="tt1375666",
+            douban="3541415",
+            dmm_code="ABC-123",
+            author=42,
+            sources=[8],
+            mediums=[10],
+            standards=[1, 6],
+            video_codecs=[1, 16],
+            audio_codecs=[6],
+            teams=[9],
+            processings=[2],
+            countries=[1],
+            labels=3,
+            labels_new=["DIY"],
+            visible=1,
+            only_fav=True,
+            offer=False,
+            hot=True,
+            upload_date_start="2026-04-01T00:00:00+00:00",
+            upload_date_end="2026-04-30T00:00:00+00:00",
+            dmm_field="maker",
+            dmm_keyword="demo",
+            min_seeders=0,
+            max_seeders=200,
+            min_leechers=0,
+            min_times_completed=0,
+        ),
+    )
+
+    assert route.called
+    assert json.loads(route.calls[0].request.content.decode("utf-8")) == {
+        "mode": "movie",
+        "visible": 1,
+        "pageNumber": 2,
+        "pageSize": 100,
+        "sortDirection": "ASC",
+        "sortField": "LEECHERS",
+        "lastId": 123,
+        "keyword": "inception",
+        "categories": [401, 419],
+        "imdb": "tt1375666",
+        "douban": "3541415",
+        "dmmCode": "ABC-123",
+        "author": 42,
+        "sources": [8],
+        "mediums": [10],
+        "standards": [1, 6],
+        "videoCodecs": [1, 16],
+        "audioCodecs": [6],
+        "teams": [9],
+        "processings": [2],
+        "countries": [1],
+        "labels": 3,
+        "labelsNew": ["DIY"],
+        "onlyFav": True,
+        "offer": False,
+        "hot": True,
+        "uploadDateStart": "2026-04-01T00:00:00+00:00",
+        "uploadDateEnd": "2026-04-30T00:00:00+00:00",
+        "dmmField": "maker",
+        "dmmKeyword": "demo",
+        "discount": "_2X_FREE",
+    }
+
+
+@pytest.mark.asyncio
+@respx.mock
 async def test_mteam_api_client_marks_missing_discount_expiry() -> None:
     respx.post("https://api.m-team.cc/api/torrent/search").mock(
         return_value=httpx.Response(

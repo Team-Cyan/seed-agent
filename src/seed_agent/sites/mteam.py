@@ -11,7 +11,7 @@ from typing import Any
 from urllib.parse import parse_qsl, urlparse
 
 import httpx
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from seed_agent.models import Discount, TorrentCandidate
 
@@ -26,10 +26,37 @@ class MTeamApiDiscoveryOptions(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     mode: str = "adult"
+    page_number: int = 1
     only_free: bool = True
+    discount: str | None = None
     sort_field: str = "downloads"
     sort_order: str = "desc"
     page_size: int = 50
+    last_id: int | None = None
+    keyword: str | None = None
+    categories: list[int] = Field(default_factory=list)
+    imdb: str | None = None
+    douban: str | None = None
+    dmm_code: str | None = None
+    author: int | None = None
+    sources: list[int] = Field(default_factory=list)
+    mediums: list[int] = Field(default_factory=list)
+    standards: list[int] = Field(default_factory=list)
+    video_codecs: list[int] = Field(default_factory=list)
+    audio_codecs: list[int] = Field(default_factory=list)
+    teams: list[int] = Field(default_factory=list)
+    processings: list[int] = Field(default_factory=list)
+    countries: list[int] = Field(default_factory=list)
+    labels: int | None = None
+    labels_new: list[str] = Field(default_factory=list)
+    visible: int = 1
+    only_fav: bool | None = None
+    offer: bool | None = None
+    hot: bool | None = None
+    upload_date_start: str | None = None
+    upload_date_end: str | None = None
+    dmm_field: str | None = None
+    dmm_keyword: str | None = None
     min_seeders: int = 0
     max_seeders: int | None = 200
     min_leechers: int = 0
@@ -438,21 +465,69 @@ def _api_row_containers(row: dict[str, Any]) -> list[dict[str, Any]]:
 def _search_payload(options: MTeamApiDiscoveryOptions) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "mode": options.mode,
-        "visible": 1,
-        "pageNumber": 1,
+        "visible": options.visible,
+        "pageNumber": options.page_number,
         "pageSize": options.page_size,
         "sortDirection": options.sort_order.upper(),
         "sortField": _api_sort_field(options.sort_field),
     }
-    if options.only_free:
-        payload["discount"] = "FREE"
+    _put_optional(payload, "lastId", options.last_id)
+    _put_optional(payload, "keyword", options.keyword)
+    _put_optional_list(payload, "categories", options.categories)
+    _put_optional(payload, "imdb", options.imdb)
+    _put_optional(payload, "douban", options.douban)
+    _put_optional(payload, "dmmCode", options.dmm_code)
+    _put_optional(payload, "author", options.author)
+    _put_optional_list(payload, "sources", options.sources)
+    _put_optional_list(payload, "mediums", options.mediums)
+    _put_optional_list(payload, "standards", options.standards)
+    _put_optional_list(payload, "videoCodecs", options.video_codecs)
+    _put_optional_list(payload, "audioCodecs", options.audio_codecs)
+    _put_optional_list(payload, "teams", options.teams)
+    _put_optional_list(payload, "processings", options.processings)
+    _put_optional_list(payload, "countries", options.countries)
+    _put_optional(payload, "labels", options.labels)
+    _put_optional_list(payload, "labelsNew", options.labels_new)
+    _put_optional(payload, "onlyFav", options.only_fav)
+    _put_optional(payload, "offer", options.offer)
+    _put_optional(payload, "hot", options.hot)
+    _put_optional(payload, "uploadDateStart", options.upload_date_start)
+    _put_optional(payload, "uploadDateEnd", options.upload_date_end)
+    _put_optional(payload, "dmmField", options.dmm_field)
+    _put_optional(payload, "dmmKeyword", options.dmm_keyword)
+
+    discount = options.discount
+    if discount is None and options.only_free:
+        discount = "FREE"
+    _put_optional(payload, "discount", discount)
     return payload
 
 
 def _api_sort_field(sort_field: str) -> str:
-    if sort_field == "downloads":
-        return "TIMES_COMPLETED"
-    return sort_field
+    aliases = {
+        "created_date": "CREATED_DATE",
+        "createdDate": "CREATED_DATE",
+        "downloads": "TIMES_COMPLETED",
+        "times_completed": "TIMES_COMPLETED",
+        "seeders": "SEEDERS",
+        "leechers": "LEECHERS",
+        "size": "SIZE",
+        "name": "NAME",
+    }
+    return aliases.get(sort_field, sort_field)
+
+
+def _put_optional(payload: dict[str, Any], key: str, value: Any) -> None:
+    if value is None:
+        return
+    if isinstance(value, str) and not value.strip():
+        return
+    payload[key] = value
+
+
+def _put_optional_list(payload: dict[str, Any], key: str, value: list[Any]) -> None:
+    if value:
+        payload[key] = value
 
 
 def _extract_search_rows(payload: dict[str, Any]) -> list[dict[str, Any]]:

@@ -16,10 +16,23 @@ sites:
   #   # Versioned strategy config. Keep this block in config, not in secrets.
   #   api_discovery:
   #     mode: adult
+  #     page_number: 1
   #     only_free: true
+  #     # Optional OpenAPI discount enum. When omitted, only_free=true sends FREE.
+  #     # discount: _2X_FREE
   #     sort_field: downloads
   #     sort_order: desc
   #     page_size: 50
+  #     # Optional native M-Team filters. IDs come from M-Team list endpoints such as
+  #     # categoryList, sourceList, mediumList, standardList, and codec/team lists.
+  #     # categories: [410, 429]
+  #     # standards: [1, 6]
+  #     # video_codecs: [1, 16]
+  #     # sources: [8]
+  #     # mediums: [10]
+  #     # teams: [9]
+  #     # labels_new: []
+  #     # hot: true
   #     min_seeders: 0
   #     max_seeders: 200
   #     min_leechers: 0

@@ -9,6 +9,10 @@ All notable project changes are tracked here.
 - M-Team API-driven discovery with `api_key_ref`, FREE filtering, activity-oriented
   sorting, deferred `genDlToken` download URL generation for accepted execute-mode
   enqueue candidates, and `site-probe` discovery-mode visibility.
+- M-Team API discovery can now send native OpenAPI search filters such as
+  categories, sources, mediums, standards, codecs, teams, processings, labels,
+  keyword/IMDB/Douban/DMM fields, date ranges, `hot`, `offer`, and explicit
+  discount enums.
 - qBittorrent category policies and logical budget pools, including mutable seed
   categories, add-only media categories, over-budget paused enqueue behavior, and
   pool usage summaries.
@@ -34,6 +38,8 @@ All notable project changes are tracked here.
 - M-Team API discovery now reads discount labels from nested `status.discount`,
   maps local `downloads` sorting to the API's `TIMES_COMPLETED` field, and avoids
   bulk download-token generation during discovery.
+- M-Team API sorting now emits the documented uppercase enum values such as
+  `CREATED_DATE`, `TIMES_COMPLETED`, `LEECHERS`, `SEEDERS`, `SIZE`, and `NAME`.
 - qBittorrent prune pool usage now includes add-only categories in shared budget
   totals while keeping cleanup actions restricted to mutable/delete-enabled
   categories.

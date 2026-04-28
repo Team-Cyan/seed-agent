@@ -27,7 +27,7 @@ However, RSS is still weak as a primary discovery surface for M-Team because it 
 - download-count-oriented ranking,
 - more targeted category/mode selection before candidates are discovered.
 
-That means the current system can enrich what it already sees, but it cannot yet ask M-Team for the *best* candidates according to PT ROI heuristics.
+That means the current system can enrich what it already sees, but it cannot yet ask M-Team for the *best* candidates according to PT ROI heuristics. The M-Team OpenAPI `TorrentSearch` shape includes native filters beyond mode/sort, including category, source, medium, standard, codec, team, processing, country, label, keyword, DMM, date range, hot, offer, favorite, and discount fields.
 
 ## Scope
 
@@ -68,6 +68,15 @@ sites:
       sort_field: downloads
       sort_order: desc
       page_size: 50
+      # Optional native M-Team filter IDs.
+      # categories: [410, 429]
+      # standards: [1, 6]
+      # video_codecs: [1, 16]
+      # sources: [8]
+      # mediums: [10]
+      # teams: [9]
+      # labels_new: []
+      # hot: true
       min_seeders: 0
       max_seeders: 200
       min_leechers: 0
@@ -78,7 +87,8 @@ Operator intent:
 
 - use M-Team API as the primary discovery source,
 - keep RSS available as a documented alternate path,
-- continue to use `detail` and `genDlToken` through the same access token,
+- continue to use `detail` through the same access token,
+- defer `genDlToken` until execute-mode enqueue for accepted candidates,
 - keep the downstream scoring and enqueue commands unchanged.
 
 ## Design Direction
@@ -90,7 +100,7 @@ Treat M-Team as having two related but distinct concerns:
 - discovery: list/search/filter/sort candidates,
 - enrichment: fill candidate metadata and produce download links.
 
-The current code already covers enrichment well enough. The new work should add API-driven discovery without coupling it too tightly to RSS parsing.
+The current code already covers enrichment well enough. The new work should add API-driven discovery without coupling it too tightly to RSS parsing. M-Team-native search fields belong in `api_discovery`, not in secret files.
 
 ### 2. Keep `TorrentCandidate` as the stable boundary
 

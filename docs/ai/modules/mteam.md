@@ -17,7 +17,8 @@ Implemented today:
 
 - RSS candidate parsing for M-Team feed shape
 - `x-api-key` detail enrichment
-- API-driven discovery with FREE filtering and activity-based sorting
+- API-driven discovery with native M-Team filters, FREE/discount filtering, and
+  activity-based sorting
 - deferred `genDlToken` download URL generation for accepted API-discovered
   candidates during execute-mode enqueue
 - `site-probe` visibility for authenticated M-Team access and discovery mode
@@ -38,6 +39,8 @@ Current fallback still present in code:
 - Keep API discovery cheap: search/detail calls may run during discovery and
   scoring, but `genDlToken` should only run for accepted candidates when
   enqueue is executing.
+- Keep M-Team search knobs in `api_discovery`; credentials stay in
+  `api_key_ref` / ignored local secret files.
 
 ## Desired Future State
 

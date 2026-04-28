@@ -12,20 +12,103 @@ from seed_agent.models import Discount
 class MTeamApiDiscoveryConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
-    mode: Literal["adult", "movie", "tvshow", "normal"] = "adult"
+    mode: Literal["normal", "adult", "movie", "music", "tvshow", "waterfall", "rss", "rankings"] = (
+        "adult"
+    )
+    page_number: int = 1
     only_free: bool = True
-    sort_field: Literal["createdDate", "id", "downloads", "seeders", "size"] = "downloads"
+    discount: Literal[
+        "NORMAL",
+        "PERCENT_70",
+        "PERCENT_50",
+        "FREE",
+        "_2X_FREE",
+        "_2X",
+        "_2X_PERCENT_50",
+    ] | None = None
+    sort_field: Literal[
+        "created_date",
+        "createdDate",
+        "downloads",
+        "times_completed",
+        "seeders",
+        "leechers",
+        "size",
+        "name",
+        "CREATED_DATE",
+        "SIZE",
+        "SEEDERS",
+        "LEECHERS",
+        "TIMES_COMPLETED",
+        "NAME",
+    ] = "downloads"
     sort_order: Literal["asc", "desc"] = "desc"
     page_size: int = 50
+    last_id: int | None = None
+    keyword: str | None = None
+    categories: list[int] = Field(default_factory=list)
+    imdb: str | None = None
+    douban: str | None = None
+    dmm_code: str | None = None
+    author: int | None = None
+    sources: list[int] = Field(default_factory=list)
+    mediums: list[int] = Field(default_factory=list)
+    standards: list[int] = Field(default_factory=list)
+    video_codecs: list[int] = Field(default_factory=list)
+    audio_codecs: list[int] = Field(default_factory=list)
+    teams: list[int] = Field(default_factory=list)
+    processings: list[int] = Field(default_factory=list)
+    countries: list[int] = Field(default_factory=list)
+    labels: int | None = None
+    labels_new: list[str] = Field(default_factory=list)
+    visible: int = 1
+    only_fav: bool | None = None
+    offer: bool | None = None
+    hot: bool | None = None
+    upload_date_start: str | None = None
+    upload_date_end: str | None = None
+    dmm_field: (
+        Literal["kid", "director", "series", "maker", "label", "product_number"] | None
+    ) = None
+    dmm_keyword: str | None = None
     min_seeders: int = 0
     max_seeders: int | None = 200
     min_leechers: int = 0
     min_times_completed: int = 0
 
+    @field_validator(
+        "categories",
+        "sources",
+        "mediums",
+        "standards",
+        "video_codecs",
+        "audio_codecs",
+        "teams",
+        "processings",
+        "countries",
+    )
+    @classmethod
+    def validate_non_negative_id_list(cls, value: list[int]) -> list[int]:
+        if any(item < 0 for item in value):
+            raise ValueError("M-Team filter ids must be >= 0")
+        return value
+
     @model_validator(mode="after")
     def validate_limits(self) -> MTeamApiDiscoveryConfig:
+        if self.page_number < 1 or self.page_number > 1000:
+            raise ValueError("page_number must be between 1 and 1000")
         if self.page_size < 1:
             raise ValueError("page_size must be >= 1")
+        if self.page_size > 200:
+            raise ValueError("page_size must be <= 200")
+        if self.last_id is not None and self.last_id < 0:
+            raise ValueError("last_id must be >= 0")
+        if self.author is not None and self.author < 0:
+            raise ValueError("author must be >= 0")
+        if self.labels is not None and self.labels < 0:
+            raise ValueError("labels must be >= 0")
+        if self.visible < 0:
+            raise ValueError("visible must be >= 0")
         if self.min_seeders < 0:
             raise ValueError("min_seeders must be >= 0")
         if self.min_leechers < 0:
