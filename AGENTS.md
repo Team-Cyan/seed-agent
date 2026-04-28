@@ -43,8 +43,8 @@ Do not start by reading every spec or every plan.
 
 ## Current Project-Specific Notes
 
-- M-Team currently supports RSS parsing plus API-key detail enrichment.
-- M-Team may later add API-driven discovery, but RSS should remain in the repo.
+- M-Team currently supports RSS parsing, API-key detail enrichment, and API-driven discovery.
+- RSS should remain in the repo for fallback flows and other sites.
 - Local state in `.seed-agent/state.db` and audit in `.seed-agent/audit.jsonl` are durable project evidence, not disposable temp files.
 
 ## Useful Docs

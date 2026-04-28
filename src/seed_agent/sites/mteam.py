@@ -203,6 +203,14 @@ class MTeamApiClient:
         status = row.get("status")
         status_data = status if isinstance(status, dict) else {}
         times_completed = _coerce_int(status_data.get("timesCompleted")) or 0
+        discount = _normalize_discount_label(row.get("discount"))
+        left_time_minutes = _left_time_minutes_from_api_row(row)
+        metadata: dict[str, Any] = {
+            "mteam_discovery_mode": "api",
+            "times_completed": times_completed,
+        }
+        if left_time_minutes is None and discount in {Discount.FREE, Discount.TWO_X_FREE}:
+            metadata["left_time_source"] = "mteam_api_missing"
 
         return TorrentCandidate(
             site=site,
@@ -212,12 +220,10 @@ class MTeamApiClient:
             size_bytes=_coerce_int(row.get("size")) or 0,
             seeders=_coerce_int(status_data.get("seeders")) or 0,
             leechers=_coerce_int(status_data.get("leechers")) or 0,
-            discount=_normalize_discount_label(row.get("discount")),
+            discount=discount,
+            left_time_minutes=left_time_minutes,
             published_at=_parse_api_datetime(row.get("createdDate")),
-            metadata={
-                "mteam_discovery_mode": "api",
-                "times_completed": times_completed,
-            },
+            metadata=metadata,
         )
 
 
@@ -347,6 +353,49 @@ def _coerce_int(value: Any) -> int | None:
             return None
 
 
+def _left_time_minutes_from_api_row(row: dict[str, Any]) -> int | None:
+    minute_fields = (
+        "left_time_minutes",
+        "leftTimeMinutes",
+        "leftTime",
+        "freeLeftTimeMinutes",
+        "discountLeftTimeMinutes",
+        "promotionLeftTimeMinutes",
+    )
+    end_fields = (
+        "freeEndTime",
+        "freeEndDate",
+        "discountEndTime",
+        "discountEndDate",
+        "discountExpireTime",
+        "discountExpireDate",
+        "promotionEndTime",
+        "promotionEndDate",
+        "endTime",
+        "endDate",
+    )
+    for container in _api_row_containers(row):
+        for field in minute_fields:
+            minutes = _coerce_int(container.get(field))
+            if minutes is not None:
+                return minutes
+        for field in end_fields:
+            end_at = _parse_api_datetime(container.get(field))
+            if end_at is None:
+                continue
+            return max(0, int((end_at - datetime.now(UTC)).total_seconds() // 60))
+    return None
+
+
+def _api_row_containers(row: dict[str, Any]) -> list[dict[str, Any]]:
+    containers = [row]
+    for key in ("status", "discount", "discountInfo", "promotion", "promotionInfo"):
+        value = row.get(key)
+        if isinstance(value, dict):
+            containers.append(value)
+    return containers
+
+
 def _search_payload(options: MTeamApiDiscoveryOptions) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "mode": options.mode,
@@ -371,19 +420,6 @@ def _extract_search_rows(payload: dict[str, Any]) -> list[dict[str, Any]]:
     if isinstance(nested, list):
         return [row for row in nested if isinstance(row, dict)]
     return []
-
-
-def _meets_thresholds(candidate: TorrentCandidate, options: MTeamApiDiscoveryOptions) -> bool:
-    if candidate.seeders < options.min_seeders:
-        return False
-    if options.max_seeders is not None and candidate.seeders > options.max_seeders:
-        return False
-    if candidate.leechers < options.min_leechers:
-        return False
-    times_completed = _coerce_int(candidate.metadata.get("times_completed")) or 0
-    if times_completed < options.min_times_completed:
-        return False
-    return True
 
 
 def _row_meets_thresholds(row: dict[str, Any], options: MTeamApiDiscoveryOptions) -> bool:
@@ -419,9 +455,19 @@ def _normalize_discount_label(value: Any) -> Discount:
 def _parse_api_datetime(value: Any) -> datetime | None:
     if value is None:
         return None
+    if isinstance(value, int | float):
+        timestamp = float(value)
+        if timestamp > 10_000_000_000:
+            timestamp = timestamp / 1000
+        return datetime.fromtimestamp(timestamp, tz=UTC)
     text = str(value).strip()
     if not text:
         return None
+    timestamp = _coerce_int(text)
+    if timestamp is not None:
+        if timestamp > 10_000_000_000:
+            timestamp = timestamp / 1000
+        return datetime.fromtimestamp(timestamp, tz=UTC)
     try:
         dt = datetime.fromisoformat(text.replace("Z", "+00:00"))
     except ValueError:

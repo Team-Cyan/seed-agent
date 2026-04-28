@@ -101,12 +101,25 @@ def _score_left_time(
     weight = scoring.weights["left_time"]
     left_time = candidate.left_time_minutes
     if left_time is None:
+        if _allows_missing_left_time(candidate, discovery):
+            return _ComponentScore(0.0, "left_time unavailable for mteam api discovery")
         return _ComponentScore(0.0, "left_time missing", True)
     if left_time < discovery.min_left_time_minutes:
         reason = f"left_time {left_time} < min {discovery.min_left_time_minutes}"
         return _ComponentScore(0.0, reason, True)
     reason = f"left_time {left_time} >= min {discovery.min_left_time_minutes}"
     return _ComponentScore(weight, reason)
+
+
+def _allows_missing_left_time(
+    candidate: TorrentCandidate,
+    discovery: DiscoveryConfig,
+) -> bool:
+    return (
+        candidate.metadata.get("mteam_discovery_mode") == "api"
+        and candidate.metadata.get("left_time_source") == "mteam_api_missing"
+        and candidate.discount in discovery.discounts
+    )
 
 
 def _score_leechers(

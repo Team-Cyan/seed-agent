@@ -48,12 +48,12 @@ The current architecture has two shipped loops:
 ## Current Site Story
 
 - `nexusphp`: RSS-first with richer feed fields
-- `mteam`: currently RSS discovery plus API-key detail enrichment
+- `mteam`: RSS discovery, API-key detail enrichment, and API-driven discovery
 
 Important nuance:
 
 - RSS must stay in the codebase because it is useful for other sites and fallback flows.
-- M-Team may later prefer API-driven discovery for better filtering and sorting.
+- M-Team API discovery is the preferred authenticated path when an API key is configured.
 
 ## Current Downloader Story
 
@@ -61,6 +61,8 @@ Important nuance:
 - Mutations should stay dry-run first.
 - qBittorrent state remains the operational source of truth.
 - `seed-agent` local state explains policy and intent lifecycle.
+- Category policies separate mutable seed pools from add-only media pools.
+- Logical budget pools affect enqueue pause behavior and cleanup visibility.
 
 ## Current Durable Files
 

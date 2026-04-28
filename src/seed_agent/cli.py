@@ -18,8 +18,8 @@ from seed_agent.actions.intent import (
     run_intent_once,
     search_intent,
 )
+from seed_agent.actions.pt import SiteDiscoveryConfigError, discover_candidates, score_candidates
 from seed_agent.actions.pt import daily_report as build_daily_report
-from seed_agent.actions.pt import discover_candidates, score_candidates
 from seed_agent.actions.qb import MutationBatchError, enqueue_candidates, prune_cold_torrents
 from seed_agent.audit import AuditLogger, redact_payload
 from seed_agent.config import (
@@ -40,7 +40,7 @@ from seed_agent.models import (
     TorrentCandidate,
     safe_url_identity,
 )
-from seed_agent.policies.category_policy import usage_by_pool
+from seed_agent.policies.category_policy import PoolUsage, usage_by_pool
 from seed_agent.search.rss import RssSearchProvider
 from seed_agent.state import StateStore
 
@@ -60,7 +60,7 @@ def discover(
     config: Annotated[Path, typer.Option("--config")] = DEFAULT_CONFIG,
 ) -> None:
     loaded = load_config(config)
-    candidates = _run(discover_candidates(loaded))
+    candidates = _discover_candidates(loaded)
     payload = {
         "command": "discover",
         "config": str(config),
@@ -75,7 +75,7 @@ def site_probe(
     config: Annotated[Path, typer.Option("--config")] = DEFAULT_CONFIG,
 ) -> None:
     loaded = load_config(config)
-    candidates = _run(discover_candidates(loaded))
+    candidates = _discover_candidates(loaded)
 
     summary_by_site: dict[str, dict[str, Any]] = {}
     for site in loaded.enabled_sites:
@@ -126,7 +126,7 @@ def score(
     config: Annotated[Path, typer.Option("--config")] = DEFAULT_CONFIG,
 ) -> None:
     loaded = load_config(config)
-    candidates = _run(discover_candidates(loaded))
+    candidates = _discover_candidates(loaded)
     scored = score_candidates(candidates, loaded.discovery, loaded.scoring)
     payload = {
         "command": "score",
@@ -146,18 +146,24 @@ def enqueue(
     execute: Annotated[bool, typer.Option("--execute")] = False,
 ) -> None:
     loaded = load_config(config)
-    candidates = _run(discover_candidates(loaded))
+    candidates = _discover_candidates(loaded)
     scored = score_candidates(candidates, loaded.discovery, loaded.scoring)
     downloader = build_downloader(loaded) if execute else _NullDownloader()
+    default_policy = _default_category_policy(loaded)
+    paused, pool_usage = _default_category_budget_state(
+        loaded,
+        downloader if execute else None,
+    )
     batch_error = None
     try:
         decisions = _run(
             enqueue_candidates(
                 scored,
                 downloader,
-                loaded.downloader.category,
-                loaded.downloader.tags,
+                default_policy,
                 execute,
+                paused=paused,
+                pool_usage=pool_usage,
             )
         )
     except MutationBatchError as exc:
@@ -352,7 +358,10 @@ def intent_enqueue(
     store = StateStore(_state_path(loaded))
     downloader = build_downloader(loaded) if execute else _NullDownloader()
     default_policy = _default_category_policy(loaded)
-    paused = _default_category_paused(loaded, downloader if execute else None)
+    paused, pool_usage = _default_category_budget_state(
+        loaded,
+        downloader if execute else None,
+    )
     batch_error = None
     try:
         intent, ranked, decisions = _run(
@@ -363,6 +372,7 @@ def intent_enqueue(
                 default_policy,
                 execute,
                 paused=paused,
+                pool_usage=pool_usage,
             )
         )
     except ValueError as exc:
@@ -399,7 +409,10 @@ def intent_run_once(
     inbox_path = _resolve_path(loaded.intent.inbox_ref, loaded.config_dir)
     downloader = build_downloader(loaded) if execute else _NullDownloader()
     default_policy = _default_category_policy(loaded)
-    paused = _default_category_paused(loaded, downloader if execute else None)
+    paused, pool_usage = _default_category_budget_state(
+        loaded,
+        downloader if execute else None,
+    )
     batch_error = None
     try:
         result = _run(
@@ -413,6 +426,7 @@ def intent_run_once(
                 policy=default_policy,
                 execute=execute,
                 paused=paused,
+                pool_usage=pool_usage,
             )
         )
         decisions = result.decisions
@@ -494,8 +508,14 @@ def prune(
         downloader = _maybe_build_downloader(loaded)
         if downloader is None:
             downloader = _NullDownloader()
-    torrents = _load_policy_torrents(downloader, loaded, policies=mutable_policies)
-    torrents = store.apply_torrent_runtime(torrents)
+    all_torrents = _load_policy_torrents(downloader, loaded)
+    all_torrents = store.apply_torrent_runtime(all_torrents)
+    mutable_policy_names = {policy.name for policy in mutable_policies}
+    torrents = [
+        torrent
+        for torrent in all_torrents
+        if torrent.category in mutable_policy_names
+    ]
     batch_error = None
     decisions: list[Decision] = []
     torrents_by_category: dict[str, list[ManagedTorrent]] = {}
@@ -514,6 +534,7 @@ def prune(
                         loaded.cleanup,
                         policy,
                         execute,
+                        pool_usage=_pool_usage_for_policy(loaded, all_torrents, policy),
                     )
                 )
             )
@@ -529,7 +550,7 @@ def prune(
         "config": str(config),
         "execute": execute,
         "managed_count": len(torrents),
-        "pool_usage": _pool_usage_summary(loaded, torrents),
+        "pool_usage": _pool_usage_summary(loaded, all_torrents),
         "decisions": [_decision_summary(item) for item in decisions],
     }
     if batch_error is not None:
@@ -543,7 +564,7 @@ def daily_report_command(
     config: Annotated[Path, typer.Option("--config")] = DEFAULT_CONFIG,
 ) -> None:
     loaded = load_config(config)
-    candidates = _run(discover_candidates(loaded))
+    candidates = _discover_candidates(loaded)
     scored = score_candidates(candidates, loaded.discovery, loaded.scoring)
     managed_torrents = _managed_torrents_for_report(loaded)
     policy_lookup = _policy_lookup(loaded)
@@ -570,7 +591,7 @@ def run_once(
     store = StateStore(_state_path(loaded))
     default_policy = _default_category_policy(loaded)
 
-    candidates = _run(discover_candidates(loaded))
+    candidates = _discover_candidates(loaded)
     for candidate in candidates:
         store.upsert_candidate(
             candidate.stable_id,
@@ -594,7 +615,10 @@ def run_once(
         )
 
     downloader = build_downloader(loaded) if execute else _NullDownloader()
-    paused = _default_category_paused(loaded, downloader if execute else None)
+    paused, pool_usage = _default_category_budget_state(
+        loaded,
+        downloader if execute else None,
+    )
     batch_error = None
     try:
         decisions = _run(
@@ -604,6 +628,7 @@ def run_once(
                 default_policy,
                 execute,
                 paused=paused,
+                pool_usage=pool_usage,
             )
         )
     except MutationBatchError as exc:
@@ -633,6 +658,13 @@ def run_once(
 
 def _run(value: Any) -> Any:
     return asyncio.run(value)
+
+
+def _discover_candidates(config: SeedAgentConfig) -> list[TorrentCandidate]:
+    try:
+        return _run(discover_candidates(config))
+    except SiteDiscoveryConfigError as exc:
+        raise typer.BadParameter(str(exc)) from exc
 
 
 def _print_json(payload: dict[str, Any]) -> None:
@@ -785,14 +817,14 @@ def _pool_usage_summary(
     }
 
 
-def _default_category_paused(
+def _default_category_budget_state(
     config: SeedAgentConfig,
     downloader: QbittorrentClient | _NullDownloader | None = None,
-) -> bool:
+) -> tuple[bool, PoolUsage | None]:
     if downloader is None:
         downloader = _maybe_build_downloader(config)
     if downloader is None:
-        return False
+        return False, None
     torrents = _load_policy_torrents(downloader, config)
     default_policy = _default_category_policy(config)
     usage = usage_by_pool(
@@ -801,7 +833,21 @@ def _default_category_paused(
         torrents,
     )
     pool_usage = usage[default_policy.budget_pool]
-    return pool_usage.over_budget and default_policy.over_budget_behavior == "add_paused"
+    paused = pool_usage.over_budget and default_policy.over_budget_behavior == "add_paused"
+    return paused, pool_usage
+
+
+def _pool_usage_for_policy(
+    config: SeedAgentConfig,
+    torrents: list[ManagedTorrent],
+    policy: CategoryPolicyConfig,
+) -> PoolUsage | None:
+    usage = usage_by_pool(
+        config.downloader.category_policies,
+        config.downloader.budget_pools,
+        torrents,
+    )
+    return usage.get(policy.budget_pool)
 
 
 def _maybe_build_downloader(config: SeedAgentConfig) -> QbittorrentClient | None:

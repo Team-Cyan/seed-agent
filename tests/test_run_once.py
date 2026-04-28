@@ -189,9 +189,12 @@ def test_run_once_dry_run_updates_state_and_redacts_audit(
     def fake_score_candidates(candidates, discovery_config, scoring_config):
         return [_scored()]
 
-    async def fake_enqueue_candidates(scored, downloader, policy, execute, paused=False):
+    async def fake_enqueue_candidates(
+        scored, downloader, policy, execute, *, paused=False, pool_usage=None
+    ):
         assert execute is False
         assert policy.name == "seed"
+        assert pool_usage is None
         return [
             Decision(
                 action="qb.enqueue",

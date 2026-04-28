@@ -7,6 +7,7 @@ import pytest
 from seed_agent.audit import AuditLogger
 from seed_agent.config import CategoryPolicyConfig
 from seed_agent.models import ScoreBreakdown, TorrentCandidate
+from seed_agent.policies.category_policy import PoolUsage
 
 
 def _candidate(**overrides: object) -> TorrentCandidate:
@@ -232,3 +233,32 @@ async def test_execute_accepted_candidate_adds_paused_when_pool_is_over_budget()
         )
     ]
     assert decisions[0].new_state["paused"] is True
+
+
+@pytest.mark.asyncio
+async def test_enqueue_decision_records_policy_and_pool_usage() -> None:
+    from seed_agent.actions.qb import enqueue_candidates
+
+    downloader = DummyDownloader()
+
+    decisions = await enqueue_candidates(
+        [_scored()],
+        downloader,
+        _policy(),
+        execute=False,
+        paused=True,
+        pool_usage=PoolUsage(
+            pool_name="downloads",
+            size_bytes=11 * 1024**4,
+            max_size_bytes=10 * 1024**4,
+        ),
+    )
+
+    state = decisions[0].new_state
+    assert state["category"] == "seed"
+    assert state["category_mode"] == "mutable"
+    assert state["budget_pool"] == "downloads"
+    assert state["delete_enabled"] is True
+    assert state["budget_pool_limit_tib"] == 10.0
+    assert state["estimated_pool_usage_tib"] == 11.0
+    assert state["over_budget_before_action"] is True

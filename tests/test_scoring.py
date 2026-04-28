@@ -188,3 +188,22 @@ def test_missing_left_time_has_clear_reason() -> None:
     assert result.accepted is False
     assert result.score == 0
     assert "left_time missing" in result.reasons
+
+
+def test_mteam_api_missing_left_time_does_not_hard_reject() -> None:
+    result = score_candidate(
+        make_candidate(
+            site="mt",
+            left_time_minutes=None,
+            metadata={
+                "mteam_discovery_mode": "api",
+                "left_time_source": "mteam_api_missing",
+            },
+        ),
+        discovery(),
+        scoring(),
+    )
+
+    assert result.accepted is True
+    assert result.score >= 70
+    assert "left_time unavailable for mteam api discovery" in result.reasons

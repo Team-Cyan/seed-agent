@@ -6,6 +6,7 @@ import pytest
 
 from seed_agent.config import CategoryPolicyConfig, CleanupConfig
 from seed_agent.models import ManagedTorrent
+from seed_agent.policies.category_policy import PoolUsage
 
 
 def _cleanup() -> CleanupConfig:
@@ -109,6 +110,66 @@ async def test_execute_prune_pauses_cold_managed_torrent() -> None:
     assert len(decisions) == 1
     assert decisions[0].action == "qb.cleanup.pause"
     assert decisions[0].execute is True
+
+
+@pytest.mark.asyncio
+async def test_prune_decision_records_policy_and_pool_usage() -> None:
+    from seed_agent.actions.qb import prune_cold_torrents
+
+    downloader = DummyDownloader()
+
+    decisions = await prune_cold_torrents(
+        [_torrent()],
+        downloader,
+        _cleanup(),
+        _policy(),
+        execute=False,
+        pool_usage=PoolUsage(
+            pool_name="downloads",
+            size_bytes=11 * 1024**4,
+            max_size_bytes=10 * 1024**4,
+        ),
+    )
+
+    state = decisions[0].new_state
+    assert state["category"] == "seed"
+    assert state["category_mode"] == "mutable"
+    assert state["budget_pool"] == "downloads"
+    assert state["delete_enabled"] is True
+    assert state["budget_pool_limit_tib"] == 10.0
+    assert state["estimated_pool_usage_tib"] == 11.0
+    assert state["over_budget_before_action"] is True
+
+
+@pytest.mark.asyncio
+async def test_prune_orders_mutable_torrents_by_eviction_rank() -> None:
+    from seed_agent.actions.qb import prune_cold_torrents
+
+    downloader = DummyDownloader()
+
+    decisions = await prune_cold_torrents(
+        [
+            _torrent(
+                hash="keep",
+                size_bytes=20 * 1024**3,
+                uploaded_bytes=200 * 1024**3,
+                metadata={"recent_upload_gb": 40},
+            ),
+            _torrent(
+                hash="drop",
+                size_bytes=400 * 1024**3,
+                uploaded_bytes=2 * 1024**3,
+                metadata={"recent_upload_gb": 0.2},
+            ),
+        ],
+        downloader,
+        _cleanup(),
+        _policy(),
+        execute=True,
+    )
+
+    assert downloader.calls == [("pause", "drop", None)]
+    assert [decision.target_id for decision in decisions] == ["drop", "keep"]
 
 
 @pytest.mark.asyncio

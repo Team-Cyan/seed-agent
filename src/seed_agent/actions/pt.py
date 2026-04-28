@@ -9,17 +9,28 @@ from seed_agent.models import ManagedTorrent, ScoreBreakdown, TorrentCandidate
 from seed_agent.policies.scoring import score_candidate
 from seed_agent.sites.mteam import (
     MTeamApiDiscoveryOptions,
+)
+from seed_agent.sites.mteam import (
     fetch_api_candidates as fetch_mteam_api_candidates,
 )
 from seed_agent.sites.rss import fetch_rss_candidates
 
 
+class SiteDiscoveryConfigError(RuntimeError):
+    pass
+
+
 async def discover_candidates(config: SeedAgentConfig) -> list[TorrentCandidate]:
-    tasks = [_discover_site_candidates(site, config.config_dir) for site in config.enabled_sites]
+    tasks = [
+        _discover_site_candidates(site, config.config_dir)
+        for site in config.enabled_sites
+    ]
     results = await asyncio.gather(*tasks, return_exceptions=True) if tasks else []
 
     candidates: list[TorrentCandidate] = []
     for result in results:
+        if isinstance(result, SiteDiscoveryConfigError):
+            raise result
         if isinstance(result, Exception):
             continue
         candidates.extend(result)
@@ -32,9 +43,13 @@ async def _discover_site_candidates(site, config_dir: Path | None) -> list[Torre
     api_key = _read_secret(site.api_key_ref, config_dir)
 
     if site.type == "mteam" and site.discovery_mode == "api" and site.api_discovery is not None:
+        if not api_key:
+            raise SiteDiscoveryConfigError(
+                f"missing api_key_ref secret for site {site.name}: {site.api_key_ref}"
+            )
         return await fetch_mteam_api_candidates(
             site=site.name,
-            api_key=api_key or "",
+            api_key=api_key,
             cookie=cookie,
             options=MTeamApiDiscoveryOptions.model_validate(site.api_discovery.model_dump()),
         )
@@ -98,7 +113,8 @@ def _read_secret(secret_ref: str | None, config_dir: Path | None = None) -> str 
 
     path = Path(secret_ref)
     if not path.is_absolute() and config_dir is not None:
-        path = config_dir / path
+        base_dir = config_dir.parent if config_dir.name == "config" else config_dir
+        path = base_dir / path
     try:
         if not path.is_file():
             return None

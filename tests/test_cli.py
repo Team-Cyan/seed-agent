@@ -353,8 +353,11 @@ def test_mutating_dry_run_does_not_require_qb_secret_or_real_downloader(
     def fake_score_candidates(candidates, discovery_config, scoring_config):
         return [_scored()]
 
-    async def fake_enqueue_candidates(scored, downloader, policy, execute, paused=False):
+    async def fake_enqueue_candidates(
+        scored, downloader, policy, execute, *, paused=False, pool_usage=None
+    ):
         assert execute is False
+        assert pool_usage is None
         return [
             Decision(
                 action="qb.enqueue",
@@ -387,6 +390,62 @@ def test_mutating_dry_run_does_not_require_qb_secret_or_real_downloader(
     assert payload["decisions"] == []
     assert events == []
     assert "download_url" not in result.output
+    assert "passkey" not in result.output
+
+
+def test_enqueue_dry_run_uses_default_category_policy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from seed_agent import cli
+
+    config_path = _config_file(tmp_path, secret_ref=None)
+    config = _config()
+    events: list[Decision] = []
+
+    async def fake_discover_candidates(config: SeedAgentConfig):
+        return [_candidate()]
+
+    def fake_score_candidates(candidates, discovery_config, scoring_config):
+        return [_scored()]
+
+    async def fake_enqueue_candidates(
+        scored, downloader, policy, execute, *, paused=False, pool_usage=None
+    ):
+        assert policy.name == "seed"
+        assert list(policy.tags) == ["seed-agent", "seed"]
+        assert execute is False
+        assert paused is False
+        assert pool_usage is None
+        return [
+            Decision(
+                action="qb.enqueue",
+                target_id=_scored().candidate_id,
+                execute=False,
+                reason="dry run",
+                new_state={"candidate_title": _scored().candidate.title},
+            )
+        ]
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("real downloader helper should not be called in dry-run")
+
+    def fake_write_audit_decisions(config: SeedAgentConfig, decisions: list[Decision]) -> None:
+        events.extend(decisions)
+
+    monkeypatch.setattr(cli, "load_config", lambda path: config)
+    monkeypatch.setattr(cli, "discover_candidates", fake_discover_candidates)
+    monkeypatch.setattr(cli, "score_candidates", fake_score_candidates)
+    monkeypatch.setattr(cli, "enqueue_candidates", fake_enqueue_candidates)
+    monkeypatch.setattr(cli, "build_downloader", fail_if_called)
+    monkeypatch.setattr(cli, "_write_audit_decisions", fake_write_audit_decisions)
+
+    result = CliRunner().invoke(cli.app, ["enqueue", "--config", str(config_path)])
+
+    assert result.exit_code == 0
+    payload = _json_output(result)
+    assert payload["command"] == "enqueue"
+    assert payload["enqueued"] == 1
+    assert events
     assert "passkey" not in result.output
 
 
@@ -658,6 +717,58 @@ def test_prune_dry_run_previews_live_torrents_without_mutation(
     assert row["state"] == LifecycleState.ENQUEUED.value
 
 
+def test_prune_pool_usage_includes_add_only_categories(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from seed_agent import cli
+
+    monkeypatch.chdir(tmp_path)
+
+    config_path = _config_file(tmp_path, secret_ref="local/secrets/qb.yaml")
+    config = _config(secret_ref="local/secrets/qb.yaml")
+
+    class FakeDownloader:
+        async def list_torrents(
+            self, category: str | None = None, tags: set[str] | None = None
+        ) -> list[ManagedTorrent]:
+            if category == "seed":
+                return [
+                    _managed_torrent(
+                        hash="seed-hash",
+                        category="seed",
+                        size_bytes=1 * 1024**4,
+                    )
+                ]
+            if category == "movie":
+                return [
+                    _managed_torrent(
+                        hash="movie-hash",
+                        category="movie",
+                        tags={"seed-agent", "movie"},
+                        size_bytes=2 * 1024**4,
+                    )
+                ]
+            return []
+
+        async def pause(self, hash: str) -> None:
+            raise AssertionError("dry-run prune must not pause torrents")
+
+        async def delete(self, hash: str, delete_files: bool) -> None:
+            raise AssertionError("dry-run prune must not delete torrents")
+
+    monkeypatch.setattr(cli, "load_config", lambda path: config)
+    monkeypatch.setattr(cli, "_maybe_build_downloader", lambda loaded: FakeDownloader())
+
+    result = CliRunner().invoke(cli.app, ["prune", "--config", str(config_path)])
+
+    assert result.exit_code == 0
+    payload = _json_output(result)
+    assert payload["managed_count"] == 1
+    assert payload["pool_usage"]["downloads"]["size_tib"] == 1.0
+    assert payload["pool_usage"]["media"]["size_tib"] == 2.0
+    assert [decision["target_id"] for decision in payload["decisions"]] == ["seed-hash"]
+
+
 def test_prune_execute_failure_persists_prior_state_and_audit(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -849,7 +960,9 @@ def test_run_once_invoke_with_execute_flag(monkeypatch: pytest.MonkeyPatch, tmp_
     def fake_score_candidates(candidates, discovery_config, scoring_config):
         return [_scored()]
 
-    async def fake_enqueue_candidates(scored, downloader, policy, execute, paused=False):
+    async def fake_enqueue_candidates(
+        scored, downloader, policy, execute, *, paused=False, pool_usage=None
+    ):
         assert execute is True
         assert policy.name == "seed"
         return [

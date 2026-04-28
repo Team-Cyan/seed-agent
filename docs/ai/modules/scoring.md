@@ -23,6 +23,10 @@ Score discovered torrents or ranked releases using explicit policy weights and e
 - explanations should remain operator-readable,
 - scoring should not absorb site-specific parsing logic,
 - ranking should not bypass state/audit expectations.
+- generic PT candidates without `left_time_minutes` are still hard-rejected,
+- M-Team API candidates may omit discount expiry; if the adapter marks that case,
+  scoring gives no left-time points but does not hard-reject an otherwise strong
+  current FREE/2xFREE candidate.
 
 ## Verification
 

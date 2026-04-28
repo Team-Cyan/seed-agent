@@ -21,6 +21,7 @@ from seed_agent.models import (
     ScoreBreakdown,
     TorrentCandidate,
 )
+from seed_agent.policies.category_policy import PoolUsage
 from seed_agent.policies.intent_ranking import rank_releases
 from seed_agent.search.base import SearchProvider
 from seed_agent.sources.file_inbox import read_file_inbox
@@ -146,6 +147,7 @@ async def enqueue_intent(
     execute: bool,
     *,
     paused: bool = False,
+    pool_usage: PoolUsage | None = None,
 ) -> tuple[ResourceIntent, RankedRelease, list[Decision]]:
     intent, selected_release_id = _load_intent_with_selected(store, intent_id)
     ranked = _enqueueable_release(
@@ -159,6 +161,7 @@ async def enqueue_intent(
         policy,
         execute,
         paused=paused,
+        pool_usage=pool_usage,
     )
     updated = intent
     if execute and any(decision.action == "qb.enqueue" for decision in decisions):
@@ -182,6 +185,7 @@ async def run_intent_once(
     execute: bool,
     *,
     paused: bool = False,
+    pool_usage: PoolUsage | None = None,
 ) -> IntentRunResult:
     ingested_pairs = ingest_inbox(inbox_path, store) if inbox_path is not None else []
     ingested = [item[0] for item in ingested_pairs]
@@ -216,6 +220,7 @@ async def run_intent_once(
                 policy,
                 execute,
                 paused=paused,
+                pool_usage=pool_usage,
             )
             enqueue_selected.append(selected)
             decisions.extend(enqueue_decisions)

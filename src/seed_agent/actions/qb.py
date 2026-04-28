@@ -5,7 +5,9 @@ from collections.abc import Iterable, Sequence
 from seed_agent.config import CategoryPolicyConfig, CleanupConfig
 from seed_agent.downloaders.base import Downloader
 from seed_agent.models import Decision, ManagedTorrent, ScoreBreakdown
+from seed_agent.policies.category_policy import PoolUsage
 from seed_agent.policies.cleanup import CleanupDecision, classify_cleanup
+from seed_agent.policies.eviction import rank_eviction_candidates
 
 ROLLBACK_INSTRUCTION = "Delete torrent from qBittorrent if enqueue was accidental"
 
@@ -23,6 +25,7 @@ async def enqueue_candidates(
     execute: bool,
     *,
     paused: bool = False,
+    pool_usage: PoolUsage | None = None,
 ) -> list[Decision]:
     decisions: list[Decision] = []
     tags_list = list(policy.tags)
@@ -38,11 +41,15 @@ async def enqueue_candidates(
             "candidate_title": candidate.title,
             "download_url": candidate.download_url,
             "category": policy.name,
+            "category_mode": policy.mode,
+            "budget_pool": policy.budget_pool,
+            "delete_enabled": policy.delete_enabled,
             "tags": tags_list,
             "paused": paused,
             "score": item.score,
             "reasons": list(item.reasons),
         }
+        new_state.update(_pool_usage_state(pool_usage))
 
         torrent_hash = None
         if execute:
@@ -97,6 +104,8 @@ async def prune_cold_torrents(
     cleanup: CleanupConfig,
     policy: CategoryPolicyConfig,
     execute: bool,
+    *,
+    pool_usage: PoolUsage | None = None,
 ) -> list[Decision]:
     if policy.mode != "mutable" or not policy.delete_enabled:
         return [
@@ -113,6 +122,8 @@ async def prune_cold_torrents(
                     "cleanup_action": "protect",
                     "managed": False,
                     "protected": True,
+                    **_policy_state(policy),
+                    **_pool_usage_state(pool_usage),
                 },
             )
             for torrent in torrents
@@ -121,9 +132,15 @@ async def prune_cold_torrents(
     decisions: list[Decision] = []
     tags = set(policy.tags)
 
-    for torrent in torrents:
+    for torrent in rank_eviction_candidates(list(torrents)):
         classification = classify_cleanup(torrent, cleanup, policy.name, tags)
-        decision = _decision_for_cleanup(torrent, classification, execute)
+        decision = _decision_for_cleanup(
+            torrent,
+            classification,
+            policy,
+            execute,
+            pool_usage=pool_usage,
+        )
 
         if not execute:
             decisions.append(decision)
@@ -134,7 +151,16 @@ async def prune_cold_torrents(
             elif classification.action == "delete":
                 await downloader.delete(torrent.hash, delete_files=True)
         except Exception as exc:
-            decisions.append(_failed_cleanup_decision(torrent, classification, execute, exc))
+            decisions.append(
+                _failed_cleanup_decision(
+                    torrent,
+                    classification,
+                    policy,
+                    execute,
+                    exc,
+                    pool_usage=pool_usage,
+                )
+            )
             raise MutationBatchError("qBittorrent cleanup batch failed", decisions) from exc
         decisions.append(decision)
 
@@ -144,7 +170,10 @@ async def prune_cold_torrents(
 def _decision_for_cleanup(
     torrent: ManagedTorrent,
     classification: CleanupDecision,
+    policy: CategoryPolicyConfig,
     execute: bool,
+    *,
+    pool_usage: PoolUsage | None = None,
 ) -> Decision:
     action = f"qb.cleanup.{classification.action}"
     reason = f"cleanup {classification.action}: {classification.reason}"
@@ -159,6 +188,8 @@ def _decision_for_cleanup(
             "cleanup_action": classification.action,
             "managed": classification.managed,
             "protected": classification.protected,
+            **_policy_state(policy),
+            **_pool_usage_state(pool_usage),
         },
     )
 
@@ -166,8 +197,11 @@ def _decision_for_cleanup(
 def _failed_cleanup_decision(
     torrent: ManagedTorrent,
     classification: CleanupDecision,
+    policy: CategoryPolicyConfig,
     execute: bool,
     exc: Exception,
+    *,
+    pool_usage: PoolUsage | None = None,
 ) -> Decision:
     error = _error_summary(exc)
     return Decision(
@@ -182,8 +216,29 @@ def _failed_cleanup_decision(
             "managed": classification.managed,
             "protected": classification.protected,
             "error": error,
+            **_policy_state(policy),
+            **_pool_usage_state(pool_usage),
         },
     )
+
+
+def _policy_state(policy: CategoryPolicyConfig) -> dict[str, object]:
+    return {
+        "category": policy.name,
+        "category_mode": policy.mode,
+        "budget_pool": policy.budget_pool,
+        "delete_enabled": policy.delete_enabled,
+    }
+
+
+def _pool_usage_state(pool_usage: PoolUsage | None) -> dict[str, object]:
+    if pool_usage is None:
+        return {}
+    return {
+        "budget_pool_limit_tib": round(pool_usage.max_size_bytes / 1024**4, 2),
+        "estimated_pool_usage_tib": round(pool_usage.size_bytes / 1024**4, 2),
+        "over_budget_before_action": pool_usage.over_budget,
+    }
 
 
 def _error_summary(exc: Exception) -> str:
