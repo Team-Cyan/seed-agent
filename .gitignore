@@ -13,6 +13,7 @@ dist/
 .vscode/
 .env
 .env.*
+config/live-*.yaml
 .seed-agent/
 local/inbox/*
 !local/inbox/.gitkeep

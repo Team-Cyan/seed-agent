@@ -9,6 +9,8 @@ from seed_agent.models import ManagedTorrent, ScoreBreakdown, TorrentCandidate
 from seed_agent.policies.scoring import score_candidate
 from seed_agent.sites.mteam import (
     MTeamApiDiscoveryOptions,
+    has_deferred_download_url,
+    resolve_deferred_download_url,
 )
 from seed_agent.sites.mteam import (
     fetch_api_candidates as fetch_mteam_api_candidates,
@@ -72,6 +74,51 @@ def score_candidates(
         score_candidate(candidate, discovery_config, scoring_config)
         for candidate in candidates
     ]
+
+
+async def resolve_deferred_download_urls(
+    scored: Sequence[ScoreBreakdown] | Iterable[ScoreBreakdown],
+    config: SeedAgentConfig,
+) -> list[ScoreBreakdown]:
+    scored_list = list(scored)
+    api_keys = {
+        site.name: _read_secret(site.api_key_ref, config.config_dir)
+        for site in config.enabled_sites
+        if site.type == "mteam"
+    }
+    resolved: list[ScoreBreakdown] = []
+    for item in scored_list:
+        candidate = item.candidate
+        if not item.accepted or not has_deferred_download_url(candidate):
+            resolved.append(item)
+            continue
+
+        api_key = api_keys.get(candidate.site)
+        if not api_key:
+            resolved.append(_reject_unresolved_download_url(item, "missing mteam api key"))
+            continue
+
+        resolved_candidate = await resolve_deferred_download_url(
+            candidate,
+            api_key=api_key,
+        )
+        if resolved_candidate is None:
+            resolved.append(
+                _reject_unresolved_download_url(item, "download_url unavailable from mteam api")
+            )
+            continue
+        resolved.append(item.model_copy(update={"candidate": resolved_candidate}))
+    return resolved
+
+
+def _reject_unresolved_download_url(item: ScoreBreakdown, reason: str) -> ScoreBreakdown:
+    return item.model_copy(
+        update={
+            "score": 0,
+            "accepted": False,
+            "reasons": [*item.reasons, reason],
+        }
+    )
 
 
 def daily_report(

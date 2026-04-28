@@ -18,7 +18,12 @@ from seed_agent.actions.intent import (
     run_intent_once,
     search_intent,
 )
-from seed_agent.actions.pt import SiteDiscoveryConfigError, discover_candidates, score_candidates
+from seed_agent.actions.pt import (
+    SiteDiscoveryConfigError,
+    discover_candidates,
+    resolve_deferred_download_urls,
+    score_candidates,
+)
 from seed_agent.actions.pt import daily_report as build_daily_report
 from seed_agent.actions.qb import MutationBatchError, enqueue_candidates, prune_cold_torrents
 from seed_agent.audit import AuditLogger, redact_payload
@@ -148,6 +153,8 @@ def enqueue(
     loaded = load_config(config)
     candidates = _discover_candidates(loaded)
     scored = score_candidates(candidates, loaded.discovery, loaded.scoring)
+    if execute:
+        scored = _run(resolve_deferred_download_urls(scored, loaded))
     downloader = build_downloader(loaded) if execute else _NullDownloader()
     default_policy = _default_category_policy(loaded)
     paused, pool_usage = _default_category_budget_state(
@@ -603,6 +610,8 @@ def run_once(
         )
 
     scored = score_candidates(candidates, loaded.discovery, loaded.scoring)
+    if execute:
+        scored = _run(resolve_deferred_download_urls(scored, loaded))
     scored_by_id = {item.candidate_id: item for item in scored}
     for item in scored:
         store.upsert_candidate(

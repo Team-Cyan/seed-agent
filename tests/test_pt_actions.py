@@ -558,6 +558,83 @@ async def test_discover_candidates_uses_mteam_api_mode_when_configured(
 
 
 @pytest.mark.asyncio
+async def test_resolve_deferred_download_urls_uses_mteam_api_key(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from seed_agent.actions import pt as pt_actions
+
+    api_key_path = tmp_path / "mt.api-key"
+    api_key_path.write_text("secret-api-key\n", encoding="utf-8")
+    config = SeedAgentConfig(
+        **{
+            **_config().model_dump(),
+            "sites": [
+                {
+                    "name": "mt",
+                    "type": "mteam",
+                    "enabled": True,
+                    "rss_url": "https://rss.m-team.cc/api/rss/fetch?dl=1",
+                    "api_key_ref": str(api_key_path),
+                    "discovery_mode": "api",
+                    "api_discovery": {
+                        "mode": "adult",
+                        "only_free": True,
+                        "sort_field": "downloads",
+                        "sort_order": "desc",
+                        "page_size": 50,
+                        "min_seeders": 0,
+                        "max_seeders": 200,
+                        "min_leechers": 0,
+                        "min_times_completed": 0,
+                    },
+                }
+            ],
+        }
+    )
+    candidate = _candidate(
+        site="mt",
+        source_url="https://kp.m-team.cc/detail/1171443",
+        download_url="mteam-api://torrent/1171443",
+        metadata={
+            "mteam_discovery_mode": "api",
+            "download_url_source": "mteam_api_deferred",
+            "mteam_torrent_id": "1171443",
+        },
+    )
+    scored = [
+        ScoreBreakdown(
+            candidate_id=candidate.stable_id,
+            score=95,
+            accepted=True,
+            reasons=["ok"],
+            candidate=candidate,
+        )
+    ]
+    calls: list[str] = []
+
+    async def fake_resolve_deferred_download_url(
+        candidate: TorrentCandidate,
+        *,
+        api_key: str,
+    ) -> TorrentCandidate | None:
+        calls.append(api_key)
+        return candidate.model_copy(update={"download_url": "https://dl.example/torrent"})
+
+    monkeypatch.setattr(
+        pt_actions,
+        "resolve_deferred_download_url",
+        fake_resolve_deferred_download_url,
+    )
+
+    resolved = await pt_actions.resolve_deferred_download_urls(scored, config)
+
+    assert calls == ["secret-api-key"]
+    assert resolved[0].accepted is True
+    assert resolved[0].candidate.download_url == "https://dl.example/torrent"
+
+
+@pytest.mark.asyncio
 async def test_discover_candidates_keeps_rss_mode_for_non_api_sites(monkeypatch) -> None:
     from seed_agent.actions import pt as pt_actions
 

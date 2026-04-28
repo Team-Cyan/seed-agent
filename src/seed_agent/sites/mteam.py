@@ -16,7 +16,10 @@ from pydantic import BaseModel, ConfigDict
 from seed_agent.models import Discount, TorrentCandidate
 
 DetailFetcher = Callable[[str], Awaitable[dict[str, Any] | None]]
-DiscoverFetcher = Callable[[str, "MTeamApiDiscoveryOptions"], Awaitable[list[TorrentCandidate]]]
+DiscoverFetcher = Callable[..., Awaitable[list[TorrentCandidate]]]
+DownloadUrlFetcher = Callable[[str], Awaitable[str | None]]
+
+DEFERRED_DOWNLOAD_URL_PREFIX = "mteam-api://torrent/"
 
 
 class MTeamApiDiscoveryOptions(BaseModel):
@@ -196,18 +199,17 @@ class MTeamApiClient:
         if torrent_id is None or not title:
             return None
 
-        download_url = await self.fetch_download_url(str(torrent_id))
-        if not download_url:
-            return None
-
         status = row.get("status")
         status_data = status if isinstance(status, dict) else {}
         times_completed = _coerce_int(status_data.get("timesCompleted")) or 0
-        discount = _normalize_discount_label(row.get("discount"))
+        discount = _normalize_discount_label(_row_discount(row))
         left_time_minutes = _left_time_minutes_from_api_row(row)
+        torrent_id_text = str(torrent_id)
         metadata: dict[str, Any] = {
             "mteam_discovery_mode": "api",
+            "mteam_torrent_id": torrent_id_text,
             "times_completed": times_completed,
+            "download_url_source": "mteam_api_deferred",
         }
         if left_time_minutes is None and discount in {Discount.FREE, Discount.TWO_X_FREE}:
             metadata["left_time_source"] = "mteam_api_missing"
@@ -216,7 +218,7 @@ class MTeamApiClient:
             site=site,
             title=title,
             source_url=f"https://kp.m-team.cc/detail/{torrent_id}",
-            download_url=download_url,
+            download_url=f"{DEFERRED_DOWNLOAD_URL_PREFIX}{torrent_id_text}",
             size_bytes=_coerce_int(row.get("size")) or 0,
             seeders=_coerce_int(status_data.get("seeders")) or 0,
             leechers=_coerce_int(status_data.get("leechers")) or 0,
@@ -269,12 +271,49 @@ async def fetch_api_candidates(
 ) -> list[TorrentCandidate]:
     client = MTeamApiClient(cookie=cookie, api_key=api_key)
     discover_fn = discover or client.discover_torrents
-    candidates = await discover_fn(site, options)
+    candidates = await discover_fn(site=site, options=options)
     return await enrich_candidates(
         candidates,
         cookie=cookie,
         api_key=api_key,
         fetch_detail=fetch_detail or client.fetch_torrent_detail,
+    )
+
+
+def has_deferred_download_url(candidate: TorrentCandidate) -> bool:
+    return (
+        candidate.download_url.startswith(DEFERRED_DOWNLOAD_URL_PREFIX)
+        and candidate.metadata.get("download_url_source") == "mteam_api_deferred"
+    )
+
+
+async def resolve_deferred_download_url(
+    candidate: TorrentCandidate,
+    *,
+    api_key: str,
+    fetch_download_url: DownloadUrlFetcher | None = None,
+) -> TorrentCandidate | None:
+    if not has_deferred_download_url(candidate):
+        return candidate
+
+    torrent_id = str(candidate.metadata.get("mteam_torrent_id") or "").strip()
+    if not torrent_id:
+        torrent_id = extract_torrent_id(candidate.source_url) or ""
+    if not torrent_id:
+        return None
+
+    fetch = fetch_download_url or MTeamApiClient(api_key=api_key).fetch_download_url
+    download_url = await fetch(torrent_id)
+    if not download_url:
+        return None
+
+    metadata = dict(candidate.metadata)
+    metadata["download_url_source"] = "mteam_api"
+    return candidate.model_copy(
+        update={
+            "download_url": download_url,
+            "metadata": metadata,
+        }
     )
 
 
@@ -403,11 +442,17 @@ def _search_payload(options: MTeamApiDiscoveryOptions) -> dict[str, Any]:
         "pageNumber": 1,
         "pageSize": options.page_size,
         "sortDirection": options.sort_order.upper(),
-        "sortField": options.sort_field,
+        "sortField": _api_sort_field(options.sort_field),
     }
     if options.only_free:
         payload["discount"] = "FREE"
     return payload
+
+
+def _api_sort_field(sort_field: str) -> str:
+    if sort_field == "downloads":
+        return "TIMES_COMPLETED"
+    return sort_field
 
 
 def _extract_search_rows(payload: dict[str, Any]) -> list[dict[str, Any]]:
@@ -437,6 +482,16 @@ def _row_meets_thresholds(row: dict[str, Any], options: MTeamApiDiscoveryOptions
     if times_completed < options.min_times_completed:
         return False
     return True
+
+
+def _row_discount(row: dict[str, Any]) -> Any:
+    discount = row.get("discount")
+    if discount:
+        return discount
+    status = row.get("status")
+    if isinstance(status, dict):
+        return status.get("discount")
+    return None
 
 
 def _normalize_discount_label(value: Any) -> Discount:

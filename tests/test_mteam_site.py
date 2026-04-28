@@ -16,6 +16,7 @@ from seed_agent.sites.mteam import (
     enrich_candidates,
     extract_torrent_id,
     fetch_api_candidates,
+    resolve_deferred_download_url,
 )
 
 
@@ -59,10 +60,10 @@ async def test_mteam_api_client_discovers_free_candidates_with_sorting() -> None
                         {
                             "id": 1171443,
                             "name": "Inception 2010 1080p BluRay",
-                            "discount": "FREE",
                             "discountEndTime": "2099-01-01T00:00:00+00:00",
                             "size": "1234567890",
                             "status": {
+                                "discount": "FREE",
                                 "seeders": 15,
                                 "leechers": 3,
                                 "timesCompleted": 28,
@@ -109,25 +110,58 @@ async def test_mteam_api_client_discovers_free_candidates_with_sorting() -> None
         "pageNumber": 1,
         "pageSize": 50,
         "sortDirection": "DESC",
-        "sortField": "downloads",
+        "sortField": "TIMES_COMPLETED",
         "discount": "FREE",
     }
-    assert token_route.called
-    token_request = token_route.calls[0].request
-    assert token_request.headers["x-api-key"] == "secret-api-key"
-    assert token_request.content.decode("utf-8") == "id=1171443"
+    assert not token_route.called
 
     assert len(candidates) == 1
     candidate = candidates[0]
     assert candidate.site == "mt"
-    assert candidate.download_url == "https://dl.m-team.cc/download.php?id=1171443&passkey=secret"
+    assert candidate.download_url == "mteam-api://torrent/1171443"
     assert candidate.discount.value == "free"
     assert candidate.left_time_minutes is not None
     assert candidate.left_time_minutes > 0
     assert candidate.seeders == 15
     assert candidate.leechers == 3
     assert candidate.metadata["mteam_discovery_mode"] == "api"
+    assert candidate.metadata["download_url_source"] == "mteam_api_deferred"
+    assert candidate.metadata["mteam_torrent_id"] == "1171443"
     assert candidate.metadata["times_completed"] == 28
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_resolve_deferred_download_url_fetches_mteam_token() -> None:
+    route = respx.post("https://api.m-team.cc/api/torrent/genDlToken").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "code": "0",
+                "data": "https://dl.m-team.cc/download.php?id=1171443&passkey=secret",
+            },
+        )
+    )
+
+    resolved = await resolve_deferred_download_url(
+        _candidate(
+            download_url="mteam-api://torrent/1171443",
+            metadata={
+                "mteam_discovery_mode": "api",
+                "download_url_source": "mteam_api_deferred",
+                "mteam_torrent_id": "1171443",
+            },
+        ),
+        api_key="secret-api-key",
+    )
+
+    assert route.called
+    request = route.calls[0].request
+    assert request.headers["x-api-key"] == "secret-api-key"
+    assert request.content.decode("utf-8") == "id=1171443"
+    assert resolved is not None
+    assert resolved.download_url == "https://dl.m-team.cc/download.php?id=1171443&passkey=secret"
+    assert resolved.metadata["download_url_source"] == "mteam_api"
 
 
 @pytest.mark.asyncio
@@ -156,16 +190,6 @@ async def test_mteam_api_client_marks_missing_discount_expiry() -> None:
             },
         )
     )
-    respx.post("https://api.m-team.cc/api/torrent/genDlToken").mock(
-        return_value=httpx.Response(
-            200,
-            json={
-                "code": "0",
-                "data": "https://dl.m-team.cc/download.php?id=1171443&passkey=secret",
-            },
-        )
-    )
-
     client = MTeamApiClient(api_key="secret-api-key")
     candidates = await client.discover_torrents(
         site="mt",
@@ -231,7 +255,9 @@ async def test_mteam_api_client_filters_out_candidates_below_thresholds() -> Non
 
 @pytest.mark.asyncio
 async def test_fetch_api_candidates_reuses_detail_enrichment() -> None:
-    async def fake_discover(site: str, options: MTeamApiDiscoveryOptions) -> list[TorrentCandidate]:
+    async def fake_discover(
+        *, site: str, options: MTeamApiDiscoveryOptions
+    ) -> list[TorrentCandidate]:
         assert site == "mt"
         assert options.sort_field == "downloads"
         return [_candidate(metadata={"mteam_discovery_mode": "api"})]
