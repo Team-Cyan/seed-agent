@@ -80,7 +80,19 @@ When the dry-run output looks right, rerun the same command with `--execute`:
 
 ```bash
 uv run seed-agent run-once --config config/example.yaml --execute
+uv run seed-agent schedule-run --config config/example.yaml --execute --interval-minutes 30
 ```
+
+For unattended runs, prefer adding free-window safety flags:
+
+```bash
+uv run seed-agent run-once --config config/example.yaml --execute \
+  --min-free-window-minutes 180 \
+  --require-known-free-window
+```
+
+That prevents execute-mode enqueue when a candidate has too little known
+remaining free time or when M-Team does not provide a usable free-window value.
 
 Implementation note: qBittorrent pause operations use the Web API stop endpoint only. That keeps the behavior explicit and predictable in the current Phase 1 loop.
 

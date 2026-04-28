@@ -220,6 +220,7 @@ def test_cli_help_lists_phase_one_commands() -> None:
     assert "prune" in result.output
     assert "daily-report" in result.output
     assert "run-once" in result.output
+    assert "schedule-run" in result.output
     assert "site-probe" in result.output
 
 
@@ -240,6 +241,17 @@ def test_mutating_command_help_includes_execute_flag(command: str) -> None:
 
     assert result.exit_code == 0
     assert "--execute" in result.output
+
+
+def test_schedule_run_help_includes_interval_and_free_window_flags() -> None:
+    from seed_agent.cli import app
+
+    result = CliRunner().invoke(app, ["schedule-run", "--help"])
+
+    assert result.exit_code == 0
+    assert "--interval-minutes" in result.output
+    assert "min-free-window" in result.output
+    assert "require-known-free" in result.output
 
 
 def test_discover_command_prints_safe_output_without_raw_download_url(
@@ -267,6 +279,70 @@ def test_discover_command_prints_safe_output_without_raw_download_url(
     assert "passkey" not in result.output
     assert _candidate().download_url not in result.output
     assert "download_url" not in result.output
+
+
+def test_schedule_run_executes_single_cycle_and_emits_schedule_metadata(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from seed_agent import cli
+
+    config_path = _config_file(tmp_path)
+    seen: list[tuple[Path, bool, int | None, bool]] = []
+
+    def fake_run_once_payload(
+        config_path_value: Path,
+        *,
+        execute: bool,
+        min_free_window_minutes: int | None,
+        require_known_free_window: bool,
+    ) -> dict[str, object]:
+        seen.append(
+            (
+                config_path_value,
+                execute,
+                min_free_window_minutes,
+                require_known_free_window,
+            )
+        )
+        return {
+            "command": "run-once",
+            "config": str(config_path_value),
+            "execute": execute,
+            "discovered": 1,
+            "scored": 1,
+            "accepted": 1,
+            "enqueued": 1,
+            "scores": [],
+            "decisions": [],
+        }
+
+    monkeypatch.setattr(cli, "_run_once_payload", fake_run_once_payload)
+    monkeypatch.setattr(cli.time, "sleep", lambda seconds: None)
+
+    result = CliRunner().invoke(
+        cli.app,
+        [
+            "schedule-run",
+            "--config",
+            str(config_path),
+            "--execute",
+            "--interval-minutes",
+            "15",
+            "--min-free-window-minutes",
+            "180",
+            "--max-cycles",
+            "1",
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = _json_output(result)
+    assert payload["command"] == "schedule-run"
+    assert payload["cycle"] == 1
+    assert payload["interval_minutes"] == 15
+    assert payload["min_free_window_minutes"] == 180
+    assert payload["require_known_free_window"] is True
+    assert seen == [(config_path, True, 180, True)]
 
 
 def test_site_probe_reports_sparse_and_enriched_counts(

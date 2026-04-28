@@ -31,7 +31,8 @@ This repository keeps durable project knowledge under `docs/`.
 
 1. `README.md`
 2. `docs/roadmap.md`
-3. `docs/operations/phase-1-usage.md` or `docs/operations/phase-2-usage.md`
+3. `docs/operations/phase-1-usage.md`, `docs/operations/docker-scheduling.md`,
+   or `docs/operations/phase-2-usage.md`
 
 ### For agents
 

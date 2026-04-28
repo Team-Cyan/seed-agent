@@ -87,6 +87,7 @@ Phase 1 uses `balanced` cleanup by default:
 - [Seed Agent Design](docs/specs/2026-04-20-seed-agent-design.md)
 - [M-Team API-Driven Discovery Spec](docs/specs/2026-04-24-mteam-api-driven-discovery.md)
 - [Phase 1 Usage](docs/operations/phase-1-usage.md)
+- [Docker Scheduling](docs/operations/docker-scheduling.md)
 - [Phase 2 Usage](docs/operations/phase-2-usage.md)
 - [Phase 1 PT Upload Plan](docs/plans/2026-04-20-phase-1-pt-upload-loop.md)
 - [Phase 2 Resource Intent Plan](docs/plans/2026-04-22-phase-2-resource-intent-loop.md)
@@ -113,6 +114,7 @@ uv run seed-agent discover --config config/example.yaml
 uv run seed-agent score --config config/example.yaml
 uv run seed-agent run-once --config config/example.yaml
 uv run seed-agent run-once --config config/example.yaml --execute
+uv run seed-agent schedule-run --config config/example.yaml --execute --interval-minutes 30
 ```
 
 ## Phase 2 CLI

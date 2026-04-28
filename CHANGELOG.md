@@ -21,6 +21,11 @@ All notable project changes are tracked here.
   categories, add-only media categories, over-budget paused enqueue behavior, and
   pool usage summaries.
 - Policy-aware audit context for enqueue and cleanup decisions.
+- A Docker image build path, container entrypoint, and operator documentation for
+  running the agent as either a long-lived polling container or an externally
+  scheduled single-run job.
+- A `schedule-run` CLI command for unattended polling loops with structured cycle
+  metadata for server-side execution logs.
 
 ### Changed
 
@@ -33,6 +38,8 @@ All notable project changes are tracked here.
 - Local live operation configs matching `config/live-*.yaml` are ignored by git.
 - The example config caps mutable seed candidates at 150 GiB while keeping
   2-80 GiB as the preferred scoring range and requiring at least one seeder.
+- Execute-mode operator docs now show how to use polling safely in unattended
+  deployments rather than relying on ad hoc local invocations.
 
 ### Fixed
 
@@ -49,3 +56,6 @@ All notable project changes are tracked here.
 - qBittorrent prune pool usage now includes add-only categories in shared budget
   totals while keeping cleanup actions restricted to mutable/delete-enabled
   categories.
+- Execute-mode enqueue flows can now reject accepted candidates when the known
+  free window is too short for the configured safety threshold, and scheduled
+  runs can require known free-window data before mutating qBittorrent.

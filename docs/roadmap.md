@@ -19,6 +19,7 @@ This file tracks the current project status at a level that is easy for both hum
 - managed torrent review
 - balanced cleanup policy with pause-before-delete behavior
 - daily report and run-once command surface
+- unattended scheduler command surface with execute-time free-window safety guards
 
 ### Resource Intent Loop
 
@@ -41,6 +42,12 @@ This file tracks the current project status at a level that is easy for both hum
   and activity-based sorting
 - `site-probe` reporting for authenticated M-Team access and discovery mode
 
+### Deployment Readiness
+
+- Docker image build path for server-side operation
+- environment-driven container entrypoint for `run-once`, `enqueue`, and `schedule-run`
+- operator docs for long-running pollers vs external scheduled jobs
+
 ## In Progress
 
 - Codex project initialization and harness-oriented AI docs
@@ -52,6 +59,12 @@ This file tracks the current project status at a level that is easy for both hum
 - ingest richer qB runtime state for better ROI decisions
 - improve visibility into active upload/download conditions before enqueue
 - replace the single managed-category assumption with per-category policy and logical budget control
+
+### Scheduler And Server Deployments
+
+- add first-class Compose and Kubernetes examples once the container contract settles
+- decide whether the preferred production model is an internal sleep loop or an external scheduler invoking `run-once`
+- add healthcheck/logging guidance for long-running deployments
 
 Reference:
 

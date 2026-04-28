@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -149,10 +151,21 @@ def score(
 def enqueue(
     config: Annotated[Path, typer.Option("--config")] = DEFAULT_CONFIG,
     execute: Annotated[bool, typer.Option("--execute")] = False,
+    min_free_window_minutes: Annotated[
+        int | None, typer.Option("--min-free-window-minutes")
+    ] = None,
+    require_known_free_window: Annotated[
+        bool, typer.Option("--require-known-free-window/--allow-unknown-free-window")
+    ] = False,
 ) -> None:
     loaded = load_config(config)
     candidates = _discover_candidates(loaded)
     scored = score_candidates(candidates, loaded.discovery, loaded.scoring)
+    scored = _apply_free_window_safety(
+        scored,
+        min_free_window_minutes=min_free_window_minutes,
+        require_known_free_window=require_known_free_window if execute else False,
+    )
     if execute:
         scored = _run(resolve_deferred_download_urls(scored, loaded))
     downloader = build_downloader(loaded) if execute else _NullDownloader()
@@ -593,8 +606,74 @@ def daily_report_command(
 def run_once(
     config: Annotated[Path, typer.Option("--config")] = DEFAULT_CONFIG,
     execute: Annotated[bool, typer.Option("--execute")] = False,
+    min_free_window_minutes: Annotated[
+        int | None, typer.Option("--min-free-window-minutes")
+    ] = None,
+    require_known_free_window: Annotated[
+        bool, typer.Option("--require-known-free-window/--allow-unknown-free-window")
+    ] = False,
 ) -> None:
-    loaded = load_config(config)
+    payload = _run_once_payload(
+        config,
+        execute=execute,
+        min_free_window_minutes=min_free_window_minutes,
+        require_known_free_window=require_known_free_window if execute else False,
+    )
+    _print_json(payload)
+    if "error" in payload:
+        raise typer.Exit(code=1)
+
+
+@app.command(name="schedule-run")
+def schedule_run(
+    config: Annotated[Path, typer.Option("--config")] = DEFAULT_CONFIG,
+    execute: Annotated[bool, typer.Option("--execute")] = False,
+    interval_minutes: Annotated[int, typer.Option("--interval-minutes")] = 60,
+    min_free_window_minutes: Annotated[
+        int | None, typer.Option("--min-free-window-minutes")
+    ] = None,
+    require_known_free_window: Annotated[
+        bool, typer.Option("--require-known-free-window/--allow-unknown-free-window")
+    ] = True,
+    max_cycles: Annotated[int | None, typer.Option("--max-cycles")] = None,
+) -> None:
+    if interval_minutes < 1:
+        raise typer.BadParameter("interval_minutes must be >= 1")
+    if max_cycles is not None and max_cycles < 1:
+        raise typer.BadParameter("max_cycles must be >= 1")
+
+    cycle = 0
+    while True:
+        cycle += 1
+        payload = _run_once_payload(
+            config,
+            execute=execute,
+            min_free_window_minutes=min_free_window_minutes,
+            require_known_free_window=require_known_free_window if execute else False,
+        )
+        payload["command"] = "schedule-run"
+        payload["cycle"] = cycle
+        payload["interval_minutes"] = interval_minutes
+        payload["scheduled_at"] = datetime.now(UTC).isoformat()
+        payload["min_free_window_minutes"] = min_free_window_minutes
+        payload["require_known_free_window"] = require_known_free_window if execute else False
+        _print_json(payload)
+
+        if "error" in payload:
+            raise typer.Exit(code=1)
+        if max_cycles is not None and cycle >= max_cycles:
+            return
+        time.sleep(interval_minutes * 60)
+
+
+def _run_once_payload(
+    config_path: Path,
+    *,
+    execute: bool,
+    min_free_window_minutes: int | None,
+    require_known_free_window: bool,
+) -> dict[str, Any]:
+    loaded = load_config(config_path)
     store = StateStore(_state_path(loaded))
     default_policy = _default_category_policy(loaded)
 
@@ -610,6 +689,11 @@ def run_once(
         )
 
     scored = score_candidates(candidates, loaded.discovery, loaded.scoring)
+    scored = _apply_free_window_safety(
+        scored,
+        min_free_window_minutes=min_free_window_minutes,
+        require_known_free_window=require_known_free_window,
+    )
     if execute:
         scored = _run(resolve_deferred_download_urls(scored, loaded))
     scored_by_id = {item.candidate_id: item for item in scored}
@@ -650,7 +734,7 @@ def run_once(
 
     payload = {
         "command": "run-once",
-        "config": str(config),
+        "config": str(config_path),
         "execute": execute,
         "discovered": len(candidates),
         "scored": len(scored),
@@ -659,10 +743,65 @@ def run_once(
         "scores": [_score_summary(item) for item in scored],
         "decisions": [_decision_summary(item) for item in decisions],
     }
+    if min_free_window_minutes is not None:
+        payload["min_free_window_minutes"] = min_free_window_minutes
+    if require_known_free_window:
+        payload["require_known_free_window"] = True
     if batch_error is not None:
         payload["error"] = str(batch_error)
-    _print_json(payload)
-    _raise_if_batch_failed(batch_error)
+    return payload
+
+
+def _apply_free_window_safety(
+    scored: list[ScoreBreakdown],
+    *,
+    min_free_window_minutes: int | None,
+    require_known_free_window: bool,
+) -> list[ScoreBreakdown]:
+    if min_free_window_minutes is not None and min_free_window_minutes < 0:
+        raise typer.BadParameter("min_free_window_minutes must be >= 0")
+    if not require_known_free_window and min_free_window_minutes is None:
+        return scored
+
+    adjusted: list[ScoreBreakdown] = []
+    for item in scored:
+        candidate = item.candidate
+        if not item.accepted:
+            adjusted.append(item)
+            continue
+
+        left_time = candidate.left_time_minutes
+        if require_known_free_window and left_time is None:
+            adjusted.append(
+                item.model_copy(
+                    update={
+                        "score": 0,
+                        "accepted": False,
+                        "reasons": [*item.reasons, "left_time required for execute safety"],
+                    }
+                )
+            )
+            continue
+        if min_free_window_minutes is not None and left_time is not None:
+            if left_time < min_free_window_minutes:
+                adjusted.append(
+                    item.model_copy(
+                        update={
+                            "score": 0,
+                            "accepted": False,
+                            "reasons": [
+                                *item.reasons,
+                                (
+                                    f"left_time {left_time} < execute safety "
+                                    f"{min_free_window_minutes}"
+                                ),
+                            ],
+                        }
+                    )
+                )
+                continue
+        adjusted.append(item)
+    return adjusted
 
 
 def _run(value: Any) -> Any:

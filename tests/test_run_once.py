@@ -495,3 +495,49 @@ def test_run_once_execute_missing_secret_exits_non_zero(
 
     assert result.exit_code != 0
     assert "missing downloader secret" in result.output
+
+
+def test_run_once_rejects_candidate_below_execute_free_window(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from seed_agent import cli
+
+    monkeypatch.chdir(tmp_path)
+
+    config_path = _config_file(tmp_path)
+    config = _config()
+    candidate = _candidate(left_time_minutes=45)
+
+    async def fake_discover_candidates(config: SeedAgentConfig):
+        return [candidate]
+
+    def fake_score_candidates(candidates, discovery_config, scoring_config):
+        return [_scored(candidate=candidate)]
+
+    async def fake_enqueue_candidates(*args, **kwargs):
+        return []
+
+    monkeypatch.setattr(cli, "load_config", lambda path: config)
+    monkeypatch.setattr(cli, "discover_candidates", fake_discover_candidates)
+    monkeypatch.setattr(cli, "score_candidates", fake_score_candidates)
+    monkeypatch.setattr(cli, "enqueue_candidates", fake_enqueue_candidates)
+
+    result = CliRunner().invoke(
+        cli.app,
+        [
+            "run-once",
+            "--config",
+            str(config_path),
+            "--min-free-window-minutes",
+            "180",
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = _json_output(result)
+    assert payload["accepted"] == 0
+    assert payload["enqueued"] == 0
+    assert any(
+        "left_time 45 < execute safety 180" in reason
+        for reason in payload["scores"][0]["reasons"]
+    )
