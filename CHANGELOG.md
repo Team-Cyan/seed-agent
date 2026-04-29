@@ -41,6 +41,11 @@ All notable project changes are tracked here.
   thresholds.
 - Paused enqueue decisions now carry explicit pause reasons through CLI payloads
   and audit-facing decision summaries, including the intent enqueue flows.
+- qB runtime persistence now stamps a first-seen `paused_at` for already-paused
+  managed torrents, so prune can eventually delete long-paused items instead of
+  keeping them forever on missing timestamp data.
+- Conservative runtime enqueue gates now count stalled/meta download states as
+  download pressure even when current `dlspeed` is zero.
 
 ### Changed
 

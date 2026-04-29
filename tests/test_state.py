@@ -165,3 +165,30 @@ def test_state_store_applies_recent_upload_snapshot_and_clears_stale_pause(
     assert runtime is not None
     assert runtime["paused_at"] is None
     assert runtime["uploaded_bytes"] == 13 * 1024**3
+
+
+def test_state_store_stamps_first_seen_pause_timestamp_for_paused_torrent(
+    tmp_path: Path,
+) -> None:
+    store = StateStore(tmp_path / "state.sqlite3")
+    paused = ManagedTorrent(
+        hash="paused-first-seen",
+        name="Paused Torrent",
+        category="pt-auto",
+        tags={"seed-agent"},
+        state="pausedUP",
+        size_bytes=10 * 1024**3,
+        uploaded_bytes=5 * 1024**3,
+        downloaded_bytes=5 * 1024**3,
+        added_at=datetime(2026, 4, 1, tzinfo=UTC),
+        last_activity_at=datetime(2026, 4, 1, tzinfo=UTC),
+        metadata={},
+    )
+
+    enriched = store.apply_torrent_runtime([paused])
+
+    paused_at = enriched[0].metadata.get("paused_at")
+    assert isinstance(paused_at, datetime)
+    runtime = store.get_torrent_runtime("paused-first-seen")
+    assert runtime is not None
+    assert runtime["paused_at"] is not None

@@ -1266,7 +1266,7 @@ def _runtime_activity_summary(torrents: list[ManagedTorrent]) -> dict[str, float
         total_amount_left += amount_left
         if upspeed > 0:
             active_upload_count += 1
-        if dlspeed > 0:
+        if dlspeed > 0 or state in {"stalleddl", "metadl"}:
             active_download_count += 1
         if state.startswith("paused"):
             paused_count += 1

@@ -189,9 +189,12 @@ class StateStore:
                 metadata["recent_upload_gb"] = recent_upload_gb
                 metadata["upload_delta_gb"] = recent_upload_gb
             paused_at = _parse_datetime(runtime.get("paused_at")) if runtime is not None else None
+            if paused_at is None:
+                paused_at = _parse_datetime(metadata.get("paused_at"))
             if _is_paused_state(torrent.state):
-                if paused_at is not None:
-                    metadata["paused_at"] = paused_at
+                if paused_at is None:
+                    paused_at = _utc_now_datetime()
+                metadata["paused_at"] = paused_at
             else:
                 paused_at = None
             self._upsert_torrent_runtime(
@@ -591,6 +594,8 @@ def _json_dumps(value: Any) -> str:
 
 
 def _parse_datetime(value: Any) -> datetime | None:
+    if isinstance(value, datetime):
+        return value
     if not isinstance(value, str) or not value:
         return None
     try:

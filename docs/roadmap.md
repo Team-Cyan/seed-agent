@@ -68,6 +68,10 @@ This file tracks the current project status at a level that is easy for both hum
   avoid penalizing torrents that are still contributing
 - use optional runtime enqueue gates to pause newly added torrents when the
   download side is already saturated
+- keep first-seen paused torrents aging toward delete eligibility instead of
+  letting missing pause timestamps stall cleanup forever
+- treat stalled/meta download states as real download pressure for conservative
+  enqueue gating, not just torrents with non-zero instantaneous throughput
 
 ### Scheduler And Server Deployments
 
