@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 
 from typer.testing import CliRunner
@@ -10,7 +11,20 @@ from seed_agent.models import Decision, LifecycleState, ScoreBreakdown, TorrentC
 from seed_agent.state import StateStore
 
 
-def _config(secret_ref: str | None = None) -> SeedAgentConfig:
+def _config(
+    secret_ref: str | None = None,
+    *,
+    discovery_overrides: dict[str, object] | None = None,
+) -> SeedAgentConfig:
+    discovery_data = {
+        "discounts": ["free", "2xfree"],
+        "min_left_time_minutes": 120,
+        "min_leechers": 8,
+        "max_seeders": 80,
+        "allow_hr": False,
+    }
+    if discovery_overrides:
+        discovery_data.update(discovery_overrides)
     return SeedAgentConfig(
         mode="balanced",
         sites=[
@@ -22,13 +36,7 @@ def _config(secret_ref: str | None = None) -> SeedAgentConfig:
                 "cookie_ref": None,
             }
         ],
-        discovery=DiscoveryConfig(
-            discounts=["free", "2xfree"],
-            min_left_time_minutes=120,
-            min_leechers=8,
-            max_seeders=80,
-            allow_hr=False,
-        ),
+        discovery=DiscoveryConfig(**discovery_data),
         scoring=ScoringConfig(
             min_score_to_enqueue=70,
             weights={
@@ -98,7 +106,12 @@ def _scored(**overrides: object) -> ScoreBreakdown:
     return ScoreBreakdown(**data)
 
 
-def _config_file(tmp_path: Path, secret_ref: str | None = None) -> Path:
+def _config_file(
+    tmp_path: Path,
+    secret_ref: str | None = None,
+    *,
+    discovery_extra: str = "",
+) -> Path:
     secret_line = "null" if secret_ref is None else secret_ref
     path = tmp_path / "config.yaml"
     path.write_text(
@@ -116,6 +129,7 @@ discovery:
   min_leechers: 8
   max_seeders: 80
   allow_hr: false
+{discovery_extra}
 scoring:
   min_score_to_enqueue: 70
   weights:
@@ -541,3 +555,77 @@ def test_run_once_rejects_candidate_below_execute_free_window(
         "left_time 45 < execute safety 180" in reason
         for reason in payload["scores"][0]["reasons"]
     )
+
+
+def test_run_once_dry_run_pauses_enqueue_when_runtime_download_gate_exceeded(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from seed_agent import cli
+    from seed_agent.models import ManagedTorrent
+
+    monkeypatch.chdir(tmp_path)
+
+    config_path = _config_file(
+        tmp_path,
+        secret_ref="local/secrets/qb.yaml",
+        discovery_extra="  max_active_downloads: 0\n",
+    )
+    config = _config(
+        secret_ref="local/secrets/qb.yaml",
+        discovery_overrides={"max_active_downloads": 0},
+    )
+
+    async def fake_discover_candidates(config: SeedAgentConfig):
+        return [_candidate()]
+
+    def fake_score_candidates(candidates, discovery_config, scoring_config):
+        return [_scored()]
+
+    async def fake_enqueue_candidates(
+        scored, downloader, policy, execute, *, paused=False, pool_usage=None
+    ):
+        assert paused is True
+        assert pool_usage is not None
+        return []
+
+    class FakeDownloader:
+        async def list_torrents(self, category: str | None = None, tags: set[str] | None = None):
+            return [
+                ManagedTorrent(
+                    hash="seed-active",
+                    name="Managed Torrent",
+                    category="seed",
+                    tags={"seed-agent", "seed"},
+                    state="downloading",
+                    size_bytes=10 * 1024**3,
+                    uploaded_bytes=1,
+                    downloaded_bytes=1,
+                    added_at=datetime.now(UTC),
+                    last_activity_at=datetime.now(UTC),
+                    metadata={"dlspeed_bps": 1024, "amount_left_bytes": 2 * 1024**3},
+                )
+            ]
+
+        async def pause(self, hash: str) -> None:
+            return None
+
+        async def delete(self, hash: str, delete_files: bool) -> None:
+            return None
+
+        async def add_url(
+            self, url: str, category: str, tags: list[str], *, paused: bool = False
+        ) -> str | None:
+            return None
+
+    monkeypatch.setattr(cli, "load_config", lambda path: config)
+    monkeypatch.setattr(cli, "discover_candidates", fake_discover_candidates)
+    monkeypatch.setattr(cli, "score_candidates", fake_score_candidates)
+    monkeypatch.setattr(cli, "enqueue_candidates", fake_enqueue_candidates)
+    monkeypatch.setattr(cli, "_maybe_build_downloader", lambda loaded: FakeDownloader())
+
+    result = CliRunner().invoke(cli.app, ["run-once", "--config", str(config_path)])
+
+    assert result.exit_code == 0
+    payload = _json_output(result)
+    assert payload["enqueue_paused_by_pool_policy"] is True
+    assert "active downloads 1 > max 0" in payload["enqueue_paused_reasons"]

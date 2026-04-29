@@ -36,6 +36,9 @@ All notable project changes are tracked here.
 - `enqueue`, `intent-enqueue`, and `intent-run-once` now expose the same qB live
   runtime summaries and default-pool context as `run-once`, reducing dry-run
   blind spots before queue mutations.
+- Optional runtime enqueue gates can now switch accepted torrents to paused-add
+  behavior when active downloads or remaining queued volume exceed configured
+  thresholds.
 
 ### Changed
 

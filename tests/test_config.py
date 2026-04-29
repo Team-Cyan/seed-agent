@@ -234,6 +234,20 @@ cleanup:
     assert [pool.name for pool in config.downloader.budget_pools] == ["downloads", "media"]
 
 
+def test_load_config_accepts_optional_runtime_enqueue_gates(tmp_path: Path) -> None:
+    data = _valid_config_data("local/secrets/qb.yaml")
+    data["discovery"] = {
+        **data["discovery"],
+        "max_active_downloads": 3,
+        "max_total_amount_left_gb": 150,
+    }
+
+    config = SeedAgentConfig(**data)
+
+    assert config.discovery.max_active_downloads == 3
+    assert config.discovery.max_total_amount_left_gb == 150
+
+
 def test_unknown_config_key_raises_validation_error() -> None:
     with pytest.raises(ValidationError):
         SeedAgentConfig(**{**_valid_config_data("local/secrets/qb.yaml"), "unexpected": True})

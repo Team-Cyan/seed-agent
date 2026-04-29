@@ -66,6 +66,8 @@ This file tracks the current project status at a level that is easy for both hum
   only after the runtime summaries have proven useful
 - keep recent-upload snapshots durable enough for prune and eviction logic to
   avoid penalizing torrents that are still contributing
+- use optional runtime enqueue gates to pause newly added torrents when the
+  download side is already saturated
 
 ### Scheduler And Server Deployments
 

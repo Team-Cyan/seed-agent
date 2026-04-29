@@ -51,6 +51,10 @@ discovery:
   # but are not rejected unless they violate min_size_gb/max_size_gb.
   preferred_size_min_gb: 2
   preferred_size_max_gb: 80
+  # Optional conservative runtime gates. When exceeded, enqueue-like commands
+  # still add accepted torrents but mark them paused by policy.
+  # max_active_downloads: 3
+  # max_total_amount_left_gb: 150
   allow_hr: false
 scoring:
   min_score_to_enqueue: 70

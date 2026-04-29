@@ -160,6 +160,8 @@ class DiscoveryConfig(BaseModel):
     max_size_gb: float | None = None
     preferred_size_min_gb: float | None = None
     preferred_size_max_gb: float | None = None
+    max_active_downloads: int | None = None
+    max_total_amount_left_gb: float | None = None
 
     @field_validator("discounts", mode="before")
     @classmethod
@@ -179,6 +181,8 @@ class DiscoveryConfig(BaseModel):
             "max_size_gb",
             "preferred_size_min_gb",
             "preferred_size_max_gb",
+            "max_active_downloads",
+            "max_total_amount_left_gb",
         ):
             value = getattr(self, field_name)
             if value is not None and value < 0:

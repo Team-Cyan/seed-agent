@@ -203,6 +203,8 @@ def enqueue(
     if pool_usage is not None:
         payload["default_pool_usage"] = _pool_usage_item_summary(pool_usage)
         payload["enqueue_paused_by_pool_policy"] = paused
+    if paused_reasons := _enqueue_pause_reasons(loaded, live_torrents, pool_usage):
+        payload["enqueue_paused_reasons"] = paused_reasons
     if batch_error is not None:
         payload["error"] = str(batch_error)
     _print_json(payload)
@@ -416,6 +418,8 @@ def intent_enqueue(
     if pool_usage is not None:
         payload["default_pool_usage"] = _pool_usage_item_summary(pool_usage)
         payload["enqueue_paused_by_pool_policy"] = paused
+    if paused_reasons := _enqueue_pause_reasons(loaded, live_torrents, pool_usage):
+        payload["enqueue_paused_reasons"] = paused_reasons
     if batch_error is not None:
         payload["error"] = str(batch_error)
     _print_json(payload)
@@ -471,6 +475,8 @@ def intent_run_once(
     if pool_usage is not None:
         payload["default_pool_usage"] = _pool_usage_item_summary(pool_usage)
         payload["enqueue_paused_by_pool_policy"] = paused
+    if paused_reasons := _enqueue_pause_reasons(loaded, live_torrents, pool_usage):
+        payload["enqueue_paused_reasons"] = paused_reasons
     if result is not None:
         payload["intents"] = [_intent_summary(intent) for intent in result.searched]
         payload["selected"] = [
@@ -790,6 +796,8 @@ def _run_once_payload(
     if pool_usage is not None:
         payload["default_pool_usage"] = _pool_usage_item_summary(pool_usage)
         payload["enqueue_paused_by_pool_policy"] = paused
+    if paused_reasons := _enqueue_pause_reasons(loaded, live_torrents, pool_usage):
+        payload["enqueue_paused_reasons"] = paused_reasons
     if min_free_window_minutes is not None:
         payload["min_free_window_minutes"] = min_free_window_minutes
     if require_known_free_window:
@@ -1168,7 +1176,41 @@ def _enqueue_runtime_context(
         return _NullDownloader(), [], False, None
     live_torrents = _load_policy_torrents(live_downloader, config)
     paused, pool_usage = _default_category_budget_state_from_torrents(config, live_torrents)
+    paused = paused or bool(_enqueue_pause_reasons(config, live_torrents, pool_usage))
     return live_downloader, live_torrents, paused, pool_usage
+
+
+def _enqueue_pause_reasons(
+    config: SeedAgentConfig,
+    torrents: list[ManagedTorrent],
+    pool_usage: PoolUsage | None,
+) -> list[str]:
+    reasons: list[str] = []
+    if pool_usage is not None and pool_usage.over_budget:
+        reasons.append(
+            f"budget pool {pool_usage.pool_name} over budget "
+            f"({round(pool_usage.size_bytes / 1024**4, 2)} / "
+            f"{round(pool_usage.max_size_bytes / 1024**4, 2)} TiB)"
+        )
+    runtime = _runtime_activity_summary(torrents)
+    max_active_downloads = config.discovery.max_active_downloads
+    if (
+        max_active_downloads is not None
+        and runtime["active_download_count"] > max_active_downloads
+    ):
+        reasons.append(
+            f"active downloads {runtime['active_download_count']} > max {max_active_downloads}"
+        )
+    max_total_amount_left_gb = config.discovery.max_total_amount_left_gb
+    if (
+        max_total_amount_left_gb is not None
+        and runtime["total_amount_left_gb"] > max_total_amount_left_gb
+    ):
+        reasons.append(
+            f"remaining download {runtime['total_amount_left_gb']} GiB > max "
+            f"{max_total_amount_left_gb}"
+        )
+    return reasons
 
 
 def _pool_usage_for_policy(
