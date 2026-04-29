@@ -62,6 +62,8 @@ This file tracks the current project status at a level that is easy for both hum
 - improve visibility into active upload/download conditions before enqueue
 - use richer live qB state to distinguish saturated seedbox keepers from torrents
   that are merely old or large
+- convert live-state visibility into conservative enqueue and prune protections
+  only after the runtime summaries have proven useful
 
 ### Scheduler And Server Deployments
 

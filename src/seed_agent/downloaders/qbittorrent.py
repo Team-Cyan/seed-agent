@@ -135,6 +135,15 @@ def _torrent_from_row(row: dict[str, Any]) -> ManagedTorrent:
     metadata: dict[str, Any] = {}
     if uploaded_session is not None:
         metadata["uploaded_session_bytes"] = int(uploaded_session)
+    upspeed = row.get("upspeed")
+    if upspeed is not None:
+        metadata["upspeed_bps"] = int(upspeed)
+    dlspeed = row.get("dlspeed")
+    if dlspeed is not None:
+        metadata["dlspeed_bps"] = int(dlspeed)
+    amount_left = row.get("amount_left")
+    if amount_left is not None:
+        metadata["amount_left_bytes"] = int(amount_left)
     tags = _parse_tags(row.get("tags"))
     if _looks_like_hr_tag(tags):
         metadata["hr"] = True

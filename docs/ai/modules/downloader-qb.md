@@ -15,6 +15,8 @@ Own qBittorrent integration for enqueue, review, and cleanup-safe downloader act
 - authenticate to qB Web API,
 - add torrents,
 - inspect managed torrents,
+- expose live runtime signals such as current upload/download speeds and
+  remaining download volume,
 - support pause/delete flows through explicit decisions.
 
 ## Expectations
@@ -22,6 +24,7 @@ Own qBittorrent integration for enqueue, review, and cleanup-safe downloader act
 - dry-run first for mutating operations,
 - never widen destructive behavior casually,
 - keep managed/unmanaged boundaries explicit,
+- make live qB state visible before turning it into automated gating,
 - avoid leaking downloader credentials in output.
 
 ## Verification

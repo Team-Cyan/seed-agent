@@ -106,6 +106,9 @@ async def test_list_torrents_converts_rows_into_managed_torrents() -> None:
                     "size": 123456,
                     "uploaded": 654321,
                     "uploaded_session": 111,
+                    "upspeed": 2048,
+                    "dlspeed": 1024,
+                    "amount_left": 4096,
                     "downloaded": 123,
                     "added_on": 1700000000,
                     "completion_on": 1700000100,
@@ -135,6 +138,9 @@ async def test_list_torrents_converts_rows_into_managed_torrents() -> None:
             save_path="/mnt/data",
             metadata={
                 "uploaded_session_bytes": 111,
+                "upspeed_bps": 2048,
+                "dlspeed_bps": 1024,
+                "amount_left_bytes": 4096,
             },
         )
     ]

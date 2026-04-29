@@ -502,6 +502,7 @@ def review(
         "config": str(config),
         "managed_count": len(torrents),
         "pool_usage": _pool_usage_summary(loaded, torrents),
+        "runtime_activity": _runtime_activity_summary(torrents),
         "managed_torrents": [
             _managed_torrent_summary(torrent, policy_lookup.get(torrent.category or ""))
             for torrent in torrents
@@ -593,6 +594,7 @@ def daily_report_command(
         "config": str(config),
         "report": build_daily_report(scored, managed_torrents),
         "pool_usage": _pool_usage_summary(loaded, managed_torrents),
+        "runtime_activity": _runtime_activity_summary(managed_torrents),
         "managed_count": len(managed_torrents),
         "managed_torrents": [
             _managed_torrent_summary(torrent, policy_lookup.get(torrent.category or ""))
@@ -744,11 +746,18 @@ def _run_once_payload(
             torrent_hash=None,
         )
 
-    downloader = build_downloader(loaded) if execute else _NullDownloader()
-    paused, pool_usage = _default_category_budget_state(
-        loaded,
-        downloader if execute else None,
-    )
+    live_downloader = build_downloader(loaded) if execute else _maybe_build_downloader(loaded)
+    if live_downloader is None:
+        downloader = _NullDownloader()
+        live_torrents = []
+        paused = False
+        pool_usage = None
+    else:
+        downloader = live_downloader
+        live_torrents = _load_policy_torrents(downloader, loaded)
+        paused, pool_usage = _default_category_budget_state_from_torrents(
+            loaded, live_torrents
+        )
     batch_error = None
     try:
         decisions = _run(
@@ -779,7 +788,11 @@ def _run_once_payload(
         "enqueued": sum(1 for item in decisions if item.action == "qb.enqueue"),
         "scores": [_score_summary(item) for item in scored],
         "decisions": [_decision_summary(item) for item in decisions],
+        "runtime_activity": _runtime_activity_summary(live_torrents),
     }
+    if pool_usage is not None:
+        payload["default_pool_usage"] = _pool_usage_item_summary(pool_usage)
+        payload["enqueue_paused_by_pool_policy"] = paused
     if min_free_window_minutes is not None:
         payload["min_free_window_minutes"] = min_free_window_minutes
     if require_known_free_window:
@@ -1040,6 +1053,10 @@ def _managed_torrent_summary(
     torrent: ManagedTorrent,
     policy: CategoryPolicyConfig | None = None,
 ) -> dict[str, Any]:
+    upspeed = int(torrent.metadata.get("upspeed_bps", 0) or 0)
+    dlspeed = int(torrent.metadata.get("dlspeed_bps", 0) or 0)
+    uploaded_session = int(torrent.metadata.get("uploaded_session_bytes", 0) or 0)
+    amount_left = int(torrent.metadata.get("amount_left_bytes", 0) or 0)
     summary = {
         "hash": torrent.hash,
         "name": torrent.name,
@@ -1053,6 +1070,12 @@ def _managed_torrent_summary(
         "last_activity_at": torrent.last_activity_at.isoformat()
         if torrent.last_activity_at is not None
         else None,
+        "upspeed_mib_s": round(upspeed / 1024**2, 3),
+        "dlspeed_mib_s": round(dlspeed / 1024**2, 3),
+        "uploaded_session_gb": round(uploaded_session / 1024**3, 3),
+        "amount_left_gb": round(amount_left / 1024**3, 3),
+        "active_uploading": upspeed > 0,
+        "active_downloading": dlspeed > 0,
     }
     if policy is not None:
         summary["policy_mode"] = policy.mode
@@ -1104,11 +1127,7 @@ def _pool_usage_summary(
         torrents,
     )
     return {
-        name: {
-            "size_tib": round(item.size_bytes / 1024**4, 2),
-            "max_size_tib": round(item.max_size_bytes / 1024**4, 2),
-            "over_budget": item.over_budget,
-        }
+        name: _pool_usage_item_summary(item)
         for name, item in usage.items()
     }
 
@@ -1122,6 +1141,15 @@ def _default_category_budget_state(
     if downloader is None:
         return False, None
     torrents = _load_policy_torrents(downloader, config)
+    return _default_category_budget_state_from_torrents(config, torrents)
+
+
+def _default_category_budget_state_from_torrents(
+    config: SeedAgentConfig,
+    torrents: list[ManagedTorrent],
+) -> tuple[bool, PoolUsage | None]:
+    if not torrents and not config.downloader.category_policies:
+        return False, None
     default_policy = _default_category_policy(config)
     usage = usage_by_pool(
         config.downloader.category_policies,
@@ -1144,6 +1172,56 @@ def _pool_usage_for_policy(
         torrents,
     )
     return usage.get(policy.budget_pool)
+
+
+def _pool_usage_item_summary(pool_usage: PoolUsage) -> dict[str, float | bool]:
+    return {
+        "size_tib": round(pool_usage.size_bytes / 1024**4, 2),
+        "max_size_tib": round(pool_usage.max_size_bytes / 1024**4, 2),
+        "over_budget": pool_usage.over_budget,
+    }
+
+
+def _runtime_activity_summary(torrents: list[ManagedTorrent]) -> dict[str, float | int]:
+    total_upspeed = 0
+    total_dlspeed = 0
+    total_amount_left = 0
+    active_upload_count = 0
+    active_download_count = 0
+    paused_count = 0
+    stalled_upload_count = 0
+    stalled_download_count = 0
+
+    for torrent in torrents:
+        state = torrent.state.lower()
+        upspeed = int(torrent.metadata.get("upspeed_bps", 0) or 0)
+        dlspeed = int(torrent.metadata.get("dlspeed_bps", 0) or 0)
+        amount_left = int(torrent.metadata.get("amount_left_bytes", 0) or 0)
+        total_upspeed += upspeed
+        total_dlspeed += dlspeed
+        total_amount_left += amount_left
+        if upspeed > 0:
+            active_upload_count += 1
+        if dlspeed > 0:
+            active_download_count += 1
+        if state.startswith("paused"):
+            paused_count += 1
+        if state == "stalledup":
+            stalled_upload_count += 1
+        if state in {"stalleddl", "metadl"}:
+            stalled_download_count += 1
+
+    return {
+        "managed_count": len(torrents),
+        "active_upload_count": active_upload_count,
+        "active_download_count": active_download_count,
+        "paused_count": paused_count,
+        "stalled_upload_count": stalled_upload_count,
+        "stalled_download_count": stalled_download_count,
+        "total_upspeed_mib_s": round(total_upspeed / 1024**2, 3),
+        "total_dlspeed_mib_s": round(total_dlspeed / 1024**2, 3),
+        "total_amount_left_gb": round(total_amount_left / 1024**3, 3),
+    }
 
 
 def _maybe_build_downloader(config: SeedAgentConfig) -> QbittorrentClient | None:

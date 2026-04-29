@@ -28,6 +28,8 @@ All notable project changes are tracked here.
   metadata for server-side execution logs.
 - A `healthcheck` CLI command, scheduler heartbeat output, and first-class
   Compose and Kubernetes CronJob examples for server deployments.
+- qB live-state summaries in `review`, `daily-report`, and `run-once`, including
+  current upload/download activity and default-pool visibility.
 
 ### Changed
 
