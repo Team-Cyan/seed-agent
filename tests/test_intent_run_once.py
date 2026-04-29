@@ -1,4 +1,5 @@
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 
 from typer.testing import CliRunner
@@ -140,6 +141,7 @@ def test_intent_run_once_ingests_searches_ranks_and_dry_run_enqueues(
     assert payload["searched"] == 1
     assert payload["ranked"] == 1
     assert payload["enqueue_candidates"] == 1
+    assert payload["runtime_activity"]["managed_count"] == 0
     assert downloader.calls == []
     assert "passkey=secret" not in result.output
     store = StateStore(tmp_path / ".seed-agent" / "state.db")
@@ -168,3 +170,58 @@ def test_intent_run_once_with_missing_inbox_is_noop(tmp_path: Path, monkeypatch)
     assert payload["ingested"] == 0
     assert payload["searched"] == 0
     assert payload["decisions"] == []
+
+
+def test_intent_run_once_dry_run_reports_runtime_activity_when_qb_visible(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from seed_agent import cli
+    from seed_agent.models import ManagedTorrent
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli, "_build_search_providers", lambda config: [_FakeSearchProvider()])
+    config_path = _write_config(tmp_path)
+    inbox = tmp_path / "local" / "inbox" / "intents.jsonl"
+    inbox.write_text(
+        json.dumps({"id": "movie-1", "text": "Inception 2010 1080p"}),
+        encoding="utf-8",
+    )
+
+    class FakeDownloader(_DummyDownloader):
+        async def list_torrents(
+            self, category: str | None = None, tags: set[str] | None = None
+        ):
+            return [
+                ManagedTorrent(
+                    hash="seed-active",
+                    name="Managed Torrent",
+                    category="seed",
+                    tags={"seed-agent", "seed"},
+                    state="downloading",
+                    size_bytes=10 * 1024**3,
+                    uploaded_bytes=1 * 1024**3,
+                    downloaded_bytes=8 * 1024**3,
+                    added_at=datetime.now(UTC),
+                    last_activity_at=datetime.now(UTC),
+                    metadata={
+                        "upspeed_bps": 0,
+                        "dlspeed_bps": 3 * 1024**2,
+                        "amount_left_bytes": 4 * 1024**3,
+                    },
+                )
+            ]
+
+    monkeypatch.setattr(cli, "_maybe_build_downloader", lambda config: FakeDownloader())
+
+    result = CliRunner().invoke(
+        cli.app,
+        ["intent-run-once", "--config", str(config_path)],
+    )
+
+    assert result.exit_code == 0
+    payload = _json_output(result)
+    assert payload["runtime_activity"]["managed_count"] == 1
+    assert payload["runtime_activity"]["active_download_count"] == 1
+    assert payload["runtime_activity"]["total_dlspeed_mib_s"] == 3.0
+    assert payload["default_pool_usage"]["over_budget"] is False

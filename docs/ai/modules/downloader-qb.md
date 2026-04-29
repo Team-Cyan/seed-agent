@@ -17,6 +17,8 @@ Own qBittorrent integration for enqueue, review, and cleanup-safe downloader act
 - inspect managed torrents,
 - expose live runtime signals such as current upload/download speeds and
   remaining download volume,
+- keep enqueue-like CLI commands aligned on the same qB runtime view during
+  dry-run and execute flows,
 - support pause/delete flows through explicit decisions.
 
 ## Expectations

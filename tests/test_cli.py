@@ -1127,6 +1127,72 @@ def test_run_once_dry_run_reports_runtime_activity_and_default_pool_usage(
     assert payload["enqueue_paused_by_pool_policy"] is False
 
 
+def test_enqueue_dry_run_reports_runtime_activity_and_default_pool_usage(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from seed_agent import cli
+
+    monkeypatch.chdir(tmp_path)
+
+    config_path = _config_file(tmp_path, secret_ref="local/secrets/qb.yaml")
+    config = _config(secret_ref="local/secrets/qb.yaml")
+
+    async def fake_discover_candidates(config: SeedAgentConfig):
+        return [_candidate()]
+
+    def fake_score_candidates(candidates, discovery_config, scoring_config):
+        return [_scored()]
+
+    async def fake_enqueue_candidates(
+        scored, downloader, policy, execute, *, paused=False, pool_usage=None
+    ):
+        assert execute is False
+        assert pool_usage is not None
+        return []
+
+    class FakeDownloader:
+        async def list_torrents(
+            self, category: str | None = None, tags: set[str] | None = None
+        ) -> list[ManagedTorrent]:
+            return [
+                _managed_torrent(
+                    hash="seed-active",
+                    state="uploading",
+                    metadata={
+                        "upspeed_bps": 2 * 1024**2,
+                        "dlspeed_bps": 0,
+                        "amount_left_bytes": 0,
+                    },
+                )
+            ]
+
+        async def pause(self, hash: str) -> None:
+            raise AssertionError("dry-run enqueue must not pause torrents")
+
+        async def delete(self, hash: str, delete_files: bool) -> None:
+            raise AssertionError("dry-run enqueue must not delete torrents")
+
+        async def add_url(
+            self, url: str, category: str, tags: list[str], *, paused: bool = False
+        ) -> str | None:
+            raise AssertionError("dry-run enqueue must not add torrents")
+
+    monkeypatch.setattr(cli, "load_config", lambda path: config)
+    monkeypatch.setattr(cli, "discover_candidates", fake_discover_candidates)
+    monkeypatch.setattr(cli, "score_candidates", fake_score_candidates)
+    monkeypatch.setattr(cli, "enqueue_candidates", fake_enqueue_candidates)
+    monkeypatch.setattr(cli, "_maybe_build_downloader", lambda loaded: FakeDownloader())
+
+    result = CliRunner().invoke(cli.app, ["enqueue", "--config", str(config_path)])
+
+    assert result.exit_code == 0
+    payload = _json_output(result)
+    assert payload["runtime_activity"]["managed_count"] == 1
+    assert payload["runtime_activity"]["active_upload_count"] == 1
+    assert payload["default_pool_usage"]["over_budget"] is False
+    assert payload["enqueue_paused_by_pool_policy"] is False
+
+
 def test_prune_execute_failure_persists_prior_state_and_audit(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

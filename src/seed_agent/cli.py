@@ -168,11 +168,9 @@ def enqueue(
     )
     if execute:
         scored = _run(resolve_deferred_download_urls(scored, loaded))
-    downloader = build_downloader(loaded) if execute else _NullDownloader()
     default_policy = _default_category_policy(loaded)
-    paused, pool_usage = _default_category_budget_state(
-        loaded,
-        downloader if execute else None,
+    downloader, live_torrents, paused, pool_usage = _enqueue_runtime_context(
+        loaded, execute=execute
     )
     batch_error = None
     try:
@@ -200,7 +198,11 @@ def enqueue(
         "enqueued": sum(1 for item in decisions if item.action == "qb.enqueue"),
         "scores": [_score_summary(item) for item in scored],
         "decisions": [_decision_summary(item) for item in decisions],
+        "runtime_activity": _runtime_activity_summary(live_torrents),
     }
+    if pool_usage is not None:
+        payload["default_pool_usage"] = _pool_usage_item_summary(pool_usage)
+        payload["enqueue_paused_by_pool_policy"] = paused
     if batch_error is not None:
         payload["error"] = str(batch_error)
     _print_json(payload)
@@ -376,11 +378,9 @@ def intent_enqueue(
 ) -> None:
     loaded = load_config(config)
     store = StateStore(_state_path(loaded))
-    downloader = build_downloader(loaded) if execute else _NullDownloader()
     default_policy = _default_category_policy(loaded)
-    paused, pool_usage = _default_category_budget_state(
-        loaded,
-        downloader if execute else None,
+    downloader, live_torrents, paused, pool_usage = _enqueue_runtime_context(
+        loaded, execute=execute
     )
     batch_error = None
     try:
@@ -411,7 +411,11 @@ def intent_enqueue(
         "selected": _ranked_release_summary(ranked) if ranked is not None else None,
         "enqueued": sum(1 for item in decisions if item.action == "qb.enqueue"),
         "decisions": [_decision_summary(item) for item in decisions],
+        "runtime_activity": _runtime_activity_summary(live_torrents),
     }
+    if pool_usage is not None:
+        payload["default_pool_usage"] = _pool_usage_item_summary(pool_usage)
+        payload["enqueue_paused_by_pool_policy"] = paused
     if batch_error is not None:
         payload["error"] = str(batch_error)
     _print_json(payload)
@@ -427,11 +431,9 @@ def intent_run_once(
     store = StateStore(_state_path(loaded))
     providers = _build_search_providers(loaded)
     inbox_path = _resolve_path(loaded.intent.inbox_ref, loaded.config_dir)
-    downloader = build_downloader(loaded) if execute else _NullDownloader()
     default_policy = _default_category_policy(loaded)
-    paused, pool_usage = _default_category_budget_state(
-        loaded,
-        downloader if execute else None,
+    downloader, live_torrents, paused, pool_usage = _enqueue_runtime_context(
+        loaded, execute=execute
     )
     batch_error = None
     try:
@@ -464,7 +466,11 @@ def intent_run_once(
         "ranked": len(result.ranked) if result is not None else 0,
         "enqueue_candidates": len(result.enqueue_selected) if result is not None else 0,
         "decisions": [_decision_summary(item) for item in decisions],
+        "runtime_activity": _runtime_activity_summary(live_torrents),
     }
+    if pool_usage is not None:
+        payload["default_pool_usage"] = _pool_usage_item_summary(pool_usage)
+        payload["enqueue_paused_by_pool_policy"] = paused
     if result is not None:
         payload["intents"] = [_intent_summary(intent) for intent in result.searched]
         payload["selected"] = [
@@ -746,18 +752,9 @@ def _run_once_payload(
             torrent_hash=None,
         )
 
-    live_downloader = build_downloader(loaded) if execute else _maybe_build_downloader(loaded)
-    if live_downloader is None:
-        downloader = _NullDownloader()
-        live_torrents = []
-        paused = False
-        pool_usage = None
-    else:
-        downloader = live_downloader
-        live_torrents = _load_policy_torrents(downloader, loaded)
-        paused, pool_usage = _default_category_budget_state_from_torrents(
-            loaded, live_torrents
-        )
+    downloader, live_torrents, paused, pool_usage = _enqueue_runtime_context(
+        loaded, execute=execute
+    )
     batch_error = None
     try:
         decisions = _run(
@@ -1159,6 +1156,19 @@ def _default_category_budget_state_from_torrents(
     pool_usage = usage[default_policy.budget_pool]
     paused = pool_usage.over_budget and default_policy.over_budget_behavior == "add_paused"
     return paused, pool_usage
+
+
+def _enqueue_runtime_context(
+    config: SeedAgentConfig,
+    *,
+    execute: bool,
+) -> tuple[QbittorrentClient | _NullDownloader, list[ManagedTorrent], bool, PoolUsage | None]:
+    live_downloader = build_downloader(config) if execute else _maybe_build_downloader(config)
+    if live_downloader is None:
+        return _NullDownloader(), [], False, None
+    live_torrents = _load_policy_torrents(live_downloader, config)
+    paused, pool_usage = _default_category_budget_state_from_torrents(config, live_torrents)
+    return live_downloader, live_torrents, paused, pool_usage
 
 
 def _pool_usage_for_policy(

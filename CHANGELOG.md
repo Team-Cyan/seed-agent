@@ -33,6 +33,9 @@ All notable project changes are tracked here.
 - Persistent qB runtime snapshots now feed `recent_upload_gb` back into prune
   and eviction decisions so active contributors are less likely to be treated
   as cold torrents.
+- `enqueue`, `intent-enqueue`, and `intent-run-once` now expose the same qB live
+  runtime summaries and default-pool context as `run-once`, reducing dry-run
+  blind spots before queue mutations.
 
 ### Changed
 

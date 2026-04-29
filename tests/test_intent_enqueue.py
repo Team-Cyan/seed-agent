@@ -1,4 +1,5 @@
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 
 from typer.testing import CliRunner
@@ -136,11 +137,61 @@ def test_intent_enqueue_dry_run_does_not_touch_downloader_or_state(
     assert payload["execute"] is False
     assert payload["enqueued"] == 1
     assert payload["decisions"][0]["execute"] is False
+    assert payload["runtime_activity"]["managed_count"] == 0
     assert downloader.calls == []
     row = store.get_intent(intent.intent_id)
     assert row is not None
     assert row["state"] == IntentState.NORMALIZED.value
     assert "passkey=secret" not in result.output
+
+
+def test_intent_enqueue_dry_run_reports_runtime_activity_when_qb_visible(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from seed_agent import cli
+    from seed_agent.models import ManagedTorrent
+
+    monkeypatch.chdir(tmp_path)
+    config_path = _write_config(tmp_path)
+    store = StateStore(tmp_path / ".seed-agent" / "state.db")
+    intent, _ = add_intent("Inception 2010 1080p", store)
+    ranked = _ranked(intent.intent_id)
+    store.save_ranked_releases([ranked])
+
+    class FakeDownloader(_DummyDownloader):
+        async def list_torrents(
+            self, category: str | None = None, tags: set[str] | None = None
+        ):
+            return [
+                ManagedTorrent(
+                    hash="abcd1234",
+                    name="Managed Torrent",
+                    category="seed",
+                    tags={"seed-agent", "seed"},
+                    state="uploading",
+                    size_bytes=10 * 1024**3,
+                    uploaded_bytes=10 * 1024**3,
+                    downloaded_bytes=8 * 1024**3,
+                    added_at=datetime.now(UTC),
+                    last_activity_at=datetime.now(UTC),
+                    metadata={"upspeed_bps": 2 * 1024**2, "dlspeed_bps": 0, "amount_left_bytes": 0},
+                )
+            ]
+
+    monkeypatch.setattr(cli, "_maybe_build_downloader", lambda config: FakeDownloader())
+
+    result = CliRunner().invoke(
+        cli.app,
+        ["intent-enqueue", intent.intent_id, "--config", str(config_path)],
+    )
+
+    assert result.exit_code == 0
+    payload = _json_output(result)
+    assert payload["runtime_activity"]["managed_count"] == 1
+    assert payload["runtime_activity"]["active_upload_count"] == 1
+    assert payload["default_pool_usage"]["over_budget"] is False
+    assert payload["enqueue_paused_by_pool_policy"] is False
 
 
 def test_intent_enqueue_execute_uses_confirmed_release_and_updates_state(
