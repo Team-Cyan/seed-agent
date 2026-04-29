@@ -218,4 +218,6 @@ def test_state_store_clears_stale_paused_runtime_when_torrent_is_active(tmp_path
     enriched = store.apply_torrent_runtime([active])
 
     assert "paused_at" not in enriched[0].metadata
-    assert store.get_torrent_runtime("abcd1234") is None
+    runtime = store.get_torrent_runtime("abcd1234")
+    assert runtime is not None
+    assert runtime["paused_at"] is None

@@ -30,6 +30,9 @@ All notable project changes are tracked here.
   Compose and Kubernetes CronJob examples for server deployments.
 - qB live-state summaries in `review`, `daily-report`, and `run-once`, including
   current upload/download activity and default-pool visibility.
+- Persistent qB runtime snapshots now feed `recent_upload_gb` back into prune
+  and eviction decisions so active contributors are less likely to be treated
+  as cold torrents.
 
 ### Changed
 

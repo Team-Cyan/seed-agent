@@ -64,6 +64,8 @@ This file tracks the current project status at a level that is easy for both hum
   that are merely old or large
 - convert live-state visibility into conservative enqueue and prune protections
   only after the runtime summaries have proven useful
+- keep recent-upload snapshots durable enough for prune and eviction logic to
+  avoid penalizing torrents that are still contributing
 
 ### Scheduler And Server Deployments
 

@@ -1,6 +1,7 @@
+from datetime import UTC, datetime
 from pathlib import Path
 
-from seed_agent.models import LifecycleState
+from seed_agent.models import LifecycleState, ManagedTorrent
 from seed_agent.state import StateStore
 
 
@@ -126,3 +127,41 @@ def test_state_store_creates_parent_directory_for_nested_path(tmp_path: Path) ->
     StateStore(path)
 
     assert path.parent.exists()
+
+
+def test_state_store_applies_recent_upload_snapshot_and_clears_stale_pause(
+    tmp_path: Path,
+) -> None:
+    store = StateStore(tmp_path / "state.sqlite3")
+    store.mark_torrent_paused("abcd1234", datetime(2026, 4, 1, tzinfo=UTC))
+    store._upsert_torrent_runtime(  # type: ignore[attr-defined]
+        "abcd1234",
+        uploaded_bytes=10 * 1024**3,
+        downloaded_bytes=5 * 1024**3,
+        upspeed_bps=0,
+        dlspeed_bps=0,
+        seen_at=datetime(2026, 4, 1, tzinfo=UTC).isoformat(),
+    )
+
+    active = ManagedTorrent(
+        hash="abcd1234",
+        name="Demo Torrent",
+        category="pt-auto",
+        tags={"seed-agent"},
+        state="uploading",
+        size_bytes=10 * 1024**3,
+        uploaded_bytes=13 * 1024**3,
+        downloaded_bytes=5 * 1024**3,
+        added_at=datetime(2026, 4, 1, tzinfo=UTC),
+        last_activity_at=datetime(2026, 4, 2, tzinfo=UTC),
+        metadata={"upspeed_bps": 1024},
+    )
+
+    enriched = store.apply_torrent_runtime([active])
+
+    assert enriched[0].metadata["recent_upload_gb"] == 3.0
+    assert "paused_at" not in enriched[0].metadata
+    runtime = store.get_torrent_runtime("abcd1234")
+    assert runtime is not None
+    assert runtime["paused_at"] is None
+    assert runtime["uploaded_bytes"] == 13 * 1024**3

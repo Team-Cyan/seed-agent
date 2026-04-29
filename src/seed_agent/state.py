@@ -24,6 +24,8 @@ STATE_PRIORITY = {
     LifecycleState.PAUSED.value: 6,
     LifecycleState.DELETED.value: 7,
 }
+GIB = 1024**3
+_UNSET = object()
 
 
 class StateStore:
@@ -140,23 +142,11 @@ class StateStore:
         return len(rows)
 
     def mark_torrent_paused(self, torrent_hash: str, paused_at: datetime | None = None) -> None:
-        now = _utc_now()
-        paused_value = (paused_at or _utc_now_datetime()).isoformat()
-        with sqlite3.connect(self.path) as conn:
-            conn.execute(
-                """
-                INSERT INTO torrent_runtime (
-                    torrent_hash,
-                    paused_at,
-                    updated_at
-                )
-                VALUES (?, ?, ?)
-                ON CONFLICT(torrent_hash) DO UPDATE SET
-                    paused_at = excluded.paused_at,
-                    updated_at = excluded.updated_at
-                """,
-                (torrent_hash, paused_value, now),
-            )
+        self._upsert_torrent_runtime(
+            torrent_hash,
+            paused_at=(paused_at or _utc_now_datetime()).isoformat(),
+            replace_paused_at=True,
+        )
 
     def clear_torrent_runtime(self, torrent_hash: str) -> None:
         with sqlite3.connect(self.path) as conn:
@@ -173,7 +163,15 @@ class StateStore:
             conn.row_factory = sqlite3.Row
             row = conn.execute(
                 """
-                SELECT torrent_hash, paused_at, updated_at
+                SELECT
+                    torrent_hash,
+                    paused_at,
+                    uploaded_bytes,
+                    downloaded_bytes,
+                    upspeed_bps,
+                    dlspeed_bps,
+                    seen_at,
+                    updated_at
                 FROM torrent_runtime
                 WHERE torrent_hash = ?
                 """,
@@ -185,19 +183,84 @@ class StateStore:
         enriched: list[ManagedTorrent] = []
         for torrent in torrents:
             runtime = self.get_torrent_runtime(torrent.hash)
-            if runtime is None:
-                enriched.append(torrent)
-                continue
-            if not _is_paused_state(torrent.state):
-                self.clear_torrent_runtime(torrent.hash)
-                enriched.append(torrent)
-                continue
             metadata = dict(torrent.metadata)
-            paused_at = _parse_datetime(runtime.get("paused_at"))
-            if paused_at is not None:
-                metadata["paused_at"] = paused_at
+            recent_upload_gb = _recent_upload_gb(runtime, torrent.uploaded_bytes)
+            if recent_upload_gb is not None:
+                metadata["recent_upload_gb"] = recent_upload_gb
+                metadata["upload_delta_gb"] = recent_upload_gb
+            paused_at = _parse_datetime(runtime.get("paused_at")) if runtime is not None else None
+            if _is_paused_state(torrent.state):
+                if paused_at is not None:
+                    metadata["paused_at"] = paused_at
+            else:
+                paused_at = None
+            self._upsert_torrent_runtime(
+                torrent.hash,
+                paused_at=paused_at.isoformat() if paused_at is not None else None,
+                replace_paused_at=True,
+                uploaded_bytes=torrent.uploaded_bytes,
+                downloaded_bytes=torrent.downloaded_bytes,
+                upspeed_bps=int(metadata.get("upspeed_bps", 0) or 0),
+                dlspeed_bps=int(metadata.get("dlspeed_bps", 0) or 0),
+                seen_at=_utc_now(),
+            )
             enriched.append(torrent.model_copy(update={"metadata": metadata}))
         return enriched
+
+    def _upsert_torrent_runtime(
+        self,
+        torrent_hash: str,
+        *,
+        paused_at: str | None | object = _UNSET,
+        replace_paused_at: bool = False,
+        uploaded_bytes: int | None = None,
+        downloaded_bytes: int | None = None,
+        upspeed_bps: int | None = None,
+        dlspeed_bps: int | None = None,
+        seen_at: str | None = None,
+    ) -> None:
+        current = self.get_torrent_runtime(torrent_hash) or {}
+        now = _utc_now()
+        paused_value = current.get("paused_at")
+        if replace_paused_at or paused_at is not _UNSET:
+            paused_value = paused_at
+
+        with sqlite3.connect(self.path) as conn:
+            conn.execute(
+                """
+                INSERT INTO torrent_runtime (
+                    torrent_hash,
+                    paused_at,
+                    uploaded_bytes,
+                    downloaded_bytes,
+                    upspeed_bps,
+                    dlspeed_bps,
+                    seen_at,
+                    updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(torrent_hash) DO UPDATE SET
+                    paused_at = excluded.paused_at,
+                    uploaded_bytes = excluded.uploaded_bytes,
+                    downloaded_bytes = excluded.downloaded_bytes,
+                    upspeed_bps = excluded.upspeed_bps,
+                    dlspeed_bps = excluded.dlspeed_bps,
+                    seen_at = excluded.seen_at,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    torrent_hash,
+                    paused_value,
+                    uploaded_bytes if uploaded_bytes is not None else current.get("uploaded_bytes"),
+                    downloaded_bytes
+                    if downloaded_bytes is not None
+                    else current.get("downloaded_bytes"),
+                    upspeed_bps if upspeed_bps is not None else current.get("upspeed_bps"),
+                    dlspeed_bps if dlspeed_bps is not None else current.get("dlspeed_bps"),
+                    seen_at if seen_at is not None else current.get("seen_at"),
+                    now,
+                ),
+            )
 
     def upsert_intent(
         self,
@@ -423,6 +486,11 @@ class StateStore:
                 CREATE TABLE IF NOT EXISTS torrent_runtime (
                   torrent_hash TEXT PRIMARY KEY,
                   paused_at TEXT,
+                  uploaded_bytes INTEGER,
+                  downloaded_bytes INTEGER,
+                  upspeed_bps INTEGER,
+                  dlspeed_bps INTEGER,
+                  seen_at TEXT,
                   updated_at TEXT NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS idx_intents_state ON intents(state);
@@ -431,6 +499,7 @@ class StateStore:
                 """
             )
             self._migrate_release_candidates(conn)
+            self._migrate_torrent_runtime(conn)
 
     def _migrate_release_candidates(self, conn: sqlite3.Connection) -> None:
         row = conn.execute(
@@ -489,6 +558,23 @@ class StateStore:
             """
         )
 
+    def _migrate_torrent_runtime(self, conn: sqlite3.Connection) -> None:
+        columns = {
+            row[1]
+            for row in conn.execute("PRAGMA table_info(torrent_runtime)").fetchall()
+        }
+        additions = {
+            "uploaded_bytes": "INTEGER",
+            "downloaded_bytes": "INTEGER",
+            "upspeed_bps": "INTEGER",
+            "dlspeed_bps": "INTEGER",
+            "seen_at": "TEXT",
+        }
+        for column, column_type in additions.items():
+            if column in columns:
+                continue
+            conn.execute(f"ALTER TABLE torrent_runtime ADD COLUMN {column} {column_type}")
+
 
 def _utc_now() -> str:
     return _utc_now_datetime().isoformat()
@@ -516,6 +602,17 @@ def _parse_datetime(value: Any) -> datetime | None:
 def _is_paused_state(state: str) -> bool:
     normalized = state.strip().lower()
     return normalized.startswith("paused") or normalized.startswith("stopped")
+
+
+def _recent_upload_gb(runtime: dict[str, Any] | None, uploaded_bytes: int) -> float | None:
+    if runtime is None:
+        return None
+    previous = runtime.get("uploaded_bytes")
+    if not isinstance(previous, int):
+        return None
+    if uploaded_bytes < previous:
+        return 0.0
+    return (uploaded_bytes - previous) / GIB
 
 
 def _monotonic_values(

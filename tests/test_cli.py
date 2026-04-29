@@ -881,6 +881,64 @@ def test_prune_dry_run_previews_live_torrents_without_mutation(
     assert row["state"] == LifecycleState.ENQUEUED.value
 
 
+def test_prune_dry_run_keeps_recently_uploaded_torrent_from_runtime_snapshot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from seed_agent import cli
+
+    monkeypatch.chdir(tmp_path)
+
+    config_path = _config_file(tmp_path, secret_ref="local/secrets/qb.yaml")
+    config = _config(secret_ref="local/secrets/qb.yaml")
+    state_path = tmp_path / ".seed-agent" / "state.db"
+    store = StateStore(state_path)
+    store.upsert_candidate(
+        stable_id="demo-free:https://tracker.example/details.php?id=1",
+        title="High Confidence Torrent",
+        site="demo-free",
+        state=LifecycleState.ENQUEUED,
+        score=95,
+        torrent_hash="abcd1234",
+    )
+
+    class FakeDownloader:
+        async def list_torrents(
+            self, category: str | None = None, tags: set[str] | None = None
+        ) -> list[ManagedTorrent]:
+            return [
+                _managed_torrent(
+                    hash="abcd1234",
+                    uploaded_bytes=15 * 1024**3,
+                    metadata={"upspeed_bps": 0, "dlspeed_bps": 0},
+                )
+            ]
+
+        async def pause(self, hash: str) -> None:
+            raise AssertionError("dry-run prune must not pause torrents")
+
+        async def delete(self, hash: str, delete_files: bool) -> None:
+            raise AssertionError("dry-run prune must not delete torrents")
+
+    monkeypatch.setattr(cli, "load_config", lambda path: config)
+    monkeypatch.setattr(cli, "_maybe_build_downloader", lambda loaded: FakeDownloader())
+
+    store._upsert_torrent_runtime(  # type: ignore[attr-defined]
+        "abcd1234",
+        uploaded_bytes=13 * 1024**3,
+        downloaded_bytes=10 * 1024**3,
+        upspeed_bps=0,
+        dlspeed_bps=0,
+        seen_at=(datetime.now(UTC) - timedelta(hours=1)).isoformat(),
+    )
+
+    result = CliRunner().invoke(cli.app, ["prune", "--config", str(config_path)])
+
+    assert result.exit_code == 0
+    payload = _json_output(result)
+    assert payload["decisions"][0]["action"] == "qb.cleanup.keep"
+    assert "recent upload 2.00 GiB >= min 1.00 GiB" in payload["decisions"][0]["reason"]
+
+
 def test_prune_pool_usage_includes_add_only_categories(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
