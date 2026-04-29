@@ -204,7 +204,14 @@ def test_run_once_dry_run_updates_state_and_redacts_audit(
         return [_scored()]
 
     async def fake_enqueue_candidates(
-        scored, downloader, policy, execute, *, paused=False, pool_usage=None
+        scored,
+        downloader,
+        policy,
+        execute,
+        *,
+        paused=False,
+        pool_usage=None,
+        pause_reasons=None,
     ):
         assert execute is False
         assert policy.name == "seed"
@@ -582,10 +589,18 @@ def test_run_once_dry_run_pauses_enqueue_when_runtime_download_gate_exceeded(
         return [_scored()]
 
     async def fake_enqueue_candidates(
-        scored, downloader, policy, execute, *, paused=False, pool_usage=None
+        scored,
+        downloader,
+        policy,
+        execute,
+        *,
+        paused=False,
+        pool_usage=None,
+        pause_reasons=None,
     ):
         assert paused is True
         assert pool_usage is not None
+        assert pause_reasons == ["active downloads 1 > max 0"]
         return []
 
     class FakeDownloader:
@@ -629,3 +644,89 @@ def test_run_once_dry_run_pauses_enqueue_when_runtime_download_gate_exceeded(
     payload = _json_output(result)
     assert payload["enqueue_paused_by_pool_policy"] is True
     assert "active downloads 1 > max 0" in payload["enqueue_paused_reasons"]
+    assert payload["decisions"] == []
+
+
+def test_run_once_dry_run_uses_raw_amount_left_for_runtime_gate(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from seed_agent import cli
+    from seed_agent.models import ManagedTorrent
+
+    monkeypatch.chdir(tmp_path)
+
+    config_path = _config_file(
+        tmp_path,
+        secret_ref="local/secrets/qb.yaml",
+        discovery_extra="  max_total_amount_left_gb: 1.0\n",
+    )
+    config = _config(
+        secret_ref="local/secrets/qb.yaml",
+        discovery_overrides={"max_total_amount_left_gb": 1.0},
+    )
+
+    async def fake_discover_candidates(config: SeedAgentConfig):
+        return [_candidate()]
+
+    def fake_score_candidates(candidates, discovery_config, scoring_config):
+        return [_scored()]
+
+    async def fake_enqueue_candidates(
+        scored,
+        downloader,
+        policy,
+        execute,
+        *,
+        paused=False,
+        pool_usage=None,
+        pause_reasons=None,
+    ):
+        assert paused is True
+        assert pool_usage is not None
+        assert pause_reasons == ["remaining download 1.0004 GiB > max 1.0"]
+        return []
+
+    class FakeDownloader:
+        async def list_torrents(
+            self, category: str | None = None, tags: set[str] | None = None
+        ):
+            return [
+                ManagedTorrent(
+                    hash="seed-active",
+                    name="Managed Torrent",
+                    category="seed",
+                    tags={"seed-agent", "seed"},
+                    state="stalledDL",
+                    size_bytes=10 * 1024**3,
+                    uploaded_bytes=1,
+                    downloaded_bytes=1,
+                    added_at=datetime.now(UTC),
+                    last_activity_at=datetime.now(UTC),
+                    metadata={"dlspeed_bps": 0, "amount_left_bytes": int(1.0004 * 1024**3)},
+                )
+            ]
+
+        async def pause(self, hash: str) -> None:
+            return None
+
+        async def delete(self, hash: str, delete_files: bool) -> None:
+            return None
+
+        async def add_url(
+            self, url: str, category: str, tags: list[str], *, paused: bool = False
+        ) -> str | None:
+            return None
+
+    monkeypatch.setattr(cli, "load_config", lambda path: config)
+    monkeypatch.setattr(cli, "discover_candidates", fake_discover_candidates)
+    monkeypatch.setattr(cli, "score_candidates", fake_score_candidates)
+    monkeypatch.setattr(cli, "enqueue_candidates", fake_enqueue_candidates)
+    monkeypatch.setattr(cli, "_maybe_build_downloader", lambda loaded: FakeDownloader())
+
+    result = CliRunner().invoke(cli.app, ["run-once", "--config", str(config_path)])
+
+    assert result.exit_code == 0
+    payload = _json_output(result)
+    assert payload["runtime_activity"]["total_amount_left_gb"] == 1.0
+    assert payload["enqueue_paused_by_pool_policy"] is True
+    assert payload["enqueue_paused_reasons"] == ["remaining download 1.0004 GiB > max 1.0"]

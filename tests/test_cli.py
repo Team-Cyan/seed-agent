@@ -518,7 +518,14 @@ def test_mutating_dry_run_does_not_require_qb_secret_or_real_downloader(
         return [_scored()]
 
     async def fake_enqueue_candidates(
-        scored, downloader, policy, execute, *, paused=False, pool_usage=None
+        scored,
+        downloader,
+        policy,
+        execute,
+        *,
+        paused=False,
+        pool_usage=None,
+        pause_reasons=None,
     ):
         assert execute is False
         assert pool_usage is None
@@ -573,7 +580,14 @@ def test_enqueue_dry_run_uses_default_category_policy(
         return [_scored()]
 
     async def fake_enqueue_candidates(
-        scored, downloader, policy, execute, *, paused=False, pool_usage=None
+        scored,
+        downloader,
+        policy,
+        execute,
+        *,
+        paused=False,
+        pool_usage=None,
+        pause_reasons=None,
     ):
         assert policy.name == "seed"
         assert list(policy.tags) == ["seed-agent", "seed"]
@@ -1076,7 +1090,14 @@ def test_run_once_dry_run_reports_runtime_activity_and_default_pool_usage(
         return [_scored()]
 
     async def fake_enqueue_candidates(
-        scored, downloader, policy, execute, *, paused=False, pool_usage=None
+        scored,
+        downloader,
+        policy,
+        execute,
+        *,
+        paused=False,
+        pool_usage=None,
+        pause_reasons=None,
     ):
         assert execute is False
         assert paused is False
@@ -1144,7 +1165,14 @@ def test_enqueue_dry_run_reports_runtime_activity_and_default_pool_usage(
         return [_scored()]
 
     async def fake_enqueue_candidates(
-        scored, downloader, policy, execute, *, paused=False, pool_usage=None
+        scored,
+        downloader,
+        policy,
+        execute,
+        *,
+        paused=False,
+        pool_usage=None,
+        pause_reasons=None,
     ):
         assert execute is False
         assert pool_usage is not None
@@ -1385,7 +1413,14 @@ def test_run_once_invoke_with_execute_flag(monkeypatch: pytest.MonkeyPatch, tmp_
         return [_scored()]
 
     async def fake_enqueue_candidates(
-        scored, downloader, policy, execute, *, paused=False, pool_usage=None
+        scored,
+        downloader,
+        policy,
+        execute,
+        *,
+        paused=False,
+        pool_usage=None,
+        pause_reasons=None,
     ):
         assert execute is True
         assert policy.name == "seed"

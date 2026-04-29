@@ -148,6 +148,7 @@ async def enqueue_intent(
     *,
     paused: bool = False,
     pool_usage: PoolUsage | None = None,
+    pause_reasons: list[str] | None = None,
 ) -> tuple[ResourceIntent, RankedRelease, list[Decision]]:
     intent, selected_release_id = _load_intent_with_selected(store, intent_id)
     ranked = _enqueueable_release(
@@ -162,6 +163,7 @@ async def enqueue_intent(
         execute,
         paused=paused,
         pool_usage=pool_usage,
+        pause_reasons=pause_reasons,
     )
     updated = intent
     if execute and any(decision.action == "qb.enqueue" for decision in decisions):
@@ -186,6 +188,7 @@ async def run_intent_once(
     *,
     paused: bool = False,
     pool_usage: PoolUsage | None = None,
+    pause_reasons: list[str] | None = None,
 ) -> IntentRunResult:
     ingested_pairs = ingest_inbox(inbox_path, store) if inbox_path is not None else []
     ingested = [item[0] for item in ingested_pairs]
@@ -221,6 +224,7 @@ async def run_intent_once(
                 execute,
                 paused=paused,
                 pool_usage=pool_usage,
+                pause_reasons=pause_reasons,
             )
             enqueue_selected.append(selected)
             decisions.extend(enqueue_decisions)

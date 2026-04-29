@@ -262,3 +262,23 @@ async def test_enqueue_decision_records_policy_and_pool_usage() -> None:
     assert state["budget_pool_limit_tib"] == 10.0
     assert state["estimated_pool_usage_tib"] == 11.0
     assert state["over_budget_before_action"] is True
+
+
+@pytest.mark.asyncio
+async def test_enqueue_decision_records_pause_reasons_when_paused() -> None:
+    from seed_agent.actions.qb import enqueue_candidates
+
+    downloader = DummyDownloader()
+
+    decisions = await enqueue_candidates(
+        [_scored()],
+        downloader,
+        _policy(),
+        execute=False,
+        paused=True,
+        pause_reasons=["active downloads 3 > max 2"],
+    )
+
+    decision = decisions[0]
+    assert decision.new_state["pause_reasons"] == ["active downloads 3 > max 2"]
+    assert "paused_by_policy=active downloads 3 > max 2" in decision.reason

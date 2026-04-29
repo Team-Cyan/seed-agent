@@ -39,6 +39,8 @@ All notable project changes are tracked here.
 - Optional runtime enqueue gates can now switch accepted torrents to paused-add
   behavior when active downloads or remaining queued volume exceed configured
   thresholds.
+- Paused enqueue decisions now carry explicit pause reasons through CLI payloads
+  and audit-facing decision summaries, including the intent enqueue flows.
 
 ### Changed
 

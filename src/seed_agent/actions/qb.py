@@ -26,16 +26,18 @@ async def enqueue_candidates(
     *,
     paused: bool = False,
     pool_usage: PoolUsage | None = None,
+    pause_reasons: Sequence[str] | None = None,
 ) -> list[Decision]:
     decisions: list[Decision] = []
     tags_list = list(policy.tags)
+    pause_reasons_list = list(pause_reasons or [])
 
     for item in scored:
         if not item.accepted:
             continue
 
         candidate = item.candidate
-        reason = _build_reason(item)
+        reason = _build_reason(item, paused=paused, pause_reasons=pause_reasons_list)
         new_state: dict[str, object] = {
             "candidate_id": item.candidate_id,
             "candidate_title": candidate.title,
@@ -49,6 +51,8 @@ async def enqueue_candidates(
             "score": item.score,
             "reasons": list(item.reasons),
         }
+        if pause_reasons_list:
+            new_state["pause_reasons"] = pause_reasons_list
         new_state.update(_pool_usage_state(pool_usage))
 
         torrent_hash = None
@@ -92,10 +96,22 @@ async def enqueue_candidates(
     return decisions
 
 
-def _build_reason(item: ScoreBreakdown) -> str:
+def _build_reason(
+    item: ScoreBreakdown,
+    *,
+    paused: bool = False,
+    pause_reasons: Sequence[str] | None = None,
+) -> str:
+    pause_reasons = list(pause_reasons or [])
     if item.reasons:
-        return f"accepted for enqueue: score={item.score}; reasons={'; '.join(item.reasons)}"
-    return f"accepted for enqueue: score={item.score}"
+        reason = f"accepted for enqueue: score={item.score}; reasons={'; '.join(item.reasons)}"
+    else:
+        reason = f"accepted for enqueue: score={item.score}"
+    if paused:
+        if pause_reasons:
+            return f"{reason}; paused_by_policy={'; '.join(pause_reasons)}"
+        return f"{reason}; paused_by_policy=true"
+    return reason
 
 
 async def prune_cold_torrents(

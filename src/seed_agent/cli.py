@@ -173,6 +173,7 @@ def enqueue(
         loaded, execute=execute
     )
     batch_error = None
+    pause_reasons = _enqueue_pause_reasons(loaded, live_torrents, pool_usage)
     try:
         decisions = _run(
             enqueue_candidates(
@@ -182,6 +183,7 @@ def enqueue(
                 execute,
                 paused=paused,
                 pool_usage=pool_usage,
+                pause_reasons=pause_reasons,
             )
         )
     except MutationBatchError as exc:
@@ -203,8 +205,8 @@ def enqueue(
     if pool_usage is not None:
         payload["default_pool_usage"] = _pool_usage_item_summary(pool_usage)
         payload["enqueue_paused_by_pool_policy"] = paused
-    if paused_reasons := _enqueue_pause_reasons(loaded, live_torrents, pool_usage):
-        payload["enqueue_paused_reasons"] = paused_reasons
+    if pause_reasons:
+        payload["enqueue_paused_reasons"] = pause_reasons
     if batch_error is not None:
         payload["error"] = str(batch_error)
     _print_json(payload)
@@ -385,6 +387,7 @@ def intent_enqueue(
         loaded, execute=execute
     )
     batch_error = None
+    pause_reasons = _enqueue_pause_reasons(loaded, live_torrents, pool_usage)
     try:
         intent, ranked, decisions = _run(
             enqueue_intent(
@@ -395,6 +398,7 @@ def intent_enqueue(
                 execute,
                 paused=paused,
                 pool_usage=pool_usage,
+                pause_reasons=pause_reasons,
             )
         )
     except ValueError as exc:
@@ -418,8 +422,8 @@ def intent_enqueue(
     if pool_usage is not None:
         payload["default_pool_usage"] = _pool_usage_item_summary(pool_usage)
         payload["enqueue_paused_by_pool_policy"] = paused
-    if paused_reasons := _enqueue_pause_reasons(loaded, live_torrents, pool_usage):
-        payload["enqueue_paused_reasons"] = paused_reasons
+    if pause_reasons:
+        payload["enqueue_paused_reasons"] = pause_reasons
     if batch_error is not None:
         payload["error"] = str(batch_error)
     _print_json(payload)
@@ -440,6 +444,7 @@ def intent_run_once(
         loaded, execute=execute
     )
     batch_error = None
+    pause_reasons = _enqueue_pause_reasons(loaded, live_torrents, pool_usage)
     try:
         result = _run(
             run_intent_once(
@@ -453,6 +458,7 @@ def intent_run_once(
                 execute=execute,
                 paused=paused,
                 pool_usage=pool_usage,
+                pause_reasons=pause_reasons,
             )
         )
         decisions = result.decisions
@@ -475,8 +481,8 @@ def intent_run_once(
     if pool_usage is not None:
         payload["default_pool_usage"] = _pool_usage_item_summary(pool_usage)
         payload["enqueue_paused_by_pool_policy"] = paused
-    if paused_reasons := _enqueue_pause_reasons(loaded, live_torrents, pool_usage):
-        payload["enqueue_paused_reasons"] = paused_reasons
+    if pause_reasons:
+        payload["enqueue_paused_reasons"] = pause_reasons
     if result is not None:
         payload["intents"] = [_intent_summary(intent) for intent in result.searched]
         payload["selected"] = [
@@ -762,6 +768,7 @@ def _run_once_payload(
         loaded, execute=execute
     )
     batch_error = None
+    pause_reasons = _enqueue_pause_reasons(loaded, live_torrents, pool_usage)
     try:
         decisions = _run(
             enqueue_candidates(
@@ -771,6 +778,7 @@ def _run_once_payload(
                 execute,
                 paused=paused,
                 pool_usage=pool_usage,
+                pause_reasons=pause_reasons,
             )
         )
     except MutationBatchError as exc:
@@ -796,8 +804,8 @@ def _run_once_payload(
     if pool_usage is not None:
         payload["default_pool_usage"] = _pool_usage_item_summary(pool_usage)
         payload["enqueue_paused_by_pool_policy"] = paused
-    if paused_reasons := _enqueue_pause_reasons(loaded, live_torrents, pool_usage):
-        payload["enqueue_paused_reasons"] = paused_reasons
+    if pause_reasons:
+        payload["enqueue_paused_reasons"] = pause_reasons
     if min_free_window_minutes is not None:
         payload["min_free_window_minutes"] = min_free_window_minutes
     if require_known_free_window:
@@ -1202,12 +1210,16 @@ def _enqueue_pause_reasons(
             f"active downloads {runtime['active_download_count']} > max {max_active_downloads}"
         )
     max_total_amount_left_gb = config.discovery.max_total_amount_left_gb
+    total_amount_left_bytes = sum(
+        int(torrent.metadata.get("amount_left_bytes", 0) or 0) for torrent in torrents
+    )
+    total_amount_left_gb = total_amount_left_bytes / 1024**3
     if (
         max_total_amount_left_gb is not None
-        and runtime["total_amount_left_gb"] > max_total_amount_left_gb
+        and total_amount_left_gb > max_total_amount_left_gb
     ):
         reasons.append(
-            f"remaining download {runtime['total_amount_left_gb']} GiB > max "
+            f"remaining download {round(total_amount_left_gb, 4)} GiB > max "
             f"{max_total_amount_left_gb}"
         )
     return reasons

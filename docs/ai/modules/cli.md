@@ -28,6 +28,9 @@ Expose the operator-facing command surface and safe summaries.
 - preserve stable command names unless intentionally versioned,
 - keep `run-once` and `schedule-run` payload shapes aligned enough for external
   schedulers and log collectors,
+- keep enqueue-like commands aligned on runtime gate reporting so paused-add
+  decisions expose both `enqueue_paused_by_pool_policy` and
+  `enqueue_paused_reasons`,
 - preview and enforce risky free-window decisions consistently when the free
   window is unknown or too short for the configured safety threshold,
 - keep long-running deployment liveness inspectable through structured

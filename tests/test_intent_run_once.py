@@ -8,10 +8,11 @@ from seed_agent.models import Discount, IntentState, ReleaseCandidate
 from seed_agent.state import StateStore
 
 
-def _write_config(tmp_path: Path) -> Path:
+def _write_config(tmp_path: Path, *, discovery_extra: str = "") -> Path:
     inbox = tmp_path / "local" / "inbox" / "intents.jsonl"
     inbox.parent.mkdir(parents=True, exist_ok=True)
     path = tmp_path / "config.yaml"
+    discovery_block = discovery_extra if discovery_extra else ""
     path.write_text(
         f"""
 mode: balanced
@@ -27,6 +28,7 @@ discovery:
   min_leechers: 8
   max_seeders: 80
   allow_hr: false
+{discovery_block}\
 scoring:
   min_score_to_enqueue: 70
   weights:
@@ -225,3 +227,53 @@ def test_intent_run_once_dry_run_reports_runtime_activity_when_qb_visible(
     assert payload["runtime_activity"]["active_download_count"] == 1
     assert payload["runtime_activity"]["total_dlspeed_mib_s"] == 3.0
     assert payload["default_pool_usage"]["over_budget"] is False
+
+
+def test_intent_run_once_dry_run_reports_pause_reasons_when_runtime_gate_exceeded(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from seed_agent import cli
+    from seed_agent.models import ManagedTorrent
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli, "_build_search_providers", lambda config: [_FakeSearchProvider()])
+    config_path = _write_config(tmp_path, discovery_extra="  max_active_downloads: 0\n")
+    inbox = tmp_path / "local" / "inbox" / "intents.jsonl"
+    inbox.write_text(
+        json.dumps({"id": "movie-1", "text": "Inception 2010 1080p"}),
+        encoding="utf-8",
+    )
+
+    class FakeDownloader(_DummyDownloader):
+        async def list_torrents(
+            self, category: str | None = None, tags: set[str] | None = None
+        ):
+            return [
+                ManagedTorrent(
+                    hash="seed-active",
+                    name="Managed Torrent",
+                    category="seed",
+                    tags={"seed-agent", "seed"},
+                    state="downloading",
+                    size_bytes=10 * 1024**3,
+                    uploaded_bytes=1 * 1024**3,
+                    downloaded_bytes=8 * 1024**3,
+                    added_at=datetime.now(UTC),
+                    last_activity_at=datetime.now(UTC),
+                    metadata={"upspeed_bps": 0, "dlspeed_bps": 1024, "amount_left_bytes": 1},
+                )
+            ]
+
+    monkeypatch.setattr(cli, "_maybe_build_downloader", lambda config: FakeDownloader())
+
+    result = CliRunner().invoke(
+        cli.app,
+        ["intent-run-once", "--config", str(config_path)],
+    )
+
+    assert result.exit_code == 0
+    payload = _json_output(result)
+    assert payload["enqueue_paused_by_pool_policy"] is True
+    assert payload["enqueue_paused_reasons"] == ["active downloads 1 > max 0"]
+    assert "paused_by_policy=active downloads 1 > max 0" in payload["decisions"][-1]["reason"]
