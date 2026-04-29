@@ -624,6 +624,32 @@ def run_once(
         raise typer.Exit(code=1)
 
 
+@app.command()
+def healthcheck(
+    config: Annotated[Path, typer.Option("--config")] = DEFAULT_CONFIG,
+    heartbeat_file: Annotated[
+        Path | None, typer.Option("--heartbeat-file")
+    ] = None,
+    max_staleness_minutes: Annotated[
+        int, typer.Option("--max-staleness-minutes")
+    ] = 90,
+) -> None:
+    if max_staleness_minutes < 1:
+        raise typer.BadParameter("max_staleness_minutes must be >= 1")
+    load_config(config)
+    payload: dict[str, Any] = {
+        "command": "healthcheck",
+        "config": str(config),
+        "status": "ok",
+    }
+    if heartbeat_file is not None:
+        payload["heartbeat"] = _heartbeat_status(
+            heartbeat_file,
+            max_staleness_minutes=max_staleness_minutes,
+        )
+    _print_json(payload)
+
+
 @app.command(name="schedule-run")
 def schedule_run(
     config: Annotated[Path, typer.Option("--config")] = DEFAULT_CONFIG,
@@ -635,6 +661,9 @@ def schedule_run(
     require_known_free_window: Annotated[
         bool, typer.Option("--require-known-free-window/--allow-unknown-free-window")
     ] = True,
+    heartbeat_file: Annotated[
+        Path | None, typer.Option("--heartbeat-file")
+    ] = None,
     max_cycles: Annotated[int | None, typer.Option("--max-cycles")] = None,
 ) -> None:
     if interval_minutes < 1:
@@ -657,6 +686,14 @@ def schedule_run(
         payload["scheduled_at"] = datetime.now(UTC).isoformat()
         payload["min_free_window_minutes"] = min_free_window_minutes
         payload["require_known_free_window"] = require_known_free_window if execute else False
+        if heartbeat_file is not None:
+            _write_heartbeat(
+                heartbeat_file,
+                cycle=cycle,
+                interval_minutes=interval_minutes,
+                payload=payload,
+            )
+            payload["heartbeat_file"] = str(heartbeat_file)
         _print_json(payload)
 
         if "error" in payload:
@@ -804,6 +841,112 @@ def _apply_free_window_safety(
     return adjusted
 
 
+def _write_heartbeat(
+    heartbeat_file: Path,
+    *,
+    cycle: int,
+    interval_minutes: int,
+    payload: dict[str, Any],
+) -> None:
+    heartbeat_file.parent.mkdir(parents=True, exist_ok=True)
+    heartbeat = {
+        "updated_at": datetime.now(UTC).isoformat(),
+        "cycle": cycle,
+        "interval_minutes": interval_minutes,
+        "command": payload.get("command"),
+        "execute": payload.get("execute"),
+        "accepted": payload.get("accepted"),
+        "enqueued": payload.get("enqueued"),
+        "error": payload.get("error"),
+    }
+    heartbeat_file.write_text(
+        json.dumps(heartbeat, ensure_ascii=False, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _heartbeat_status(
+    heartbeat_file: Path,
+    *,
+    max_staleness_minutes: int,
+) -> dict[str, Any]:
+    if not heartbeat_file.exists():
+        raise typer.Exit(
+            code=_print_error_payload(
+                {
+                    "command": "healthcheck",
+                    "status": "error",
+                    "error": f"heartbeat file not found: {heartbeat_file}",
+                }
+            )
+        )
+    try:
+        heartbeat = json.loads(heartbeat_file.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise typer.Exit(
+            code=_print_error_payload(
+                {
+                    "command": "healthcheck",
+                    "status": "error",
+                    "error": f"invalid heartbeat json: {exc.msg}",
+                    "heartbeat_file": str(heartbeat_file),
+                }
+            )
+        ) from exc
+
+    updated_at_raw = heartbeat.get("updated_at")
+    if not isinstance(updated_at_raw, str):
+        raise typer.Exit(
+            code=_print_error_payload(
+                {
+                    "command": "healthcheck",
+                    "status": "error",
+                    "error": "heartbeat missing updated_at",
+                    "heartbeat_file": str(heartbeat_file),
+                }
+            )
+        )
+    try:
+        updated_at = datetime.fromisoformat(updated_at_raw)
+    except ValueError as exc:
+        raise typer.Exit(
+            code=_print_error_payload(
+                {
+                    "command": "healthcheck",
+                    "status": "error",
+                    "error": "heartbeat updated_at is not valid ISO datetime",
+                    "heartbeat_file": str(heartbeat_file),
+                }
+            )
+        ) from exc
+
+    age_minutes = max((datetime.now(UTC) - updated_at).total_seconds() / 60, 0.0)
+    status = {
+        "heartbeat_file": str(heartbeat_file),
+        "updated_at": updated_at.isoformat(),
+        "age_minutes": round(age_minutes, 2),
+        "max_staleness_minutes": max_staleness_minutes,
+        "cycle": heartbeat.get("cycle"),
+        "interval_minutes": heartbeat.get("interval_minutes"),
+        "last_error": heartbeat.get("error"),
+    }
+    if age_minutes > max_staleness_minutes:
+        raise typer.Exit(
+            code=_print_error_payload(
+                {
+                    "command": "healthcheck",
+                    "status": "error",
+                    "error": (
+                        f"heartbeat stale: {round(age_minutes, 2)} minutes old "
+                        f"(max {max_staleness_minutes})"
+                    ),
+                    "heartbeat": status,
+                }
+            )
+        )
+    return status
+
+
 def _run(value: Any) -> Any:
     return asyncio.run(value)
 
@@ -817,6 +960,11 @@ def _discover_candidates(config: SeedAgentConfig) -> list[TorrentCandidate]:
 
 def _print_json(payload: dict[str, Any]) -> None:
     typer.echo(json.dumps(redact_payload(payload), ensure_ascii=False, sort_keys=True))
+
+
+def _print_error_payload(payload: dict[str, Any]) -> int:
+    _print_json(payload)
+    return 1
 
 
 def _candidate_summary(candidate: TorrentCandidate) -> dict[str, Any]:

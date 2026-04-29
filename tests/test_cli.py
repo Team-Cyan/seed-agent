@@ -220,6 +220,7 @@ def test_cli_help_lists_phase_one_commands() -> None:
     assert "prune" in result.output
     assert "daily-report" in result.output
     assert "run-once" in result.output
+    assert "healthcheck" in result.output
     assert "schedule-run" in result.output
     assert "site-probe" in result.output
 
@@ -252,6 +253,7 @@ def test_schedule_run_help_includes_interval_and_free_window_flags() -> None:
     assert "--interval-minutes" in result.output
     assert "min-free-window" in result.output
     assert "require-known-free" in result.output
+    assert "heartbeat-file" in result.output
 
 
 def test_discover_command_prints_safe_output_without_raw_download_url(
@@ -287,6 +289,7 @@ def test_schedule_run_executes_single_cycle_and_emits_schedule_metadata(
     from seed_agent import cli
 
     config_path = _config_file(tmp_path)
+    heartbeat_path = tmp_path / "state" / "heartbeat.json"
     seen: list[tuple[Path, bool, int | None, bool]] = []
 
     def fake_run_once_payload(
@@ -330,6 +333,8 @@ def test_schedule_run_executes_single_cycle_and_emits_schedule_metadata(
             "15",
             "--min-free-window-minutes",
             "180",
+            "--heartbeat-file",
+            str(heartbeat_path),
             "--max-cycles",
             "1",
         ],
@@ -342,7 +347,90 @@ def test_schedule_run_executes_single_cycle_and_emits_schedule_metadata(
     assert payload["interval_minutes"] == 15
     assert payload["min_free_window_minutes"] == 180
     assert payload["require_known_free_window"] is True
+    assert payload["heartbeat_file"] == str(heartbeat_path)
     assert seen == [(config_path, True, 180, True)]
+    heartbeat = json.loads(heartbeat_path.read_text(encoding="utf-8"))
+    assert heartbeat["cycle"] == 1
+    assert heartbeat["interval_minutes"] == 15
+    assert heartbeat["accepted"] == 1
+    assert heartbeat["enqueued"] == 1
+
+
+def test_healthcheck_reports_recent_heartbeat(tmp_path: Path) -> None:
+    from seed_agent.cli import app
+
+    config_path = _config_file(tmp_path)
+    heartbeat_path = tmp_path / "state" / "heartbeat.json"
+    heartbeat_path.parent.mkdir(parents=True, exist_ok=True)
+    heartbeat_path.write_text(
+        json.dumps(
+            {
+                "updated_at": datetime.now(UTC).isoformat(),
+                "cycle": 2,
+                "interval_minutes": 30,
+                "error": None,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "healthcheck",
+            "--config",
+            str(config_path),
+            "--heartbeat-file",
+            str(heartbeat_path),
+            "--max-staleness-minutes",
+            "90",
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = _json_output(result)
+    assert payload["command"] == "healthcheck"
+    assert payload["status"] == "ok"
+    assert payload["heartbeat"]["cycle"] == 2
+    assert payload["heartbeat"]["interval_minutes"] == 30
+
+
+def test_healthcheck_fails_for_stale_heartbeat(tmp_path: Path) -> None:
+    from seed_agent.cli import app
+
+    config_path = _config_file(tmp_path)
+    heartbeat_path = tmp_path / "state" / "heartbeat.json"
+    heartbeat_path.parent.mkdir(parents=True, exist_ok=True)
+    heartbeat_path.write_text(
+        json.dumps(
+            {
+                "updated_at": (datetime.now(UTC) - timedelta(hours=4)).isoformat(),
+                "cycle": 2,
+                "interval_minutes": 30,
+                "error": None,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "healthcheck",
+            "--config",
+            str(config_path),
+            "--heartbeat-file",
+            str(heartbeat_path),
+            "--max-staleness-minutes",
+            "90",
+        ],
+    )
+
+    assert result.exit_code == 1
+    payload = _json_output(result)
+    assert payload["command"] == "healthcheck"
+    assert payload["status"] == "error"
+    assert "heartbeat stale" in payload["error"]
 
 
 def test_site_probe_reports_sparse_and_enriched_counts(

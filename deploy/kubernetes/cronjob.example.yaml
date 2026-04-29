@@ -1,0 +1,34 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: seed-agent
+spec:
+  schedule: "*/30 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: seed-agent
+              image: ghcr.io/team-cyan/seed-agent:latest
+              imagePullPolicy: IfNotPresent
+              args:
+                - run-once
+                - --config
+                - /app/config/config.yaml
+                - --execute
+                - --min-free-window-minutes
+                - "180"
+                - --require-known-free-window
+              volumeMounts:
+                - name: config
+                  mountPath: /app/config
+                  readOnly: true
+          volumes:
+            - name: config
+              secret:
+                secretName: seed-agent-config

@@ -21,6 +21,12 @@ For most NAS or homelab deployments, the single-run job shape is safer and
 easier to reason about. It gives the host scheduler ownership of timing, retry,
 and restart behavior.
 
+Current project recommendation:
+
+- prefer an external scheduler that invokes `run-once --execute`,
+- keep `schedule-run` for simpler always-on containers,
+- use a heartbeat file plus `healthcheck` only for the long-running shape.
+
 ## Free-Window Safety
 
 The main risk with freeleech torrents is not polling frequency by itself. The
@@ -37,6 +43,8 @@ Recommended protections:
 
 If M-Team does not return a known remaining free window for a candidate,
 `--require-known-free-window` rejects that candidate during execute-mode runs.
+If you pass these flags during dry-run, the CLI will also preview that same
+safety decision in the printed candidate output.
 
 ## Docker Image
 
@@ -50,15 +58,17 @@ Long-running scheduler example:
 
 ```bash
 docker run --rm \
-  -v "$PWD/config:/config:ro" \
+  -v "$PWD/config:/app/config:ro" \
   -v "$PWD/local:/app/local" \
   -v "$PWD/.seed-agent:/app/.seed-agent" \
+  -v "$PWD/state:/state" \
   -e SEED_AGENT_MODE=schedule-run \
-  -e SEED_AGENT_CONFIG=/config/config.yaml \
+  -e SEED_AGENT_CONFIG=/app/config/config.yaml \
   -e SEED_AGENT_EXECUTE=true \
   -e SEED_AGENT_INTERVAL_MINUTES=30 \
   -e SEED_AGENT_MIN_FREE_WINDOW_MINUTES=180 \
   -e SEED_AGENT_REQUIRE_KNOWN_FREE_WINDOW=true \
+  -e SEED_AGENT_HEARTBEAT_FILE=/state/schedule-heartbeat.json \
   seed-agent:local
 ```
 
@@ -66,11 +76,11 @@ Single-run job example:
 
 ```bash
 docker run --rm \
-  -v "$PWD/config:/config:ro" \
+  -v "$PWD/config:/app/config:ro" \
   -v "$PWD/local:/app/local" \
   -v "$PWD/.seed-agent:/app/.seed-agent" \
   -e SEED_AGENT_MODE=run-once \
-  -e SEED_AGENT_CONFIG=/config/config.yaml \
+  -e SEED_AGENT_CONFIG=/app/config/config.yaml \
   -e SEED_AGENT_EXECUTE=true \
   -e SEED_AGENT_MIN_FREE_WINDOW_MINUTES=180 \
   -e SEED_AGENT_REQUIRE_KNOWN_FREE_WINDOW=true \
@@ -82,7 +92,7 @@ docker run --rm \
 - `SEED_AGENT_MODE`
   - `schedule-run`, `run-once`, `enqueue`, or any other CLI command
 - `SEED_AGENT_CONFIG`
-  - defaults to `/config/config.yaml`
+  - defaults to `/app/config/config.yaml`
 - `SEED_AGENT_EXECUTE`
   - `true` or `false`
 - `SEED_AGENT_INTERVAL_MINUTES`
@@ -91,8 +101,41 @@ docker run --rm \
   - optional execute-time free-window safety threshold
 - `SEED_AGENT_REQUIRE_KNOWN_FREE_WINDOW`
   - `true` or `false`
+- `SEED_AGENT_HEARTBEAT_FILE`
+  - optional heartbeat JSON file written by `schedule-run`
+- `SEED_AGENT_MAX_STALENESS_MINUTES`
+  - used by `healthcheck`
 - `SEED_AGENT_MAX_CYCLES`
   - useful for smoke tests or external supervisors
+
+## Healthcheck And Logging
+
+For long-running scheduler containers:
+
+- set `SEED_AGENT_HEARTBEAT_FILE` to a writable persistent path,
+- run `seed-agent healthcheck --config /config/config.yaml --heartbeat-file ...`
+  from Docker Compose, Kubernetes, or another supervisor,
+- treat JSON stdout as the primary log stream,
+- persist `.seed-agent/audit.jsonl` and the heartbeat file if you want postmortem
+  visibility after container restarts.
+
+Example manual probe:
+
+```bash
+docker run --rm \
+  -v "$PWD/config:/app/config:ro" \
+  -v "$PWD/state:/state" \
+  -e SEED_AGENT_MODE=healthcheck \
+  -e SEED_AGENT_CONFIG=/app/config/config.yaml \
+  -e SEED_AGENT_HEARTBEAT_FILE=/state/schedule-heartbeat.json \
+  -e SEED_AGENT_MAX_STALENESS_MINUTES=90 \
+  seed-agent:local
+```
+
+First-class examples live in:
+
+- `deploy/docker-compose.example.yml`
+- `deploy/kubernetes/cronjob.example.yaml`
 
 ## DockerHub Shape
 

@@ -1,0 +1,36 @@
+services:
+  seed-agent:
+    image: ghcr.io/team-cyan/seed-agent:latest
+    container_name: seed-agent
+    restart: unless-stopped
+    environment:
+      SEED_AGENT_MODE: schedule-run
+      SEED_AGENT_CONFIG: /app/config/config.yaml
+      SEED_AGENT_EXECUTE: "true"
+      SEED_AGENT_INTERVAL_MINUTES: "30"
+      SEED_AGENT_MIN_FREE_WINDOW_MINUTES: "180"
+      SEED_AGENT_REQUIRE_KNOWN_FREE_WINDOW: "true"
+      SEED_AGENT_HEARTBEAT_FILE: /state/schedule-heartbeat.json
+      SEED_AGENT_MAX_STALENESS_MINUTES: "90"
+    volumes:
+      - ./config:/app/config:ro
+      - ./local:/app/local:ro
+      - ./.seed-agent:/app/.seed-agent
+      - ./state:/state
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "seed-agent",
+          "healthcheck",
+          "--config",
+          "/app/config/config.yaml",
+          "--heartbeat-file",
+          "/state/schedule-heartbeat.json",
+          "--max-staleness-minutes",
+          "90"
+        ]
+      interval: 5m
+      timeout: 20s
+      retries: 3
+      start_period: 45s

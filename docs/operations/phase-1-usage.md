@@ -93,6 +93,14 @@ uv run seed-agent run-once --config config/example.yaml --execute \
 
 That prevents execute-mode enqueue when a candidate has too little known
 remaining free time or when M-Team does not provide a usable free-window value.
+If you pass the same flags without `--execute`, the dry-run output previews that
+deployment-time safety decision before you mutate qBittorrent.
+
+For long-running scheduler deployments, pair `schedule-run` with:
+
+- `--heartbeat-file` on the scheduler side, and
+- `healthcheck --heartbeat-file ... --max-staleness-minutes ...` on the
+  supervisor side.
 
 Implementation note: qBittorrent pause operations use the Web API stop endpoint only. That keeps the behavior explicit and predictable in the current Phase 1 loop.
 

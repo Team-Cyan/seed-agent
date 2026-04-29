@@ -26,6 +26,8 @@ All notable project changes are tracked here.
   scheduled single-run job.
 - A `schedule-run` CLI command for unattended polling loops with structured cycle
   metadata for server-side execution logs.
+- A `healthcheck` CLI command, scheduler heartbeat output, and first-class
+  Compose and Kubernetes CronJob examples for server deployments.
 
 ### Changed
 
@@ -39,7 +41,10 @@ All notable project changes are tracked here.
 - The example config caps mutable seed candidates at 150 GiB while keeping
   2-80 GiB as the preferred scoring range and requiring at least one seeder.
 - Execute-mode operator docs now show how to use polling safely in unattended
-  deployments rather than relying on ad hoc local invocations.
+  deployments rather than relying on ad hoc local invocations, and the dry-run
+  output now documents the same free-window safety preview behavior.
+- Deployment guidance now explicitly prefers host-driven scheduled `run-once`
+  execution for production-like installs while keeping `schedule-run` available.
 
 ### Fixed
 
@@ -56,6 +61,6 @@ All notable project changes are tracked here.
 - qBittorrent prune pool usage now includes add-only categories in shared budget
   totals while keeping cleanup actions restricted to mutable/delete-enabled
   categories.
-- Execute-mode enqueue flows can now reject accepted candidates when the known
-  free window is too short for the configured safety threshold, and scheduled
-  runs can require known free-window data before mutating qBittorrent.
+- Run loops can now preview and enforce candidate rejection when the known free
+  window is too short for the configured safety threshold, and scheduled runs
+  can require known free-window data before mutating qBittorrent.

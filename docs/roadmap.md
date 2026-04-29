@@ -19,7 +19,7 @@ This file tracks the current project status at a level that is easy for both hum
 - managed torrent review
 - balanced cleanup policy with pause-before-delete behavior
 - daily report and run-once command surface
-- unattended scheduler command surface with execute-time free-window safety guards
+- unattended scheduler command surface with free-window safety preview and enforcement
 
 ### Resource Intent Loop
 
@@ -47,6 +47,8 @@ This file tracks the current project status at a level that is easy for both hum
 - Docker image build path for server-side operation
 - environment-driven container entrypoint for `run-once`, `enqueue`, and `schedule-run`
 - operator docs for long-running pollers vs external scheduled jobs
+- healthcheck and heartbeat support for long-running scheduler containers
+- first-class Compose and Kubernetes CronJob deployment examples
 
 ## In Progress
 
@@ -58,13 +60,14 @@ This file tracks the current project status at a level that is easy for both hum
 
 - ingest richer qB runtime state for better ROI decisions
 - improve visibility into active upload/download conditions before enqueue
-- replace the single managed-category assumption with per-category policy and logical budget control
+- use richer live qB state to distinguish saturated seedbox keepers from torrents
+  that are merely old or large
 
 ### Scheduler And Server Deployments
 
-- add first-class Compose and Kubernetes examples once the container contract settles
-- decide whether the preferred production model is an internal sleep loop or an external scheduler invoking `run-once`
-- add healthcheck/logging guidance for long-running deployments
+- extend deployment examples to the user's real target environments after the
+  first server install
+- add release-publishing steps for DockerHub or another registry
 
 Reference:
 
