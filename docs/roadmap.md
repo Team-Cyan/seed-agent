@@ -49,6 +49,9 @@ This file tracks the current project status at a level that is easy for both hum
 - operator docs for long-running pollers vs external scheduled jobs
 - healthcheck and heartbeat support for long-running scheduler containers
 - first-class Compose and Kubernetes CronJob deployment examples
+- Docker-first README and Compose user guide for self-hosted NAS deployments
+- Compose-level registry override example for GHCR and Docker Hub style image
+  distribution
 
 ## In Progress
 

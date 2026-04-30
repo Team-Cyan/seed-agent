@@ -1,0 +1,112 @@
+# Docker Image Publishing
+
+This document explains how `seed-agent` images should be built and published for
+Docker-first deployments.
+
+## Publishing Model
+
+The image should stay generic:
+
+- no embedded secrets,
+- no embedded operator config,
+- no embedded runtime database,
+- no baked-in tracker state.
+
+Everything deployment-specific should come from mounted files and environment
+variables.
+
+## Supported Distribution Shapes
+
+The repository is compatible with:
+
+- local-only image builds,
+- GitHub Container Registry,
+- Docker Hub.
+
+## Build Locally
+
+```bash
+docker build -t seed-agent:local .
+```
+
+## Tag For A Registry
+
+Docker Hub example:
+
+```bash
+docker tag seed-agent:local your-dockerhub-user/seed-agent:latest
+docker tag seed-agent:local your-dockerhub-user/seed-agent:0.1.0
+```
+
+GHCR example:
+
+```bash
+docker tag seed-agent:local ghcr.io/team-cyan/seed-agent:latest
+docker tag seed-agent:local ghcr.io/team-cyan/seed-agent:0.1.0
+```
+
+## Push
+
+Docker Hub:
+
+```bash
+docker push your-dockerhub-user/seed-agent:latest
+docker push your-dockerhub-user/seed-agent:0.1.0
+```
+
+GHCR:
+
+```bash
+docker push ghcr.io/team-cyan/seed-agent:latest
+docker push ghcr.io/team-cyan/seed-agent:0.1.0
+```
+
+## Compose Template Strategy
+
+Compose examples should not assume one fixed registry forever.
+
+Recommended pattern:
+
+- default to a published image for normal users,
+- optionally include `build: ..` for local source deployments,
+- allow image override through `deploy/seed-agent.env` or direct Compose edits.
+
+The repository already includes:
+
+- `deploy/docker-compose.example.yml`
+- `deploy/seed-agent.env.example`
+
+## What Must Stay Mounted
+
+Even when you publish to Docker Hub, operators still need to mount:
+
+- `/app/config`
+- `/app/local`
+- `/app/.seed-agent`
+- optional heartbeat/output paths such as `/state`
+
+That is the contract that keeps the image portable.
+
+## Release Checklist
+
+Before publishing:
+
+1. `uv run pytest -q`
+2. `uv run ruff check .`
+3. `docker build -t seed-agent:local .`
+4. confirm README and Compose docs match current env vars and volume layout
+5. confirm example config does not contain secrets
+
+## Current Gaps
+
+What is now documented:
+
+- Docker-first installation path
+- Compose-based runtime model
+- image tagging and push workflow
+
+What still remains optional future work:
+
+- CI-driven multi-arch builds
+- automated Docker Hub publish workflow
+- release automation for version tags

@@ -1,249 +1,227 @@
 # seed-agent
 
-`seed-agent` is an AI-first PT and downloader operations toolkit for a personal NAS.
+`seed-agent` is a Docker-first self-hosted PT automation app for NAS and homelab deployments.
 
-The project is not intended to be a dashboard, a media server, or a full MoviePilot-style platform. It is a structured strategy runner that helps an AI agent and a human operator manage PT discovery, qBittorrent tasks, cleanup decisions, and future resource-intent workflows through clear configuration, command-line actions, and auditable records.
+It is designed to run as a long-lived container, keep its state on mounted
+storage, and manage PT discovery plus qBittorrent actions through versioned
+config files and local secret files.
 
-## Core Idea
+The primary operator experience is:
 
-The first interface is documentation plus configuration, not a custom UI.
+- prepare `config.yaml`,
+- prepare local secrets,
+- launch with Docker Compose,
+- inspect logs, heartbeat, and audit output,
+- adjust strategy without rebuilding the image.
 
-- Humans describe intent in plain language.
-- AI agents read this README and the design docs.
-- Strategy parameters live in versioned config files.
-- Execution happens through structured actions.
-- Every external change is written to an audit log.
+This project is not a dashboard, a media server, or a general Python utility
+that happens to ship a container. Docker deployment is the main product shape.
 
-The implementation should be API-ready internally, even before a long-running HTTP API exists. Every core operation should accept structured input and return structured output so Telegram, Douban, a future API server, or a lightweight UI can be added later without rewriting the policy engine.
+## What It Does
 
-Current RSS adapters:
+Today `seed-agent` focuses on two loops:
 
-- `nexusphp`: full RSS candidate parsing with peer stats and size fields.
-- `mteam`: RSS list parsing with direct torrent download links and category metadata. The public feed shape does not currently expose peer stats or size, so those candidates are marked as sparse by default. If `api_key_ref` points to an M-Team laboratory access token, `seed-agent` will use `x-api-key` detail enrichment to fill `size`, `seeders`, `leechers`, and `times_completed`. `cookie_ref` remains available as a compatibility fallback for a logged-in browser session.
+1. PT upload strategy loop
+   - discover candidate torrents,
+   - score them,
+   - enqueue accepted candidates to qBittorrent,
+   - review managed torrents,
+   - prune cold managed torrents,
+   - keep an audit trail for downloader mutations.
 
-## Agent Docs
+2. Resource intent loop
+   - ingest user intents,
+   - search releases,
+   - rank and confirm choices,
+   - enqueue through the same downloader path.
 
-This repository follows the thin-entrypoint pattern described by OpenAI for agent-oriented repos:
+The default deployment shape for self-hosted use is a Docker container running
+`schedule-run`.
 
-- root `AGENTS.md` as the agent entrypoint
-- `docs/` as the structured system of record
+## Quick Start
 
-Recommended AI read order:
+1. Copy the example config:
 
-1. `AGENTS.md`
-2. `docs/roadmap.md`
-3. matching `docs/ai/modules/*.md`
-4. only then the relevant spec, plan, or handoff note
+```bash
+cp config/example.yaml config/config.yaml
+```
 
-## Phases
+2. Create local secret files:
 
-### Phase 1: PT Upload Strategy Loop
+- `local/secrets/qbittorrent.yaml`
+- `local/secrets/mt.api-key` if you use M-Team API discovery
 
-Build the smallest useful closed loop:
+3. Review and adjust:
 
-1. Fetch free and hot candidate torrents from configured PT sites.
-2. Score candidates using discount, seeders, leechers, remaining discount time, H&R status, size, and site history.
-3. Enqueue high-confidence candidates into qBittorrent with managed categories and tags.
-4. Review existing managed torrents for upload performance.
-5. Pause or delete cold managed torrents under a balanced safety policy.
-6. Write an audit record explaining every enqueue, skip, pause, and delete decision.
+- tracker/site config under `sites:`
+- strategy thresholds under `discovery:` and `scoring:`
+- qB category ownership under `downloader.category_policies:`
+- cleanup thresholds under `cleanup:`
 
-Phase 1 should learn from `pt-tools` and `flexget-nexusphp`, but use this project's own models, policies, and audit trail.
+4. Start the container:
 
-### Phase 2: Resource Intent Loop
+```bash
+cp deploy/seed-agent.env.example deploy/seed-agent.env
+docker compose --env-file deploy/seed-agent.env -f deploy/docker-compose.example.yml up -d
+```
 
-Expand from "find upload candidates" to "act on user intent":
+5. Verify:
 
-1. Accept Telegram messages, WeChat bridge events, and Douban wanted-list items.
-2. Convert each request into a search intent.
-3. Search configured sources and PT sites.
-4. Rank candidate releases.
-5. Ask for confirmation when multiple reasonable choices exist.
-6. Enqueue the selected result through the same downloader abstraction.
+```bash
+docker compose --env-file deploy/seed-agent.env -f deploy/docker-compose.example.yml logs -f seed-agent
+docker compose --env-file deploy/seed-agent.env -f deploy/docker-compose.example.yml ps
+```
 
-Phase 2 should learn from `PT-Plugin-Plus`, `Auto_Bangumi`, `ani-rss`, and `bgmi`.
+State and audit files are written under `.seed-agent/` in the mounted workspace.
 
-### Roadmap
+## Recommended Docker Layout
 
-Later work can add rule import/export, auto-reseed, local HTTP APIs, richer reports, and optional UI surfaces. These should stay outside the Phase 1 critical path.
+Mount these paths into the container:
 
-## Safety Defaults
+- `./config:/app/config:ro`
+- `./local:/app/local:ro`
+- `./.seed-agent:/app/.seed-agent`
+- `./state:/state`
 
-Phase 1 uses `balanced` cleanup by default:
+That layout gives you:
 
-- Mutable qB categories such as `seed` may be paused or deleted automatically when rules are explicit.
-- H&R torrents are protected.
-- Manually added torrents are protected.
-- Media-library-associated torrents are protected.
-- Unknown-origin torrents are never deleted automatically.
-- A pause-before-delete delay should be supported before permanent removal.
+- checked-in config under `config/`,
+- gitignored secrets under `local/secrets/`,
+- durable runtime state in `.seed-agent/`,
+- scheduler heartbeat under `state/`.
+
+## Docker Compose Install
+
+The included Compose example runs the app as a long-lived scheduler container.
+
+Key environment variables:
+
+- `SEED_AGENT_MODE=schedule-run`
+- `SEED_AGENT_CONFIG=/app/config/config.yaml`
+- `SEED_AGENT_EXECUTE=true`
+- `SEED_AGENT_INTERVAL_MINUTES=30`
+- `SEED_AGENT_MIN_FREE_WINDOW_MINUTES=180`
+- `SEED_AGENT_REQUIRE_KNOWN_FREE_WINDOW=true`
+- `SEED_AGENT_HEARTBEAT_FILE=/state/schedule-heartbeat.json`
+- `SEED_AGENT_MAX_STALENESS_MINUTES=90`
+
+See:
+
+- [Docker Compose User Guide](docs/operations/docker-compose-user-guide.md)
+- [Docker Scheduling](docs/operations/docker-scheduling.md)
+- [Compose Example](deploy/docker-compose.example.yml)
+
+If you want to switch from GHCR to Docker Hub later, set `SEED_AGENT_IMAGE` in
+`deploy/seed-agent.env` instead of editing the Compose file.
+
+## Configuration And Secrets
+
+Keep strategy config and secrets separate:
+
+- safe to version:
+  - `config/config.yaml`
+  - `config/example.yaml`
+- local only:
+  - `local/secrets/qbittorrent.yaml`
+  - `local/secrets/mt.api-key`
+  - optional site cookies
+
+For M-Team, the preferred authenticated path is API-driven discovery with
+`api_key_ref`. RSS remains in the repo as a fallback path for other sites and
+compatibility flows.
+
+## Runtime Safety Defaults
+
+Recommended unattended protections:
+
+- conservative `discovery.min_left_time_minutes`
+- `SEED_AGENT_MIN_FREE_WINDOW_MINUTES=180`
+- `SEED_AGENT_REQUIRE_KNOWN_FREE_WINDOW=true`
+- `discovery.max_active_downloads`
+- `discovery.max_total_amount_left_gb`
+
+These guards help avoid:
+
+- enqueueing candidates with too little remaining free time,
+- enqueueing when the downloader is already congested,
+- starting new work while a shared budget pool is already saturated.
+
+## qB Category Model
+
+`seed-agent` treats category policy as a safety boundary:
+
+- mutable categories such as `seed` may be paused or deleted by policy,
+- add-only categories such as `movie` and `tv` may receive new torrents but are
+  not auto-deleted,
+- shared budget pools can force paused enqueue behavior without widening cleanup.
 
 ## Documentation
 
 - [Docs Index](docs/README.md)
 - [Roadmap](docs/roadmap.md)
-- [Repo Init Kit](docs/ai/repo-init-kit/README.md)
-- [Inspiration Pool](docs/research/inspiration-pool.md)
-- [Seed Agent Design](docs/specs/2026-04-20-seed-agent-design.md)
-- [M-Team API-Driven Discovery Spec](docs/specs/2026-04-24-mteam-api-driven-discovery.md)
-- [Phase 1 Usage](docs/operations/phase-1-usage.md)
+- [Docker Compose User Guide](docs/operations/docker-compose-user-guide.md)
 - [Docker Scheduling](docs/operations/docker-scheduling.md)
+- [Docker Image Publishing](docs/operations/docker-image-publishing.md)
+- [Phase 1 Usage](docs/operations/phase-1-usage.md)
+- [Phase 2 Usage](docs/operations/phase-2-usage.md)
 - [Compose Example](deploy/docker-compose.example.yml)
 - [Kubernetes CronJob Example](deploy/kubernetes/cronjob.example.yaml)
-- [Phase 2 Usage](docs/operations/phase-2-usage.md)
-- [Phase 1 PT Upload Plan](docs/plans/2026-04-20-phase-1-pt-upload-loop.md)
-- [Phase 2 Resource Intent Plan](docs/plans/2026-04-22-phase-2-resource-intent-loop.md)
-- [Session Handoff](docs/operations/session-handoff.md)
+
+## Image Sources
+
+The project is structured to work with:
+
+- local image builds,
+- GitHub Container Registry,
+- Docker Hub style publishing.
+
+The image is intentionally generic:
+
+- no baked-in config,
+- no baked-in secrets,
+- runtime behavior comes from env vars, mounted config, and mounted state.
+
+See [Docker Image Publishing](docs/operations/docker-image-publishing.md).
 
 ## Local Development
 
-Use `uv` for the local development loop:
+Local Python development still exists for contributors and debugging:
 
 ```bash
 uv sync --dev
-uv run pytest
+uv run pytest -q
 uv run ruff check .
 ```
 
-## Phase 1 CLI
+But that is a contributor workflow, not the primary operator installation path.
 
-Phase 1 commands default to dry-run for mutating downloader actions. Pass `--execute` only when you are ready for qBittorrent changes to be applied.
+## CLI Reference
 
-Example commands:
+Mutating commands are dry-run first unless `--execute` is set.
 
-```bash
-uv run seed-agent discover --config config/example.yaml
-uv run seed-agent score --config config/example.yaml
-uv run seed-agent run-once --config config/example.yaml
-uv run seed-agent run-once --config config/example.yaml --execute
-uv run seed-agent healthcheck --config config/example.yaml
-uv run seed-agent schedule-run --config config/example.yaml --execute --interval-minutes 30
-```
-
-## Phase 2 CLI
-
-Phase 2 commands are also dry-run first. `intent-confirm` and `intent-reject` only change local state. `intent-enqueue --execute` and `intent-run-once --execute` are the commands that may touch qBittorrent.
-
-Example commands:
+Examples:
 
 ```bash
-uv run seed-agent intent-add "download Inception 2010 1080p" --config config/example.yaml
-uv run seed-agent intent-inbox --config config/example.yaml
-uv run seed-agent intent-search <intent-id> --config config/example.yaml
-uv run seed-agent intent-rank <intent-id> --config config/example.yaml
-uv run seed-agent intent-review --config config/example.yaml
-uv run seed-agent intent-confirm <intent-id> <release-id> --config config/example.yaml
-uv run seed-agent intent-reject <intent-id> --config config/example.yaml
-uv run seed-agent intent-enqueue <intent-id> --config config/example.yaml
-uv run seed-agent intent-enqueue <intent-id> --config config/example.yaml --execute
-uv run seed-agent intent-run-once --config config/example.yaml
-uv run seed-agent intent-run-once --config config/example.yaml --execute
+uv run seed-agent run-once --config config/config.yaml
+uv run seed-agent run-once --config config/config.yaml --execute
+uv run seed-agent schedule-run --config config/config.yaml --execute --interval-minutes 30
+uv run seed-agent healthcheck --config config/config.yaml
 ```
 
 ## Runtime Files
 
-Phase 1 and Phase 2 store local state and audit records in the repository workspace:
+Mounted runtime files:
 
 - `.seed-agent/state.db`
 - `.seed-agent/audit.jsonl`
+- `state/schedule-heartbeat.json`
 
-Local intent inbox files live under `local/inbox/`. This directory is gitignored except for `.gitkeep`, because inbox exports can contain private media preferences.
+Local inbox files live under `local/inbox/`.
 
-## Downloader Credentials
+## References
 
-qBittorrent credentials belong in `local/secrets/qbittorrent.yaml`, and that file is gitignored.
-
-## Early Configuration Shape
-
-```yaml
-mode: balanced
-
-discovery:
-  discounts: ["free", "2xfree"]
-  min_left_time_minutes: 120
-  min_leechers: 8
-  max_seeders: 80
-  allow_hr: false
-
-scoring:
-  min_score_to_enqueue: 70
-  weights:
-    discount: 30
-    leechers: 25
-    seeders: 15
-    left_time: 15
-    size: 10
-    site_history: 5
-
-downloader:
-  type: qbittorrent
-  target: unraid-qb
-  default_category: seed
-  category_policies:
-    - name: seed
-      mode: mutable
-      budget_pool: downloads
-      delete_enabled: true
-      over_budget_behavior: add_paused
-      tags: ["seed-agent", "seed"]
-    - name: movie
-      mode: add_only
-      budget_pool: media
-      delete_enabled: false
-      over_budget_behavior: add_paused
-      tags: ["seed-agent", "movie"]
-    - name: tv
-      mode: add_only
-      budget_pool: media
-      delete_enabled: false
-      over_budget_behavior: add_paused
-      tags: ["seed-agent", "tv"]
-  budget_pools:
-    - name: downloads
-      max_size_tib: 10
-    - name: media
-      max_size_tib: 10
-
-cleanup:
-  cold_after_days: 7
-  min_upload_delta_gb: 1
-  protect_hr: true
-  protect_manual: true
-  protect_media_library: true
-  pause_before_delete_hours: 24
-
-intent:
-  confirmation_threshold: 0.82
-  auto_enqueue_threshold: 0.94
-  ambiguity_gap: 0.08
-  default_resolution: 1080p
-  preferred_languages: ["zh", "en"]
-  inbox_ref: local/inbox/intents.jsonl
-
-search:
-  site_priority:
-    demo-free: 10
-  max_results_per_site: 20
-  prefer_free: true
-  reject_hr_by_default: true
-```
-
-Budget pools are logical qB budgets computed from torrent `size`, not from NAS share inspection. If a budget pool is already over limit, `seed-agent` can still add new torrents to qB in a paused state. Mutable categories may evict lower-value torrents automatically; add-only categories never auto-delete.
-
-## AI Operating Notes
-
-When an AI agent works in this repository:
-
-- Prefer editing configuration and docs before adding code.
-- Keep credentials in local gitignored files.
-- Keep strategy decisions explainable.
-- Never delete unmanaged torrents automatically.
-- Treat cleanup actions as high-risk unless the torrent is clearly managed by `seed-agent`.
-- Preserve a complete audit trail for downloader changes.
-
-## Thanks And References
-
-This project has learned from several open-source projects and public references. `seed-agent` does not aim to clone their product shape, but they have been valuable for patterns, constraints, and troubleshooting clues.
+This project has learned from several open-source projects and public
+references, but it does not aim to copy their full product shape.
 
 - [`pt-tools`](https://github.com/sunerpy/pt-tools)
 - [`PT-Plugin-Plus`](https://github.com/pt-plugins/PT-Plugin-Plus)
@@ -254,7 +232,3 @@ This project has learned from several open-source projects and public references
 - [`ani-rss`](https://github.com/walse0/ani-rss)
 - [`bgmi`](https://github.com/BGmi/BGmi)
 - [`mteam-active-top-rss`](https://hub.docker.com/r/xiaohaigreen/mteam-active-top-rss)
-
-For AI-session-specific notes on what each reference is useful for, see `docs/ai/reference-repos.md`.
-
-For a reusable OpenAI-aligned repo bootstrap kit that can be copied into other repositories, see `docs/ai/repo-init-kit/`.

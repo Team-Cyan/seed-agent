@@ -49,6 +49,9 @@ All notable project changes are tracked here.
 
 ### Changed
 
+- README and operations docs now treat `seed-agent` as a Docker-first self-hosted
+  app, with Docker Compose installation as the primary user path instead of a
+  contributor-first local Python workflow.
 - Repository AI docs now describe M-Team API discovery as a current capability while
   keeping RSS as a supported fallback path.
 - Cleanup decisions for mutable categories use composite eviction ranking before
@@ -63,6 +66,11 @@ All notable project changes are tracked here.
   output now documents the same free-window safety preview behavior.
 - Deployment guidance now explicitly prefers host-driven scheduled `run-once`
   execution for production-like installs while keeping `schedule-run` available.
+- Docker deployment docs now include a dedicated Compose user guide, Docker image
+  publishing guide, and a registry-override Compose example that fits both GHCR
+  and Docker Hub style image distribution.
+- Docker deployment docs now align the documented healthcheck config path with
+  the actual container mount contract at `/app/config/config.yaml`.
 
 ### Fixed
 

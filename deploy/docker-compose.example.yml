@@ -1,6 +1,9 @@
 services:
   seed-agent:
-    image: ghcr.io/team-cyan/seed-agent:latest
+    image: ${SEED_AGENT_IMAGE:-ghcr.io/team-cyan/seed-agent:latest}
+    # For local source deployments, uncomment:
+    # build:
+    #   context: ..
     container_name: seed-agent
     restart: unless-stopped
     environment:
@@ -13,10 +16,10 @@ services:
       SEED_AGENT_HEARTBEAT_FILE: /state/schedule-heartbeat.json
       SEED_AGENT_MAX_STALENESS_MINUTES: "90"
     volumes:
-      - ./config:/app/config:ro
-      - ./local:/app/local:ro
-      - ./.seed-agent:/app/.seed-agent
-      - ./state:/state
+      - ../config:/app/config:ro
+      - ../local:/app/local:ro
+      - ../.seed-agent:/app/.seed-agent
+      - ../state:/state
     healthcheck:
       test:
         [

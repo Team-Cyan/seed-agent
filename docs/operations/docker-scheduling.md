@@ -17,15 +17,16 @@ strategy loop.
    - best when your host already has a scheduler such as cron, Unraid User
      Scripts, systemd timers, or Kubernetes CronJobs
 
-For most NAS or homelab deployments, the single-run job shape is safer and
-easier to reason about. It gives the host scheduler ownership of timing, retry,
-and restart behavior.
+For this repository's Docker-first app shape, the normal installation path is
+the long-running scheduler container. External schedulers remain supported, but
+they are now an alternative deployment mode rather than the main one.
 
 Current project recommendation:
 
-- prefer an external scheduler that invokes `run-once --execute`,
-- keep `schedule-run` for simpler always-on containers,
-- use a heartbeat file plus `healthcheck` only for the long-running shape.
+- default to a long-running `schedule-run` container for Docker Compose users,
+- use the single-run job shape when your host already has stronger scheduling
+  primitives and you want one-shot container execution,
+- use a heartbeat file plus `healthcheck` for the long-running shape.
 
 ## Free-Window Safety
 
@@ -113,7 +114,7 @@ docker run --rm \
 For long-running scheduler containers:
 
 - set `SEED_AGENT_HEARTBEAT_FILE` to a writable persistent path,
-- run `seed-agent healthcheck --config /config/config.yaml --heartbeat-file ...`
+- run `seed-agent healthcheck --config /app/config/config.yaml --heartbeat-file ...`
   from Docker Compose, Kubernetes, or another supervisor,
 - treat JSON stdout as the primary log stream,
 - persist `.seed-agent/audit.jsonl` and the heartbeat file if you want postmortem
@@ -147,9 +148,13 @@ The current image is designed to be DockerHub-friendly:
 - no baked-in secrets,
 - repo-mounted state and secret files.
 
-When publishing to DockerHub later, keep the image generic and let the server
-provide:
+When publishing to DockerHub, keep the image generic and let the server provide:
 
 - the checked-in config file,
 - gitignored secret files,
 - persistent `.seed-agent/` state and audit storage.
+
+See also:
+
+- `docs/operations/docker-compose-user-guide.md`
+- `docs/operations/docker-image-publishing.md`
