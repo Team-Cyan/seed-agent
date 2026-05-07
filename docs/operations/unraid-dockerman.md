@@ -43,6 +43,25 @@ Inside that root, keep:
 That keeps the Unraid mapping surface simple while preserving the repository's
 expected config-relative secret paths.
 
+## Secrets Stay On Disk
+
+The DockerMan template intentionally does not expose M-Team or qBittorrent
+credentials as template text fields.
+
+Keep secrets as local files under:
+
+- `/mnt/user/appdata/seed-agent/runtime/local/secrets/mteam-api-key.txt`
+- `/mnt/user/appdata/seed-agent/runtime/local/secrets/qbittorrent.yaml`
+
+That keeps credentials out of the template XML and still lets `schedule-run`
+load them through the checked-in config file at:
+
+- `/workspace/runtime/config/config.yaml`
+
+In practice, DockerMan only needs to mount `/mnt/user/appdata/seed-agent` to
+`/workspace`; the runtime config then resolves `local/secrets/...` relative to
+that mounted root.
+
 ## Template
 
 Copy or import:
