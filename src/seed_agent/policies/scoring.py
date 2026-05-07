@@ -102,6 +102,8 @@ def _score_left_time(
     weight = scoring.weights["left_time"]
     left_time = candidate.left_time_minutes
     if left_time is None:
+        if candidate.metadata.get("left_time_source") == "mteam_api_unlimited":
+            return _ComponentScore(weight, "left_time unlimited for mteam api discovery")
         if _allows_missing_left_time(candidate, discovery):
             return _ComponentScore(0.0, "left_time unavailable for mteam api discovery")
         return _ComponentScore(0.0, "left_time missing", True)

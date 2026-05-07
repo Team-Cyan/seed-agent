@@ -117,6 +117,29 @@ def _scored(**overrides: object) -> ScoreBreakdown:
     return ScoreBreakdown(**data)
 
 
+def test_apply_free_window_safety_allows_mteam_unlimited_window() -> None:
+    from seed_agent.cli import _apply_free_window_safety
+
+    candidate = _candidate(
+        site="mteam",
+        left_time_minutes=None,
+        metadata={
+            "mteam_discovery_mode": "api",
+            "left_time_source": "mteam_api_unlimited",
+        },
+    )
+
+    adjusted = _apply_free_window_safety(
+        [_scored(candidate=candidate)],
+        min_free_window_minutes=180,
+        require_known_free_window=True,
+    )
+
+    assert adjusted[0].accepted is True
+    assert adjusted[0].score == 95
+    assert "left_time required for execute safety" not in adjusted[0].reasons
+
+
 def _managed_torrent(**overrides: object) -> ManagedTorrent:
     now = datetime.now(UTC)
     data: dict[str, object] = {

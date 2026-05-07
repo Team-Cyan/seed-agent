@@ -39,6 +39,8 @@ Current fallback still present in code:
 - Keep API discovery cheap: search/detail calls may run during discovery and
   scoring, but `genDlToken` should only run for accepted candidates when
   enqueue is executing.
+- Treat `discount=FREE` plus an explicit `discountEndTime=null` from the M-Team
+  API as a known unlimited free window rather than an unknown expiry.
 - Keep M-Team search knobs in `api_discovery`; credentials stay in
   `api_key_ref` / ignored local secret files.
 

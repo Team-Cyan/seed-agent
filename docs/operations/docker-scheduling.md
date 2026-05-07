@@ -44,6 +44,10 @@ Recommended protections:
 
 If M-Team does not return a known remaining free window for a candidate,
 `--require-known-free-window` rejects that candidate during execute-mode runs.
+One important exception now exists: some M-Team API rows represent effectively
+permanent FREE torrents by returning `discount=FREE` with an explicit
+`discountEndTime=null`. `seed-agent` treats that shape as a known unlimited
+free window, so those candidates remain eligible during execute-mode runs.
 If you pass these flags during dry-run, the CLI will also preview that same
 safety decision in the printed candidate output.
 

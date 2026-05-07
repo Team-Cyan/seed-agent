@@ -847,6 +847,9 @@ def _apply_free_window_safety(
 
         left_time = candidate.left_time_minutes
         if require_known_free_window and left_time is None:
+            if candidate.metadata.get("left_time_source") == "mteam_api_unlimited":
+                adjusted.append(item)
+                continue
             adjusted.append(
                 item.model_copy(
                     update={

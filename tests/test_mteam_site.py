@@ -13,6 +13,7 @@ from seed_agent.models import TorrentCandidate
 from seed_agent.sites.mteam import (
     MTeamApiClient,
     MTeamApiDiscoveryOptions,
+    _merge_detail,
     enrich_candidates,
     extract_torrent_id,
     fetch_api_candidates,
@@ -298,6 +299,53 @@ async def test_mteam_api_client_marks_missing_discount_expiry() -> None:
 
 @pytest.mark.asyncio
 @respx.mock
+async def test_mteam_api_client_marks_open_ended_discount_as_unlimited() -> None:
+    respx.post("https://api.m-team.cc/api/torrent/search").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "code": "0",
+                "data": {
+                    "data": [
+                        {
+                            "id": 1171443,
+                            "name": "Open Ended Free Torrent",
+                            "size": "1234567890",
+                            "status": {
+                                "discount": "FREE",
+                                "discountEndTime": None,
+                                "seeders": 15,
+                                "leechers": 3,
+                                "timesCompleted": 28,
+                            },
+                        }
+                    ]
+                },
+            },
+        )
+    )
+    client = MTeamApiClient(api_key="secret-api-key")
+    candidates = await client.discover_torrents(
+        site="mt",
+        options=MTeamApiDiscoveryOptions(
+            mode="adult",
+            only_free=True,
+            sort_field="downloads",
+            sort_order="desc",
+            page_size=50,
+            min_seeders=0,
+            max_seeders=200,
+            min_leechers=0,
+            min_times_completed=0,
+        ),
+    )
+
+    assert candidates[0].left_time_minutes is None
+    assert candidates[0].metadata["left_time_source"] == "mteam_api_unlimited"
+
+
+@pytest.mark.asyncio
+@respx.mock
 async def test_mteam_api_client_filters_out_candidates_below_thresholds() -> None:
     search_route = respx.post("https://api.m-team.cc/api/torrent/search").mock(
         return_value=httpx.Response(
@@ -376,7 +424,36 @@ async def test_fetch_api_candidates_reuses_detail_enrichment() -> None:
 
     assert candidates[0].size_bytes == 9_999
     assert candidates[0].metadata["mteam_detail_enriched"] is True
-    assert candidates[0].metadata["mteam_discovery_mode"] == "api"
+
+
+def test_merge_detail_upgrades_open_ended_free_window() -> None:
+    candidate = _candidate(
+        discount="free",
+        left_time_minutes=None,
+        metadata={
+            "mteam_discovery_mode": "api",
+            "left_time_source": "mteam_api_missing",
+        },
+    )
+
+    merged = _merge_detail(
+        candidate,
+        {
+            "_auth_mode": "api_key",
+            "size": 9999,
+            "status": {
+                "discount": "FREE",
+                "discountEndTime": None,
+                "seeders": 7,
+                "leechers": 2,
+                "timesCompleted": 11,
+            },
+        },
+    )
+
+    assert merged.left_time_minutes is None
+    assert merged.metadata["mteam_discovery_mode"] == "api"
+    assert merged.metadata["left_time_source"] == "mteam_api_unlimited"
 
 
 @pytest.mark.asyncio

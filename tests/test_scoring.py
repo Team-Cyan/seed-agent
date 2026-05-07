@@ -254,3 +254,22 @@ def test_mteam_api_missing_left_time_does_not_hard_reject() -> None:
     assert result.accepted is True
     assert result.score >= 70
     assert "left_time unavailable for mteam api discovery" in result.reasons
+
+
+def test_mteam_api_unlimited_left_time_gets_full_credit() -> None:
+    result = score_candidate(
+        make_candidate(
+            site="mt",
+            left_time_minutes=None,
+            metadata={
+                "mteam_discovery_mode": "api",
+                "left_time_source": "mteam_api_unlimited",
+            },
+        ),
+        discovery(),
+        scoring(),
+    )
+
+    assert result.accepted is True
+    assert result.score >= 85
+    assert "left_time unlimited for mteam api discovery" in result.reasons

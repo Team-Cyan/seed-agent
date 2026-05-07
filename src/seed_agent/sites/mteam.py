@@ -239,7 +239,7 @@ class MTeamApiClient:
             "download_url_source": "mteam_api_deferred",
         }
         if left_time_minutes is None and discount in {Discount.FREE, Discount.TWO_X_FREE}:
-            metadata["left_time_source"] = "mteam_api_missing"
+            metadata["left_time_source"] = _left_time_source_from_api_row(row)
 
         return TorrentCandidate(
             site=site,
@@ -383,12 +383,22 @@ def _merge_detail(candidate: TorrentCandidate, detail: dict[str, Any]) -> Torren
     size_bytes = _coerce_int(detail.get("size")) or candidate.size_bytes
     seeders = _coerce_int(status_data.get("seeders")) or candidate.seeders
     leechers = _coerce_int(status_data.get("leechers")) or candidate.leechers
+    left_time_minutes = _left_time_minutes_from_api_row(detail)
+    if left_time_minutes is not None:
+        metadata.pop("left_time_source", None)
+    elif candidate.discount in {Discount.FREE, Discount.TWO_X_FREE}:
+        metadata["left_time_source"] = _left_time_source_from_api_row(detail)
 
     return candidate.model_copy(
         update={
             "size_bytes": size_bytes,
             "seeders": seeders,
             "leechers": leechers,
+            "left_time_minutes": (
+                left_time_minutes
+                if left_time_minutes is not None
+                else candidate.left_time_minutes
+            ),
             "metadata": metadata,
         }
     )
@@ -451,6 +461,30 @@ def _left_time_minutes_from_api_row(row: dict[str, Any]) -> int | None:
                 continue
             return max(0, int((end_at - datetime.now(UTC)).total_seconds() // 60))
     return None
+
+
+def _left_time_source_from_api_row(row: dict[str, Any]) -> str:
+    if _has_explicit_open_ended_discount(row):
+        return "mteam_api_unlimited"
+    return "mteam_api_missing"
+
+
+def _has_explicit_open_ended_discount(row: dict[str, Any]) -> bool:
+    open_ended_fields = (
+        "freeEndTime",
+        "freeEndDate",
+        "discountEndTime",
+        "discountEndDate",
+        "discountExpireTime",
+        "discountExpireDate",
+        "promotionEndTime",
+        "promotionEndDate",
+    )
+    for container in _api_row_containers(row):
+        for field in open_ended_fields:
+            if field in container and container.get(field) is None:
+                return True
+    return False
 
 
 def _api_row_containers(row: dict[str, Any]) -> list[dict[str, Any]]:
