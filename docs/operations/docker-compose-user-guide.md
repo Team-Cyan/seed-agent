@@ -123,6 +123,9 @@ If you want to build from local source:
 docker compose --env-file deploy/seed-agent.env -f deploy/docker-compose.example.yml up -d --build
 ```
 
+That source build uses `uv.lock` inside the Docker image, so the container path
+matches the repository's pinned Python dependency set.
+
 ## 6. Verify The Deployment
 
 Check container status:
@@ -149,6 +152,10 @@ Expected files:
 - `.seed-agent/state.db`
 - `.seed-agent/audit.jsonl`
 - `state/schedule-heartbeat.json`
+
+It is normal for the very first scheduler cycle to take a couple of minutes
+before the first heartbeat appears. The example Compose file leaves a four-minute
+`start_period` for that reason.
 
 ## 7. Common Operations
 

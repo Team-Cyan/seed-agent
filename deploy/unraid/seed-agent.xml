@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Container version="2">
+  <Name>seed-agent</Name>
+  <Repository>ghcr.io/team-cyan/seed-agent:latest</Repository>
+  <Registry>https://github.com/Team-Cyan/seed-agent/pkgs/container/seed-agent</Registry>
+  <Network>bridge</Network>
+  <MyIP/>
+  <Shell>sh</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/Team-Cyan/seed-agent/issues</Support>
+  <Project>https://github.com/Team-Cyan/seed-agent</Project>
+  <ReadMe>https://github.com/Team-Cyan/seed-agent#readme</ReadMe>
+  <Overview>Docker-first PT automation for qBittorrent and M-Team, designed for long-running NAS deployment with mounted config, local secrets, audit, and state.</Overview>
+  <Category>Downloaders:Tools:Utilities</Category>
+  <WebUI>https://github.com/Team-Cyan/seed-agent</WebUI>
+  <TemplateURL>https://raw.githubusercontent.com/Team-Cyan/seed-agent/main/deploy/unraid/seed-agent.xml</TemplateURL>
+  <Icon>https://github.githubassets.com/favicons/favicon.png</Icon>
+  <ExtraSearchTerms>pt qbittorrent m-team seedbox nas</ExtraSearchTerms>
+  <ExtraParams/>
+  <PostArgs/>
+  <CPUset/>
+  <DateInstalled>0</DateInstalled>
+  <DonateText/>
+  <DonateLink/>
+  <Requires/>
+  <CategoryList>Downloaders</CategoryList>
+  <CategoryList>Tools-Utilities</CategoryList>
+  <Author>Team-Cyan</Author>
+  <Config Name="Appdata Root" Target="/workspace" Default="/mnt/user/appdata/seed-agent" Mode="rw" Description="Single mounted root folder containing runtime/config, runtime/local, runtime/.seed-agent, and runtime/state." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/seed-agent</Config>
+  <Config Name="Timezone" Target="TZ" Default="Asia/Shanghai" Mode="" Description="Container timezone." Type="Variable" Display="always" Required="true" Mask="false">Asia/Shanghai</Config>
+  <Config Name="Mode" Target="SEED_AGENT_MODE" Default="schedule-run" Mode="" Description="Primary entry mode for the container." Type="Variable" Display="always" Required="true" Mask="false">schedule-run</Config>
+  <Config Name="Config Path" Target="SEED_AGENT_CONFIG" Default="/workspace/runtime/config/config.yaml" Mode="" Description="Path to the runtime config file inside the mounted root folder." Type="Variable" Display="always" Required="true" Mask="false">/workspace/runtime/config/config.yaml</Config>
+  <Config Name="Execute" Target="SEED_AGENT_EXECUTE" Default="true" Mode="" Description="Set true for unattended execution or false for dry-run scheduler mode." Type="Variable" Display="always" Required="true" Mask="false">true</Config>
+  <Config Name="Interval Minutes" Target="SEED_AGENT_INTERVAL_MINUTES" Default="30" Mode="" Description="Polling interval for schedule-run mode." Type="Variable" Display="always" Required="true" Mask="false">30</Config>
+  <Config Name="Min Free Window Minutes" Target="SEED_AGENT_MIN_FREE_WINDOW_MINUTES" Default="180" Mode="" Description="Reject candidates with too little remaining freeleech time." Type="Variable" Display="always" Required="true" Mask="false">180</Config>
+  <Config Name="Require Known Free Window" Target="SEED_AGENT_REQUIRE_KNOWN_FREE_WINDOW" Default="true" Mode="" Description="Require a known free-window duration for execute-mode enqueue decisions." Type="Variable" Display="always" Required="true" Mask="false">true</Config>
+  <Config Name="Heartbeat File" Target="SEED_AGENT_HEARTBEAT_FILE" Default="/workspace/runtime/state/schedule-heartbeat.json" Mode="" Description="Heartbeat file used by Docker health checks and runtime visibility." Type="Variable" Display="always" Required="true" Mask="false">/workspace/runtime/state/schedule-heartbeat.json</Config>
+  <Config Name="Max Staleness Minutes" Target="SEED_AGENT_MAX_STALENESS_MINUTES" Default="90" Mode="" Description="Healthcheck staleness threshold for the scheduler heartbeat." Type="Variable" Display="advanced" Required="true" Mask="false">90</Config>
+  <TailscaleStateDir/>
+</Container>

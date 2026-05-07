@@ -694,6 +694,18 @@ def schedule_run(
     cycle = 0
     while True:
         cycle += 1
+        if heartbeat_file is not None:
+            _write_heartbeat(
+                heartbeat_file,
+                cycle=cycle,
+                interval_minutes=interval_minutes,
+                payload={
+                    "command": "schedule-run",
+                    "execute": execute,
+                    "phase": "running",
+                    "error": None,
+                },
+            )
         payload = _run_once_payload(
             config,
             execute=execute,
@@ -881,6 +893,7 @@ def _write_heartbeat(
         "interval_minutes": interval_minutes,
         "command": payload.get("command"),
         "execute": payload.get("execute"),
+        "phase": payload.get("phase"),
         "accepted": payload.get("accepted"),
         "enqueued": payload.get("enqueued"),
         "error": payload.get("error"),

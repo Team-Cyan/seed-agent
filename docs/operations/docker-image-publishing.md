@@ -61,6 +61,21 @@ docker push ghcr.io/team-cyan/seed-agent:latest
 docker push ghcr.io/team-cyan/seed-agent:0.1.0
 ```
 
+## GitHub-Native Publishing
+
+This repository now includes `.github/workflows/docker-publish.yml`.
+
+On every push to `main`, GitHub Actions publishes a multi-arch image to:
+
+- `ghcr.io/team-cyan/seed-agent:latest`
+- `ghcr.io/team-cyan/seed-agent:sha-<commit>`
+
+On version tags such as `v0.1.0`, the same workflow also publishes the tag
+name itself.
+
+This is the path that lets Unraid treat `seed-agent` like a normal third-party
+container with remote update checks.
+
 ## Compose Template Strategy
 
 Compose examples should not assume one fixed registry forever.
@@ -104,9 +119,10 @@ What is now documented:
 - Docker-first installation path
 - Compose-based runtime model
 - image tagging and push workflow
+- CI-driven GHCR publishing workflow
+- first-party Unraid template for DockerMan users
 
 What still remains optional future work:
 
-- CI-driven multi-arch builds
 - automated Docker Hub publish workflow
 - release automation for version tags

@@ -291,6 +291,7 @@ def test_schedule_run_executes_single_cycle_and_emits_schedule_metadata(
     config_path = _config_file(tmp_path)
     heartbeat_path = tmp_path / "state" / "heartbeat.json"
     seen: list[tuple[Path, bool, int | None, bool]] = []
+    startup_heartbeats: list[dict[str, object]] = []
 
     def fake_run_once_payload(
         config_path_value: Path,
@@ -299,6 +300,7 @@ def test_schedule_run_executes_single_cycle_and_emits_schedule_metadata(
         min_free_window_minutes: int | None,
         require_known_free_window: bool,
     ) -> dict[str, object]:
+        startup_heartbeats.append(json.loads(heartbeat_path.read_text(encoding="utf-8")))
         seen.append(
             (
                 config_path_value,
@@ -349,9 +351,23 @@ def test_schedule_run_executes_single_cycle_and_emits_schedule_metadata(
     assert payload["require_known_free_window"] is True
     assert payload["heartbeat_file"] == str(heartbeat_path)
     assert seen == [(config_path, True, 180, True)]
+    assert startup_heartbeats == [
+        {
+            "accepted": None,
+            "command": "schedule-run",
+            "cycle": 1,
+            "enqueued": None,
+            "error": None,
+            "execute": True,
+            "interval_minutes": 15,
+            "phase": "running",
+            "updated_at": startup_heartbeats[0]["updated_at"],
+        }
+    ]
     heartbeat = json.loads(heartbeat_path.read_text(encoding="utf-8"))
     assert heartbeat["cycle"] == 1
     assert heartbeat["interval_minutes"] == 15
+    assert heartbeat["phase"] is None
     assert heartbeat["accepted"] == 1
     assert heartbeat["enqueued"] == 1
 

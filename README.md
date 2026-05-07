@@ -110,6 +110,8 @@ See:
 - [Docker Compose User Guide](docs/operations/docker-compose-user-guide.md)
 - [Docker Scheduling](docs/operations/docker-scheduling.md)
 - [Compose Example](deploy/docker-compose.example.yml)
+- [Unraid Template](deploy/unraid/seed-agent.xml)
+- [Unraid DockerMan Install](docs/operations/unraid-dockerman.md)
 
 If you want to switch from GHCR to Docker Hub later, set `SEED_AGENT_IMAGE` in
 `deploy/seed-agent.env` instead of editing the Compose file.
@@ -162,6 +164,7 @@ These guards help avoid:
 - [Docker Compose User Guide](docs/operations/docker-compose-user-guide.md)
 - [Docker Scheduling](docs/operations/docker-scheduling.md)
 - [Docker Image Publishing](docs/operations/docker-image-publishing.md)
+- [Unraid DockerMan Install](docs/operations/unraid-dockerman.md)
 - [Phase 1 Usage](docs/operations/phase-1-usage.md)
 - [Phase 2 Usage](docs/operations/phase-2-usage.md)
 - [Compose Example](deploy/docker-compose.example.yml)
@@ -174,6 +177,10 @@ The project is structured to work with:
 - local image builds,
 - GitHub Container Registry,
 - Docker Hub style publishing.
+
+For Unraid users who want native DockerMan actions such as edit, update checks,
+and template-driven rebuilds, the repository now includes a first-party Unraid
+template and a GitHub Actions workflow that publishes `ghcr.io/team-cyan/seed-agent`.
 
 The image is intentionally generic:
 

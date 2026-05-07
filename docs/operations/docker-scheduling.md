@@ -55,6 +55,9 @@ Build locally:
 docker build -t seed-agent:local .
 ```
 
+The Dockerfile now installs application dependencies through `uv.lock`, so
+source builds no longer rely on an unconstrained `pip install .` path.
+
 Long-running scheduler example:
 
 ```bash
@@ -114,6 +117,9 @@ docker run --rm \
 For long-running scheduler containers:
 
 - set `SEED_AGENT_HEARTBEAT_FILE` to a writable persistent path,
+- expect the first scheduler cycle to take longer than a healthcheck probe when
+  site discovery is slow, so give Compose or your supervisor a few minutes of
+  `start_period`,
 - run `seed-agent healthcheck --config /app/config/config.yaml --heartbeat-file ...`
   from Docker Compose, Kubernetes, or another supervisor,
 - treat JSON stdout as the primary log stream,
