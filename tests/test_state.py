@@ -129,6 +129,20 @@ def test_state_store_creates_parent_directory_for_nested_path(tmp_path: Path) ->
     assert path.parent.exists()
 
 
+def test_state_store_uses_wal_and_busy_timeout(tmp_path: Path) -> None:
+    path = tmp_path / "state.sqlite3"
+    store = StateStore(path)
+
+    with store._connect() as conn:  # type: ignore[attr-defined]
+        journal_mode = conn.execute("PRAGMA journal_mode").fetchone()
+        busy_timeout = conn.execute("PRAGMA busy_timeout").fetchone()
+
+    assert journal_mode is not None
+    assert journal_mode[0].lower() == "wal"
+    assert busy_timeout is not None
+    assert int(busy_timeout[0]) == 30_000
+
+
 def test_state_store_applies_recent_upload_snapshot_and_clears_stale_pause(
     tmp_path: Path,
 ) -> None:

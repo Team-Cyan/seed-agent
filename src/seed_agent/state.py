@@ -26,6 +26,8 @@ STATE_PRIORITY = {
 }
 GIB = 1024**3
 _UNSET = object()
+SQLITE_TIMEOUT_SECONDS = 30.0
+SQLITE_BUSY_TIMEOUT_MS = 30_000
 
 
 class StateStore:
@@ -53,7 +55,7 @@ class StateStore:
             torrent_hash,
         )
 
-        with sqlite3.connect(self.path) as conn:
+        with self._connect() as conn:
             conn.execute(
                 """
                 INSERT INTO candidates (
@@ -88,8 +90,7 @@ class StateStore:
             )
 
     def get_candidate(self, stable_id: str) -> dict[str, Any] | None:
-        with sqlite3.connect(self.path) as conn:
-            conn.row_factory = sqlite3.Row
+        with self._connect(row_factory=sqlite3.Row) as conn:
             row = conn.execute(
                 """
                 SELECT stable_id, site, title, state, score, torrent_hash, first_seen_at, updated_at
@@ -101,8 +102,7 @@ class StateStore:
         return dict(row) if row is not None else None
 
     def list_by_state(self, state: LifecycleState) -> list[dict[str, Any]]:
-        with sqlite3.connect(self.path) as conn:
-            conn.row_factory = sqlite3.Row
+        with self._connect(row_factory=sqlite3.Row) as conn:
             rows = conn.execute(
                 """
                 SELECT stable_id, site, title, state, score, torrent_hash, first_seen_at, updated_at
@@ -115,8 +115,7 @@ class StateStore:
         return [dict(row) for row in rows]
 
     def list_by_torrent_hash(self, torrent_hash: str) -> list[dict[str, Any]]:
-        with sqlite3.connect(self.path) as conn:
-            conn.row_factory = sqlite3.Row
+        with self._connect(row_factory=sqlite3.Row) as conn:
             rows = conn.execute(
                 """
                 SELECT stable_id, site, title, state, score, torrent_hash, first_seen_at, updated_at
@@ -149,7 +148,7 @@ class StateStore:
         )
 
     def clear_torrent_runtime(self, torrent_hash: str) -> None:
-        with sqlite3.connect(self.path) as conn:
+        with self._connect() as conn:
             conn.execute(
                 """
                 DELETE FROM torrent_runtime
@@ -159,8 +158,7 @@ class StateStore:
             )
 
     def get_torrent_runtime(self, torrent_hash: str) -> dict[str, Any] | None:
-        with sqlite3.connect(self.path) as conn:
-            conn.row_factory = sqlite3.Row
+        with self._connect(row_factory=sqlite3.Row) as conn:
             row = conn.execute(
                 """
                 SELECT
@@ -228,7 +226,7 @@ class StateStore:
         if replace_paused_at or paused_at is not _UNSET:
             paused_value = paused_at
 
-        with sqlite3.connect(self.path) as conn:
+        with self._connect() as conn:
             conn.execute(
                 """
                 INSERT INTO torrent_runtime (
@@ -277,7 +275,7 @@ class StateStore:
         if selected_value is None and current is not None:
             selected_value = current["selected_release_id"]
 
-        with sqlite3.connect(self.path) as conn:
+        with self._connect() as conn:
             conn.execute(
                 """
                 INSERT INTO intents (
@@ -318,8 +316,7 @@ class StateStore:
             )
 
     def get_intent(self, intent_id: str) -> dict[str, Any] | None:
-        with sqlite3.connect(self.path) as conn:
-            conn.row_factory = sqlite3.Row
+        with self._connect(row_factory=sqlite3.Row) as conn:
             row = conn.execute(
                 """
                 SELECT
@@ -341,8 +338,7 @@ class StateStore:
         return dict(row) if row is not None else None
 
     def list_intents_by_state(self, state: IntentState) -> list[dict[str, Any]]:
-        with sqlite3.connect(self.path) as conn:
-            conn.row_factory = sqlite3.Row
+        with self._connect(row_factory=sqlite3.Row) as conn:
             rows = conn.execute(
                 """
                 SELECT
@@ -381,7 +377,7 @@ class StateStore:
 
     def save_ranked_releases(self, releases: list[RankedRelease]) -> None:
         now = _utc_now()
-        with sqlite3.connect(self.path) as conn:
+        with self._connect() as conn:
             for ranked in releases:
                 conn.execute(
                     """
@@ -422,8 +418,7 @@ class StateStore:
                 )
 
     def list_release_candidates(self, intent_id: str) -> list[dict[str, Any]]:
-        with sqlite3.connect(self.path) as conn:
-            conn.row_factory = sqlite3.Row
+        with self._connect(row_factory=sqlite3.Row) as conn:
             rows = conn.execute(
                 """
                 SELECT
@@ -446,7 +441,7 @@ class StateStore:
         return [dict(row) for row in rows]
 
     def _initialize(self) -> None:
-        with sqlite3.connect(self.path) as conn:
+        with self._connect() as conn:
             conn.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS candidates (
@@ -503,6 +498,14 @@ class StateStore:
             )
             self._migrate_release_candidates(conn)
             self._migrate_torrent_runtime(conn)
+
+    def _connect(self, *, row_factory: Any | None = None) -> sqlite3.Connection:
+        conn = sqlite3.connect(self.path, timeout=SQLITE_TIMEOUT_SECONDS)
+        conn.execute(f"PRAGMA busy_timeout={SQLITE_BUSY_TIMEOUT_MS}")
+        conn.execute("PRAGMA journal_mode=WAL")
+        if row_factory is not None:
+            conn.row_factory = row_factory
+        return conn
 
     def _migrate_release_candidates(self, conn: sqlite3.Connection) -> None:
         row = conn.execute(
