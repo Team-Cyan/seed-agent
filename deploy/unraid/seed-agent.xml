@@ -16,7 +16,7 @@
   <TemplateURL>https://raw.githubusercontent.com/Team-Cyan/seed-agent/main/deploy/unraid/seed-agent.xml</TemplateURL>
   <Icon>https://github.githubassets.com/favicons/favicon.png</Icon>
   <ExtraSearchTerms>pt qbittorrent m-team seedbox nas</ExtraSearchTerms>
-  <ExtraParams/>
+  <ExtraParams>--health-cmd='seed-agent healthcheck --config /workspace/runtime/config/config.yaml --heartbeat-file /workspace/runtime/state/schedule-heartbeat.json --max-staleness-minutes 90' --health-interval=1m --health-timeout=20s --health-retries=3 --health-start-period=4m</ExtraParams>
   <PostArgs/>
   <CPUset/>
   <DateInstalled>0</DateInstalled>
