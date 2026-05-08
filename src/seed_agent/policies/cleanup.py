@@ -50,6 +50,10 @@ def classify_cleanup(
             protected=True,
         )
 
+    free_window_decision = _free_window_decision(torrent, cleanup, metadata)
+    if free_window_decision is not None:
+        return free_window_decision
+
     if torrent.last_activity_at is not None:
         age = _utcnow() - torrent.last_activity_at
         if age < timedelta(days=cleanup.cold_after_days):
@@ -107,6 +111,62 @@ def classify_cleanup(
     )
 
 
+def _free_window_decision(
+    torrent: ManagedTorrent,
+    cleanup: CleanupConfig,
+    metadata: dict[str, object],
+) -> CleanupDecision | None:
+    expires_at = _free_window_expires_at(metadata)
+    if expires_at is None:
+        return None
+    min_remaining = _free_window_min_remaining_minutes(metadata)
+    if min_remaining is None:
+        return None
+    remaining = expires_at - _utcnow()
+    if remaining > timedelta(minutes=min_remaining):
+        return None
+    if _is_paused_or_stopped(torrent.state):
+        return _paused_or_stopped_decision(metadata, cleanup)
+    return CleanupDecision(
+        action="pause",
+        reason=_reason(
+            "free window expires before next check; pause managed torrent before paid period"
+        ),
+        managed=True,
+    )
+
+
+def _paused_or_stopped_decision(
+    metadata: dict[str, object],
+    cleanup: CleanupConfig,
+) -> CleanupDecision:
+    paused_at = _paused_at(metadata)
+    if paused_at is not None:
+        paused_age = _utcnow() - paused_at
+        if paused_age >= timedelta(hours=cleanup.pause_before_delete_hours):
+            return CleanupDecision(
+                action="delete",
+                reason=_reason(
+                    f"paused for {paused_age.days}d {paused_age.seconds // 3600}h "
+                    f">= delete delay {cleanup.pause_before_delete_hours}h"
+                ),
+                managed=True,
+            )
+        return CleanupDecision(
+            action="keep",
+            reason=_reason(
+                f"paused for {paused_age.days}d {paused_age.seconds // 3600}h "
+                f"< delete delay {cleanup.pause_before_delete_hours}h"
+            ),
+            managed=True,
+        )
+    return CleanupDecision(
+        action="keep",
+        reason=_reason("paused/stopped torrent missing paused_at timestamp"),
+        managed=True,
+    )
+
+
 def _is_managed(
     torrent: ManagedTorrent,
     managed_category: str,
@@ -148,6 +208,27 @@ def _paused_at(metadata: dict[str, object]) -> datetime | None:
     value = metadata.get("paused_at")
     if isinstance(value, datetime):
         return value
+    return None
+
+
+def _free_window_expires_at(metadata: dict[str, object]) -> datetime | None:
+    value = metadata.get("free_window_expires_at")
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str) and value:
+        try:
+            return datetime.fromisoformat(value)
+        except ValueError:
+            return None
+    return None
+
+
+def _free_window_min_remaining_minutes(metadata: dict[str, object]) -> int | None:
+    value = metadata.get("free_window_min_remaining_minutes")
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int | float) and value >= 0:
+        return int(value)
     return None
 
 

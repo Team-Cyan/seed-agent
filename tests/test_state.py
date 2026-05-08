@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from seed_agent.models import LifecycleState, ManagedTorrent
@@ -99,6 +99,24 @@ def test_state_store_preserves_existing_score_and_hash_when_incoming_values_are_
     assert row["torrent_hash"] == "deadbeef"
 
 
+def test_state_store_persists_candidate_free_window_expiry(tmp_path: Path) -> None:
+    store = StateStore(tmp_path / "state.sqlite3")
+
+    store.upsert_candidate(
+        stable_id="demo:one",
+        title="One",
+        site="demo",
+        state=LifecycleState.ENQUEUED,
+        score=91,
+        torrent_hash="deadbeef",
+        free_window_expires_at="2026-05-08T12:00:00+00:00",
+    )
+    row = store.get_candidate("demo:one")
+
+    assert row is not None
+    assert row["free_window_expires_at"] == "2026-05-08T12:00:00+00:00"
+
+
 def test_state_store_lists_and_updates_candidates_by_torrent_hash(tmp_path: Path) -> None:
     store = StateStore(tmp_path / "state.sqlite3")
     store.upsert_candidate(
@@ -119,6 +137,38 @@ def test_state_store_lists_and_updates_candidates_by_torrent_hash(tmp_path: Path
     assert updated == 1
     assert row is not None
     assert row["state"] == LifecycleState.PAUSED.value
+
+
+def test_state_store_prunes_stale_unqueued_candidates_only(tmp_path: Path) -> None:
+    store = StateStore(tmp_path / "state.sqlite3")
+    old = datetime.now(UTC) - timedelta(days=45)
+    store.upsert_candidate(
+        stable_id="demo:old-scored",
+        title="Old Scored",
+        site="demo",
+        state=LifecycleState.SCORED,
+        score=10,
+        torrent_hash=None,
+    )
+    store.upsert_candidate(
+        stable_id="demo:old-enqueued",
+        title="Old Enqueued",
+        site="demo",
+        state=LifecycleState.ENQUEUED,
+        score=90,
+        torrent_hash="deadbeef",
+    )
+    with store._connect() as conn:  # type: ignore[attr-defined]
+        conn.execute(
+            "UPDATE candidates SET updated_at = ?, first_seen_at = ?",
+            (old.isoformat(), old.isoformat()),
+        )
+
+    deleted = store.prune_stale_candidates(retention_days=30)
+
+    assert deleted == 1
+    assert store.get_candidate("demo:old-scored") is None
+    assert store.get_candidate("demo:old-enqueued") is not None
 
 
 def test_state_store_creates_parent_directory_for_nested_path(tmp_path: Path) -> None:

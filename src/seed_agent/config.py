@@ -115,7 +115,10 @@ class MTeamApiDiscoveryConfig(BaseModel):
             raise ValueError("min_leechers must be >= 0")
         if self.min_times_completed < 0:
             raise ValueError("min_times_completed must be >= 0")
-        if self.max_seeders is not None and self.max_seeders < self.min_seeders:
+        if (
+            self.max_seeders not in {None, 0}
+            and self.max_seeders < self.min_seeders
+        ):
             raise ValueError("max_seeders must be >= min_seeders")
         return self
 
@@ -152,7 +155,8 @@ class DiscoveryConfig(BaseModel):
     discounts: list[Discount] = Field(default_factory=list)
     min_left_time_minutes: int
     min_leechers: int
-    max_seeders: int
+    target_seed_leecher_ratio: float = 16.0
+    allow_non_free: bool = False
     allow_hr: bool = False
     min_seeders: int | None = None
     max_leechers: int | None = None
@@ -162,6 +166,18 @@ class DiscoveryConfig(BaseModel):
     preferred_size_max_gb: float | None = None
     max_active_downloads: int | None = None
     max_total_amount_left_gb: float | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_legacy_seed_pressure(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        data = dict(value)
+        legacy_max_seeders = data.pop("max_seeders", None)
+        if "target_seed_leecher_ratio" not in data and legacy_max_seeders is not None:
+            min_leechers = data.get("min_leechers") or 1
+            data["target_seed_leecher_ratio"] = float(legacy_max_seeders) / float(min_leechers)
+        return data
 
     @field_validator("discounts", mode="before")
     @classmethod
@@ -181,6 +197,7 @@ class DiscoveryConfig(BaseModel):
             "max_size_gb",
             "preferred_size_min_gb",
             "preferred_size_max_gb",
+            "target_seed_leecher_ratio",
             "max_active_downloads",
             "max_total_amount_left_gb",
         ):
@@ -375,6 +392,18 @@ class SourcesConfig(BaseModel):
     subscription: SubscriptionSourceConfig = Field(default_factory=SubscriptionSourceConfig)
 
 
+class StateConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    candidate_retention_days: int = 30
+
+    @model_validator(mode="after")
+    def validate_retention(self) -> StateConfig:
+        if self.candidate_retention_days < 1:
+            raise ValueError("candidate_retention_days must be >= 1")
+        return self
+
+
 class SeedAgentConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
@@ -387,6 +416,7 @@ class SeedAgentConfig(BaseModel):
     intent: IntentConfig = Field(default_factory=IntentConfig)
     search: SearchConfig = Field(default_factory=SearchConfig)
     sources: SourcesConfig = Field(default_factory=SourcesConfig)
+    state: StateConfig = Field(default_factory=StateConfig)
     _config_dir: Path | None = PrivateAttr(default=None)
 
     @property

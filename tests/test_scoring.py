@@ -27,7 +27,7 @@ def discovery(**overrides: object) -> DiscoveryConfig:
         "discounts": ["free", "2xfree"],
         "min_left_time_minutes": 120,
         "min_leechers": 8,
-        "max_seeders": 80,
+        "target_seed_leecher_ratio": 10,
         "allow_hr": False,
     }
     data.update(overrides)
@@ -140,13 +140,33 @@ def test_zero_min_leechers_does_not_drop_leecher_score_to_zero() -> None:
     assert "leechers 0 >= min 0" in result.reasons
 
 
-def test_seeder_taper_reduces_score_for_very_high_seeder_count() -> None:
-    low_seeders = score_candidate(make_candidate(seeders=20), discovery(), scoring())
-    high_seeders = score_candidate(make_candidate(seeders=160), discovery(), scoring())
+def test_seeder_score_uses_upload_demand_ratio_not_absolute_seeders() -> None:
+    seeders_only = scoring(
+        min_score_to_enqueue=1,
+        weights={
+            "discount": 0,
+            "leechers": 0,
+            "seeders": 100,
+            "left_time": 0,
+            "size": 0,
+            "site_history": 0,
+        },
+    )
 
-    assert low_seeders.score > high_seeders.score
-    assert "seeders 160 >= 2x max 80" in high_seeders.reasons
-    assert "seeders 20 <= max 80" in low_seeders.reasons
+    high_demand = score_candidate(
+        make_candidate(seeders=160, leechers=20),
+        discovery(min_leechers=0),
+        seeders_only,
+    )
+    low_demand = score_candidate(
+        make_candidate(seeders=80, leechers=1),
+        discovery(min_leechers=0),
+        seeders_only,
+    )
+
+    assert high_demand.score > low_demand.score
+    assert "seeder_leecher_ratio 8.00 <= target 10.00" in high_demand.reasons
+    assert "seeder_leecher_ratio 80.00 >= 2x target 10.00" in low_demand.reasons
 
 
 def test_site_history_score_is_clamped_between_zero_and_one() -> None:
@@ -223,6 +243,18 @@ def test_normal_discount_not_in_config_is_rejected() -> None:
     assert result.accepted is False
     assert result.score == 0
     assert "discount normal not accepted" in result.reasons
+
+
+def test_normal_discount_can_be_scored_when_non_free_is_allowed() -> None:
+    result = score_candidate(
+        make_candidate(discount=Discount.NORMAL, metadata={"discount_raw": "NORMAL"}),
+        discovery(discounts=["free"], allow_non_free=True),
+        scoring(min_score_to_enqueue=1),
+    )
+
+    assert result.accepted is True
+    assert result.score > 0
+    assert "discount normal allowed without discount credit" in result.reasons
 
 
 def test_missing_left_time_has_clear_reason() -> None:

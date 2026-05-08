@@ -19,6 +19,9 @@ Expose the operator-facing command surface and safe summaries.
 - site probe diagnostics,
 - unattended `schedule-run` orchestration for server-side polling,
 - free-window safety previewing for freeleech-sensitive workflows,
+- optional per-cycle cleanup through `run-once --prune` and `schedule-run --prune`,
+- stronger prune previews that include live torrent identity, linked candidate
+  state, action, reason, and whether delete actions remove files,
 - heartbeat reporting and healthcheck probes for long-running deployments.
 
 ## Expectations
@@ -33,6 +36,11 @@ Expose the operator-facing command surface and safe summaries.
   `enqueue_paused_reasons`,
 - preview and enforce risky free-window decisions consistently when the free
   window is unknown or too short for the configured safety threshold,
+- keep optional scheduled pruning explicit through `--prune` so cleanup is never
+  silently bundled into a long-running deployment,
+- expose cleanup preview details before execute-mode mutation,
+- pass the scheduler interval into per-cycle pruning so persisted free-window
+  expiries can be evaluated against the next scheduled check,
 - keep long-running deployment liveness inspectable through structured
   heartbeat output instead of opaque shell wrappers.
 

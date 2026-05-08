@@ -584,7 +584,7 @@ def _row_meets_thresholds(row: dict[str, Any], options: MTeamApiDiscoveryOptions
     times_completed = _coerce_int(status_data.get("timesCompleted")) or 0
     if seeders < options.min_seeders:
         return False
-    if options.max_seeders is not None and seeders > options.max_seeders:
+    if options.max_seeders not in {None, 0} and seeders > options.max_seeders:
         return False
     if leechers < options.min_leechers:
         return False

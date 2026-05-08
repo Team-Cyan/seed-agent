@@ -133,6 +133,54 @@ async def test_mteam_api_client_discovers_free_candidates_with_sorting() -> None
 
 @pytest.mark.asyncio
 @respx.mock
+async def test_mteam_api_zero_max_seeders_does_not_block_popular_torrents() -> None:
+    respx.post("https://api.m-team.cc/api/torrent/search").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "code": "0",
+                "data": {
+                    "data": [
+                        {
+                            "id": 111591,
+                            "name": "joymii hardcore solo lesbian 2014 mp4 1080P MegaPack",
+                            "size": 93781377024,
+                            "discount": "FREE",
+                            "status": {
+                                "seeders": 307,
+                                "leechers": 18,
+                                "timesCompleted": 16685,
+                            },
+                        }
+                    ]
+                },
+            },
+        )
+    )
+
+    client = MTeamApiClient(api_key="secret-api-key")
+    candidates = await client.discover_torrents(
+        site="mt",
+        options=MTeamApiDiscoveryOptions(
+            mode="adult",
+            only_free=True,
+            sort_field="leechers",
+            sort_order="desc",
+            page_size=50,
+            min_seeders=1,
+            max_seeders=0,
+            min_leechers=0,
+            min_times_completed=0,
+        ),
+    )
+
+    assert [candidate.title for candidate in candidates] == [
+        "joymii hardcore solo lesbian 2014 mp4 1080P MegaPack"
+    ]
+
+
+@pytest.mark.asyncio
+@respx.mock
 async def test_resolve_deferred_download_url_fetches_mteam_token() -> None:
     route = respx.post("https://api.m-team.cc/api/torrent/genDlToken").mock(
         return_value=httpx.Response(

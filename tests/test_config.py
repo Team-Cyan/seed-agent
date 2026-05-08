@@ -248,6 +248,26 @@ def test_load_config_accepts_optional_runtime_enqueue_gates(tmp_path: Path) -> N
     assert config.discovery.max_total_amount_left_gb == 150
 
 
+def test_discovery_accepts_ratio_seed_pressure_config_name() -> None:
+    data = _valid_config_data("local/secrets/qb.yaml")
+    discovery = dict(data["discovery"])  # type: ignore[arg-type]
+    discovery.pop("max_seeders")
+    discovery["target_seed_leecher_ratio"] = 12.5
+    discovery["allow_non_free"] = True
+    data["discovery"] = discovery
+
+    config = SeedAgentConfig(**data)
+
+    assert config.discovery.target_seed_leecher_ratio == 12.5
+    assert config.discovery.allow_non_free is True
+
+
+def test_discovery_migrates_legacy_max_seeders_to_ratio() -> None:
+    config = SeedAgentConfig(**_valid_config_data("local/secrets/qb.yaml"))
+
+    assert config.discovery.target_seed_leecher_ratio == 10.0
+
+
 def test_unknown_config_key_raises_validation_error() -> None:
     with pytest.raises(ValidationError):
         SeedAgentConfig(**{**_valid_config_data("local/secrets/qb.yaml"), "unexpected": True})
@@ -372,6 +392,37 @@ def test_mteam_api_discovery_rejects_invalid_openapi_filter_limits() -> None:
 
     with pytest.raises(ValidationError):
         SeedAgentConfig(**data)
+
+
+def test_mteam_api_discovery_allows_zero_max_seeders_as_unbounded() -> None:
+    data = _valid_config_data("local/secrets/qb.yaml")
+    data["sites"] = [
+        {
+            "name": "mt",
+            "type": "mteam",
+            "enabled": True,
+            "rss_url": "https://rss.m-team.cc/api/rss/fetch?dl=1",
+            "api_key_ref": "local/secrets/mt.api-key",
+            "discovery_mode": "api",
+            "api_discovery": {
+                "mode": "adult",
+                "only_free": True,
+                "sort_field": "downloads",
+                "sort_order": "desc",
+                "page_size": 100,
+                "categories": [410],
+                "min_seeders": 1,
+                "max_seeders": 0,
+                "min_leechers": 0,
+                "min_times_completed": 0,
+            },
+        }
+    ]
+
+    config = SeedAgentConfig(**data)
+
+    assert config.enabled_sites[0].api_discovery is not None
+    assert config.enabled_sites[0].api_discovery.max_seeders == 0
 
 
 def test_discovery_rejects_invalid_size_limits() -> None:

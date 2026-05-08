@@ -102,6 +102,48 @@ def test_cold_managed_torrent_with_meaningful_recent_upload_is_kept(
     assert "recent upload" in decision.reason.lower()
 
 
+def test_managed_torrent_pauses_when_free_window_cannot_survive_next_check() -> None:
+    from seed_agent.policies.cleanup import classify_cleanup
+
+    now = datetime.now(UTC)
+    decision = classify_cleanup(
+        _torrent(
+            last_activity_at=now - timedelta(minutes=10),
+            metadata={
+                "free_window_expires_at": (now + timedelta(minutes=20)).isoformat(),
+                "free_window_min_remaining_minutes": 30,
+            },
+        ),
+        _cleanup(),
+        managed_category="pt-auto",
+        managed_tags={"seed-agent", "pt-auto"},
+    )
+
+    assert decision.action == "pause"
+    assert "free window" in decision.reason
+
+
+def test_managed_torrent_keeps_when_free_window_survives_next_check() -> None:
+    from seed_agent.policies.cleanup import classify_cleanup
+
+    now = datetime.now(UTC)
+    decision = classify_cleanup(
+        _torrent(
+            last_activity_at=now - timedelta(minutes=10),
+            metadata={
+                "free_window_expires_at": (now + timedelta(minutes=90)).isoformat(),
+                "free_window_min_remaining_minutes": 30,
+            },
+        ),
+        _cleanup(),
+        managed_category="pt-auto",
+        managed_tags={"seed-agent", "pt-auto"},
+    )
+
+    assert decision.action == "keep"
+    assert "recent activity" in decision.reason
+
+
 @pytest.mark.parametrize(
     ("metadata", "cleanup_overrides", "reason_fragment"),
     [

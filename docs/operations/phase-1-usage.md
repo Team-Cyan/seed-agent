@@ -83,6 +83,25 @@ uv run seed-agent run-once --config config/example.yaml --execute
 uv run seed-agent schedule-run --config config/example.yaml --execute --interval-minutes 30
 ```
 
+To combine the normal discovery/enqueue loop with managed torrent cleanup,
+add `--prune` to `run-once` or `schedule-run`:
+
+```bash
+uv run seed-agent schedule-run --config config/example.yaml --execute \
+  --interval-minutes 30 \
+  --prune
+```
+
+`--prune` reuses the same conservative cleanup policy as the standalone
+`prune` command: only mutable managed categories are eligible, and cold torrents
+are paused before they can be deleted in a later pass.
+
+When `schedule-run --prune` is used, the scheduler interval also becomes the
+free-window safety horizon for managed torrents. A torrent with persisted
+`free_window_expires_at` that cannot survive until the next scheduled check is
+paused before the paid period; already-paused torrents still follow the normal
+pause-before-delete delay.
+
 For unattended runs, prefer adding free-window safety flags:
 
 ```bash
@@ -95,6 +114,18 @@ That prevents execute-mode enqueue when a candidate has too little known
 remaining free time or when M-Team does not provide a usable free-window value.
 If you pass the same flags without `--execute`, the dry-run output previews that
 deployment-time safety decision before you mutate qBittorrent.
+
+Execute-mode enqueue also persists a candidate-level `free_window_expires_at`
+when the site provides `left_time_minutes`. That timestamp is local operational
+state in `.seed-agent/state.db`; it gives later review and cleanup passes a
+durable record of the expected free window for torrents that were added by the
+agent. If M-Team marks an API candidate as explicitly unlimited, the persisted
+expiry is `9999-12-31T23:59:59+00:00`.
+
+Candidate rows that never become linked to a qB torrent are pruned after
+`state.candidate_retention_days` days, defaulting to 30. Enqueued, downloading,
+seeding, paused, and deleted rows are retained because they explain live cleanup
+history.
 
 For long-running scheduler deployments, pair `schedule-run` with:
 
@@ -128,7 +159,9 @@ jq -c '.' .seed-agent/audit.jsonl | tail -n 20
 - Only mutable configured categories such as `seed` are eligible for automatic cleanup decisions.
 - Keep H&R, manual, media-library-associated, and unknown-origin torrents protected.
 - Treat category and tag management as part of the safety boundary, not cosmetic metadata.
-- Do not delete unmanaged torrents.
+- Do not delete unmanaged torrents. For eligible managed delete actions,
+  `prune --execute` deletes both the torrent and its files; inspect the `preview`
+  block before executing.
 - Do not remove or rewrite audit history.
 
 ## Budget Notes

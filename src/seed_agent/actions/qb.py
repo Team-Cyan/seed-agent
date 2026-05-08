@@ -122,6 +122,7 @@ async def prune_cold_torrents(
     execute: bool,
     *,
     pool_usage: PoolUsage | None = None,
+    free_window_min_remaining_minutes: int | None = None,
 ) -> list[Decision]:
     if policy.mode != "mutable" or not policy.delete_enabled:
         return [
@@ -149,6 +150,10 @@ async def prune_cold_torrents(
     tags = set(policy.tags)
 
     for torrent in rank_eviction_candidates(list(torrents)):
+        if free_window_min_remaining_minutes is not None:
+            metadata = dict(torrent.metadata)
+            metadata["free_window_min_remaining_minutes"] = free_window_min_remaining_minutes
+            torrent = torrent.model_copy(update={"metadata": metadata})
         classification = classify_cleanup(torrent, cleanup, policy.name, tags)
         decision = _decision_for_cleanup(
             torrent,

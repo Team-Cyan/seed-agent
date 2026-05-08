@@ -140,6 +140,21 @@ def test_apply_free_window_safety_allows_mteam_unlimited_window() -> None:
     assert "left_time required for execute safety" not in adjusted[0].reasons
 
 
+def test_candidate_free_window_uses_far_future_for_unlimited_mteam_api() -> None:
+    from seed_agent.cli import _candidate_free_window_expires_at
+
+    candidate = _candidate(
+        site="mteam",
+        left_time_minutes=None,
+        metadata={
+            "mteam_discovery_mode": "api",
+            "left_time_source": "mteam_api_unlimited",
+        },
+    )
+
+    assert _candidate_free_window_expires_at(candidate) == "9999-12-31T23:59:59+00:00"
+
+
 def _managed_torrent(**overrides: object) -> ManagedTorrent:
     now = datetime.now(UTC)
     data: dict[str, object] = {
@@ -322,6 +337,8 @@ def test_schedule_run_executes_single_cycle_and_emits_schedule_metadata(
         execute: bool,
         min_free_window_minutes: int | None,
         require_known_free_window: bool,
+        prune: bool,
+        prune_free_window_min_remaining_minutes: int | None = None,
     ) -> dict[str, object]:
         startup_heartbeats.append(json.loads(heartbeat_path.read_text(encoding="utf-8")))
         seen.append(
@@ -393,6 +410,159 @@ def test_schedule_run_executes_single_cycle_and_emits_schedule_metadata(
     assert heartbeat["phase"] is None
     assert heartbeat["accepted"] == 1
     assert heartbeat["enqueued"] == 1
+
+
+def test_schedule_run_can_prune_each_cycle(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from seed_agent import cli
+
+    config_path = _config_file(tmp_path)
+    seen: list[bool] = []
+
+    def fake_run_once_payload(
+        config_path_value: Path,
+        *,
+        execute: bool,
+        min_free_window_minutes: int | None,
+        require_known_free_window: bool,
+        prune: bool,
+        prune_free_window_min_remaining_minutes: int | None = None,
+    ) -> dict[str, object]:
+        seen.append(prune)
+        return {
+            "command": "run-once",
+            "config": str(config_path_value),
+            "execute": execute,
+            "discovered": 0,
+            "scored": 0,
+            "accepted": 0,
+            "enqueued": 0,
+            "scores": [],
+            "decisions": [],
+            "prune": {"command": "prune", "managed_count": 1, "decisions": []},
+        }
+
+    monkeypatch.setattr(cli, "_run_once_payload", fake_run_once_payload)
+
+    result = CliRunner().invoke(
+        cli.app,
+        [
+            "schedule-run",
+            "--config",
+            str(config_path),
+            "--prune",
+            "--max-cycles",
+            "1",
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = _json_output(result)
+    assert seen == [True]
+    assert payload["prune"]["command"] == "prune"
+
+
+def test_schedule_run_prune_uses_interval_as_free_window_horizon(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from seed_agent import cli
+
+    config_path = _config_file(tmp_path)
+    seen: list[int | None] = []
+
+    def fake_prune_payload(
+        config_path_value: Path,
+        *,
+        execute: bool,
+        free_window_min_remaining_minutes: int | None,
+    ) -> dict[str, object]:
+        seen.append(free_window_min_remaining_minutes)
+        return {
+            "command": "prune",
+            "config": str(config_path_value),
+            "execute": execute,
+            "managed_count": 0,
+            "pool_usage": {},
+            "decisions": [],
+        }
+
+    async def fake_discover_candidates(loaded):
+        return []
+
+    monkeypatch.setattr(cli, "discover_candidates", fake_discover_candidates)
+    monkeypatch.setattr(cli, "_maybe_build_downloader", lambda loaded: None)
+    monkeypatch.setattr(cli, "_prune_payload", fake_prune_payload)
+
+    result = CliRunner().invoke(
+        cli.app,
+        [
+            "schedule-run",
+            "--config",
+            str(config_path),
+            "--interval-minutes",
+            "45",
+            "--prune",
+            "--max-cycles",
+            "1",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert seen == [45]
+
+
+def test_execute_enqueue_persists_candidate_free_window_expiry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from seed_agent import cli
+
+    monkeypatch.chdir(tmp_path)
+
+    config_path = _config_file(tmp_path)
+    config = _config(secret_ref="local/secrets/qb.yaml")
+    candidate = _candidate(left_time_minutes=240)
+    state_path = tmp_path / ".seed-agent" / "state.db"
+
+    async def fake_discover_candidates(config: SeedAgentConfig):
+        return [candidate]
+
+    def fake_score_candidates(candidates, discovery_config, scoring_config):
+        return [_scored(candidate=candidate)]
+
+    async def fake_resolve_deferred_download_urls(scored, loaded):
+        return scored
+
+    class FakeDownloader:
+        async def list_torrents(
+            self, category: str | None = None, tags: set[str] | None = None
+        ) -> list[ManagedTorrent]:
+            return []
+
+        async def add_url(
+            self,
+            url: str,
+            category: str,
+            tags: list[str],
+            *,
+            paused: bool = False,
+        ) -> str:
+            return "abcd1234"
+
+    monkeypatch.setattr(cli, "load_config", lambda path: config)
+    monkeypatch.setattr(cli, "discover_candidates", fake_discover_candidates)
+    monkeypatch.setattr(cli, "score_candidates", fake_score_candidates)
+    monkeypatch.setattr(cli, "resolve_deferred_download_urls", fake_resolve_deferred_download_urls)
+    monkeypatch.setattr(cli, "build_downloader", lambda loaded: FakeDownloader())
+
+    result = CliRunner().invoke(
+        cli.app, ["run-once", "--config", str(config_path), "--execute"]
+    )
+
+    assert result.exit_code == 0
+    row = StateStore(state_path).get_candidate(candidate.stable_id)
+    assert row is not None
+    assert row["free_window_expires_at"] is not None
 
 
 def test_healthcheck_reports_recent_heartbeat(tmp_path: Path) -> None:
@@ -928,10 +1098,49 @@ def test_prune_dry_run_previews_live_torrents_without_mutation(
     assert payload["managed_count"] == 1
     assert payload["decisions"][0]["action"] == "qb.cleanup.pause"
     assert payload["decisions"][0]["execute"] is False
+    assert payload["preview"][0]["hash"] == "<redacted>"
+    assert payload["preview"][0]["name"] == "Managed Torrent"
+    assert payload["preview"][0]["candidate_state"] == LifecycleState.ENQUEUED.value
+    assert payload["preview"][0]["delete_files_on_delete"] is True
     assert downloader.calls == []
     row = store.get_candidate("demo-free:https://tracker.example/details.php?id=1")
     assert row is not None
     assert row["state"] == LifecycleState.ENQUEUED.value
+
+
+def test_prune_links_live_torrent_without_existing_candidate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from seed_agent import cli
+
+    monkeypatch.chdir(tmp_path)
+
+    config_path = _config_file(tmp_path, secret_ref="local/secrets/qb.yaml")
+    config = _config(secret_ref="local/secrets/qb.yaml")
+    store = StateStore(tmp_path / ".seed-agent" / "state.db")
+
+    class FakeDownloader:
+        async def list_torrents(
+            self, category: str | None = None, tags: set[str] | None = None
+        ) -> list[ManagedTorrent]:
+            return [_managed_torrent(hash="legacy-hash", name="Legacy Managed")]
+
+        async def pause(self, hash: str) -> None:
+            raise AssertionError("dry-run prune must not pause torrents")
+
+        async def delete(self, hash: str, delete_files: bool) -> None:
+            raise AssertionError("dry-run prune must not delete torrents")
+
+    monkeypatch.setattr(cli, "load_config", lambda path: config)
+    monkeypatch.setattr(cli, "_maybe_build_downloader", lambda loaded: FakeDownloader())
+
+    result = CliRunner().invoke(cli.app, ["prune", "--config", str(config_path)])
+
+    assert result.exit_code == 0
+    row = store.get_candidate("qb:legacy-hash")
+    assert row is not None
+    assert row["title"] == "Legacy Managed"
+    assert row["torrent_hash"] == "legacy-hash"
 
 
 def test_prune_dry_run_keeps_recently_uploaded_torrent_from_runtime_snapshot(

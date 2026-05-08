@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -515,6 +515,7 @@ def review(
     policy_lookup = _policy_lookup(loaded)
     torrents = _load_policy_torrents(downloader, loaded)
     torrents = store.apply_torrent_runtime(torrents)
+    _persist_live_torrent_candidates(store, torrents)
     payload = {
         "command": "review",
         "config": str(config),
@@ -534,68 +535,10 @@ def prune(
     config: Annotated[Path, typer.Option("--config")] = DEFAULT_CONFIG,
     execute: Annotated[bool, typer.Option("--execute")] = False,
 ) -> None:
-    loaded = load_config(config)
-    store = StateStore(_state_path(loaded))
-    mutable_policies = [
-        policy
-        for policy in loaded.downloader.category_policies
-        if policy.mode == "mutable" and policy.delete_enabled
-    ]
-    if execute:
-        downloader = build_downloader(loaded)
-    else:
-        downloader = _maybe_build_downloader(loaded)
-        if downloader is None:
-            downloader = _NullDownloader()
-    all_torrents = _load_policy_torrents(downloader, loaded)
-    all_torrents = store.apply_torrent_runtime(all_torrents)
-    mutable_policy_names = {policy.name for policy in mutable_policies}
-    torrents = [
-        torrent
-        for torrent in all_torrents
-        if torrent.category in mutable_policy_names
-    ]
-    batch_error = None
-    decisions: list[Decision] = []
-    torrents_by_category: dict[str, list[ManagedTorrent]] = {}
-    for torrent in torrents:
-        if torrent.category is None:
-            continue
-        torrents_by_category.setdefault(torrent.category, []).append(torrent)
-    for policy in mutable_policies:
-        category_torrents = torrents_by_category.get(policy.name, [])
-        try:
-            decisions.extend(
-                _run(
-                    prune_cold_torrents(
-                        category_torrents,
-                        downloader,
-                        loaded.cleanup,
-                        policy,
-                        execute,
-                        pool_usage=_pool_usage_for_policy(loaded, all_torrents, policy),
-                    )
-                )
-            )
-        except MutationBatchError as exc:
-            decisions.extend(exc.decisions)
-            batch_error = exc
-            break
-    _write_audit_decisions(loaded, decisions)
-    if execute:
-        _persist_prune_state(store, decisions)
-    payload = {
-        "command": "prune",
-        "config": str(config),
-        "execute": execute,
-        "managed_count": len(torrents),
-        "pool_usage": _pool_usage_summary(loaded, all_torrents),
-        "decisions": [_decision_summary(item) for item in decisions],
-    }
-    if batch_error is not None:
-        payload["error"] = str(batch_error)
+    payload = _prune_payload(config, execute=execute)
     _print_json(payload)
-    _raise_if_batch_failed(batch_error)
+    if "error" in payload:
+        raise typer.Exit(code=1)
 
 
 @app.command(name="daily-report")
@@ -632,12 +575,14 @@ def run_once(
     require_known_free_window: Annotated[
         bool, typer.Option("--require-known-free-window/--allow-unknown-free-window")
     ] = False,
+    prune: Annotated[bool, typer.Option("--prune/--no-prune")] = False,
 ) -> None:
     payload = _run_once_payload(
         config,
         execute=execute,
         min_free_window_minutes=min_free_window_minutes,
         require_known_free_window=require_known_free_window if execute else False,
+        prune=prune,
     )
     _print_json(payload)
     if "error" in payload:
@@ -681,6 +626,7 @@ def schedule_run(
     require_known_free_window: Annotated[
         bool, typer.Option("--require-known-free-window/--allow-unknown-free-window")
     ] = True,
+    prune: Annotated[bool, typer.Option("--prune/--no-prune")] = False,
     heartbeat_file: Annotated[
         Path | None, typer.Option("--heartbeat-file")
     ] = None,
@@ -711,6 +657,8 @@ def schedule_run(
             execute=execute,
             min_free_window_minutes=min_free_window_minutes,
             require_known_free_window=require_known_free_window if execute else False,
+            prune=prune,
+            prune_free_window_min_remaining_minutes=interval_minutes if prune else None,
         )
         payload["command"] = "schedule-run"
         payload["cycle"] = cycle
@@ -718,6 +666,7 @@ def schedule_run(
         payload["scheduled_at"] = datetime.now(UTC).isoformat()
         payload["min_free_window_minutes"] = min_free_window_minutes
         payload["require_known_free_window"] = require_known_free_window if execute else False
+        payload["prune_enabled"] = prune
         if heartbeat_file is not None:
             _write_heartbeat(
                 heartbeat_file,
@@ -735,12 +684,86 @@ def schedule_run(
         time.sleep(interval_minutes * 60)
 
 
+def _prune_payload(
+    config_path: Path,
+    *,
+    execute: bool,
+    free_window_min_remaining_minutes: int | None = None,
+) -> dict[str, Any]:
+    loaded = load_config(config_path)
+    store = StateStore(_state_path(loaded))
+    mutable_policies = [
+        policy
+        for policy in loaded.downloader.category_policies
+        if policy.mode == "mutable" and policy.delete_enabled
+    ]
+    if execute:
+        downloader = build_downloader(loaded)
+    else:
+        downloader = _maybe_build_downloader(loaded)
+        if downloader is None:
+            downloader = _NullDownloader()
+    all_torrents = _load_policy_torrents(downloader, loaded)
+    all_torrents = store.apply_torrent_runtime(all_torrents)
+    _persist_live_torrent_candidates(store, all_torrents)
+    mutable_policy_names = {policy.name for policy in mutable_policies}
+    torrents = [
+        torrent
+        for torrent in all_torrents
+        if torrent.category in mutable_policy_names
+    ]
+    batch_error = None
+    decisions: list[Decision] = []
+    torrents_by_category: dict[str, list[ManagedTorrent]] = {}
+    for torrent in torrents:
+        if torrent.category is None:
+            continue
+        torrents_by_category.setdefault(torrent.category, []).append(torrent)
+    for policy in mutable_policies:
+        category_torrents = torrents_by_category.get(policy.name, [])
+        try:
+            decisions.extend(
+                _run(
+                    prune_cold_torrents(
+                        category_torrents,
+                        downloader,
+                        loaded.cleanup,
+                        policy,
+                        execute,
+                        pool_usage=_pool_usage_for_policy(loaded, all_torrents, policy),
+                        free_window_min_remaining_minutes=free_window_min_remaining_minutes,
+                    )
+                )
+            )
+        except MutationBatchError as exc:
+            decisions.extend(exc.decisions)
+            batch_error = exc
+            break
+    _write_audit_decisions(loaded, decisions)
+    if execute:
+        _persist_prune_state(store, decisions)
+    payload = {
+        "command": "prune",
+        "config": str(config_path),
+        "execute": execute,
+        "managed_count": len(torrents),
+        "pool_usage": _pool_usage_summary(loaded, all_torrents),
+        "decisions": [_decision_summary(item) for item in decisions],
+        "preview": _prune_preview(decisions, torrents, store),
+    }
+    if batch_error is not None:
+        payload["error"] = str(batch_error)
+    return payload
+
+
 def _run_once_payload(
     config_path: Path,
     *,
     execute: bool,
     min_free_window_minutes: int | None,
     require_known_free_window: bool,
+    prune: bool,
+    prune_free_window_min_remaining_minutes: int | None = None,
 ) -> dict[str, Any]:
     loaded = load_config(config_path)
     store = StateStore(_state_path(loaded))
@@ -775,6 +798,9 @@ def _run_once_payload(
             score=item.score,
             torrent_hash=None,
         )
+    stale_candidates_pruned = store.prune_stale_candidates(
+        retention_days=loaded.state.candidate_retention_days
+    )
 
     downloader, live_torrents, paused, pool_usage = _enqueue_runtime_context(
         loaded, execute=execute
@@ -812,6 +838,7 @@ def _run_once_payload(
         "scores": [_score_summary(item) for item in scored],
         "decisions": [_decision_summary(item) for item in decisions],
         "runtime_activity": _runtime_activity_summary(live_torrents),
+        "stale_candidates_pruned": stale_candidates_pruned,
     }
     if pool_usage is not None:
         payload["default_pool_usage"] = _pool_usage_item_summary(pool_usage)
@@ -824,6 +851,15 @@ def _run_once_payload(
         payload["require_known_free_window"] = True
     if batch_error is not None:
         payload["error"] = str(batch_error)
+    if prune:
+        prune_payload = _prune_payload(
+            config_path,
+            execute=execute,
+            free_window_min_remaining_minutes=prune_free_window_min_remaining_minutes,
+        )
+        payload["prune"] = prune_payload
+        if "error" in prune_payload:
+            payload["error"] = f"prune: {prune_payload['error']}"
     return payload
 
 
@@ -1262,6 +1298,70 @@ def _pool_usage_item_summary(pool_usage: PoolUsage) -> dict[str, float | bool]:
     }
 
 
+def _persist_live_torrent_candidates(
+    store: StateStore,
+    torrents: list[ManagedTorrent],
+) -> None:
+    for torrent in torrents:
+        if store.list_by_torrent_hash(torrent.hash):
+            continue
+        store.upsert_candidate(
+            stable_id=f"qb:{torrent.hash}",
+            title=torrent.name,
+            site="qb",
+            state=_lifecycle_state_from_torrent(torrent),
+            score=None,
+            torrent_hash=torrent.hash,
+        )
+
+
+def _lifecycle_state_from_torrent(torrent: ManagedTorrent) -> LifecycleState:
+    state = torrent.state.strip().lower()
+    if state.startswith("paused") or state.startswith("stopped"):
+        return LifecycleState.PAUSED
+    if state in {"downloading", "stalleddl", "metadl", "checkingdl"}:
+        return LifecycleState.DOWNLOADING
+    return LifecycleState.SEEDING
+
+
+def _prune_preview(
+    decisions: list[Decision],
+    torrents: list[ManagedTorrent],
+    store: StateStore,
+) -> list[dict[str, Any]]:
+    torrents_by_hash = {torrent.hash: torrent for torrent in torrents}
+    preview: list[dict[str, Any]] = []
+    for decision in decisions:
+        torrent = torrents_by_hash.get(decision.target_id)
+        rows = store.list_by_torrent_hash(decision.target_id)
+        candidate_state = rows[-1]["state"] if rows else None
+        candidate_id = rows[-1]["stable_id"] if rows else None
+        item: dict[str, Any] = {
+            "hash": decision.target_id,
+            "candidate_id": candidate_id,
+            "candidate_state": candidate_state,
+            "action": decision.action,
+            "execute": decision.execute,
+            "reason": decision.reason,
+            "delete_files_on_delete": True,
+        }
+        if torrent is not None:
+            item.update(
+                {
+                    "name": torrent.name,
+                    "category": torrent.category,
+                    "state": torrent.state,
+                    "size_gb": round(torrent.size_bytes / 1024**3, 2),
+                    "uploaded_gb": round(torrent.uploaded_bytes / 1024**3, 2),
+                    "downloaded_gb": round(torrent.downloaded_bytes / 1024**3, 2),
+                    "free_window_expires_at": torrent.metadata.get("free_window_expires_at"),
+                    "recent_upload_gb": torrent.metadata.get("recent_upload_gb"),
+                }
+            )
+        preview.append(item)
+    return preview
+
+
 def _runtime_activity_summary(torrents: list[ManagedTorrent]) -> dict[str, float | int]:
     total_upspeed = 0
     total_dlspeed = 0
@@ -1417,7 +1517,16 @@ def _persist_enqueue_state(
             LifecycleState.ENQUEUED,
             score=scored_item.score,
             torrent_hash=str(torrent_hash) if torrent_hash is not None else None,
+            free_window_expires_at=_candidate_free_window_expires_at(scored_item.candidate),
         )
+
+
+def _candidate_free_window_expires_at(candidate: TorrentCandidate) -> str | None:
+    if candidate.left_time_minutes is None:
+        if candidate.metadata.get("left_time_source") == "mteam_api_unlimited":
+            return "9999-12-31T23:59:59+00:00"
+        return None
+    return (datetime.now(UTC) + timedelta(minutes=candidate.left_time_minutes)).isoformat()
 
 
 def _persist_prune_state(store: StateStore, decisions: list[Decision]) -> None:

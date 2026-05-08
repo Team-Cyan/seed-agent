@@ -20,6 +20,18 @@ This file tracks the current project status at a level that is easy for both hum
 - balanced cleanup policy with pause-before-delete behavior
 - daily report and run-once command surface
 - unattended scheduler command surface with free-window safety preview and enforcement
+- optional scheduled pruning through `run-once --prune` and `schedule-run --prune`
+- execute-mode enqueue persists candidate `free_window_expires_at` when a finite
+  free window is known
+- unlimited M-Team API free windows persist as `9999-12-31T23:59:59+00:00`
+- `schedule-run --prune` pauses managed torrents whose persisted free window
+  cannot survive until the next scheduled check
+- scoring uses a soft seeder/leecher pressure ratio instead of an absolute
+  seeder cap, with explicit `allow_non_free` control for NORMAL candidates
+- stale unqueued candidate rows are pruned by retention policy while linked qB
+  lifecycle rows are kept
+- prune payloads include a stronger preview and qB live torrents are backfilled
+  into local candidate state when no candidate row exists yet
 
 ### Resource Intent Loop
 

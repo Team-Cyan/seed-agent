@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -44,10 +44,19 @@ class StateStore:
         state: LifecycleState,
         score: int | None,
         torrent_hash: str | None,
+        *,
+        free_window_expires_at: str | None | object = _UNSET,
     ) -> None:
         current = self.get_candidate(stable_id)
         now = _utc_now()
         first_seen_at = current["first_seen_at"] if current is not None else now
+        free_window_value = (
+            current.get("free_window_expires_at")
+            if current is not None and free_window_expires_at is _UNSET
+            else free_window_expires_at
+        )
+        if free_window_value is _UNSET:
+            free_window_value = None
         state_value, score_value, torrent_hash_value = _monotonic_values(
             current,
             state,
@@ -65,16 +74,18 @@ class StateStore:
                     state,
                     score,
                     torrent_hash,
+                    free_window_expires_at,
                     first_seen_at,
                     updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(stable_id) DO UPDATE SET
                     site = excluded.site,
                     title = excluded.title,
                     state = excluded.state,
                     score = excluded.score,
                     torrent_hash = excluded.torrent_hash,
+                    free_window_expires_at = excluded.free_window_expires_at,
                     updated_at = excluded.updated_at
                 """,
                 (
@@ -84,6 +95,7 @@ class StateStore:
                     state_value,
                     score_value,
                     torrent_hash_value,
+                    free_window_value,
                     first_seen_at,
                     now,
                 ),
@@ -93,7 +105,16 @@ class StateStore:
         with self._connect(row_factory=sqlite3.Row) as conn:
             row = conn.execute(
                 """
-                SELECT stable_id, site, title, state, score, torrent_hash, first_seen_at, updated_at
+                SELECT
+                    stable_id,
+                    site,
+                    title,
+                    state,
+                    score,
+                    torrent_hash,
+                    free_window_expires_at,
+                    first_seen_at,
+                    updated_at
                 FROM candidates
                 WHERE stable_id = ?
                 """,
@@ -105,7 +126,16 @@ class StateStore:
         with self._connect(row_factory=sqlite3.Row) as conn:
             rows = conn.execute(
                 """
-                SELECT stable_id, site, title, state, score, torrent_hash, first_seen_at, updated_at
+                SELECT
+                    stable_id,
+                    site,
+                    title,
+                    state,
+                    score,
+                    torrent_hash,
+                    free_window_expires_at,
+                    first_seen_at,
+                    updated_at
                 FROM candidates
                 WHERE state = ?
                 ORDER BY updated_at ASC, stable_id ASC
@@ -118,7 +148,16 @@ class StateStore:
         with self._connect(row_factory=sqlite3.Row) as conn:
             rows = conn.execute(
                 """
-                SELECT stable_id, site, title, state, score, torrent_hash, first_seen_at, updated_at
+                SELECT
+                    stable_id,
+                    site,
+                    title,
+                    state,
+                    score,
+                    torrent_hash,
+                    free_window_expires_at,
+                    first_seen_at,
+                    updated_at
                 FROM candidates
                 WHERE torrent_hash = ?
                 ORDER BY updated_at ASC, stable_id ASC
@@ -139,6 +178,32 @@ class StateStore:
                 torrent_hash=str(row["torrent_hash"]) if row["torrent_hash"] is not None else None,
             )
         return len(rows)
+
+    def prune_stale_candidates(
+        self,
+        *,
+        retention_days: int,
+        states: tuple[LifecycleState, ...] = (
+            LifecycleState.DISCOVERED,
+            LifecycleState.SCORED,
+        ),
+    ) -> int:
+        if retention_days <= 0:
+            return 0
+        cutoff = (_utc_now_datetime() - timedelta(days=retention_days)).isoformat()
+        state_values = tuple(state.value for state in states)
+        placeholders = ", ".join("?" for _ in state_values)
+        with self._connect() as conn:
+            cursor = conn.execute(
+                f"""
+                DELETE FROM candidates
+                WHERE torrent_hash IS NULL
+                  AND state IN ({placeholders})
+                  AND updated_at < ?
+                """,
+                (*state_values, cutoff),
+            )
+            return int(cursor.rowcount)
 
     def mark_torrent_paused(self, torrent_hash: str, paused_at: datetime | None = None) -> None:
         self._upsert_torrent_runtime(
@@ -182,6 +247,18 @@ class StateStore:
         for torrent in torrents:
             runtime = self.get_torrent_runtime(torrent.hash)
             metadata = dict(torrent.metadata)
+            candidate_rows = self.list_by_torrent_hash(torrent.hash)
+            candidate_free_expiry = next(
+                (
+                    row.get("free_window_expires_at")
+                    for row in candidate_rows
+                    if row.get("free_window_expires_at")
+                ),
+                None,
+            )
+            if candidate_free_expiry:
+                metadata["free_window_expires_at"] = candidate_free_expiry
+                metadata["free_window_source"] = "candidate_state"
             recent_upload_gb = _recent_upload_gb(runtime, torrent.uploaded_bytes)
             if recent_upload_gb is not None:
                 metadata["recent_upload_gb"] = recent_upload_gb
@@ -451,6 +528,7 @@ class StateStore:
                   state TEXT NOT NULL,
                   score INTEGER,
                   torrent_hash TEXT,
+                  free_window_expires_at TEXT,
                   first_seen_at TEXT NOT NULL,
                   updated_at TEXT NOT NULL
                 );
@@ -496,6 +574,7 @@ class StateStore:
                   ON release_candidates(intent_id);
                 """
             )
+            self._migrate_candidates(conn)
             self._migrate_release_candidates(conn)
             self._migrate_torrent_runtime(conn)
 
@@ -563,6 +642,14 @@ class StateStore:
               ON release_candidates(intent_id);
             """
         )
+
+    def _migrate_candidates(self, conn: sqlite3.Connection) -> None:
+        columns = {
+            row[1]
+            for row in conn.execute("PRAGMA table_info(candidates)").fetchall()
+        }
+        if "free_window_expires_at" not in columns:
+            conn.execute("ALTER TABLE candidates ADD COLUMN free_window_expires_at TEXT")
 
     def _migrate_torrent_runtime(self, conn: sqlite3.Connection) -> None:
         columns = {

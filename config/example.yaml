@@ -34,6 +34,7 @@ sites:
   #     # labels_new: []
   #     # hot: true
   #     min_seeders: 0
+  #     # 0 or null means no native API seeder upper-bound filter.
   #     max_seeders: 200
   #     min_leechers: 0
   #     min_times_completed: 0
@@ -44,7 +45,12 @@ discovery:
   min_left_time_minutes: 120
   min_seeders: 1
   min_leechers: 8
-  max_seeders: 80
+  # Soft scoring pressure: seeders / max(leechers, 1). Higher ratios lose
+  # seeder-score credit but are not hard-rejected.
+  target_seed_leecher_ratio: 10
+  # Set true only when you intentionally want NORMAL/non-free candidates to
+  # stay eligible without discount-score credit.
+  allow_non_free: false
   # Hard candidate size bounds. Use these to keep giant packs out of mutable seed pools.
   max_size_gb: 150
   # Soft scoring preference range. Candidates outside this range lose size points
@@ -114,6 +120,8 @@ search:
   max_results_per_site: 20
   prefer_free: true
   reject_hr_by_default: true
+state:
+  candidate_retention_days: 30
 sources:
   telegram:
     enabled: false

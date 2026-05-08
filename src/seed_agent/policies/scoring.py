@@ -90,6 +90,8 @@ def _score_discount(
     if discount in {Discount.HALF, Discount.TWO_X_HALF}:
         return _ComponentScore(weight * 0.5, f"discount {discount.value} partial")
     if discount == Discount.NORMAL:
+        if discovery.allow_non_free:
+            return _ComponentScore(0.0, "discount normal allowed without discount credit")
         return _ComponentScore(0.0, "discount normal not accepted", True)
     return _ComponentScore(0.0, f"discount {discount.value} not configured")
 
@@ -151,16 +153,25 @@ def _score_seeders(
     minimum = discovery.min_seeders
     if minimum is not None and seeders < minimum:
         return _ComponentScore(0.0, f"seeders {seeders} < min {minimum}", True)
-    maximum = discovery.max_seeders
-    if seeders <= maximum:
-        return _ComponentScore(weight, f"seeders {seeders} <= max {maximum}")
-    ceiling = max(maximum * 2, maximum + 1)
-    if seeders >= ceiling:
-        return _ComponentScore(0.0, f"seeders {seeders} >= 2x max {maximum}")
-    span = ceiling - maximum
-    factor = max(0.0, 1.0 - ((seeders - maximum) / span))
+    target = discovery.target_seed_leecher_ratio
+    if target <= 0:
+        return _ComponentScore(weight, "seeder_leecher_ratio disabled")
+    ratio = seeders / max(candidate.leechers, 1)
+    if ratio <= target:
+        return _ComponentScore(weight, f"seeder_leecher_ratio {ratio:.2f} <= target {target:.2f}")
+    ceiling = max(target * 2, target + 1)
+    if ratio >= ceiling:
+        return _ComponentScore(
+            0.0,
+            f"seeder_leecher_ratio {ratio:.2f} >= 2x target {target:.2f}",
+        )
+    span = ceiling - target
+    factor = max(0.0, 1.0 - ((ratio - target) / span))
     score = weight * factor
-    return _ComponentScore(score, f"seeders {seeders} tapered above max {maximum}")
+    return _ComponentScore(
+        score,
+        f"seeder_leecher_ratio {ratio:.2f} tapered above target {target:.2f}",
+    )
 
 
 def _score_size(

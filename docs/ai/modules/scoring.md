@@ -35,6 +35,11 @@ Score discovered torrents or ranked releases using explicit policy weights and e
   size score contribution.
 - `discovery.min_seeders` and `discovery.max_leechers` are hard bounds when
   configured; they protect the seed pool from dead or overly crowded candidates.
+- `discovery.target_seed_leecher_ratio` is a soft seed-pressure score input,
+  computed as `seeders / max(leechers, 1)`. It replaces the old absolute
+  `discovery.max_seeders` scoring name; legacy configs are migrated at load time.
+- `discovery.allow_non_free` lets NORMAL/non-free candidates remain eligible
+  without discount-score credit. Keep it false for freeleech-only discovery.
 
 ## Verification
 
