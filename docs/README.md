@@ -33,9 +33,11 @@ This repository keeps durable project knowledge under `docs/`.
 2. `docs/roadmap.md`
 3. `docs/operations/docker-compose-user-guide.md`
 4. `docs/operations/docker-scheduling.md`
-5. `deploy/docker-compose.example.yml`
-6. `deploy/seed-agent.env.example`
-7. `docs/operations/phase-1-usage.md` or `docs/operations/phase-2-usage.md`
+5. `docs/operations/docker-image-publishing.md`
+6. `docs/operations/release-process.md`
+7. `deploy/docker-compose.example.yml`
+8. `deploy/seed-agent.env.example`
+9. `docs/operations/phase-1-usage.md` or `docs/operations/phase-2-usage.md`
 
 ### For agents
 

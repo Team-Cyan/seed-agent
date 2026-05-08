@@ -51,7 +51,7 @@ from seed_agent.policies.category_policy import PoolUsage, usage_by_pool
 from seed_agent.search.rss import RssSearchProvider
 from seed_agent.state import StateStore
 
-app = typer.Typer(help="AI-first PT and downloader operations toolkit.")
+app = typer.Typer(help="Docker-first PT automation for NAS and homelab operations.")
 DEFAULT_CONFIG = Path("config/example.yaml")
 
 

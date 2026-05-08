@@ -2,10 +2,12 @@
 
 ## What `seed-agent` Is
 
-`seed-agent` is an AI-first PT and downloader operations toolkit for a personal NAS.
+`seed-agent` is a Docker-first PT automation app for personal NAS and homelab
+deployments.
 
 It is:
 
+- a Docker image and Compose-oriented runtime,
 - a config-first strategy runner,
 - a CLI-first operator tool,
 - an auditable automation layer over PT discovery and qBittorrent actions,
@@ -40,6 +42,9 @@ The current architecture has two shipped loops:
 ## Core Runtime Surfaces
 
 - CLI: `src/seed_agent/cli.py`
+- Docker image: `Dockerfile`
+- Container entrypoint: `docker/entrypoint.sh`
+- Publish workflow: `.github/workflows/docker-publish.yml`
 - Config: `src/seed_agent/config.py`
 - Models: `src/seed_agent/models.py`
 - State store: `src/seed_agent/state.py`

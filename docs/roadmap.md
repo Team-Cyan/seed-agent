@@ -64,6 +64,8 @@ This file tracks the current project status at a level that is easy for both hum
 - Docker-first README and Compose user guide for self-hosted NAS deployments
 - Compose-level registry override example for GHCR and Docker Hub style image
   distribution
+- GHCR publish workflow with multi-arch images, semver tags, short-SHA tags,
+  OCI labels, and release-version validation
 
 ## In Progress
 
@@ -92,7 +94,9 @@ This file tracks the current project status at a level that is easy for both hum
 
 - extend deployment examples to the user's real target environments after the
   first server install
-- add release-publishing steps for DockerHub or another registry
+- decide whether Docker Hub publishing should mirror GHCR or remain a manual
+  downstream republish path
+- add a small version bump helper once releases become frequent
 
 Reference:
 

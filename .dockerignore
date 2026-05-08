@@ -1,4 +1,6 @@
 .git
+.github
+.DS_Store
 .venv
 .pytest_cache
 .ruff_cache
@@ -6,7 +8,13 @@
 __pycache__
 *.pyc
 .seed-agent
+.superpowers
 local
+state
+config/live-*.yaml
+deploy
+docs
+tests
 dist
 build
 htmlcov

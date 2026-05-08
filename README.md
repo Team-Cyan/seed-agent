@@ -6,6 +6,11 @@ It is designed to run as a long-lived container, keep its state on mounted
 storage, and manage PT discovery plus qBittorrent actions through versioned
 config files and local secret files.
 
+Current image:
+
+- `ghcr.io/team-cyan/seed-agent:latest`
+- versioned releases use tags such as `ghcr.io/team-cyan/seed-agent:0.1.0`
+
 The primary operator experience is:
 
 - prepare `config.yaml`,
@@ -164,6 +169,7 @@ These guards help avoid:
 - [Docker Compose User Guide](docs/operations/docker-compose-user-guide.md)
 - [Docker Scheduling](docs/operations/docker-scheduling.md)
 - [Docker Image Publishing](docs/operations/docker-image-publishing.md)
+- [Release Process](docs/operations/release-process.md)
 - [Unraid DockerMan Install](docs/operations/unraid-dockerman.md)
 - [Phase 1 Usage](docs/operations/phase-1-usage.md)
 - [Phase 2 Usage](docs/operations/phase-2-usage.md)
@@ -181,6 +187,9 @@ The project is structured to work with:
 For Unraid users who want native DockerMan actions such as edit, update checks,
 and template-driven rebuilds, the repository now includes a first-party Unraid
 template and a GitHub Actions workflow that publishes `ghcr.io/team-cyan/seed-agent`.
+
+On `main`, GHCR receives `latest`, `main`, and `sha-<short-sha>` tags. On
+release tags such as `v0.1.0`, GHCR also receives `v0.1.0`, `0.1.0`, and `0.1`.
 
 The image is intentionally generic:
 

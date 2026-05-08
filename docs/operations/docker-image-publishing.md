@@ -68,10 +68,17 @@ This repository now includes `.github/workflows/docker-publish.yml`.
 On every push to `main`, GitHub Actions publishes a multi-arch image to:
 
 - `ghcr.io/team-cyan/seed-agent:latest`
+- `ghcr.io/team-cyan/seed-agent:main`
 - `ghcr.io/team-cyan/seed-agent:sha-<commit>`
 
-On version tags such as `v0.1.0`, the same workflow also publishes the tag
-name itself.
+On version tags such as `v0.1.0`, the same workflow also publishes:
+
+- `ghcr.io/team-cyan/seed-agent:v0.1.0`
+- `ghcr.io/team-cyan/seed-agent:0.1.0`
+- `ghcr.io/team-cyan/seed-agent:0.1`
+
+The tag workflow checks that the git tag matches the repository `VERSION` file
+before publishing.
 
 This is the path that lets Unraid treat `seed-agent` like a normal third-party
 container with remote update checks.
@@ -109,8 +116,10 @@ Before publishing:
 1. `uv run pytest -q`
 2. `uv run ruff check .`
 3. `docker build -t seed-agent:local .`
-4. confirm README and Compose docs match current env vars and volume layout
-5. confirm example config does not contain secrets
+4. `docker compose --env-file deploy/seed-agent.env.example -f deploy/docker-compose.example.yml config`
+5. confirm README and Compose docs match current env vars and volume layout
+6. confirm example config does not contain secrets
+7. confirm `VERSION`, `pyproject.toml`, and `src/seed_agent/__init__.py` match
 
 ## Current Gaps
 
@@ -120,9 +129,11 @@ What is now documented:
 - Compose-based runtime model
 - image tagging and push workflow
 - CI-driven GHCR publishing workflow
+- semver and short-SHA GHCR tags
+- OCI image labels
 - first-party Unraid template for DockerMan users
 
 What still remains optional future work:
 
 - automated Docker Hub publish workflow
-- release automation for version tags
+- a fully automated changelog/version bump command

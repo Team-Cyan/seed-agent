@@ -1,7 +1,26 @@
 #!/bin/sh
 set -eu
 
-MODE="${SEED_AGENT_MODE:-schedule-run}"
+if [ "${1:-}" = "seed-agent" ]; then
+  shift
+  exec seed-agent "$@"
+fi
+
+case "${1:-}" in
+  "")
+    MODE="${SEED_AGENT_MODE:-schedule-run}"
+    EXTRA_ARGS=""
+    ;;
+  -*)
+    exec seed-agent "$@"
+    ;;
+  *)
+    MODE="$1"
+    shift
+    EXTRA_ARGS="$*"
+    ;;
+esac
+
 CONFIG_PATH="${SEED_AGENT_CONFIG:-/app/config/config.yaml}"
 EXECUTE="${SEED_AGENT_EXECUTE:-true}"
 INTERVAL_MINUTES="${SEED_AGENT_INTERVAL_MINUTES:-60}"
@@ -48,6 +67,13 @@ if [ "$MODE" = "healthcheck" ]; then
   if [ -n "$MAX_STALENESS_MINUTES" ]; then
     set -- "$@" --max-staleness-minutes "$MAX_STALENESS_MINUTES"
   fi
+fi
+
+# Allow explicit `docker run seed-agent:local <mode> <extra args>` overrides for
+# one-off debugging while preserving env-driven Compose defaults.
+if [ -n "$EXTRA_ARGS" ]; then
+  # shellcheck disable=SC2086
+  set -- "$@" $EXTRA_ARGS
 fi
 
 exec "$@"

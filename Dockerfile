@@ -1,5 +1,17 @@
 FROM python:3.14-slim
 
+ARG VERSION=0.1.0
+ARG REVISION=unknown
+ARG BUILD_DATE=unknown
+
+LABEL org.opencontainers.image.title="seed-agent" \
+    org.opencontainers.image.description="Docker-first PT automation for NAS and homelab qBittorrent operations" \
+    org.opencontainers.image.url="https://github.com/Team-Cyan/seed-agent" \
+    org.opencontainers.image.source="https://github.com/Team-Cyan/seed-agent" \
+    org.opencontainers.image.version="${VERSION}" \
+    org.opencontainers.image.revision="${REVISION}" \
+    org.opencontainers.image.created="${BUILD_DATE}"
+
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     UV_LINK_MODE=copy \
@@ -7,7 +19,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-COPY pyproject.toml uv.lock README.md /app/
+COPY pyproject.toml uv.lock README.md VERSION /app/
 COPY src /app/src
 COPY docker /app/docker
 

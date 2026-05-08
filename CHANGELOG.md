@@ -24,6 +24,7 @@ All notable project changes are tracked here.
 - A Docker image build path, container entrypoint, and operator documentation for
   running the agent as either a long-lived polling container or an externally
   scheduled single-run job.
+- A root `VERSION` file and release process guide for Docker image releases.
 - A `schedule-run` CLI command for unattended polling loops with structured cycle
   metadata for server-side execution logs.
 - A `healthcheck` CLI command, scheduler heartbeat output, and first-class
@@ -71,6 +72,8 @@ All notable project changes are tracked here.
   and Docker Hub style image distribution.
 - Docker deployment docs now align the documented healthcheck config path with
   the actual container mount contract at `/app/config/config.yaml`.
+- GitHub Actions now publishes GHCR images with branch, semver, and short-SHA
+  tags, and the Dockerfile carries OCI image metadata.
 
 ### Fixed
 
