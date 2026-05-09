@@ -49,7 +49,7 @@ from seed_agent.models import (
 )
 from seed_agent.policies.category_policy import PoolUsage, usage_by_pool
 from seed_agent.search.rss import RssSearchProvider
-from seed_agent.state import StateStore
+from seed_agent.state import STATE_PRIORITY, StateStore
 
 app = typer.Typer(help="Docker-first PT automation for NAS and homelab operations.")
 DEFAULT_CONFIG = Path("config/example.yaml")
@@ -798,6 +798,7 @@ def _run_once_payload(
             score=item.score,
             torrent_hash=None,
         )
+    scored, skipped_existing = _filter_existing_enqueue_candidates(store, scored)
     stale_candidates_pruned = store.prune_stale_candidates(
         retention_days=loaded.state.candidate_retention_days
     )
@@ -834,6 +835,7 @@ def _run_once_payload(
         "discovered": len(candidates),
         "scored": len(scored),
         "accepted": sum(1 for item in scored if item.accepted),
+        "skipped_existing": skipped_existing,
         "enqueued": sum(1 for item in decisions if item.action == "qb.enqueue"),
         "scores": [_score_summary(item) for item in scored],
         "decisions": [_decision_summary(item) for item in decisions],
@@ -861,6 +863,28 @@ def _run_once_payload(
         if "error" in prune_payload:
             payload["error"] = f"prune: {prune_payload['error']}"
     return payload
+
+
+def _filter_existing_enqueue_candidates(
+    store: StateStore,
+    scored: list[ScoreBreakdown],
+) -> tuple[list[ScoreBreakdown], int]:
+    filtered: list[ScoreBreakdown] = []
+    skipped = 0
+    for item in scored:
+        if item.accepted and _candidate_already_active(store, item.candidate_id):
+            skipped += 1
+            continue
+        filtered.append(item)
+    return filtered, skipped
+
+
+def _candidate_already_active(store: StateStore, candidate_id: str) -> bool:
+    row = store.get_candidate(candidate_id)
+    if row is None:
+        return False
+    state = str(row["state"])
+    return STATE_PRIORITY.get(state, -1) >= STATE_PRIORITY[LifecycleState.ENQUEUED.value]
 
 
 def _apply_free_window_safety(

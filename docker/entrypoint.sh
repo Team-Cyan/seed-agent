@@ -29,6 +29,7 @@ REQUIRE_KNOWN_FREE_WINDOW="${SEED_AGENT_REQUIRE_KNOWN_FREE_WINDOW:-}"
 HEARTBEAT_FILE="${SEED_AGENT_HEARTBEAT_FILE:-}"
 MAX_STALENESS_MINUTES="${SEED_AGENT_MAX_STALENESS_MINUTES:-}"
 MAX_CYCLES="${SEED_AGENT_MAX_CYCLES:-}"
+PRUNE="${SEED_AGENT_PRUNE:-false}"
 
 set -- seed-agent "$MODE" --config "$CONFIG_PATH"
 
@@ -57,6 +58,9 @@ if [ "$MODE" = "schedule-run" ]; then
   set -- "$@" --interval-minutes "$INTERVAL_MINUTES"
   if [ -n "$MAX_CYCLES" ]; then
     set -- "$@" --max-cycles "$MAX_CYCLES"
+  fi
+  if [ "$PRUNE" = "true" ]; then
+    set -- "$@" --prune
   fi
 fi
 

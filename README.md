@@ -9,7 +9,7 @@ config files and local secret files.
 Current image:
 
 - `ghcr.io/team-cyan/seed-agent:latest`
-- versioned releases use tags such as `ghcr.io/team-cyan/seed-agent:0.1.0`
+- versioned releases use tags such as `ghcr.io/team-cyan/seed-agent:0.1.1`
 
 The primary operator experience is:
 
@@ -109,6 +109,7 @@ Key environment variables:
 - `SEED_AGENT_REQUIRE_KNOWN_FREE_WINDOW=true`
 - `SEED_AGENT_HEARTBEAT_FILE=/state/schedule-heartbeat.json`
 - `SEED_AGENT_MAX_STALENESS_MINUTES=90`
+- `SEED_AGENT_PRUNE=true`
 
 See:
 
@@ -189,7 +190,7 @@ and template-driven rebuilds, the repository now includes a first-party Unraid
 template and a GitHub Actions workflow that publishes `ghcr.io/team-cyan/seed-agent`.
 
 On `main`, GHCR receives `latest`, `main`, and `sha-<short-sha>` tags. On
-release tags such as `v0.1.0`, GHCR also receives `v0.1.0`, `0.1.0`, and `0.1`.
+release tags such as `v0.1.1`, GHCR also receives `v0.1.1`, `0.1.1`, and `0.1`.
 
 The image is intentionally generic:
 

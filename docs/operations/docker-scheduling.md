@@ -115,6 +115,8 @@ docker run --rm \
   - used by `healthcheck`
 - `SEED_AGENT_MAX_CYCLES`
   - useful for smoke tests or external supervisors
+- `SEED_AGENT_PRUNE`
+  - set to `true` to run `schedule-run --prune` each cycle
 
 ## Healthcheck And Logging
 
@@ -140,6 +142,7 @@ docker run --rm \
   -e SEED_AGENT_CONFIG=/app/config/config.yaml \
   -e SEED_AGENT_HEARTBEAT_FILE=/state/schedule-heartbeat.json \
   -e SEED_AGENT_MAX_STALENESS_MINUTES=90 \
+  -e SEED_AGENT_PRUNE=true \
   seed-agent:local
 ```
 

@@ -32,6 +32,10 @@ Do not start by reading every spec or every plan.
 - Prefer small, well-bounded sessions.
 - Work on one module or one roadmap item at a time.
 - Update the most relevant module doc and `docs/roadmap.md` when project state materially changes.
+- Before commit, push, or release, check the release version policy in
+  `docs/operations/release-process.md`. Code fixes and operational fixes bump
+  patch by `0.0.1`; new features bump minor by `0.1.0`; docs-only changes may
+  keep the version unchanged unless they are part of a deployment release.
 
 ## Safety
 

@@ -4,6 +4,13 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+### Fixed
+
+- Container entrypoint and deployment templates now support `SEED_AGENT_PRUNE=true`
+  so scheduled Docker deployments can actually run cleanup each cycle.
+- `run-once` now skips candidates already tracked as enqueued or active, avoiding
+  repeated qB add attempts for the same accepted torrent.
+
 ### Added
 
 - M-Team API-driven discovery with `api_key_ref`, FREE filtering, activity-oriented

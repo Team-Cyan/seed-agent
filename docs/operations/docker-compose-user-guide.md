@@ -107,6 +107,7 @@ Main env vars:
 - `SEED_AGENT_REQUIRE_KNOWN_FREE_WINDOW=true`
 - `SEED_AGENT_HEARTBEAT_FILE=/state/schedule-heartbeat.json`
 - `SEED_AGENT_MAX_STALENESS_MINUTES=90`
+- `SEED_AGENT_PRUNE=true`
 
 The Compose file reads `SEED_AGENT_IMAGE` from `deploy/seed-agent.env`, so you can switch
 between GHCR, Docker Hub, and a private registry without editing YAML.

@@ -518,6 +518,59 @@ def test_run_once_execute_missing_secret_exits_non_zero(
     assert "missing downloader secret" in result.output
 
 
+def test_run_once_skips_previously_enqueued_candidate(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from seed_agent import cli
+
+    monkeypatch.chdir(tmp_path)
+
+    config_path = _config_file(tmp_path)
+    config = _config()
+    candidate = _candidate()
+    store = StateStore(tmp_path / ".seed-agent" / "state.db")
+    store.upsert_candidate(
+        candidate.stable_id,
+        candidate.title,
+        candidate.site,
+        LifecycleState.ENQUEUED,
+        score=95,
+        torrent_hash=None,
+    )
+
+    async def fake_discover_candidates(config: SeedAgentConfig):
+        return [candidate]
+
+    def fake_score_candidates(candidates, discovery_config, scoring_config):
+        return [_scored(candidate=candidate)]
+
+    async def fake_enqueue_candidates(
+        scored,
+        downloader,
+        policy,
+        execute,
+        *,
+        paused=False,
+        pool_usage=None,
+        pause_reasons=None,
+    ):
+        assert list(scored) == []
+        return []
+
+    monkeypatch.setattr(cli, "load_config", lambda path: config)
+    monkeypatch.setattr(cli, "discover_candidates", fake_discover_candidates)
+    monkeypatch.setattr(cli, "score_candidates", fake_score_candidates)
+    monkeypatch.setattr(cli, "enqueue_candidates", fake_enqueue_candidates)
+
+    result = CliRunner().invoke(cli.app, ["run-once", "--config", str(config_path)])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["accepted"] == 0
+    assert payload["skipped_existing"] == 1
+    assert payload["enqueued"] == 0
+
+
 def test_run_once_rejects_candidate_below_execute_free_window(
     tmp_path: Path, monkeypatch
 ) -> None:

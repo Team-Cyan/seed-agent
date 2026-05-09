@@ -50,6 +50,17 @@ The current architecture has two shipped loops:
 - State store: `src/seed_agent/state.py`
 - Audit: `src/seed_agent/audit.py`
 
+## Release Discipline
+
+- Published Docker image behavior must have an intentional version decision
+  before commit, push, or release.
+- Code fixes and operational fixes bump the patch slot by `0.0.1`.
+- New features bump the minor slot by `0.1.0`.
+- Documentation-only changes may keep the version unchanged unless they are part
+  of an operator handoff or deployment release.
+- When bumping, keep `VERSION`, `pyproject.toml`, `src/seed_agent/__init__.py`,
+  and `CHANGELOG.md` aligned.
+
 ## Current Site Story
 
 - `nexusphp`: RSS-first with richer feed fields

@@ -10,7 +10,24 @@ Keep these files on the same version before tagging a release:
 - `pyproject.toml`
 - `src/seed_agent/__init__.py`
 
-The current release line is `0.1.0`.
+The current release line is `0.1.1`.
+
+## Version Bump Policy
+
+Every commit or push intended for deployment must consider whether it changes
+the published Docker image behavior.
+
+- Code fixes and operational fixes bump the patch slot by `0.0.1`
+  - example: `0.1.0` -> `0.1.1`
+- New features bump the minor slot by `0.1.0`
+  - example: `0.1.0` -> `0.2.0`
+- Documentation-only changes may leave the version unchanged unless they are
+  part of a release or deployment handoff.
+
+Agents must check this before commit, push, or release. If a change is expected
+to be pulled by Unraid or another Docker host, bump the version before pushing
+so the registry, image labels, changelog, and operator UI make the update
+visible.
 
 ## GHCR Image
 
@@ -20,20 +37,24 @@ GitHub Actions publishes to:
 - `ghcr.io/team-cyan/seed-agent:main`
 - `ghcr.io/team-cyan/seed-agent:sha-<short-sha>`
 
-Version tags such as `v0.1.0` also publish:
+Version tags such as `v0.1.1` also publish:
 
-- `ghcr.io/team-cyan/seed-agent:v0.1.0`
-- `ghcr.io/team-cyan/seed-agent:0.1.0`
+- `ghcr.io/team-cyan/seed-agent:v0.1.1`
+- `ghcr.io/team-cyan/seed-agent:0.1.1`
 - `ghcr.io/team-cyan/seed-agent:0.1`
 
 The image name must stay lowercase for registry compatibility.
 
 ## Release Checklist
 
-1. Update `VERSION`, `pyproject.toml`, and `src/seed_agent/__init__.py`.
-2. Move user-facing entries from `CHANGELOG.md` `Unreleased` into a versioned
+1. Classify the change as docs-only, codefix/operational fix, or feature.
+2. Apply the version bump policy when the change affects the published Docker
+   image or deployment behavior.
+3. Update `VERSION`, `pyproject.toml`, and `src/seed_agent/__init__.py` when a
+   version bump is required.
+4. Move user-facing entries from `CHANGELOG.md` `Unreleased` into a versioned
    section.
-3. Run:
+5. Run:
 
 ```bash
 uv run pytest -q
@@ -42,14 +63,14 @@ docker compose --env-file deploy/seed-agent.env.example -f deploy/docker-compose
 docker build -t seed-agent:local .
 ```
 
-4. Tag and push:
+6. Tag and push:
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.1.1
+git push origin v0.1.1
 ```
 
-5. Confirm the GitHub Actions run publishes the GHCR image and that the package
+7. Confirm the GitHub Actions run publishes the GHCR image and that the package
    page shows the expected tags.
 
 ## Release Boundaries

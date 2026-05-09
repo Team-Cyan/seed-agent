@@ -66,6 +66,8 @@ This file tracks the current project status at a level that is easy for both hum
   distribution
 - GHCR publish workflow with multi-arch images, semver tags, short-SHA tags,
   OCI labels, and release-version validation
+- documented release version policy: code fixes and operational fixes bump patch
+  by `0.0.1`; new features bump minor by `0.1.0`
 
 ## In Progress
 
