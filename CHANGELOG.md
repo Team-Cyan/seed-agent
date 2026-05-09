@@ -9,6 +9,8 @@ All notable project changes are tracked here.
 - M-Team API discovery can now fetch multiple pages with `api_discovery.max_pages`,
   so a page full of already-managed high-score candidates does not starve new
   enqueue opportunities.
+- M-Team API discovery no longer does detail enrichment for every search result
+  by default, keeping multi-page discovery responsive.
 - Container entrypoint and deployment templates now support `SEED_AGENT_PRUNE=true`
   so scheduled Docker deployments can actually run cleanup each cycle.
 - `run-once` now skips candidates already tracked as enqueued or active, avoiding

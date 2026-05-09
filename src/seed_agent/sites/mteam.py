@@ -326,11 +326,13 @@ async def fetch_api_candidates(
     client = MTeamApiClient(cookie=cookie, api_key=api_key)
     discover_fn = discover or client.discover_torrents
     candidates = await discover_fn(site=site, options=options)
+    if fetch_detail is None:
+        return candidates
     return await enrich_candidates(
         candidates,
         cookie=cookie,
         api_key=api_key,
-        fetch_detail=fetch_detail or client.fetch_torrent_detail,
+        fetch_detail=fetch_detail,
     )
 
 

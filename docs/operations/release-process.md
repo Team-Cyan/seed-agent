@@ -10,7 +10,7 @@ Keep these files on the same version before tagging a release:
 - `pyproject.toml`
 - `src/seed_agent/__init__.py`
 
-The current release line is `0.1.2`.
+The current release line is `0.1.3`.
 
 ## Version Bump Policy
 
@@ -37,10 +37,10 @@ GitHub Actions publishes to:
 - `ghcr.io/team-cyan/seed-agent:main`
 - `ghcr.io/team-cyan/seed-agent:sha-<short-sha>`
 
-Version tags such as `v0.1.2` also publish:
+Version tags such as `v0.1.3` also publish:
 
-- `ghcr.io/team-cyan/seed-agent:v0.1.2`
-- `ghcr.io/team-cyan/seed-agent:0.1.2`
+- `ghcr.io/team-cyan/seed-agent:v0.1.3`
+- `ghcr.io/team-cyan/seed-agent:0.1.3`
 - `ghcr.io/team-cyan/seed-agent:0.1`
 
 The image name must stay lowercase for registry compatibility.
@@ -66,8 +66,8 @@ docker build -t seed-agent:local .
 6. Tag and push:
 
 ```bash
-git tag v0.1.2
-git push origin v0.1.2
+git tag v0.1.3
+git push origin v0.1.3
 ```
 
 7. Confirm the GitHub Actions run publishes the GHCR image and that the package

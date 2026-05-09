@@ -9,7 +9,7 @@ config files and local secret files.
 Current image:
 
 - `ghcr.io/team-cyan/seed-agent:latest`
-- versioned releases use tags such as `ghcr.io/team-cyan/seed-agent:0.1.2`
+- versioned releases use tags such as `ghcr.io/team-cyan/seed-agent:0.1.3`
 
 The primary operator experience is:
 
@@ -190,7 +190,7 @@ and template-driven rebuilds, the repository now includes a first-party Unraid
 template and a GitHub Actions workflow that publishes `ghcr.io/team-cyan/seed-agent`.
 
 On `main`, GHCR receives `latest`, `main`, and `sha-<short-sha>` tags. On
-release tags such as `v0.1.2`, GHCR also receives `v0.1.2`, `0.1.2`, and `0.1`.
+release tags such as `v0.1.3`, GHCR also receives `v0.1.3`, `0.1.3`, and `0.1`.
 
 The image is intentionally generic:
 

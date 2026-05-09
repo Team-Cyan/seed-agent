@@ -553,6 +553,43 @@ async def test_fetch_api_candidates_reuses_detail_enrichment() -> None:
     assert candidates[0].metadata["mteam_detail_enriched"] is True
 
 
+@pytest.mark.asyncio
+async def test_fetch_api_candidates_skips_detail_enrichment_by_default() -> None:
+    async def fake_discover(
+        *, site: str, options: MTeamApiDiscoveryOptions
+    ) -> list[TorrentCandidate]:
+        return [
+            _candidate(
+                site=site,
+                metadata={
+                    "mteam_discovery_mode": "api",
+                    "mteam_torrent_id": "1171443",
+                },
+            )
+        ]
+
+    candidates = await fetch_api_candidates(
+        site="mt",
+        api_key="secret-api-key",
+        options=MTeamApiDiscoveryOptions(
+            mode="adult",
+            only_free=True,
+            sort_field="leechers",
+            sort_order="desc",
+            page_size=50,
+            max_pages=5,
+            min_seeders=0,
+            max_seeders=0,
+            min_leechers=0,
+            min_times_completed=0,
+        ),
+        discover=fake_discover,
+    )
+
+    assert candidates[0].size_bytes == 0
+    assert "mteam_detail_enriched" not in candidates[0].metadata
+
+
 def test_merge_detail_upgrades_open_ended_free_window() -> None:
     candidate = _candidate(
         discount="free",
