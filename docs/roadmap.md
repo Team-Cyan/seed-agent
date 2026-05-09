@@ -18,6 +18,8 @@ This file tracks the current project status at a level that is easy for both hum
 - qBittorrent enqueue path with dry-run first
 - managed torrent review
 - balanced cleanup policy with pause-before-delete behavior
+- completed active seeds can be observed for a no-upload window before deletion,
+  avoiding pause-first cleanup when upload contribution still needs measuring
 - daily report and run-once command surface
 - unattended scheduler command surface with free-window safety preview and enforcement
 - optional scheduled pruning through `run-once --prune` and `schedule-run --prune`
@@ -32,6 +34,10 @@ This file tracks the current project status at a level that is easy for both hum
   lifecycle rows are kept
 - prune payloads include a stronger preview and qB live torrents are backfilled
   into local candidate state when no candidate row exists yet
+- runtime enqueue gates use score-prioritized headroom planning, so higher-score
+  accepted candidates can start while lower-priority candidates are added paused
+- zero-progress stopped download placeholders are excluded from active download
+  liability calculations
 
 ### Resource Intent Loop
 
@@ -83,14 +89,9 @@ This file tracks the current project status at a level that is easy for both hum
   that are merely old or large
 - convert live-state visibility into conservative enqueue and prune protections
   only after the runtime summaries have proven useful
-- keep recent-upload snapshots durable enough for prune and eviction logic to
-  avoid penalizing torrents that are still contributing
-- use optional runtime enqueue gates to pause newly added torrents when the
-  download side is already saturated
-- keep first-seen paused torrents aging toward delete eligibility instead of
-  letting missing pause timestamps stall cleanup forever
-- treat stalled/meta download states as real download pressure for conservative
-  enqueue gating, not just torrents with non-zero instantaneous throughput
+- refine eviction ranking with tracker-side demand signals when available
+- add an operator report that summarizes no-upload observation windows and
+  pending cleanup deletes before execute-mode pruning
 
 ### Scheduler And Server Deployments
 

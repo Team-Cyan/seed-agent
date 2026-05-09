@@ -34,6 +34,11 @@ Expose the operator-facing command surface and safe summaries.
 - keep enqueue-like commands aligned on runtime gate reporting so paused-add
   decisions expose both `enqueue_paused_by_pool_policy` and
   `enqueue_paused_reasons`,
+- when remaining-download caps are configured, plan enqueue batches by score so
+  higher-scoring candidates get the available active-download headroom before
+  lower-scoring candidates are added paused,
+- exclude zero-progress stopped download placeholders from active download
+  liability so old paused queue entries do not block fresh high-priority work,
 - preview and enforce risky free-window decisions consistently when the free
   window is unknown or too short for the configured safety threshold,
 - keep optional scheduled pruning explicit through `--prune` so cleanup is never

@@ -108,6 +108,7 @@ cleanup:
   protect_hr: true
   protect_manual: true
   protect_media_library: true
+  delete_after_no_upload_hours: 24
   pause_before_delete_hours: 24
 intent:
   confirmation_threshold: 0.82

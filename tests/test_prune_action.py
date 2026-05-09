@@ -159,7 +159,10 @@ async def test_prune_orders_mutable_torrents_by_eviction_rank() -> None:
                 hash="drop",
                 size_bytes=400 * 1024**3,
                 uploaded_bytes=2 * 1024**3,
-                metadata={"recent_upload_gb": 0.2},
+                metadata={
+                    "recent_upload_gb": 0.2,
+                    "no_upload_since_at": datetime.now(UTC) - timedelta(hours=30),
+                },
             ),
         ],
         downloader,
@@ -168,7 +171,7 @@ async def test_prune_orders_mutable_torrents_by_eviction_rank() -> None:
         execute=True,
     )
 
-    assert downloader.calls == [("pause", "drop", None)]
+    assert downloader.calls == [("delete", "drop", True)]
     assert [decision.target_id for decision in decisions] == ["drop", "keep"]
 
 

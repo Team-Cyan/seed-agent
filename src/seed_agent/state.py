@@ -233,6 +233,7 @@ class StateStore:
                     downloaded_bytes,
                     upspeed_bps,
                     dlspeed_bps,
+                    no_upload_since_at,
                     seen_at,
                     updated_at
                 FROM torrent_runtime
@@ -263,6 +264,12 @@ class StateStore:
             if recent_upload_gb is not None:
                 metadata["recent_upload_gb"] = recent_upload_gb
                 metadata["upload_delta_gb"] = recent_upload_gb
+            no_upload_since_at = _no_upload_since_at(
+                runtime,
+                recent_upload_gb=recent_upload_gb,
+            )
+            if no_upload_since_at is not None:
+                metadata["no_upload_since_at"] = no_upload_since_at
             paused_at = _parse_datetime(runtime.get("paused_at")) if runtime is not None else None
             if paused_at is None:
                 paused_at = _parse_datetime(metadata.get("paused_at"))
@@ -280,6 +287,9 @@ class StateStore:
                 downloaded_bytes=torrent.downloaded_bytes,
                 upspeed_bps=int(metadata.get("upspeed_bps", 0) or 0),
                 dlspeed_bps=int(metadata.get("dlspeed_bps", 0) or 0),
+                no_upload_since_at=(
+                    no_upload_since_at.isoformat() if no_upload_since_at is not None else None
+                ),
                 seen_at=_utc_now(),
             )
             enriched.append(torrent.model_copy(update={"metadata": metadata}))
@@ -295,6 +305,7 @@ class StateStore:
         downloaded_bytes: int | None = None,
         upspeed_bps: int | None = None,
         dlspeed_bps: int | None = None,
+        no_upload_since_at: str | None = None,
         seen_at: str | None = None,
     ) -> None:
         current = self.get_torrent_runtime(torrent_hash) or {}
@@ -313,16 +324,18 @@ class StateStore:
                     downloaded_bytes,
                     upspeed_bps,
                     dlspeed_bps,
+                    no_upload_since_at,
                     seen_at,
                     updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(torrent_hash) DO UPDATE SET
                     paused_at = excluded.paused_at,
                     uploaded_bytes = excluded.uploaded_bytes,
                     downloaded_bytes = excluded.downloaded_bytes,
                     upspeed_bps = excluded.upspeed_bps,
                     dlspeed_bps = excluded.dlspeed_bps,
+                    no_upload_since_at = excluded.no_upload_since_at,
                     seen_at = excluded.seen_at,
                     updated_at = excluded.updated_at
                 """,
@@ -335,6 +348,7 @@ class StateStore:
                     else current.get("downloaded_bytes"),
                     upspeed_bps if upspeed_bps is not None else current.get("upspeed_bps"),
                     dlspeed_bps if dlspeed_bps is not None else current.get("dlspeed_bps"),
+                    no_upload_since_at,
                     seen_at if seen_at is not None else current.get("seen_at"),
                     now,
                 ),
@@ -566,6 +580,7 @@ class StateStore:
                   downloaded_bytes INTEGER,
                   upspeed_bps INTEGER,
                   dlspeed_bps INTEGER,
+                  no_upload_since_at TEXT,
                   seen_at TEXT,
                   updated_at TEXT NOT NULL
                 );
@@ -644,23 +659,18 @@ class StateStore:
         )
 
     def _migrate_candidates(self, conn: sqlite3.Connection) -> None:
-        columns = {
-            row[1]
-            for row in conn.execute("PRAGMA table_info(candidates)").fetchall()
-        }
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(candidates)").fetchall()}
         if "free_window_expires_at" not in columns:
             conn.execute("ALTER TABLE candidates ADD COLUMN free_window_expires_at TEXT")
 
     def _migrate_torrent_runtime(self, conn: sqlite3.Connection) -> None:
-        columns = {
-            row[1]
-            for row in conn.execute("PRAGMA table_info(torrent_runtime)").fetchall()
-        }
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(torrent_runtime)").fetchall()}
         additions = {
             "uploaded_bytes": "INTEGER",
             "downloaded_bytes": "INTEGER",
             "upspeed_bps": "INTEGER",
             "dlspeed_bps": "INTEGER",
+            "no_upload_since_at": "TEXT",
             "seen_at": "TEXT",
         }
         for column, column_type in additions.items():
@@ -710,6 +720,22 @@ def _recent_upload_gb(runtime: dict[str, Any] | None, uploaded_bytes: int) -> fl
     return (uploaded_bytes - previous) / GIB
 
 
+def _no_upload_since_at(
+    runtime: dict[str, Any] | None,
+    *,
+    recent_upload_gb: float | None,
+) -> datetime | None:
+    if runtime is None or recent_upload_gb is None:
+        return None
+    if recent_upload_gb > 0:
+        return None
+    existing = _parse_datetime(runtime.get("no_upload_since_at"))
+    if existing is not None:
+        return existing
+    seen_at = _parse_datetime(runtime.get("seen_at"))
+    return seen_at or _utc_now_datetime()
+
+
 def _monotonic_values(
     current: dict[str, Any] | None,
     incoming_state: LifecycleState,
@@ -733,7 +759,5 @@ def _monotonic_values(
     return (
         incoming_state.value,
         incoming_score if incoming_score is not None else current["score"],
-        incoming_torrent_hash
-        if incoming_torrent_hash is not None
-        else current["torrent_hash"],
+        incoming_torrent_hash if incoming_torrent_hash is not None else current["torrent_hash"],
     )

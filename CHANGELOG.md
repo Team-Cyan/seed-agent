@@ -6,6 +6,15 @@ All notable project changes are tracked here.
 
 ### Fixed
 
+- Enqueue gating now plans accepted candidates by score against remaining
+  download headroom, so a full queue can start the best fitting candidates and
+  pause the rest instead of applying one global paused flag to the whole batch.
+- Runtime download-pressure checks now ignore zero-progress stopped download
+  entries, preventing paused queue placeholders from blocking future higher
+  priority candidates.
+- Cleanup now observes completed active seeds for a configurable no-upload
+  window before deletion, instead of pausing first and losing the ability to
+  observe upload contribution during that window.
 - M-Team API discovery can now fetch multiple pages with `api_discovery.max_pages`,
   so a page full of already-managed high-score candidates does not starve new
   enqueue opportunities.

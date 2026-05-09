@@ -187,9 +187,7 @@ def _json_output(result) -> dict[str, object]:
     return parsed
 
 
-def test_run_once_dry_run_updates_state_and_redacts_audit(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_run_once_dry_run_updates_state_and_redacts_audit(tmp_path: Path, monkeypatch) -> None:
     from seed_agent import cli
 
     monkeypatch.chdir(tmp_path)
@@ -491,9 +489,7 @@ def test_run_once_execute_failure_persists_prior_state_and_audit(
     assert "passkey=secret" not in audit
 
 
-def test_run_once_execute_missing_secret_exits_non_zero(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_run_once_execute_missing_secret_exits_non_zero(tmp_path: Path, monkeypatch) -> None:
     from seed_agent import cli
 
     monkeypatch.chdir(tmp_path)
@@ -518,9 +514,7 @@ def test_run_once_execute_missing_secret_exits_non_zero(
     assert "missing downloader secret" in result.output
 
 
-def test_run_once_skips_previously_enqueued_candidate(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_run_once_skips_previously_enqueued_candidate(tmp_path: Path, monkeypatch) -> None:
     from seed_agent import cli
 
     monkeypatch.chdir(tmp_path)
@@ -571,9 +565,7 @@ def test_run_once_skips_previously_enqueued_candidate(
     assert payload["enqueued"] == 0
 
 
-def test_run_once_rejects_candidate_below_execute_free_window(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_run_once_rejects_candidate_below_execute_free_window(tmp_path: Path, monkeypatch) -> None:
     from seed_agent import cli
 
     monkeypatch.chdir(tmp_path)
@@ -612,8 +604,7 @@ def test_run_once_rejects_candidate_below_execute_free_window(
     assert payload["accepted"] == 0
     assert payload["enqueued"] == 0
     assert any(
-        "left_time 45 < execute safety 180" in reason
-        for reason in payload["scores"][0]["reasons"]
+        "left_time 45 < execute safety 180" in reason for reason in payload["scores"][0]["reasons"]
     )
 
 
@@ -736,13 +727,13 @@ def test_run_once_dry_run_uses_raw_amount_left_for_runtime_gate(
     ):
         assert paused is True
         assert pool_usage is not None
-        assert pause_reasons == ["remaining download 1.0004 GiB > max 1.0"]
+        assert pause_reasons == [
+            "remaining download budget reserved for higher-score candidates (1.0004 GiB / max 1.0)"
+        ]
         return []
 
     class FakeDownloader:
-        async def list_torrents(
-            self, category: str | None = None, tags: set[str] | None = None
-        ):
+        async def list_torrents(self, category: str | None = None, tags: set[str] | None = None):
             return [
                 ManagedTorrent(
                     hash="seed-active",
@@ -781,8 +772,166 @@ def test_run_once_dry_run_uses_raw_amount_left_for_runtime_gate(
     assert result.exit_code == 0
     payload = _json_output(result)
     assert payload["runtime_activity"]["total_amount_left_gb"] == 1.0
+    assert payload["runtime_activity"]["total_download_liability_gb"] == 1.0
     assert payload["enqueue_paused_by_pool_policy"] is True
-    assert payload["enqueue_paused_reasons"] == ["remaining download 1.0004 GiB > max 1.0"]
+    assert payload["enqueue_paused_reasons"] == [
+        "remaining download budget reserved for higher-score candidates (1.0004 GiB / max 1.0)"
+    ]
+
+
+def test_run_once_dry_run_ignores_zero_progress_stopped_queue_for_runtime_gate(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from seed_agent import cli
+    from seed_agent.models import ManagedTorrent
+
+    monkeypatch.chdir(tmp_path)
+
+    config_path = _config_file(
+        tmp_path,
+        secret_ref="local/secrets/qb.yaml",
+        discovery_extra="  max_total_amount_left_gb: 1.0\n",
+    )
+    config = _config(
+        secret_ref="local/secrets/qb.yaml",
+        discovery_overrides={"max_total_amount_left_gb": 1.0},
+    )
+
+    async def fake_discover_candidates(config: SeedAgentConfig):
+        return [_candidate(size_bytes=int(0.5 * 1024**3))]
+
+    def fake_score_candidates(candidates, discovery_config, scoring_config):
+        return [_scored(candidate=candidates[0])]
+
+    async def fake_enqueue_candidates(
+        scored,
+        downloader,
+        policy,
+        execute,
+        *,
+        paused=False,
+        pool_usage=None,
+        pause_reasons=None,
+    ):
+        assert paused is False
+        assert pause_reasons == []
+        return []
+
+    class FakeDownloader:
+        async def list_torrents(self, category: str | None = None, tags: set[str] | None = None):
+            return [
+                ManagedTorrent(
+                    hash="seed-queued",
+                    name="Queued Torrent",
+                    category="seed",
+                    tags={"seed-agent", "seed"},
+                    state="stoppedDL",
+                    size_bytes=10 * 1024**3,
+                    uploaded_bytes=0,
+                    downloaded_bytes=0,
+                    added_at=datetime.now(UTC),
+                    last_activity_at=datetime.now(UTC),
+                    metadata={"dlspeed_bps": 0, "amount_left_bytes": int(1.0004 * 1024**3)},
+                )
+            ]
+
+        async def pause(self, hash: str) -> None:
+            return None
+
+        async def delete(self, hash: str, delete_files: bool) -> None:
+            return None
+
+        async def add_url(
+            self, url: str, category: str, tags: list[str], *, paused: bool = False
+        ) -> str | None:
+            return None
+
+    monkeypatch.setattr(cli, "load_config", lambda path: config)
+    monkeypatch.setattr(cli, "discover_candidates", fake_discover_candidates)
+    monkeypatch.setattr(cli, "score_candidates", fake_score_candidates)
+    monkeypatch.setattr(cli, "enqueue_candidates", fake_enqueue_candidates)
+    monkeypatch.setattr(cli, "_maybe_build_downloader", lambda loaded: FakeDownloader())
+
+    result = CliRunner().invoke(cli.app, ["run-once", "--config", str(config_path)])
+
+    assert result.exit_code == 0
+    payload = _json_output(result)
+    assert payload["runtime_activity"]["total_amount_left_gb"] == 1.0
+    assert payload["runtime_activity"]["total_download_liability_gb"] == 0.0
+    assert payload["enqueue_paused_by_pool_policy"] is False
+    assert "enqueue_paused_reasons" not in payload
+
+
+def test_run_once_dry_run_starts_higher_score_candidates_before_pausing_over_budget(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from seed_agent import cli
+
+    monkeypatch.chdir(tmp_path)
+
+    config_path = _config_file(
+        tmp_path,
+        secret_ref="local/secrets/qb.yaml",
+        discovery_extra="  max_total_amount_left_gb: 15.0\n",
+    )
+    config = _config(
+        secret_ref="local/secrets/qb.yaml",
+        discovery_overrides={"max_total_amount_left_gb": 15.0},
+    )
+
+    high = _candidate(title="High", size_bytes=10 * 1024**3)
+    low = _candidate(
+        title="Low", source_url="https://tracker.example/details.php?id=2", size_bytes=10 * 1024**3
+    )
+    calls: list[tuple[list[str], bool]] = []
+
+    async def fake_discover_candidates(config: SeedAgentConfig):
+        return [low, high]
+
+    def fake_score_candidates(candidates, discovery_config, scoring_config):
+        return [
+            _scored(candidate=low, score=80),
+            _scored(candidate=high, score=95),
+        ]
+
+    async def fake_enqueue_candidates(
+        scored,
+        downloader,
+        policy,
+        execute,
+        *,
+        paused=False,
+        pool_usage=None,
+        pause_reasons=None,
+    ):
+        calls.append(([item.candidate.title for item in scored], paused))
+        return []
+
+    class FakeDownloader:
+        async def list_torrents(self, category: str | None = None, tags: set[str] | None = None):
+            return []
+
+        async def pause(self, hash: str) -> None:
+            return None
+
+        async def delete(self, hash: str, delete_files: bool) -> None:
+            return None
+
+        async def add_url(
+            self, url: str, category: str, tags: list[str], *, paused: bool = False
+        ) -> str | None:
+            return None
+
+    monkeypatch.setattr(cli, "load_config", lambda path: config)
+    monkeypatch.setattr(cli, "discover_candidates", fake_discover_candidates)
+    monkeypatch.setattr(cli, "score_candidates", fake_score_candidates)
+    monkeypatch.setattr(cli, "enqueue_candidates", fake_enqueue_candidates)
+    monkeypatch.setattr(cli, "_maybe_build_downloader", lambda loaded: FakeDownloader())
+
+    result = CliRunner().invoke(cli.app, ["run-once", "--config", str(config_path)])
+
+    assert result.exit_code == 0
+    assert calls == [(["High"], False), (["Low"], True)]
 
 
 def test_run_once_dry_run_counts_stalled_downloads_for_runtime_gate(
@@ -824,9 +973,7 @@ def test_run_once_dry_run_counts_stalled_downloads_for_runtime_gate(
         return []
 
     class FakeDownloader:
-        async def list_torrents(
-            self, category: str | None = None, tags: set[str] | None = None
-        ):
+        async def list_torrents(self, category: str | None = None, tags: set[str] | None = None):
             return [
                 ManagedTorrent(
                     hash="seed-stalled",

@@ -63,7 +63,7 @@ def test_protects_unmanaged_torrent() -> None:
         ({"upload_delta_gb": 0.5},),
     ],
 )
-def test_cold_managed_torrent_with_insufficient_recent_upload_still_pauses(
+def test_cold_managed_torrent_with_insufficient_recent_upload_enters_observation(
     metadata: dict[str, object],
 ) -> None:
     from seed_agent.policies.cleanup import classify_cleanup
@@ -75,8 +75,8 @@ def test_cold_managed_torrent_with_insufficient_recent_upload_still_pauses(
         managed_tags={"seed-agent", "pt-auto"},
     )
 
-    assert decision.action == "pause"
-    assert "cold" in decision.reason
+    assert decision.action == "keep"
+    assert "observation" in decision.reason or "no upload" in decision.reason
 
 
 @pytest.mark.parametrize(
@@ -187,3 +187,49 @@ def test_deletes_stopped_managed_torrent_only_after_pause_delay_without_recent_u
 
     assert decision.action == "delete"
     assert "paused" in decision.reason
+
+
+def test_keeps_active_seed_while_no_upload_observation_window_is_young() -> None:
+    from seed_agent.policies.cleanup import classify_cleanup
+
+    now = datetime.now(UTC)
+    decision = classify_cleanup(
+        _torrent(
+            state="stalledUP",
+            last_activity_at=now,
+            metadata={
+                "amount_left_bytes": 0,
+                "recent_upload_gb": 0.0,
+                "no_upload_since_at": now - timedelta(hours=6),
+            },
+        ),
+        _cleanup(),
+        managed_category="pt-auto",
+        managed_tags={"seed-agent", "pt-auto"},
+    )
+
+    assert decision.action == "keep"
+    assert "no upload" in decision.reason
+
+
+def test_deletes_active_seed_after_no_upload_observation_window() -> None:
+    from seed_agent.policies.cleanup import classify_cleanup
+
+    now = datetime.now(UTC)
+    decision = classify_cleanup(
+        _torrent(
+            state="stalledUP",
+            last_activity_at=now,
+            metadata={
+                "amount_left_bytes": 0,
+                "recent_upload_gb": 0.0,
+                "no_upload_since_at": now - timedelta(hours=30),
+            },
+        ),
+        _cleanup(),
+        managed_category="pt-auto",
+        managed_tags={"seed-agent", "pt-auto"},
+    )
+
+    assert decision.action == "delete"
+    assert "no upload" in decision.reason

@@ -321,11 +321,14 @@ class CleanupConfig(BaseModel):
     protect_manual: bool
     protect_media_library: bool
     pause_before_delete_hours: int
+    delete_after_no_upload_hours: int = 24
 
     @model_validator(mode="after")
     def validate_pause_before_delete_hours(self) -> CleanupConfig:
         if self.pause_before_delete_hours < 1:
             raise ValueError("pause_before_delete_hours must be >= 1")
+        if self.delete_after_no_upload_hours < 1:
+            raise ValueError("delete_after_no_upload_hours must be >= 1")
         return self
 
 

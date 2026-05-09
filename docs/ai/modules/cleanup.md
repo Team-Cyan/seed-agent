@@ -16,6 +16,8 @@ Decide when managed torrents should be paused or deleted under the balanced safe
 - protect H&R torrents,
 - protect manual torrents,
 - protect media-library-associated torrents,
+- observe completed active seeds for `cleanup.delete_after_no_upload_hours`
+  before deleting them for zero upload,
 - require pause-before-delete timing,
 - keep policy reasoning auditable.
 

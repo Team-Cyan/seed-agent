@@ -55,6 +55,12 @@ For unattended NAS use, strongly consider:
 - `discovery.max_total_amount_left_gb`
 - `downloader.category_policies`
 - `downloader.budget_pools`
+- `cleanup.delete_after_no_upload_hours`
+
+`discovery.max_total_amount_left_gb` is an active download liability cap. The
+agent ignores zero-progress stopped download placeholders for that cap and uses
+score order when deciding which accepted candidates should start versus be added
+paused.
 
 ## 3. Prepare Local Secrets
 

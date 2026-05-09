@@ -54,6 +54,10 @@ def classify_cleanup(
     if free_window_decision is not None:
         return free_window_decision
 
+    no_upload_decision = _no_upload_observation_decision(torrent, cleanup, metadata)
+    if no_upload_decision is not None:
+        return no_upload_decision
+
     if torrent.last_activity_at is not None:
         age = _utcnow() - torrent.last_activity_at
         if age < timedelta(days=cleanup.cold_after_days):
@@ -107,6 +111,56 @@ def classify_cleanup(
     return CleanupDecision(
         action="pause",
         reason=_reason("cold managed torrent should be paused before deletion"),
+        managed=True,
+    )
+
+
+def _no_upload_observation_decision(
+    torrent: ManagedTorrent,
+    cleanup: CleanupConfig,
+    metadata: dict[str, object],
+) -> CleanupDecision | None:
+    if not _is_completed_seed(torrent):
+        return None
+    if _is_paused_or_stopped(torrent.state):
+        return None
+    recent_upload_gb = _recent_upload_gb(metadata)
+    if recent_upload_gb is None:
+        return None
+    if recent_upload_gb >= cleanup.min_upload_delta_gb:
+        return CleanupDecision(
+            action="keep",
+            reason=_reason(
+                f"recent upload {recent_upload_gb:.2f} GiB >= min "
+                f"{cleanup.min_upload_delta_gb:.2f} GiB; retain managed seed"
+            ),
+            managed=True,
+        )
+
+    no_upload_since_at = _no_upload_since_at(metadata)
+    if no_upload_since_at is None:
+        return CleanupDecision(
+            action="keep",
+            reason=_reason("no-upload observation window just started"),
+            managed=True,
+        )
+    no_upload_age = _utcnow() - no_upload_since_at
+    delete_delay = timedelta(hours=cleanup.delete_after_no_upload_hours)
+    if no_upload_age >= delete_delay:
+        return CleanupDecision(
+            action="delete",
+            reason=_reason(
+                f"no upload for {no_upload_age.days}d {no_upload_age.seconds // 3600}h "
+                f">= delete delay {cleanup.delete_after_no_upload_hours}h"
+            ),
+            managed=True,
+        )
+    return CleanupDecision(
+        action="keep",
+        reason=_reason(
+            f"no upload for {no_upload_age.days}d {no_upload_age.seconds // 3600}h "
+            f"< delete delay {cleanup.delete_after_no_upload_hours}h"
+        ),
         managed=True,
     )
 
@@ -187,9 +241,7 @@ def _protection_rules(
     if cleanup.protect_manual and bool(metadata.get("manual")):
         rules.append(_MatchedRule("protect", "manual torrent protected by cleanup policy"))
     if cleanup.protect_media_library and bool(metadata.get("media_library")):
-        rules.append(
-            _MatchedRule("protect", "media library torrent protected by cleanup policy")
-        )
+        rules.append(_MatchedRule("protect", "media library torrent protected by cleanup policy"))
     return rules
 
 
@@ -209,6 +261,23 @@ def _paused_at(metadata: dict[str, object]) -> datetime | None:
     if isinstance(value, datetime):
         return value
     return None
+
+
+def _no_upload_since_at(metadata: dict[str, object]) -> datetime | None:
+    value = metadata.get("no_upload_since_at")
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str) and value:
+        try:
+            return datetime.fromisoformat(value)
+        except ValueError:
+            return None
+    return None
+
+
+def _is_completed_seed(torrent: ManagedTorrent) -> bool:
+    amount_left = int(torrent.metadata.get("amount_left_bytes", 0) or 0)
+    return amount_left <= 0 and torrent.downloaded_bytes > 0
 
 
 def _free_window_expires_at(metadata: dict[str, object]) -> datetime | None:

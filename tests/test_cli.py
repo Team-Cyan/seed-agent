@@ -1650,6 +1650,7 @@ cleanup:
 def test_run_once_invoke_with_execute_flag(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     from seed_agent import cli
 
+    monkeypatch.chdir(tmp_path)
     config_path = _config_file(tmp_path, secret_ref="local/secrets/qb.yaml")
     config = _config(secret_ref="local/secrets/qb.yaml")
     events: list[Decision] = []

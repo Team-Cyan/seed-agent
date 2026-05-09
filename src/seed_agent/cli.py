@@ -173,17 +173,17 @@ def enqueue(
         loaded, execute=execute
     )
     batch_error = None
-    pause_reasons = _enqueue_pause_reasons(loaded, live_torrents, pool_usage)
+    enqueue_batches = _enqueue_candidate_batches(scored, loaded, live_torrents, pool_usage)
+    paused = any(batch_paused for _, batch_paused, _ in enqueue_batches)
+    pause_reasons = _batch_pause_reasons(enqueue_batches)
     try:
         decisions = _run(
-            enqueue_candidates(
-                scored,
+            _enqueue_candidate_batches_action(
+                enqueue_batches,
                 downloader,
                 default_policy,
                 execute,
-                paused=paused,
                 pool_usage=pool_usage,
-                pause_reasons=pause_reasons,
             )
         )
     except MutationBatchError as exc:
@@ -485,9 +485,7 @@ def intent_run_once(
         payload["enqueue_paused_reasons"] = pause_reasons
     if result is not None:
         payload["intents"] = [_intent_summary(intent) for intent in result.searched]
-        payload["selected"] = [
-            _ranked_release_summary(item) for item in result.enqueue_selected
-        ]
+        payload["selected"] = [_ranked_release_summary(item) for item in result.enqueue_selected]
     if batch_error is not None:
         payload["error"] = str(batch_error)
     _print_json(payload)
@@ -592,12 +590,8 @@ def run_once(
 @app.command()
 def healthcheck(
     config: Annotated[Path, typer.Option("--config")] = DEFAULT_CONFIG,
-    heartbeat_file: Annotated[
-        Path | None, typer.Option("--heartbeat-file")
-    ] = None,
-    max_staleness_minutes: Annotated[
-        int, typer.Option("--max-staleness-minutes")
-    ] = 90,
+    heartbeat_file: Annotated[Path | None, typer.Option("--heartbeat-file")] = None,
+    max_staleness_minutes: Annotated[int, typer.Option("--max-staleness-minutes")] = 90,
 ) -> None:
     if max_staleness_minutes < 1:
         raise typer.BadParameter("max_staleness_minutes must be >= 1")
@@ -627,9 +621,7 @@ def schedule_run(
         bool, typer.Option("--require-known-free-window/--allow-unknown-free-window")
     ] = True,
     prune: Annotated[bool, typer.Option("--prune/--no-prune")] = False,
-    heartbeat_file: Annotated[
-        Path | None, typer.Option("--heartbeat-file")
-    ] = None,
+    heartbeat_file: Annotated[Path | None, typer.Option("--heartbeat-file")] = None,
     max_cycles: Annotated[int | None, typer.Option("--max-cycles")] = None,
 ) -> None:
     if interval_minutes < 1:
@@ -707,11 +699,7 @@ def _prune_payload(
     all_torrents = store.apply_torrent_runtime(all_torrents)
     _persist_live_torrent_candidates(store, all_torrents)
     mutable_policy_names = {policy.name for policy in mutable_policies}
-    torrents = [
-        torrent
-        for torrent in all_torrents
-        if torrent.category in mutable_policy_names
-    ]
+    torrents = [torrent for torrent in all_torrents if torrent.category in mutable_policy_names]
     batch_error = None
     decisions: list[Decision] = []
     torrents_by_category: dict[str, list[ManagedTorrent]] = {}
@@ -807,17 +795,17 @@ def _run_once_payload(
         loaded, execute=execute
     )
     batch_error = None
-    pause_reasons = _enqueue_pause_reasons(loaded, live_torrents, pool_usage)
+    enqueue_batches = _enqueue_candidate_batches(scored, loaded, live_torrents, pool_usage)
+    paused = any(batch_paused for _, batch_paused, _ in enqueue_batches)
+    pause_reasons = _batch_pause_reasons(enqueue_batches)
     try:
         decisions = _run(
-            enqueue_candidates(
-                scored,
+            _enqueue_candidate_batches_action(
+                enqueue_batches,
                 downloader,
                 default_policy,
                 execute,
-                paused=paused,
                 pool_usage=pool_usage,
-                pause_reasons=pause_reasons,
             )
         )
     except MutationBatchError as exc:
@@ -1215,10 +1203,7 @@ def _pool_usage_summary(
         config.downloader.budget_pools,
         torrents,
     )
-    return {
-        name: _pool_usage_item_summary(item)
-        for name, item in usage.items()
-    }
+    return {name: _pool_usage_item_summary(item) for name, item in usage.items()}
 
 
 def _default_category_budget_state(
@@ -1246,7 +1231,11 @@ def _default_category_budget_state_from_torrents(
         torrents,
     )
     pool_usage = usage[default_policy.budget_pool]
-    paused = pool_usage.over_budget and default_policy.over_budget_behavior == "add_paused"
+    paused = (
+        pool_usage.over_budget
+        and default_policy.over_budget_behavior == "add_paused"
+        and config.discovery.max_total_amount_left_gb is None
+    )
     return paused, pool_usage
 
 
@@ -1264,13 +1253,109 @@ def _enqueue_runtime_context(
     return live_downloader, live_torrents, paused, pool_usage
 
 
+async def _enqueue_candidate_batches_action(
+    batches: list[tuple[list[ScoreBreakdown], bool, list[str]]],
+    downloader: QbittorrentClient | _NullDownloader,
+    policy: CategoryPolicyConfig,
+    execute: bool,
+    *,
+    pool_usage: PoolUsage | None,
+) -> list[Decision]:
+    decisions: list[Decision] = []
+    for batch, paused, pause_reasons in batches:
+        if not batch:
+            continue
+        decisions.extend(
+            await enqueue_candidates(
+                batch,
+                downloader,
+                policy,
+                execute,
+                paused=paused,
+                pool_usage=pool_usage,
+                pause_reasons=pause_reasons,
+            )
+        )
+    return decisions
+
+
+def _enqueue_candidate_batches(
+    scored: list[ScoreBreakdown],
+    config: SeedAgentConfig,
+    torrents: list[ManagedTorrent],
+    pool_usage: PoolUsage | None,
+) -> list[tuple[list[ScoreBreakdown], bool, list[str]]]:
+    accepted = sorted(
+        (item for item in scored if item.accepted),
+        key=lambda item: item.score,
+        reverse=True,
+    )
+    if not accepted:
+        return [(list(scored), False, [])]
+
+    hard_reasons = _enqueue_pause_reasons(config, torrents, pool_usage, include_amount=False)
+    if hard_reasons:
+        return [(accepted, True, hard_reasons)]
+
+    max_left_gb = config.discovery.max_total_amount_left_gb
+    if max_left_gb is None:
+        return [(accepted, False, [])]
+
+    max_left_bytes = int(max_left_gb * 1024**3)
+    planned_left_bytes = sum(_download_liability_bytes(torrent) for torrent in torrents)
+    active: list[ScoreBreakdown] = []
+    paused: list[ScoreBreakdown] = []
+    for item in accepted:
+        candidate_left = max(int(item.candidate.size_bytes), 0)
+        if planned_left_bytes + candidate_left <= max_left_bytes:
+            active.append(item)
+            planned_left_bytes += candidate_left
+        else:
+            paused.append(item)
+
+    batches: list[tuple[list[ScoreBreakdown], bool, list[str]]] = []
+    if active:
+        batches.append((active, False, []))
+    if paused:
+        batches.append(
+            (
+                paused,
+                True,
+                [
+                    f"remaining download budget reserved for higher-score candidates "
+                    f"({round(planned_left_bytes / 1024**3, 4)} GiB / max {max_left_gb})"
+                ],
+            )
+        )
+    return batches
+
+
+def _batch_pause_reasons(
+    batches: list[tuple[list[ScoreBreakdown], bool, list[str]]],
+) -> list[str]:
+    reasons: list[str] = []
+    for _, paused, batch_reasons in batches:
+        if not paused:
+            continue
+        for reason in batch_reasons:
+            if reason not in reasons:
+                reasons.append(reason)
+    return reasons
+
+
 def _enqueue_pause_reasons(
     config: SeedAgentConfig,
     torrents: list[ManagedTorrent],
     pool_usage: PoolUsage | None,
+    *,
+    include_amount: bool = True,
 ) -> list[str]:
     reasons: list[str] = []
-    if pool_usage is not None and pool_usage.over_budget:
+    if (
+        pool_usage is not None
+        and pool_usage.over_budget
+        and config.discovery.max_total_amount_left_gb is None
+    ):
         reasons.append(
             f"budget pool {pool_usage.pool_name} over budget "
             f"({round(pool_usage.size_bytes / 1024**4, 2)} / "
@@ -1278,27 +1363,33 @@ def _enqueue_pause_reasons(
         )
     runtime = _runtime_activity_summary(torrents)
     max_active_downloads = config.discovery.max_active_downloads
-    if (
-        max_active_downloads is not None
-        and runtime["active_download_count"] > max_active_downloads
-    ):
+    if max_active_downloads is not None and runtime["active_download_count"] > max_active_downloads:
         reasons.append(
             f"active downloads {runtime['active_download_count']} > max {max_active_downloads}"
         )
     max_total_amount_left_gb = config.discovery.max_total_amount_left_gb
-    total_amount_left_bytes = sum(
-        int(torrent.metadata.get("amount_left_bytes", 0) or 0) for torrent in torrents
-    )
+    if not include_amount:
+        return reasons
+    total_amount_left_bytes = sum(_download_liability_bytes(torrent) for torrent in torrents)
     total_amount_left_gb = total_amount_left_bytes / 1024**3
-    if (
-        max_total_amount_left_gb is not None
-        and total_amount_left_gb > max_total_amount_left_gb
-    ):
+    if max_total_amount_left_gb is not None and total_amount_left_gb > max_total_amount_left_gb:
         reasons.append(
             f"remaining download {round(total_amount_left_gb, 4)} GiB > max "
             f"{max_total_amount_left_gb}"
         )
     return reasons
+
+
+def _download_liability_bytes(torrent: ManagedTorrent) -> int:
+    amount_left = int(torrent.metadata.get("amount_left_bytes", 0) or 0)
+    if amount_left <= 0:
+        return 0
+    state = torrent.state.strip().lower()
+    if (
+        state.startswith("paused") or state.startswith("stopped")
+    ) and torrent.downloaded_bytes <= 0:
+        return 0
+    return amount_left
 
 
 def _pool_usage_for_policy(
@@ -1390,6 +1481,7 @@ def _runtime_activity_summary(torrents: list[ManagedTorrent]) -> dict[str, float
     total_upspeed = 0
     total_dlspeed = 0
     total_amount_left = 0
+    total_download_liability = 0
     active_upload_count = 0
     active_download_count = 0
     paused_count = 0
@@ -1404,6 +1496,7 @@ def _runtime_activity_summary(torrents: list[ManagedTorrent]) -> dict[str, float
         total_upspeed += upspeed
         total_dlspeed += dlspeed
         total_amount_left += amount_left
+        total_download_liability += _download_liability_bytes(torrent)
         if upspeed > 0:
             active_upload_count += 1
         if dlspeed > 0 or state in {"stalleddl", "metadl"}:
@@ -1425,6 +1518,7 @@ def _runtime_activity_summary(torrents: list[ManagedTorrent]) -> dict[str, float
         "total_upspeed_mib_s": round(total_upspeed / 1024**2, 3),
         "total_dlspeed_mib_s": round(total_dlspeed / 1024**2, 3),
         "total_amount_left_gb": round(total_amount_left / 1024**3, 3),
+        "total_download_liability_gb": round(total_download_liability / 1024**3, 3),
     }
 
 
