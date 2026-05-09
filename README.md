@@ -159,8 +159,12 @@ These guards help avoid:
 `seed-agent` treats category policy as a safety boundary:
 
 - mutable categories such as `seed` may be paused or deleted by policy,
+- when a qB category is configured as mutable, every existing and future torrent
+  in that category is considered managed, regardless of tags,
 - add-only categories such as `movie` and `tv` may receive new torrents but are
   not auto-deleted,
+- tags are metadata applied to new torrents for audit/search convenience; tags
+  alone do not grant cleanup permission outside the configured category,
 - shared budget pools can force paused enqueue behavior without widening cleanup.
 
 ## Documentation

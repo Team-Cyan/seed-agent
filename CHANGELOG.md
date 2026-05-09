@@ -6,6 +6,9 @@ All notable project changes are tracked here.
 
 ### Fixed
 
+- Cleanup ownership is now granted by configured qB category membership only;
+  tags remain audit/search metadata and no longer grant delete authority outside
+  the mutable category.
 - Enqueue gating now plans accepted candidates by score against remaining
   download headroom, so a full queue can start the best fitting candidates and
   pause the rest instead of applying one global paused flag to the whole batch.

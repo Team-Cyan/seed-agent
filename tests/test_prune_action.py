@@ -25,8 +25,8 @@ def _torrent(**overrides: object) -> ManagedTorrent:
     data: dict[str, object] = {
         "hash": "abcd1234",
         "name": "Demo Torrent",
-        "category": "pt-auto",
-        "tags": {"seed-agent", "pt-auto"},
+        "category": "seed",
+        "tags": {"seed-agent", "seed"},
         "state": "uploading",
         "size_bytes": 10 * 1024**3,
         "uploaded_bytes": 10 * 1024**3,

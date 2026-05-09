@@ -56,6 +56,20 @@ def test_protects_unmanaged_torrent() -> None:
     assert "unmanaged" in decision.reason
 
 
+def test_tag_alone_does_not_grant_cleanup_management() -> None:
+    from seed_agent.policies.cleanup import classify_cleanup
+
+    decision = classify_cleanup(
+        _torrent(category="movie", tags={"seed-agent", "seed"}),
+        _cleanup(),
+        managed_category="pt-auto",
+        managed_tags={"seed-agent", "pt-auto"},
+    )
+
+    assert decision.action == "protect"
+    assert "unmanaged" in decision.reason
+
+
 @pytest.mark.parametrize(
     ("metadata",),
     [

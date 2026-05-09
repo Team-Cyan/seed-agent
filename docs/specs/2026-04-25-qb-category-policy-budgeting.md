@@ -242,6 +242,9 @@ to:
 
 - Dry-run remains the default for all mutating downloader commands.
 - Automatic delete is allowed only for categories whose policy is explicitly mutable and delete-enabled.
+- A mutable category owns every existing and future torrent whose qB category
+  matches that policy. Tags are labels for audit/search and must not grant
+  cleanup authority by themselves.
 - Categories not present in config remain unmanaged and must never be automatically deleted.
 - qB category names are part of the safety boundary and should be treated as operator-controlled configuration, not inferred heuristically.
 - Audit output must explain whether a torrent was handled under mutable or add-only rules.

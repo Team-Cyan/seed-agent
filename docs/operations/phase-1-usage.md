@@ -157,8 +157,11 @@ jq -c '.' .seed-agent/audit.jsonl | tail -n 20
 ## Safety Notes
 
 - Only mutable configured categories such as `seed` are eligible for automatic cleanup decisions.
+- A mutable category grants management over all torrents already in that qB
+  category and all future torrents added there.
 - Keep H&R, manual, media-library-associated, and unknown-origin torrents protected.
-- Treat category and tag management as part of the safety boundary, not cosmetic metadata.
+- Treat qB category management as the safety boundary. Tags remain useful
+  metadata for new torrents, but tags alone do not grant delete permission.
 - Do not delete unmanaged torrents. For eligible managed delete actions,
   `prune --execute` deletes both the torrent and its files; inspect the `preview`
   block before executing.

@@ -226,9 +226,8 @@ def _is_managed(
     managed_category: str,
     managed_tags: set[str],
 ) -> bool:
-    category_matches = torrent.category == managed_category
-    tag_matches = bool(managed_tags.intersection(torrent.tags))
-    return category_matches or tag_matches
+    del managed_tags
+    return torrent.category == managed_category
 
 
 def _protection_rules(
