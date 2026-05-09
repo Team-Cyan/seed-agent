@@ -181,6 +181,85 @@ async def test_mteam_api_zero_max_seeders_does_not_block_popular_torrents() -> N
 
 @pytest.mark.asyncio
 @respx.mock
+async def test_mteam_api_client_discovers_multiple_pages() -> None:
+    route = respx.post("https://api.m-team.cc/api/torrent/search").mock(
+        side_effect=[
+            httpx.Response(
+                200,
+                json={
+                    "code": "0",
+                    "data": {
+                        "data": [
+                            {
+                                "id": 111,
+                                "name": "Already Seen Candidate",
+                                "size": 10 * 1024**3,
+                                "discount": "FREE",
+                                "status": {
+                                    "seeders": 10,
+                                    "leechers": 5,
+                                    "timesCompleted": 12,
+                                },
+                            }
+                        ]
+                    },
+                },
+            ),
+            httpx.Response(
+                200,
+                json={
+                    "code": "0",
+                    "data": {
+                        "data": [
+                            {
+                                "id": 222,
+                                "name": "Second Page Candidate",
+                                "size": 11 * 1024**3,
+                                "discount": "FREE",
+                                "status": {
+                                    "seeders": 8,
+                                    "leechers": 6,
+                                    "timesCompleted": 9,
+                                },
+                            }
+                        ]
+                    },
+                },
+            ),
+        ]
+    )
+
+    client = MTeamApiClient(api_key="secret-api-key")
+    candidates = await client.discover_torrents(
+        site="mt",
+        options=MTeamApiDiscoveryOptions(
+            mode="adult",
+            only_free=True,
+            sort_field="leechers",
+            sort_order="desc",
+            page_size=50,
+            max_pages=2,
+            min_seeders=1,
+            max_seeders=0,
+            min_leechers=0,
+            min_times_completed=0,
+        ),
+    )
+
+    assert route.call_count == 2
+    requested_pages = [
+        json.loads(call.request.content.decode("utf-8"))["pageNumber"]
+        for call in route.calls
+    ]
+    assert requested_pages == [1, 2]
+    assert [candidate.title for candidate in candidates] == [
+        "Already Seen Candidate",
+        "Second Page Candidate",
+    ]
+
+
+@pytest.mark.asyncio
+@respx.mock
 async def test_resolve_deferred_download_url_fetches_mteam_token() -> None:
     route = respx.post("https://api.m-team.cc/api/torrent/genDlToken").mock(
         return_value=httpx.Response(

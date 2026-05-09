@@ -334,6 +334,7 @@ def test_mteam_site_accepts_api_discovery_mode() -> None:
                 "sort_field": "downloads",
                 "sort_order": "desc",
                 "page_size": 100,
+                "max_pages": 3,
                 "keyword": "demo",
                 "categories": [410, 429],
                 "sources": [8],
@@ -360,6 +361,7 @@ def test_mteam_site_accepts_api_discovery_mode() -> None:
     assert site.api_discovery is not None
     assert site.api_discovery.sort_field == "downloads"
     assert site.api_discovery.page_number == 2
+    assert site.api_discovery.max_pages == 3
     assert site.api_discovery.categories == [410, 429]
     assert site.api_discovery.standards == [1, 6]
     assert site.api_discovery.hot is True

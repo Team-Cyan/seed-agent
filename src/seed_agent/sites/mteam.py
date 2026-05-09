@@ -32,6 +32,7 @@ class MTeamApiDiscoveryOptions(BaseModel):
     sort_field: str = "downloads"
     sort_order: str = "desc"
     page_size: int = 50
+    max_pages: int = 1
     last_id: int | None = None
     keyword: str | None = None
     categories: list[int] = Field(default_factory=list)
@@ -91,28 +92,54 @@ class MTeamApiClient:
         if not self.api_key:
             return []
 
-        headers = {
-            "Accept": "application/json, text/plain, */*",
-            "Content-Type": "application/json",
-            "Referer": "https://kp.m-team.cc/browse",
-            "User-Agent": "Mozilla/5.0",
-            "x-api-key": self.api_key,
-        }
-
+        candidates: list[TorrentCandidate] = []
+        seen_ids: set[str] = set()
         async with httpx.AsyncClient(follow_redirects=True, timeout=self.timeout) as client:
-            response = await client.post(
-                f"{self.API_BASE_URL}/torrent/search",
-                headers=headers,
-                json=_search_payload(options),
-            )
-            response.raise_for_status()
+            for page_number in range(
+                options.page_number,
+                options.page_number + options.max_pages,
+            ):
+                page_options = options.model_copy(update={"page_number": page_number})
+                page_candidates = await self._discover_torrent_page(
+                    client,
+                    site=site,
+                    options=page_options,
+                )
+                if not page_candidates:
+                    break
+                for candidate in page_candidates:
+                    if candidate.stable_id in seen_ids:
+                        continue
+                    candidates.append(candidate)
+                    seen_ids.add(candidate.stable_id)
+        return candidates
+
+    async def _discover_torrent_page(
+        self,
+        client: httpx.AsyncClient,
+        *,
+        site: str,
+        options: MTeamApiDiscoveryOptions,
+    ) -> list[TorrentCandidate]:
+        candidates: list[TorrentCandidate] = []
+        response = await client.post(
+            f"{self.API_BASE_URL}/torrent/search",
+            headers={
+                "Accept": "application/json, text/plain, */*",
+                "Content-Type": "application/json",
+                "Referer": "https://kp.m-team.cc/browse",
+                "User-Agent": "Mozilla/5.0",
+                "x-api-key": self.api_key or "",
+            },
+            json=_search_payload(options),
+        )
+        response.raise_for_status()
 
         payload = response.json()
         if not isinstance(payload, dict) or str(payload.get("code")) != "0":
             return []
 
         rows = _extract_search_rows(payload)
-        candidates: list[TorrentCandidate] = []
         for row in rows:
             if not _row_meets_thresholds(row, options):
                 continue

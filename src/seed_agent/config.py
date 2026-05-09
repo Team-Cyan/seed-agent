@@ -44,6 +44,7 @@ class MTeamApiDiscoveryConfig(BaseModel):
     ] = "downloads"
     sort_order: Literal["asc", "desc"] = "desc"
     page_size: int = 50
+    max_pages: int = 1
     last_id: int | None = None
     keyword: str | None = None
     categories: list[int] = Field(default_factory=list)
@@ -101,6 +102,8 @@ class MTeamApiDiscoveryConfig(BaseModel):
             raise ValueError("page_size must be >= 1")
         if self.page_size > 200:
             raise ValueError("page_size must be <= 200")
+        if self.max_pages < 1 or self.max_pages > 20:
+            raise ValueError("max_pages must be between 1 and 20")
         if self.last_id is not None and self.last_id < 0:
             raise ValueError("last_id must be >= 0")
         if self.author is not None and self.author < 0:

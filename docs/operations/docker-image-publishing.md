@@ -35,14 +35,14 @@ Docker Hub example:
 
 ```bash
 docker tag seed-agent:local your-dockerhub-user/seed-agent:latest
-docker tag seed-agent:local your-dockerhub-user/seed-agent:0.1.1
+docker tag seed-agent:local your-dockerhub-user/seed-agent:0.1.2
 ```
 
 GHCR example:
 
 ```bash
 docker tag seed-agent:local ghcr.io/team-cyan/seed-agent:latest
-docker tag seed-agent:local ghcr.io/team-cyan/seed-agent:0.1.1
+docker tag seed-agent:local ghcr.io/team-cyan/seed-agent:0.1.2
 ```
 
 ## Push
@@ -51,14 +51,14 @@ Docker Hub:
 
 ```bash
 docker push your-dockerhub-user/seed-agent:latest
-docker push your-dockerhub-user/seed-agent:0.1.1
+docker push your-dockerhub-user/seed-agent:0.1.2
 ```
 
 GHCR:
 
 ```bash
 docker push ghcr.io/team-cyan/seed-agent:latest
-docker push ghcr.io/team-cyan/seed-agent:0.1.1
+docker push ghcr.io/team-cyan/seed-agent:0.1.2
 ```
 
 ## GitHub-Native Publishing
@@ -71,10 +71,10 @@ On every push to `main`, GitHub Actions publishes a multi-arch image to:
 - `ghcr.io/team-cyan/seed-agent:main`
 - `ghcr.io/team-cyan/seed-agent:sha-<commit>`
 
-On version tags such as `v0.1.1`, the same workflow also publishes:
+On version tags such as `v0.1.2`, the same workflow also publishes:
 
-- `ghcr.io/team-cyan/seed-agent:v0.1.1`
-- `ghcr.io/team-cyan/seed-agent:0.1.1`
+- `ghcr.io/team-cyan/seed-agent:v0.1.2`
+- `ghcr.io/team-cyan/seed-agent:0.1.2`
 - `ghcr.io/team-cyan/seed-agent:0.1`
 
 The tag workflow checks that the git tag matches the repository `VERSION` file

@@ -209,7 +209,7 @@ sites:
       sort_order: desc
       page_size: 50
       min_seeders: 0
-      max_seeders: 200
+      max_seeders: 0
       min_leechers: 0
       min_times_completed: 0
     # Optional compatibility fallback for detail enrichment:

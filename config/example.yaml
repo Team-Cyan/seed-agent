@@ -23,6 +23,8 @@ sites:
   #     sort_field: downloads
   #     sort_order: desc
   #     page_size: 50
+  #     # Fetch more pages when the first page is mostly already-managed torrents.
+  #     max_pages: 1
   #     # Optional native M-Team filters. IDs come from M-Team list endpoints such as
   #     # categoryList, sourceList, mediumList, standardList, and codec/team lists.
   #     # categories: [410, 429]
@@ -35,7 +37,7 @@ sites:
   #     # hot: true
   #     min_seeders: 0
   #     # 0 or null means no native API seeder upper-bound filter.
-  #     max_seeders: 200
+  #     max_seeders: 0
   #     min_leechers: 0
   #     min_times_completed: 0
   #   # Optional compatibility fallback: a logged-in M-Team site cookie.
