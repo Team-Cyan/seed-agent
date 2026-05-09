@@ -292,3 +292,38 @@ def test_state_store_stamps_first_seen_pause_timestamp_for_paused_torrent(
     runtime = store.get_torrent_runtime("paused-first-seen")
     assert runtime is not None
     assert runtime["paused_at"] is not None
+
+
+def test_state_store_applies_runtime_with_batched_sqlite_access(tmp_path: Path) -> None:
+    store = StateStore(tmp_path / "state.sqlite3")
+    torrents = [
+        ManagedTorrent(
+            hash=f"hash-{index}",
+            name=f"Torrent {index}",
+            category="seed",
+            tags={"seed"},
+            state="stalledUP",
+            size_bytes=10 * 1024**3,
+            uploaded_bytes=10 * 1024**3,
+            downloaded_bytes=10 * 1024**3,
+            added_at=datetime(2026, 4, 1, tzinfo=UTC),
+            last_activity_at=datetime(2026, 4, 1, tzinfo=UTC),
+            metadata={},
+        )
+        for index in range(8)
+    ]
+
+    connect_count = 0
+    original_connect = store._connect  # type: ignore[attr-defined]
+
+    def counted_connect(*args, **kwargs):
+        nonlocal connect_count
+        connect_count += 1
+        return original_connect(*args, **kwargs)
+
+    store._connect = counted_connect  # type: ignore[method-assign]
+
+    enriched = store.apply_torrent_runtime(torrents)
+
+    assert len(enriched) == 8
+    assert connect_count <= 4

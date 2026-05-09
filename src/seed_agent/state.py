@@ -244,11 +244,16 @@ class StateStore:
         return dict(row) if row is not None else None
 
     def apply_torrent_runtime(self, torrents: list[ManagedTorrent]) -> list[ManagedTorrent]:
+        torrent_hashes = [torrent.hash for torrent in torrents if torrent.hash]
+        runtime_by_hash = self._torrent_runtime_by_hash(torrent_hashes)
+        candidate_rows_by_hash = self._candidate_rows_by_torrent_hash(torrent_hashes)
+        seen_at = _utc_now()
+        updates: list[tuple[object, ...]] = []
         enriched: list[ManagedTorrent] = []
         for torrent in torrents:
-            runtime = self.get_torrent_runtime(torrent.hash)
+            runtime = runtime_by_hash.get(torrent.hash)
             metadata = dict(torrent.metadata)
-            candidate_rows = self.list_by_torrent_hash(torrent.hash)
+            candidate_rows = candidate_rows_by_hash.get(torrent.hash, [])
             candidate_free_expiry = next(
                 (
                     row.get("free_window_expires_at")
@@ -279,21 +284,111 @@ class StateStore:
                 metadata["paused_at"] = paused_at
             else:
                 paused_at = None
-            self._upsert_torrent_runtime(
-                torrent.hash,
-                paused_at=paused_at.isoformat() if paused_at is not None else None,
-                replace_paused_at=True,
-                uploaded_bytes=torrent.uploaded_bytes,
-                downloaded_bytes=torrent.downloaded_bytes,
-                upspeed_bps=int(metadata.get("upspeed_bps", 0) or 0),
-                dlspeed_bps=int(metadata.get("dlspeed_bps", 0) or 0),
-                no_upload_since_at=(
-                    no_upload_since_at.isoformat() if no_upload_since_at is not None else None
-                ),
-                seen_at=_utc_now(),
+            updates.append(
+                (
+                    torrent.hash,
+                    paused_at.isoformat() if paused_at is not None else None,
+                    torrent.uploaded_bytes,
+                    torrent.downloaded_bytes,
+                    int(metadata.get("upspeed_bps", 0) or 0),
+                    int(metadata.get("dlspeed_bps", 0) or 0),
+                    (
+                        no_upload_since_at.isoformat()
+                        if no_upload_since_at is not None
+                        else None
+                    ),
+                    seen_at,
+                    seen_at,
+                )
             )
             enriched.append(torrent.model_copy(update={"metadata": metadata}))
+        self._bulk_upsert_torrent_runtime(updates)
         return enriched
+
+    def _torrent_runtime_by_hash(self, torrent_hashes: list[str]) -> dict[str, dict[str, Any]]:
+        if not torrent_hashes:
+            return {}
+        placeholders = ", ".join("?" for _ in torrent_hashes)
+        with self._connect(row_factory=sqlite3.Row) as conn:
+            rows = conn.execute(
+                f"""
+                SELECT
+                    torrent_hash,
+                    paused_at,
+                    uploaded_bytes,
+                    downloaded_bytes,
+                    upspeed_bps,
+                    dlspeed_bps,
+                    no_upload_since_at,
+                    seen_at,
+                    updated_at
+                FROM torrent_runtime
+                WHERE torrent_hash IN ({placeholders})
+                """,
+                tuple(torrent_hashes),
+            ).fetchall()
+        return {str(row["torrent_hash"]): dict(row) for row in rows}
+
+    def _candidate_rows_by_torrent_hash(
+        self, torrent_hashes: list[str]
+    ) -> dict[str, list[dict[str, Any]]]:
+        if not torrent_hashes:
+            return {}
+        placeholders = ", ".join("?" for _ in torrent_hashes)
+        with self._connect(row_factory=sqlite3.Row) as conn:
+            rows = conn.execute(
+                f"""
+                SELECT
+                    stable_id,
+                    site,
+                    title,
+                    state,
+                    score,
+                    torrent_hash,
+                    free_window_expires_at,
+                    first_seen_at,
+                    updated_at
+                FROM candidates
+                WHERE torrent_hash IN ({placeholders})
+                ORDER BY updated_at ASC, stable_id ASC
+                """,
+                tuple(torrent_hashes),
+            ).fetchall()
+        grouped: dict[str, list[dict[str, Any]]] = {}
+        for row in rows:
+            grouped.setdefault(str(row["torrent_hash"]), []).append(dict(row))
+        return grouped
+
+    def _bulk_upsert_torrent_runtime(self, rows: list[tuple[object, ...]]) -> None:
+        if not rows:
+            return
+        with self._connect() as conn:
+            conn.executemany(
+                """
+                INSERT INTO torrent_runtime (
+                    torrent_hash,
+                    paused_at,
+                    uploaded_bytes,
+                    downloaded_bytes,
+                    upspeed_bps,
+                    dlspeed_bps,
+                    no_upload_since_at,
+                    seen_at,
+                    updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(torrent_hash) DO UPDATE SET
+                    paused_at = excluded.paused_at,
+                    uploaded_bytes = excluded.uploaded_bytes,
+                    downloaded_bytes = excluded.downloaded_bytes,
+                    upspeed_bps = excluded.upspeed_bps,
+                    dlspeed_bps = excluded.dlspeed_bps,
+                    no_upload_since_at = excluded.no_upload_since_at,
+                    seen_at = excluded.seen_at,
+                    updated_at = excluded.updated_at
+                """,
+                rows,
+            )
 
     def _upsert_torrent_runtime(
         self,

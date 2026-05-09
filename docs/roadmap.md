@@ -38,6 +38,8 @@ This file tracks the current project status at a level that is easy for both hum
   accepted candidates can start while lower-priority candidates are added paused
 - zero-progress stopped download placeholders are excluded from active download
   liability calculations
+- qB policy torrent loading and runtime SQLite enrichment are batched for lower
+  scheduler, review, and prune overhead
 
 ### Resource Intent Loop
 

@@ -4,6 +4,15 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+### Performance
+
+- qB live torrent loading now uses one all-category listing when multiple
+  category policies need review, while preserving the narrower category-filtered
+  request for single-policy checks.
+- Runtime state enrichment now batches SQLite reads and writes for managed
+  torrents, avoiding per-torrent connection churn during review, prune, and
+  scheduler cycles.
+
 ### Fixed
 
 - Cleanup ownership is now granted by configured qB category membership only;

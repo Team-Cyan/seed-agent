@@ -1215,16 +1215,13 @@ def test_prune_pool_usage_includes_add_only_categories(
         async def list_torrents(
             self, category: str | None = None, tags: set[str] | None = None
         ) -> list[ManagedTorrent]:
-            if category == "seed":
+            if category is None:
                 return [
                     _managed_torrent(
                         hash="seed-hash",
                         category="seed",
                         size_bytes=1 * 1024**4,
-                    )
-                ]
-            if category == "movie":
-                return [
+                    ),
                     _managed_torrent(
                         hash="movie-hash",
                         category="movie",
@@ -1253,6 +1250,62 @@ def test_prune_pool_usage_includes_add_only_categories(
     assert [decision["target_id"] for decision in payload["decisions"]] == ["seed-hash"]
 
 
+def test_load_policy_torrents_uses_single_qb_listing_for_multiple_categories() -> None:
+    from seed_agent import cli
+
+    config = _config(secret_ref="local/secrets/qb.yaml")
+
+    class FakeDownloader:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str | None, set[str] | None]] = []
+
+        async def list_torrents(
+            self, category: str | None = None, tags: set[str] | None = None
+        ) -> list[ManagedTorrent]:
+            self.calls.append((category, tags))
+            assert category is None
+            return [
+                _managed_torrent(hash="seed-hash", category="seed"),
+                _managed_torrent(hash="movie-hash", category="movie"),
+                _managed_torrent(hash="other-hash", category="other"),
+            ]
+
+    downloader = FakeDownloader()
+
+    torrents = cli._load_policy_torrents(downloader, config)
+
+    assert downloader.calls == [(None, None)]
+    assert [torrent.hash for torrent in torrents] == ["seed-hash", "movie-hash"]
+
+
+def test_load_policy_torrents_keeps_category_filter_for_single_category() -> None:
+    from seed_agent import cli
+
+    config = _config(secret_ref="local/secrets/qb.yaml")
+    seed_policy = config.downloader.category_policies[0]
+
+    class FakeDownloader:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str | None, set[str] | None]] = []
+
+        async def list_torrents(
+            self, category: str | None = None, tags: set[str] | None = None
+        ) -> list[ManagedTorrent]:
+            self.calls.append((category, tags))
+            assert category == "seed"
+            return [
+                _managed_torrent(hash="seed-hash", category="seed"),
+                _managed_torrent(hash="other-hash", category="other"),
+            ]
+
+    downloader = FakeDownloader()
+
+    torrents = cli._load_policy_torrents(downloader, config, policies=[seed_policy])
+
+    assert downloader.calls == [("seed", None)]
+    assert [torrent.hash for torrent in torrents] == ["seed-hash"]
+
+
 def test_review_reports_runtime_activity_summary(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1267,7 +1320,7 @@ def test_review_reports_runtime_activity_summary(
         async def list_torrents(
             self, category: str | None = None, tags: set[str] | None = None
         ) -> list[ManagedTorrent]:
-            if category == "seed":
+            if category is None:
                 return [
                     _managed_torrent(
                         hash="seed-active",
@@ -1287,11 +1340,8 @@ def test_review_reports_runtime_activity_summary(
                             "dlspeed_bps": 4 * 1024**2,
                             "uploaded_session_bytes": 0,
                             "amount_left_bytes": 5 * 1024**3,
-                        },
-                    ),
-                ]
-            if category == "movie":
-                return [
+                            },
+                        ),
                     _managed_torrent(
                         hash="movie-paused",
                         category="movie",

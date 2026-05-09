@@ -1183,14 +1183,17 @@ def _load_policy_torrents(
     policies: list[CategoryPolicyConfig] | None = None,
 ) -> list[ManagedTorrent]:
     selected_policies = policies if policies is not None else config.downloader.category_policies
+    policy_names = {policy.name for policy in selected_policies}
     torrents: list[ManagedTorrent] = []
     seen_hashes: set[str] = set()
-    for policy in selected_policies:
-        for torrent in _run(downloader.list_torrents(policy.name, None)):
-            if torrent.hash in seen_hashes:
-                continue
-            seen_hashes.add(torrent.hash)
-            torrents.append(torrent)
+    category_filter = next(iter(policy_names)) if len(policy_names) == 1 else None
+    for torrent in _run(downloader.list_torrents(category_filter, None)):
+        if torrent.category not in policy_names:
+            continue
+        if torrent.hash in seen_hashes:
+            continue
+        seen_hashes.add(torrent.hash)
+        torrents.append(torrent)
     return torrents
 
 
