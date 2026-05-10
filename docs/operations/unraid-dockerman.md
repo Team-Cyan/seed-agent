@@ -77,6 +77,35 @@ Recommended user-visible defaults:
 - `SEED_AGENT_EXECUTE=true`
 - `SEED_AGENT_REQUIRE_KNOWN_FREE_WINDOW=true`
 
+## Updating The Container
+
+After the container is installed through DockerMan, keep it managed by the
+Unraid template system.
+
+Use the Docker page's normal **Update** / **Apply Update** action when GHCR has
+a new `latest` image. Do not update a template-managed install with manual
+`docker rm && docker run` commands. Manual recreation can detach the running
+container from DockerMan's template metadata, which makes the Unraid UI treat it
+like a third-party container and can hide normal up-to-date status.
+
+If a command-line repair is needed on the Unraid host, prefer DockerMan's own
+template rebuild/update script so the recreated container keeps the managed
+label:
+
+```sh
+/usr/local/emhttp/plugins/dynamix.docker.manager/scripts/update_container seed-agent
+```
+
+Afterward, confirm the container still has:
+
+```text
+net.unraid.docker.managed=dockerman
+```
+
+If repeated `latest` pulls leave old `ghcr.io/team-cyan/seed-agent:<none>`
+images behind, remove only unused seed-agent dangling images. Avoid broad
+`docker system prune` operations on a NAS host.
+
 ## WebUI Button
 
 `seed-agent` does not expose an HTTP control panel today.
