@@ -271,6 +271,8 @@ class StateStore:
                 metadata["upload_delta_gb"] = recent_upload_gb
             no_upload_since_at = _no_upload_since_at(
                 runtime,
+                torrent_added_at=torrent.added_at,
+                uploaded_bytes=torrent.uploaded_bytes,
                 recent_upload_gb=recent_upload_gb,
             )
             if no_upload_since_at is not None:
@@ -818,8 +820,19 @@ def _recent_upload_gb(runtime: dict[str, Any] | None, uploaded_bytes: int) -> fl
 def _no_upload_since_at(
     runtime: dict[str, Any] | None,
     *,
+    torrent_added_at: datetime,
+    uploaded_bytes: int,
     recent_upload_gb: float | None,
 ) -> datetime | None:
+    if uploaded_bytes <= 0:
+        existing = (
+            _parse_datetime(runtime.get("no_upload_since_at"))
+            if runtime is not None
+            else None
+        )
+        if existing is not None:
+            return min(existing, torrent_added_at)
+        return torrent_added_at
     if runtime is None or recent_upload_gb is None:
         return None
     if recent_upload_gb > 0:

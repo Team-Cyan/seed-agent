@@ -148,6 +148,39 @@ async def test_list_torrents_converts_rows_into_managed_torrents() -> None:
 
 @pytest.mark.asyncio
 @respx.mock
+async def test_list_torrents_treats_negative_completion_time_as_unknown() -> None:
+    respx.post("https://qb.example/api/v2/auth/login").mock(
+        return_value=httpx.Response(200, text="Ok.")
+    )
+    respx.get("https://qb.example/api/v2/torrents/info").mock(
+        return_value=httpx.Response(
+            200,
+            json=[
+                {
+                    "hash": "abcd1234",
+                    "name": "Incomplete Torrent",
+                    "category": "seed",
+                    "tags": "seed-agent, seed",
+                    "state": "downloading",
+                    "size": 123456,
+                    "uploaded": 0,
+                    "downloaded": 123,
+                    "added_on": 1700000000,
+                    "completion_on": -1,
+                    "last_activity": 1700000200,
+                }
+            ],
+        )
+    )
+    client = QbittorrentClient("https://qb.example", "alice", "secret")
+
+    torrents = await client.list_torrents(category="seed", tags={"seed-agent"})
+
+    assert torrents[0].completed_at is None
+
+
+@pytest.mark.asyncio
+@respx.mock
 async def test_list_torrents_infers_protection_metadata_from_qb_rows() -> None:
     respx.post("https://qb.example/api/v2/auth/login").mock(
         return_value=httpx.Response(200, text="Ok.")

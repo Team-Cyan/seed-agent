@@ -214,7 +214,7 @@ def test_keeps_active_seed_while_no_upload_observation_window_is_young() -> None
             metadata={
                 "amount_left_bytes": 0,
                 "recent_upload_gb": 0.0,
-                "no_upload_since_at": now - timedelta(hours=6),
+                "no_upload_since_at": now - timedelta(hours=1),
             },
         ),
         _cleanup(),
@@ -237,7 +237,7 @@ def test_deletes_active_seed_after_no_upload_observation_window() -> None:
             metadata={
                 "amount_left_bytes": 0,
                 "recent_upload_gb": 0.0,
-                "no_upload_since_at": now - timedelta(hours=30),
+                "no_upload_since_at": now - timedelta(hours=3),
             },
         ),
         _cleanup(),
@@ -247,3 +247,27 @@ def test_deletes_active_seed_after_no_upload_observation_window() -> None:
 
     assert decision.action == "delete"
     assert "no upload" in decision.reason
+
+
+def test_deletes_incomplete_zero_upload_torrent_after_observation_window() -> None:
+    from seed_agent.policies.cleanup import classify_cleanup
+
+    now = datetime.now(UTC)
+    decision = classify_cleanup(
+        _torrent(
+            state="downloading",
+            uploaded_bytes=0,
+            downloaded_bytes=5 * 1024**3,
+            last_activity_at=now,
+            metadata={
+                "amount_left_bytes": 5 * 1024**3,
+                "no_upload_since_at": now - timedelta(hours=3),
+            },
+        ),
+        _cleanup(),
+        managed_category="pt-auto",
+        managed_tags={"seed-agent", "pt-auto"},
+    )
+
+    assert decision.action == "delete"
+    assert "zero total upload" in decision.reason

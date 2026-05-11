@@ -267,6 +267,33 @@ def test_state_store_tracks_no_upload_observation_start(tmp_path: Path) -> None:
     assert runtime["no_upload_since_at"] == seen_at.isoformat()
 
 
+def test_state_store_starts_zero_upload_observation_at_torrent_added_at(
+    tmp_path: Path,
+) -> None:
+    store = StateStore(tmp_path / "state.sqlite3")
+    added_at = datetime(2026, 4, 1, tzinfo=UTC)
+    torrent = ManagedTorrent(
+        hash="zero-upload",
+        name="Zero Upload",
+        category="pt-auto",
+        tags={"seed-agent"},
+        state="downloading",
+        size_bytes=10 * 1024**3,
+        uploaded_bytes=0,
+        downloaded_bytes=1 * 1024**3,
+        added_at=added_at,
+        last_activity_at=added_at + timedelta(hours=3),
+        metadata={"amount_left_bytes": 9 * 1024**3},
+    )
+
+    enriched = store.apply_torrent_runtime([torrent])
+
+    assert enriched[0].metadata["no_upload_since_at"] == added_at
+    runtime = store.get_torrent_runtime("zero-upload")
+    assert runtime is not None
+    assert runtime["no_upload_since_at"] == added_at.isoformat()
+
+
 def test_state_store_stamps_first_seen_pause_timestamp_for_paused_torrent(
     tmp_path: Path,
 ) -> None:

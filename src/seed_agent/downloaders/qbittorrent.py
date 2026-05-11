@@ -197,6 +197,9 @@ def _looks_like_media_library_path(save_path: str) -> bool:
 
 
 def _optional_datetime(value: Any) -> datetime | None:
-    if value in (None, "", 0):
+    if value in (None, ""):
         return None
-    return datetime.fromtimestamp(int(value), tz=UTC)
+    timestamp = int(value)
+    if timestamp <= 0:
+        return None
+    return datetime.fromtimestamp(timestamp, tz=UTC)

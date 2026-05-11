@@ -18,8 +18,11 @@ Decide when managed torrents should be paused or deleted under the balanced safe
 - protect media-library-associated torrents,
 - treat qB category membership as the cleanup ownership boundary,
 - never treat tags alone as cleanup authorization outside the configured category,
-- observe completed active seeds for `cleanup.delete_after_no_upload_hours`
-  before deleting them for zero upload,
+- observe zero-total-upload managed torrents from qB `added_at` for
+  `cleanup.delete_after_no_upload_hours` before deleting them, including
+  incomplete downloads that consumed space but never uploaded,
+- observe completed active seeds with no recent upload for
+  `cleanup.delete_after_no_upload_hours` before deleting them,
 - require pause-before-delete timing,
 - keep policy reasoning auditable.
 - distinguish automated lifecycle cleanup from explicit operator cleanup. When

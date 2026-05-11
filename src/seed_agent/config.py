@@ -321,7 +321,7 @@ class CleanupConfig(BaseModel):
     protect_manual: bool
     protect_media_library: bool
     pause_before_delete_hours: int
-    delete_after_no_upload_hours: int = 24
+    delete_after_no_upload_hours: int = 2
 
     @model_validator(mode="after")
     def validate_pause_before_delete_hours(self) -> CleanupConfig:

@@ -120,6 +120,8 @@ def _no_upload_observation_decision(
     cleanup: CleanupConfig,
     metadata: dict[str, object],
 ) -> CleanupDecision | None:
+    if torrent.uploaded_bytes <= 0:
+        return _zero_total_upload_decision(cleanup, metadata)
     if not _is_completed_seed(torrent):
         return None
     if _is_paused_or_stopped(torrent.state):
@@ -159,6 +161,38 @@ def _no_upload_observation_decision(
         action="keep",
         reason=_reason(
             f"no upload for {no_upload_age.days}d {no_upload_age.seconds // 3600}h "
+            f"< delete delay {cleanup.delete_after_no_upload_hours}h"
+        ),
+        managed=True,
+    )
+
+
+def _zero_total_upload_decision(
+    cleanup: CleanupConfig,
+    metadata: dict[str, object],
+) -> CleanupDecision | None:
+    no_upload_since_at = _no_upload_since_at(metadata)
+    if no_upload_since_at is None:
+        return CleanupDecision(
+            action="keep",
+            reason=_reason("zero total upload observation window just started"),
+            managed=True,
+        )
+    no_upload_age = _utcnow() - no_upload_since_at
+    delete_delay = timedelta(hours=cleanup.delete_after_no_upload_hours)
+    if no_upload_age >= delete_delay:
+        return CleanupDecision(
+            action="delete",
+            reason=_reason(
+                f"zero total upload for {no_upload_age.days}d {no_upload_age.seconds // 3600}h "
+                f">= delete delay {cleanup.delete_after_no_upload_hours}h"
+            ),
+            managed=True,
+        )
+    return CleanupDecision(
+        action="keep",
+        reason=_reason(
+            f"zero total upload for {no_upload_age.days}d {no_upload_age.seconds // 3600}h "
             f"< delete delay {cleanup.delete_after_no_upload_hours}h"
         ),
         managed=True,
