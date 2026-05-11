@@ -40,6 +40,11 @@ This file tracks the current project status at a level that is easy for both hum
   liability calculations
 - qB policy torrent loading and runtime SQLite enrichment are batched for lower
   scheduler, review, and prune overhead
+- qB `completion_on <= 0` is treated as unknown completion time, preventing
+  incomplete torrents from looking like 1969 completions
+- zero-total-upload managed torrents are observed from qB `added_at` and can be
+  pruned after the configured no-upload window, including incomplete downloads
+  that consumed space but never uploaded
 
 ### Resource Intent Loop
 
@@ -92,8 +97,8 @@ This file tracks the current project status at a level that is easy for both hum
 - convert live-state visibility into conservative enqueue and prune protections
   only after the runtime summaries have proven useful
 - refine eviction ranking with tracker-side demand signals when available
-- add an operator report that summarizes no-upload observation windows and
-  pending cleanup deletes before execute-mode pruning
+- improve operator reports that join enqueue-time seed/leecher/free-window
+  signals with later upload ratio, completion time, and cleanup outcome
 
 ### Scheduler And Server Deployments
 

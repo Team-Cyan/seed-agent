@@ -40,6 +40,17 @@ Score discovered torrents or ranked releases using explicit policy weights and e
   `discovery.max_seeders` scoring name; legacy configs are migrated at load time.
 - `discovery.allow_non_free` lets NORMAL/non-free candidates remain eligible
   without discount-score credit. Keep it false for freeleech-only discovery.
+- When tuning seed-pool scoring, start from live qB outcomes instead of title
+  guesses. Compare each executed candidate's enqueue-time `seeders`,
+  `leechers`, seed/leecher ratio, size, and free window against later qB
+  `uploaded_gb`, upload/download ratio, completion time, and no-upload cleanup
+  result.
+- Treat absolute seeder count as weak evidence. A candidate with many seeders
+  can still perform if leechers are high enough, while low leecher counts and
+  high seed/leecher ratio are stronger negative signals for upload farming.
+- Do not overfit a single live run. Use live review/prune samples to identify
+  suspicious bands, then encode changes as explainable scoring weights or
+  retention thresholds with tests.
 
 ## Verification
 

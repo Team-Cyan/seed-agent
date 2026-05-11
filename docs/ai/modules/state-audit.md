@@ -42,6 +42,14 @@ Persist local lifecycle knowledge and durable decision evidence.
 - after any bulk qB cleanup, re-query qB and record or report the remaining
   matching count instead of assuming deletion succeeded from command output
   alone.
+- Preserve the bridge between enqueue-time candidate data and qB live runtime.
+  The most useful optimization evidence is the joined view: original
+  seeders/leechers/free-window data plus current uploaded bytes, ratio,
+  completion time, amount left, state, and cleanup decision.
+- For total-zero-upload torrents, record the no-upload observation start from qB
+  `added_at` rather than the first time the agent happened to refresh state.
+  Otherwise old no-value torrents can survive another full observation window
+  just because the local runtime cache was cold.
 
 ## Verification
 
