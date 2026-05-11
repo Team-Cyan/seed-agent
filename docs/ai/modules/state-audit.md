@@ -35,6 +35,13 @@ Persist local lifecycle knowledge and durable decision evidence.
   candidate pruning so cleanup evidence remains durable,
 - redact secrets in audit output,
 - keep state changes explainable and reviewable.
+- for manual live cleanup outside the normal prune decision path, write a
+  separate operator audit record in the mounted runtime state area before
+  mutation. Include cutoff, category, hash, name, size, state, and whether files
+  were deleted.
+- after any bulk qB cleanup, re-query qB and record or report the remaining
+  matching count instead of assuming deletion succeeded from command output
+  alone.
 
 ## Verification
 

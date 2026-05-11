@@ -60,6 +60,13 @@ The current architecture has two shipped loops:
   of an operator handoff or deployment release.
 - When bumping, keep `VERSION`, `pyproject.toml`, `src/seed_agent/__init__.py`,
   and `CHANGELOG.md` aligned.
+- After pushing a release intended for Unraid, verify the GHCR tag or manifest
+  before touching the live host. Pulling `latest` too early can leave the host
+  on the previous digest while the GitHub Action is still publishing.
+- A DockerMan-managed Unraid install must be updated through Unraid's template
+  update path, not by hand-written `docker rm && docker run` recreation. Manual
+  recreation detaches the container from DockerMan metadata and hides the normal
+  update status in the Unraid UI.
 
 ## Current Site Story
 
@@ -79,6 +86,12 @@ Important nuance:
 - `seed-agent` local state explains policy and intent lifecycle.
 - Category policies separate mutable seed pools from add-only media pools.
 - Logical budget pools affect enqueue pause behavior and cleanup visibility.
+- A `mutable` qB category is the operator-granted management boundary. When the
+  user explicitly authorizes the seed category, current and future torrents in
+  that category may be managed by the agent; tags remain audit/search metadata,
+  not delete authority outside the category.
+- Large manual cleanup requests should still start from a live candidate list
+  with category, age, size, and state, then record the exact executed hash set.
 
 ## Current Durable Files
 

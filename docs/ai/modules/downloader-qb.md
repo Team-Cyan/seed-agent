@@ -28,6 +28,25 @@ Own qBittorrent integration for enqueue, review, and cleanup-safe downloader act
 - keep managed/unmanaged boundaries explicit,
 - make live qB state visible before turning it into automated gating,
 - avoid leaking downloader credentials in output.
+- for bulk cleanup, scope by qB category first and only then by age, size,
+  state, or score; never use tags alone as a delete boundary,
+- before deleting qB torrents with files, print or persist the exact candidate
+  list and execute only that bounded hash set,
+- if the live qB list is needed for multiple configured categories, prefer one
+  all-category listing plus local filtering; if only one category is needed,
+  keep the qB category filter to avoid unnecessary host/API work.
+
+## Live Operation Notes
+
+- Manual old-seed cleanup on Unraid should be treated as an explicit operator
+  action, not as a silent policy expansion. The previous live cleanup used the
+  boundary `category == "seed"` and `added_at < 2026-02-01T00:00:00Z`, wrote an
+  audit JSONL under the mounted appdata state folder, then deleted exactly the
+  planned hashes with `delete_files=true`.
+- qB rows with `state` like `stalledUP` can still be valid seed cleanup
+  candidates when the operator's age/category boundary is explicit. Do not
+  infer safety from the state string alone; keep the printed candidate set as
+  the source of truth.
 
 ## Verification
 
