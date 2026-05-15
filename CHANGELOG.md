@@ -4,6 +4,14 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.2.0 - 2026-05-15
+
+### Added
+
+- Local `seed-agent web` settings UI for tracker configuration, preserving the
+  YAML reference versus local secret file boundary and exposing safe
+  tracker-local validation, site probe, and dry-run preview actions.
+
 ### Performance
 
 - qB live torrent loading now uses one all-category listing when multiple

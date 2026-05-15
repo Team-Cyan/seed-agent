@@ -49,11 +49,15 @@ async def _discover_site_candidates(site, config_dir: Path | None) -> list[Torre
             raise SiteDiscoveryConfigError(
                 f"missing api_key_ref secret for site {site.name}: {site.api_key_ref}"
             )
+        api_kwargs = {}
+        if site.auth_header != "x-api-key":
+            api_kwargs["api_key_header"] = site.auth_header
         return await fetch_mteam_api_candidates(
             site=site.name,
             api_key=api_key,
             cookie=cookie,
             options=MTeamApiDiscoveryOptions.model_validate(site.api_discovery.model_dump()),
+            **api_kwargs,
         )
 
     return await fetch_rss_candidates(

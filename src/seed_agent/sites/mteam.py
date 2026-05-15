@@ -75,11 +75,13 @@ class MTeamApiClient:
         *,
         cookie: str | None = None,
         api_key: str | None = None,
+        api_key_header: str = "x-api-key",
         visitor_id: str | None = None,
         timeout: float = 20.0,
     ) -> None:
         self.cookie = cookie
         self.api_key = api_key
+        self.api_key_header = api_key_header
         self.visitor_id = visitor_id or str(uuid.uuid4())
         self.timeout = timeout
 
@@ -129,7 +131,7 @@ class MTeamApiClient:
                 "Content-Type": "application/json",
                 "Referer": "https://kp.m-team.cc/browse",
                 "User-Agent": "Mozilla/5.0",
-                "x-api-key": self.api_key or "",
+                self.api_key_header: self.api_key or "",
             },
             json=_search_payload(options),
         )
@@ -196,7 +198,7 @@ class MTeamApiClient:
         headers = {
             "Accept": "application/json, text/plain, */*",
             "User-Agent": "Mozilla/5.0",
-            "x-api-key": self.api_key or "",
+            self.api_key_header: self.api_key or "",
         }
 
         async with httpx.AsyncClient(follow_redirects=True, timeout=self.timeout) as client:
@@ -226,7 +228,7 @@ class MTeamApiClient:
             "Accept": "application/json, text/plain, */*",
             "Content-Type": "application/x-www-form-urlencoded",
             "User-Agent": "Mozilla/5.0",
-            "x-api-key": self.api_key,
+            self.api_key_header: self.api_key,
         }
 
         async with httpx.AsyncClient(follow_redirects=True, timeout=self.timeout) as client:
@@ -288,6 +290,7 @@ async def enrich_candidates(
     *,
     cookie: str | None,
     api_key: str | None = None,
+    api_key_header: str = "x-api-key",
     fetch_detail: DetailFetcher | None = None,
 ) -> list[TorrentCandidate]:
     if not candidates or (not cookie and not api_key):
@@ -295,7 +298,7 @@ async def enrich_candidates(
 
     fetch = fetch_detail
     if fetch is None:
-        client = MTeamApiClient(cookie=cookie, api_key=api_key)
+        client = MTeamApiClient(cookie=cookie, api_key=api_key, api_key_header=api_key_header)
         fetch = client.fetch_torrent_detail
 
     enriched: list[TorrentCandidate] = []
@@ -320,10 +323,11 @@ async def fetch_api_candidates(
     api_key: str,
     options: MTeamApiDiscoveryOptions,
     cookie: str | None = None,
+    api_key_header: str = "x-api-key",
     discover: DiscoverFetcher | None = None,
     fetch_detail: DetailFetcher | None = None,
 ) -> list[TorrentCandidate]:
-    client = MTeamApiClient(cookie=cookie, api_key=api_key)
+    client = MTeamApiClient(cookie=cookie, api_key=api_key, api_key_header=api_key_header)
     discover_fn = discover or client.discover_torrents
     candidates = await discover_fn(site=site, options=options)
     if fetch_detail is None:
@@ -332,6 +336,7 @@ async def fetch_api_candidates(
         candidates,
         cookie=cookie,
         api_key=api_key,
+        api_key_header=api_key_header,
         fetch_detail=fetch_detail,
     )
 
@@ -347,6 +352,7 @@ async def resolve_deferred_download_url(
     candidate: TorrentCandidate,
     *,
     api_key: str,
+    api_key_header: str = "x-api-key",
     fetch_download_url: DownloadUrlFetcher | None = None,
 ) -> TorrentCandidate | None:
     if not has_deferred_download_url(candidate):
@@ -358,7 +364,10 @@ async def resolve_deferred_download_url(
     if not torrent_id:
         return None
 
-    fetch = fetch_download_url or MTeamApiClient(api_key=api_key).fetch_download_url
+    fetch = (
+        fetch_download_url
+        or MTeamApiClient(api_key=api_key, api_key_header=api_key_header).fetch_download_url
+    )
     download_url = await fetch(torrent_id)
     if not download_url:
         return None

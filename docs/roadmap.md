@@ -82,6 +82,15 @@ This file tracks the current project status at a level that is easy for both hum
 - documented release version policy: code fixes and operational fixes bump patch
   by `0.0.1`; new features bump minor by `0.1.0`
 
+### Web Settings UI
+
+- Tracker-first settings UI design
+- local `seed-agent web` command for configuration editing
+- tracker containers with type-first creation, contextual auth fields, local
+  status, validation, site probe, and dry-run preview
+- config-vs-secret boundary preserved: YAML stores refs, local secret files store
+  token values
+
 ## In Progress
 
 - Codex project initialization and harness-oriented AI docs
