@@ -82,32 +82,19 @@ This file tracks the current project status at a level that is easy for both hum
 - documented release version policy: code fixes and operational fixes bump patch
   by `0.0.1`; new features bump minor by `0.1.0`
 
-### Web Settings UI
-
-- Tracker-first settings UI design
-- local `seed-agent web` command for configuration editing
-- tracker containers with type-first creation, contextual auth fields, local
-  status, validation, site probe, and dry-run preview
-- config-vs-secret boundary preserved: YAML stores refs, local secret files store
-  token values
-
 ## In Progress
 
 - Codex project initialization and harness-oriented AI docs
 
+### Web Settings UI
+
+- local `seed-agent web` command for configuration editing
+- tracker-first settings UI design and implementation are in place, but the
+  surface is still WIP rather than a finished operations UI
+- remaining work includes broader settings coverage, stronger UX polish, and a
+  clearer split from the future read-only dashboard/API surface
+
 ## Next
-
-### Project Credibility And Collaboration
-
-- add a repository `LICENSE`
-- add a pull-request CI gate beyond Docker image publishing
-- add a README support matrix for supported sites, downloaders, source adapters,
-  and deployment modes
-- add a concise README roadmap summary for public orientation
-- add a Docker smoke test that uses example config plus mocked site/downloader
-  behavior
-- clarify source adapter status so implemented, skeleton, and planned sources
-  are visibly distinct
 
 ### qBittorrent Live-State-Grounded Strategy
 

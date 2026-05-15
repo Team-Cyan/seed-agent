@@ -9,7 +9,7 @@ config files and local secret files.
 Current image:
 
 - `ghcr.io/team-cyan/seed-agent:latest`
-- versioned releases use tags such as `ghcr.io/team-cyan/seed-agent:0.1.3`
+- versioned releases use tags such as `ghcr.io/team-cyan/seed-agent:0.2.0`
 
 The primary operator experience is:
 
@@ -42,6 +42,42 @@ Today `seed-agent` focuses on two loops:
 
 The default deployment shape for self-hosted use is a Docker container running
 `schedule-run`.
+
+## Current Support Matrix
+
+| Area | Status | Notes |
+| --- | --- | --- |
+| Docker deployment | Supported | Compose, Unraid template, Kubernetes CronJob example, heartbeat, and healthcheck are present. |
+| qBittorrent downloader | Supported | The only implemented downloader; category policy is the cleanup authority boundary. |
+| Transmission downloader | Planned | Candidate for the first second-downloader adapter. |
+| NexusPHP-style RSS | Supported | RSS remains useful for fallback flows and non-M-Team sites. |
+| M-Team RSS | Supported | Available as fallback and compatibility path. |
+| M-Team API discovery | Supported | Preferred authenticated path when `api_key_ref` is configured. |
+| Resource intent loop | Supported | Local intent add, inbox ingestion, search, ranking, confirmation, and enqueue are implemented. |
+| Web Settings UI | WIP | Local configuration UI exists, but it is not a full operations dashboard yet. |
+| Read-only dashboard/API | Planned | Future observability surface for state, audit, pool usage, cleanup decisions, and intent queues. |
+
+## Roadmap Snapshot
+
+The immediate credibility pass is in place: license clarity, pull-request CI,
+Docker smoke testing, README visibility, and clear source-adapter status. The
+next product work stays grounded in qB live state, conservative enqueue/prune
+decisions, and better reporting before wider dashboard or multi-downloader
+expansion.
+
+Medium-term work should validate extensibility with Transmission and a second
+non-M-Team API provider, then turn tracker/account signals, downloader telemetry,
+historical outcomes, and user confirmations into real scoring feedback.
+
+## Source Adapter Status
+
+| Source | Status | Current boundary |
+| --- | --- | --- |
+| file inbox | Wired | JSONL inbox ingestion is the supported local source path. |
+| Telegram | Parser skeleton | Parses Telegram update payloads; no bot loop or hosted receiver is shipped. |
+| WeChat bridge | Parser skeleton | Parses bridge payloads; no personal-account automation is shipped. |
+| Douban wanted | Local export reader | Reads local wanted-list export JSON. |
+| subscription | Planned | Config shape exists for future rules, but no subscription runner is shipped. |
 
 ## Quick Start
 
@@ -194,7 +230,7 @@ and template-driven rebuilds, the repository now includes a first-party Unraid
 template and a GitHub Actions workflow that publishes `ghcr.io/team-cyan/seed-agent`.
 
 On `main`, GHCR receives `latest`, `main`, and `sha-<short-sha>` tags. On
-release tags such as `v0.1.3`, GHCR also receives `v0.1.3`, `0.1.3`, and `0.1`.
+release tags such as `v0.2.0`, GHCR also receives `v0.2.0`, `0.2.0`, and `0.2`.
 
 The image is intentionally generic:
 
