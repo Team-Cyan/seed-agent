@@ -368,8 +368,16 @@ def test_schedule_run_executes_single_cycle_and_emits_schedule_metadata(
             "scored": 1,
             "accepted": 1,
             "enqueued": 1,
-            "scores": [],
-            "decisions": [],
+            "scores": [{"candidate_id": "large-detail"}],
+            "decisions": [{"action": "qb.enqueue"}],
+            "prune": {
+                "command": "prune",
+                "execute": execute,
+                "managed_count": 3,
+                "decisions": [{"action": "qb.cleanup.keep"}],
+                "preview": [{"candidate_evidence": {"title": "large-detail"}}],
+                "pool_usage": {"downloads": {"size_tib": 1.2}},
+            },
         }
 
     monkeypatch.setattr(cli, "_run_once_payload", fake_run_once_payload)
@@ -401,6 +409,18 @@ def test_schedule_run_executes_single_cycle_and_emits_schedule_metadata(
     assert payload["min_free_window_minutes"] == 180
     assert payload["require_known_free_window"] is True
     assert payload["heartbeat_file"] == str(heartbeat_path)
+    assert payload["scores_count"] == 1
+    assert payload["decisions_count"] == 1
+    assert "scores" not in payload
+    assert "decisions" not in payload
+    assert payload["prune"] == {
+        "command": "prune",
+        "execute": True,
+        "managed_count": 3,
+        "decisions_count": 1,
+        "preview_count": 1,
+        "pool_usage": {"downloads": {"size_tib": 1.2}},
+    }
     assert seen == [(config_path, True, 180, True)]
     assert startup_heartbeats == [
         {

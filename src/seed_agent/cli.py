@@ -688,7 +688,7 @@ def schedule_run(
                 payload=payload,
             )
             payload["heartbeat_file"] = str(heartbeat_file)
-        _print_json(payload)
+        _print_json(_schedule_log_summary(payload))
 
         if "error" in payload:
             raise typer.Exit(code=1)
@@ -1078,6 +1078,43 @@ def _print_json(payload: dict[str, Any]) -> None:
 def _print_error_payload(payload: dict[str, Any]) -> int:
     _print_json(payload)
     return 1
+
+
+def _schedule_log_summary(payload: dict[str, Any]) -> dict[str, Any]:
+    summary_keys = [
+        "command",
+        "config",
+        "execute",
+        "cycle",
+        "interval_minutes",
+        "scheduled_at",
+        "min_free_window_minutes",
+        "require_known_free_window",
+        "prune_enabled",
+        "heartbeat_file",
+        "discovered",
+        "scored",
+        "accepted",
+        "enqueued",
+        "enqueue_paused_by_pool_policy",
+        "default_pool_usage",
+        "runtime_activity",
+        "error",
+    ]
+    summary = {key: payload[key] for key in summary_keys if key in payload}
+    summary["scores_count"] = len(payload.get("scores") or [])
+    summary["decisions_count"] = len(payload.get("decisions") or [])
+    prune_payload = payload.get("prune")
+    if isinstance(prune_payload, dict):
+        summary["prune"] = {
+            "command": prune_payload.get("command"),
+            "execute": prune_payload.get("execute"),
+            "managed_count": prune_payload.get("managed_count"),
+            "decisions_count": len(prune_payload.get("decisions") or []),
+            "preview_count": len(prune_payload.get("preview") or []),
+            "pool_usage": prune_payload.get("pool_usage"),
+        }
+    return summary
 
 
 def _candidate_summary(candidate: TorrentCandidate) -> dict[str, Any]:

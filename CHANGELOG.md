@@ -4,6 +4,14 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.2.2 - 2026-05-15
+
+### Fixed
+
+- `schedule-run` now writes compact per-cycle summaries to stdout so Unraid's
+  Docker log viewer can stay responsive while detailed decisions remain in
+  audit/state files.
+
 ## 0.2.1 - 2026-05-15
 
 ### Added
