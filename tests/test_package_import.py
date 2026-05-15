@@ -5,7 +5,7 @@ from seed_agent import __version__
 
 
 def test_package_imports() -> None:
-    assert __version__ == "0.1.6"
+    assert __version__ == "0.2.0"
 
 
 def test_release_version_sources_match() -> None:
