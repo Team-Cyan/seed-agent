@@ -294,6 +294,17 @@ def test_schedule_run_help_includes_interval_and_free_window_flags() -> None:
     assert "heartbeat-file" in result.output
 
 
+def test_web_help_includes_local_server_options() -> None:
+    from seed_agent.cli import app
+
+    result = CliRunner().invoke(app, ["web", "--help"])
+
+    assert result.exit_code == 0
+    assert "--config" in result.output
+    assert "--host" in result.output
+    assert "--port" in result.output
+
+
 def test_discover_command_prints_safe_output_without_raw_download_url(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

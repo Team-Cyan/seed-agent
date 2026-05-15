@@ -12,6 +12,7 @@ sites:
   #   rss_url: https://rss.m-team.cc/api/rss/fetch?dl=1&pageSize=10&sign=secret
   #   # Secret reference only. The token value itself stays in local/secrets/mt.api-key.
   #   api_key_ref: local/secrets/mt.api-key
+  #   auth_header: x-api-key
   #   discovery_mode: api
   #   # Versioned strategy config. Keep this block in config, not in secrets.
   #   api_discovery:

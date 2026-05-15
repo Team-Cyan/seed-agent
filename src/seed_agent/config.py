@@ -135,6 +135,7 @@ class SiteConfig(BaseModel):
     rss_url: str
     cookie_ref: str | None = None
     api_key_ref: str | None = None
+    auth_header: str = "x-api-key"
     discovery_mode: Literal["rss", "api"] = "rss"
     api_discovery: MTeamApiDiscoveryConfig | None = None
 

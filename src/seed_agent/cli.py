@@ -77,6 +77,18 @@ def discover(
     _print_json(payload)
 
 
+@app.command()
+def web(
+    config: Annotated[Path, typer.Option("--config")] = DEFAULT_CONFIG,
+    host: Annotated[str, typer.Option("--host")] = "127.0.0.1",
+    port: Annotated[int, typer.Option("--port")] = 8765,
+) -> None:
+    from seed_agent.web.app import serve
+
+    typer.echo(f"Serving seed-agent settings UI at http://{host}:{port}")
+    serve(config, host, port)
+
+
 @app.command(name="site-probe")
 def site_probe(
     config: Annotated[Path, typer.Option("--config")] = DEFAULT_CONFIG,

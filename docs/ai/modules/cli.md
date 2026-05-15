@@ -18,6 +18,7 @@ Expose the operator-facing command surface and safe summaries.
 - safe JSON summaries,
 - site probe diagnostics,
 - unattended `schedule-run` orchestration for server-side polling,
+- local `web` settings UI server for safe configuration editing,
 - free-window safety previewing for freeleech-sensitive workflows,
 - optional per-cycle cleanup through `run-once --prune` and `schedule-run --prune`,
 - stronger prune previews that include live torrent identity, linked candidate
@@ -48,6 +49,8 @@ Expose the operator-facing command surface and safe summaries.
   expiries can be evaluated against the next scheduled check,
 - keep long-running deployment liveness inspectable through structured
   heartbeat output instead of opaque shell wrappers.
+- keep web UI actions safe by default: tracker-local validation, site probe,
+  and dry-run preview must not execute enqueue or cleanup mutations.
 
 ## Verification
 
@@ -55,3 +58,4 @@ Expose the operator-facing command surface and safe summaries.
 - `uv run seed-agent --help`
 - `uv run seed-agent schedule-run --help`
 - `uv run seed-agent healthcheck --help`
+- `uv run seed-agent web --help`

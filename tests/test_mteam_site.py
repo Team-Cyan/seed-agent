@@ -133,6 +133,21 @@ async def test_mteam_api_client_discovers_free_candidates_with_sorting() -> None
 
 @pytest.mark.asyncio
 @respx.mock
+async def test_mteam_api_client_uses_custom_api_key_header() -> None:
+    search_route = respx.post("https://api.m-team.cc/api/torrent/search").mock(
+        return_value=httpx.Response(200, json={"code": "0", "data": {"data": []}})
+    )
+
+    client = MTeamApiClient(api_key="secret-api-key", api_key_header="x-custom-key")
+    await client.discover_torrents(site="mt", options=MTeamApiDiscoveryOptions())
+
+    request = search_route.calls[0].request
+    assert request.headers["x-custom-key"] == "secret-api-key"
+    assert "x-api-key" not in request.headers
+
+
+@pytest.mark.asyncio
+@respx.mock
 async def test_mteam_api_zero_max_seeders_does_not_block_popular_torrents() -> None:
     respx.post("https://api.m-team.cc/api/torrent/search").mock(
         return_value=httpx.Response(
