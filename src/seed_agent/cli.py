@@ -533,7 +533,11 @@ def review(
         "pool_usage": _pool_usage_summary(loaded, torrents),
         "runtime_activity": _runtime_activity_summary(torrents),
         "managed_torrents": [
-            _managed_torrent_summary(torrent, policy_lookup.get(torrent.category or ""))
+            _managed_torrent_summary(
+                torrent,
+                policy_lookup.get(torrent.category or ""),
+                store=store,
+            )
             for torrent in torrents
         ],
     }
@@ -556,9 +560,10 @@ def daily_report_command(
     config: Annotated[Path, typer.Option("--config")] = DEFAULT_CONFIG,
 ) -> None:
     loaded = load_config(config)
+    store = StateStore(_state_path(loaded))
     candidates = _discover_candidates(loaded)
     scored = score_candidates(candidates, loaded.discovery, loaded.scoring)
-    managed_torrents = _managed_torrents_for_report(loaded)
+    managed_torrents = _managed_torrents_for_report(loaded, store=store)
     policy_lookup = _policy_lookup(loaded)
     payload = {
         "command": "daily-report",
@@ -568,7 +573,11 @@ def daily_report_command(
         "runtime_activity": _runtime_activity_summary(managed_torrents),
         "managed_count": len(managed_torrents),
         "managed_torrents": [
-            _managed_torrent_summary(torrent, policy_lookup.get(torrent.category or ""))
+            _managed_torrent_summary(
+                torrent,
+                policy_lookup.get(torrent.category or ""),
+                store=store,
+            )
             for torrent in managed_torrents
         ],
     }
@@ -778,6 +787,7 @@ def _run_once_payload(
             LifecycleState.DISCOVERED,
             score=None,
             torrent_hash=None,
+            **_candidate_snapshot_kwargs(candidate),
         )
 
     scored = score_candidates(candidates, loaded.discovery, loaded.scoring)
@@ -797,6 +807,7 @@ def _run_once_payload(
             LifecycleState.SCORED,
             score=item.score,
             torrent_hash=None,
+            **_candidate_snapshot_kwargs(item.candidate, score_reasons=list(item.reasons)),
         )
     scored, skipped_existing = _filter_existing_enqueue_candidates(store, scored)
     stale_candidates_pruned = store.prune_stale_candidates(
@@ -1098,6 +1109,21 @@ def _score_summary(item: ScoreBreakdown) -> dict[str, Any]:
     return summary
 
 
+def _candidate_snapshot_kwargs(
+    candidate: TorrentCandidate,
+    *,
+    score_reasons: list[str] | None = None,
+) -> dict[str, Any]:
+    return {
+        "size_bytes": candidate.size_bytes,
+        "seeders": candidate.seeders,
+        "leechers": candidate.leechers,
+        "discount": candidate.discount.value,
+        "left_time_minutes": candidate.left_time_minutes,
+        "score_reasons": score_reasons,
+    }
+
+
 def _decision_summary(item: Decision) -> dict[str, Any]:
     return redact_payload(item.model_dump(mode="json"))
 
@@ -1141,11 +1167,19 @@ def _ranked_release_summary(item: RankedRelease) -> dict[str, Any]:
 def _managed_torrent_summary(
     torrent: ManagedTorrent,
     policy: CategoryPolicyConfig | None = None,
+    *,
+    store: StateStore | None = None,
 ) -> dict[str, Any]:
     upspeed = int(torrent.metadata.get("upspeed_bps", 0) or 0)
     dlspeed = int(torrent.metadata.get("dlspeed_bps", 0) or 0)
     uploaded_session = int(torrent.metadata.get("uploaded_session_bytes", 0) or 0)
     amount_left = int(torrent.metadata.get("amount_left_bytes", 0) or 0)
+    ratio = (
+        torrent.uploaded_bytes / torrent.downloaded_bytes
+        if torrent.downloaded_bytes > 0
+        else None
+    )
+    no_upload_since_at = torrent.metadata.get("no_upload_since_at")
     summary = {
         "hash": torrent.hash,
         "name": torrent.name,
@@ -1155,7 +1189,11 @@ def _managed_torrent_summary(
         "size_gb": round(torrent.size_bytes / (1024**3), 2),
         "uploaded_gb": round(torrent.uploaded_bytes / (1024**3), 2),
         "downloaded_gb": round(torrent.downloaded_bytes / (1024**3), 2),
+        "ratio": round(ratio, 4) if ratio is not None else None,
         "added_at": torrent.added_at.isoformat(),
+        "completed_at": torrent.completed_at.isoformat()
+        if torrent.completed_at is not None
+        else None,
         "last_activity_at": torrent.last_activity_at.isoformat()
         if torrent.last_activity_at is not None
         else None,
@@ -1166,18 +1204,55 @@ def _managed_torrent_summary(
         "active_uploading": upspeed > 0,
         "active_downloading": dlspeed > 0,
     }
+    if isinstance(no_upload_since_at, datetime):
+        summary["no_upload_since_at"] = no_upload_since_at.isoformat()
+    elif no_upload_since_at is not None:
+        summary["no_upload_since_at"] = str(no_upload_since_at)
     if policy is not None:
         summary["policy_mode"] = policy.mode
         summary["budget_pool"] = policy.budget_pool
+    if store is not None:
+        evidence = _candidate_evidence_summary(store, torrent.hash)
+        if evidence is not None:
+            summary["candidate_evidence"] = evidence
     return summary
 
 
-def _managed_torrents_for_report(config: SeedAgentConfig) -> list[ManagedTorrent]:
+def _managed_torrents_for_report(
+    config: SeedAgentConfig,
+    *,
+    store: StateStore | None = None,
+) -> list[ManagedTorrent]:
     downloader = _maybe_build_downloader(config)
     if downloader is None:
         return []
     torrents = _load_policy_torrents(downloader, config)
-    return StateStore(_state_path(config)).apply_torrent_runtime(torrents)
+    return (store or StateStore(_state_path(config))).apply_torrent_runtime(torrents)
+
+
+def _candidate_evidence_summary(store: StateStore, torrent_hash: str) -> dict[str, Any] | None:
+    rows = store.list_by_torrent_hash(torrent_hash)
+    if not rows:
+        return None
+    row = rows[-1]
+    return {
+        "candidate_id": row["stable_id"],
+        "candidate_state": row["state"],
+        "site": row["site"],
+        "title": row["title"],
+        "score": row["score"],
+        "size_gb": round(row["size_bytes"] / 1024**3, 2)
+        if row.get("size_bytes") is not None
+        else None,
+        "seeders": row.get("seeders"),
+        "leechers": row.get("leechers"),
+        "discount": row.get("discount"),
+        "left_time_minutes": row.get("left_time_minutes"),
+        "free_window_expires_at": row.get("free_window_expires_at"),
+        "score_reasons": row.get("score_reasons") or [],
+        "first_seen_at": row.get("first_seen_at"),
+        "updated_at": row.get("updated_at"),
+    }
 
 
 def _policy_lookup(config: SeedAgentConfig) -> dict[str, CategoryPolicyConfig]:
@@ -1442,6 +1517,7 @@ def _persist_live_torrent_candidates(
             state=_lifecycle_state_from_torrent(torrent),
             score=None,
             torrent_hash=torrent.hash,
+            size_bytes=torrent.size_bytes,
         )
 
 
@@ -1476,6 +1552,7 @@ def _prune_preview(
             "delete_files_on_delete": True,
         }
         if torrent is not None:
+            evidence_summary = _managed_torrent_summary(torrent, store=store)
             item.update(
                 {
                     "name": torrent.name,
@@ -1484,10 +1561,19 @@ def _prune_preview(
                     "size_gb": round(torrent.size_bytes / 1024**3, 2),
                     "uploaded_gb": round(torrent.uploaded_bytes / 1024**3, 2),
                     "downloaded_gb": round(torrent.downloaded_bytes / 1024**3, 2),
+                    "ratio": evidence_summary.get("ratio"),
+                    "completed_at": evidence_summary.get("completed_at"),
+                    "amount_left_gb": evidence_summary.get("amount_left_gb"),
+                    "upspeed_mib_s": evidence_summary.get("upspeed_mib_s"),
+                    "dlspeed_mib_s": evidence_summary.get("dlspeed_mib_s"),
+                    "uploaded_session_gb": evidence_summary.get("uploaded_session_gb"),
+                    "no_upload_since_at": evidence_summary.get("no_upload_since_at"),
                     "free_window_expires_at": torrent.metadata.get("free_window_expires_at"),
                     "recent_upload_gb": torrent.metadata.get("recent_upload_gb"),
                 }
             )
+            if "candidate_evidence" in evidence_summary:
+                item["candidate_evidence"] = evidence_summary["candidate_evidence"]
         preview.append(item)
     return preview
 
@@ -1651,6 +1737,10 @@ def _persist_enqueue_state(
             score=scored_item.score,
             torrent_hash=str(torrent_hash) if torrent_hash is not None else None,
             free_window_expires_at=_candidate_free_window_expires_at(scored_item.candidate),
+            **_candidate_snapshot_kwargs(
+                scored_item.candidate,
+                score_reasons=list(scored_item.reasons),
+            ),
         )
 
 

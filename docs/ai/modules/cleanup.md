@@ -23,6 +23,8 @@ Decide when managed torrents should be paused or deleted under the balanced safe
   incomplete downloads that consumed space but never uploaded,
 - observe completed active seeds with no recent upload for
   `cleanup.delete_after_no_upload_hours` before deleting them,
+- keep currently uploading managed torrents even if a stale no-upload marker is
+  present,
 - require pause-before-delete timing,
 - keep policy reasoning auditable.
 - distinguish automated lifecycle cleanup from explicit operator cleanup. When
@@ -40,6 +42,9 @@ Decide when managed torrents should be paused or deleted under the balanced safe
   action counts, total size/downloaded/left for deletes, state distribution, and
   a sample of names/reasons. Do not execute a broad cleanup from counts alone if
   the category boundary or delete-with-files behavior is unclear.
+- Prune previews should include joined candidate evidence and qB runtime fields:
+  score reasons, seeders/leechers/free window, ratio, completion time, amount
+  left, recent upload, and no-upload observation state.
 
 ## Verification
 

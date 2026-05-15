@@ -45,6 +45,13 @@ This file tracks the current project status at a level that is easy for both hum
 - zero-total-upload managed torrents are observed from qB `added_at` and can be
   pruned after the configured no-upload window, including incomplete downloads
   that consumed space but never uploaded
+- candidate state now preserves enqueue-time evidence such as size,
+  seeders/leechers, discount, left time, and score reasons
+- `review`, `daily-report`, and prune previews join enqueue-time evidence with
+  later qB runtime outcomes such as ratio, completion time, amount left,
+  recent upload, and no-upload observation state
+- cleanup keeps currently uploading managed torrents instead of allowing stale
+  no-upload markers to drive delete decisions
 
 ### Resource Intent Loop
 
@@ -98,15 +105,9 @@ This file tracks the current project status at a level that is easy for both hum
 
 ### qBittorrent Live-State-Grounded Strategy
 
-- ingest richer qB runtime state for better ROI decisions
-- improve visibility into active upload/download conditions before enqueue
-- use richer live qB state to distinguish saturated seedbox keepers from torrents
-  that are merely old or large
-- convert live-state visibility into conservative enqueue and prune protections
-  only after the runtime summaries have proven useful
 - refine eviction ranking with tracker-side demand signals when available
-- improve operator reports that join enqueue-time seed/leecher/free-window
-  signals with later upload ratio, completion time, and cleanup outcome
+- use the new joined evidence reports to tune cleanup thresholds against real
+  upload outcomes before adding more automation
 
 ### Scheduler And Server Deployments
 
@@ -131,6 +132,8 @@ Reference:
 - richer reporting and feedback-loop scoring that turns tracker/account signals,
   downloader telemetry, historical outcomes, and user confirmations into real
   `site_history_score` inputs
+- live-state enqueue headroom planning v2, after joined evidence proves which
+  qB runtime signals reliably predict good enqueue outcomes
 - stronger source integrations beyond local skeletons
 
 ## Deferred Or Intentionally Not In Scope

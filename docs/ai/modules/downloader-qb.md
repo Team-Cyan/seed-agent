@@ -17,6 +17,8 @@ Own qBittorrent integration for enqueue, review, and cleanup-safe downloader act
 - inspect managed torrents,
 - expose live runtime signals such as current upload/download speeds and
   remaining download volume,
+- expose joined operator evidence that links enqueue-time candidate signals with
+  later qB runtime outcomes in `review`, `daily-report`, and prune previews,
 - keep enqueue-like CLI commands aligned on the same qB runtime view during
   dry-run and execute flows,
 - support pause/delete flows through explicit decisions.
@@ -27,6 +29,9 @@ Own qBittorrent integration for enqueue, review, and cleanup-safe downloader act
 - never widen destructive behavior casually,
 - keep managed/unmanaged boundaries explicit,
 - make live qB state visible before turning it into automated gating,
+- keep live-state enqueue headroom planning behind evidence from joined reports;
+  do not skip straight from raw qB speed/amount-left fields to aggressive
+  automation,
 - avoid leaking downloader credentials in output.
 - for bulk cleanup, scope by qB category first and only then by age, size,
   state, or score; never use tags alone as a delete boundary,

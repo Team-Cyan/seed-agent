@@ -4,6 +4,20 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.2.1 - 2026-05-15
+
+### Added
+
+- Candidate state now preserves enqueue-time evidence, including size, demand,
+  discount, free-window, and scoring reasons.
+- Review, daily-report, and prune-preview output now join candidate evidence with
+  qB runtime outcomes for operator tuning.
+
+### Fixed
+
+- Cleanup keeps currently uploading managed torrents even when an older
+  no-upload marker exists.
+
 ## 0.2.0 - 2026-05-15
 
 ### Added

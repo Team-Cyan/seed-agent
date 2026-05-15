@@ -139,6 +139,114 @@ def test_state_store_lists_and_updates_candidates_by_torrent_hash(tmp_path: Path
     assert row["state"] == LifecycleState.PAUSED.value
 
 
+def test_state_store_persists_candidate_snapshot_fields(tmp_path: Path) -> None:
+    store = StateStore(tmp_path / "state.sqlite3")
+
+    store.upsert_candidate(
+        stable_id="demo:snapshot",
+        title="Snapshot Torrent",
+        site="demo",
+        state=LifecycleState.SCORED,
+        score=88,
+        torrent_hash="hash123",
+        size_bytes=12 * 1024**3,
+        seeders=42,
+        leechers=9,
+        discount="free",
+        left_time_minutes=180,
+        score_reasons=["discount 30.0", "leechers 25.0"],
+    )
+
+    row = store.get_candidate("demo:snapshot")
+
+    assert row is not None
+    assert row["size_bytes"] == 12 * 1024**3
+    assert row["seeders"] == 42
+    assert row["leechers"] == 9
+    assert row["discount"] == "free"
+    assert row["left_time_minutes"] == 180
+    assert row["score_reasons"] == ["discount 30.0", "leechers 25.0"]
+    linked = store.list_by_torrent_hash("hash123")
+    assert linked[0]["score_reasons"] == ["discount 30.0", "leechers 25.0"]
+
+
+def test_state_store_preserves_candidate_snapshot_when_unset(tmp_path: Path) -> None:
+    store = StateStore(tmp_path / "state.sqlite3")
+
+    store.upsert_candidate(
+        stable_id="demo:snapshot",
+        title="Snapshot Torrent",
+        site="demo",
+        state=LifecycleState.SCORED,
+        score=88,
+        torrent_hash=None,
+        size_bytes=12,
+        seeders=4,
+        leechers=2,
+        discount="free",
+        left_time_minutes=100,
+        score_reasons=["initial"],
+    )
+    store.upsert_candidate(
+        stable_id="demo:snapshot",
+        title="Snapshot Torrent",
+        site="demo",
+        state=LifecycleState.ENQUEUED,
+        score=88,
+        torrent_hash="hash123",
+    )
+
+    row = store.get_candidate("demo:snapshot")
+
+    assert row is not None
+    assert row["size_bytes"] == 12
+    assert row["seeders"] == 4
+    assert row["leechers"] == 2
+    assert row["discount"] == "free"
+    assert row["left_time_minutes"] == 100
+    assert row["score_reasons"] == ["initial"]
+
+
+def test_state_store_migrates_candidate_snapshot_columns(tmp_path: Path) -> None:
+    path = tmp_path / "state.sqlite3"
+    store = StateStore(path)
+    with store._connect() as conn:  # type: ignore[attr-defined]
+        conn.execute("DROP TABLE candidates")
+        conn.execute(
+            """
+            CREATE TABLE candidates (
+              stable_id TEXT PRIMARY KEY,
+              site TEXT NOT NULL,
+              title TEXT NOT NULL,
+              state TEXT NOT NULL,
+              score INTEGER,
+              torrent_hash TEXT,
+              free_window_expires_at TEXT,
+              first_seen_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL
+            )
+            """
+        )
+
+    migrated = StateStore(path)
+    migrated.upsert_candidate(
+        stable_id="demo:migrated",
+        title="Migrated Torrent",
+        site="demo",
+        state=LifecycleState.SCORED,
+        score=70,
+        torrent_hash=None,
+        seeders=7,
+        score_reasons=["migrated"],
+    )
+
+    row = migrated.get_candidate("demo:migrated")
+
+    assert row is not None
+    assert row["seeders"] == 7
+    assert row["score_reasons"] == ["migrated"]
+
+
 def test_state_store_prunes_stale_unqueued_candidates_only(tmp_path: Path) -> None:
     store = StateStore(tmp_path / "state.sqlite3")
     old = datetime.now(UTC) - timedelta(days=45)

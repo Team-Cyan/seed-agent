@@ -54,6 +54,13 @@ def classify_cleanup(
     if free_window_decision is not None:
         return free_window_decision
 
+    if _is_currently_uploading(metadata):
+        return CleanupDecision(
+            action="keep",
+            reason=_reason("currently uploading; retain managed torrent"),
+            managed=True,
+        )
+
     no_upload_decision = _no_upload_observation_decision(torrent, cleanup, metadata)
     if no_upload_decision is not None:
         return no_upload_decision
@@ -287,6 +294,16 @@ def _recent_upload_gb(metadata: dict[str, object]) -> float | None:
         if isinstance(raw_value, (int, float)):
             return float(raw_value)
     return None
+
+
+def _is_currently_uploading(metadata: dict[str, object]) -> bool:
+    value = metadata.get("upspeed_bps")
+    if value is None:
+        return False
+    try:
+        return int(value) > 0
+    except (TypeError, ValueError):
+        return False
 
 
 def _paused_at(metadata: dict[str, object]) -> datetime | None:

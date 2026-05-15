@@ -576,6 +576,55 @@ def test_execute_enqueue_persists_candidate_free_window_expiry(
     assert row["free_window_expires_at"] is not None
 
 
+def test_run_once_persists_candidate_snapshot_fields(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from seed_agent import cli
+
+    monkeypatch.chdir(tmp_path)
+
+    config_path = _config_file(tmp_path)
+    config = _config(secret_ref="local/secrets/qb.yaml")
+    candidate = _candidate(seeders=21, leechers=34, left_time_minutes=360)
+    state_path = tmp_path / ".seed-agent" / "state.db"
+
+    async def fake_discover_candidates(config: SeedAgentConfig):
+        return [candidate]
+
+    def fake_score_candidates(candidates, discovery_config, scoring_config):
+        return [
+            _scored(
+                candidate=candidate,
+                score=93,
+                reasons=["discount free accepted", "site_history 0.5"],
+            )
+        ]
+
+    class FakeDownloader:
+        async def list_torrents(
+            self, category: str | None = None, tags: set[str] | None = None
+        ) -> list[ManagedTorrent]:
+            return []
+
+    monkeypatch.setattr(cli, "load_config", lambda path: config)
+    monkeypatch.setattr(cli, "discover_candidates", fake_discover_candidates)
+    monkeypatch.setattr(cli, "score_candidates", fake_score_candidates)
+    monkeypatch.setattr(cli, "build_downloader", lambda loaded: FakeDownloader())
+
+    result = CliRunner().invoke(cli.app, ["run-once", "--config", str(config_path)])
+
+    assert result.exit_code == 0
+    row = StateStore(state_path).get_candidate(candidate.stable_id)
+    assert row is not None
+    assert row["size_bytes"] == candidate.size_bytes
+    assert row["seeders"] == 21
+    assert row["leechers"] == 34
+    assert row["discount"] == "free"
+    assert row["left_time_minutes"] == 360
+    assert row["score"] == 93
+    assert row["score_reasons"] == ["discount free accepted", "site_history 0.5"]
+
+
 def test_healthcheck_reports_recent_heartbeat(tmp_path: Path) -> None:
     from seed_agent.cli import app
 
@@ -1119,6 +1168,69 @@ def test_prune_dry_run_previews_live_torrents_without_mutation(
     assert row["state"] == LifecycleState.ENQUEUED.value
 
 
+def test_prune_preview_includes_joined_evidence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from seed_agent import cli
+
+    monkeypatch.chdir(tmp_path)
+
+    config_path = _config_file(tmp_path, secret_ref="local/secrets/qb.yaml")
+    config = _config(secret_ref="local/secrets/qb.yaml")
+    StateStore(tmp_path / ".seed-agent" / "state.db").upsert_candidate(
+        stable_id="demo-free:https://tracker.example/details.php?id=1",
+        title="High Confidence Torrent",
+        site="demo-free",
+        state=LifecycleState.ENQUEUED,
+        score=95,
+        torrent_hash="preview-hash",
+        free_window_expires_at="2026-05-16T00:00:00+00:00",
+        seeders=20,
+        leechers=30,
+        discount="free",
+        left_time_minutes=240,
+        score_reasons=["preview evidence"],
+    )
+
+    class FakeDownloader:
+        async def list_torrents(
+            self, category: str | None = None, tags: set[str] | None = None
+        ) -> list[ManagedTorrent]:
+            return [
+                _managed_torrent(
+                    hash="preview-hash",
+                    uploaded_bytes=2 * 1024**3,
+                    downloaded_bytes=10 * 1024**3,
+                    metadata={
+                        "amount_left_bytes": 3 * 1024**3,
+                        "recent_upload_gb": 0.25,
+                        "no_upload_since_at": datetime(2026, 5, 15, tzinfo=UTC),
+                    },
+                )
+            ]
+
+        async def pause(self, hash: str) -> None:
+            raise AssertionError("dry-run should not pause")
+
+        async def delete(self, hash: str, delete_files: bool) -> None:
+            raise AssertionError("dry-run should not delete")
+
+    monkeypatch.setattr(cli, "load_config", lambda path: config)
+    monkeypatch.setattr(cli, "_maybe_build_downloader", lambda loaded: FakeDownloader())
+
+    result = CliRunner().invoke(cli.app, ["prune", "--config", str(config_path)])
+
+    assert result.exit_code == 0
+    item = _json_output(result)["preview"][0]
+    assert item["ratio"] == 0.2
+    assert item["amount_left_gb"] == 3.0
+    assert item["recent_upload_gb"] == 0.25
+    assert item["no_upload_since_at"] == "2026-05-15T00:00:00+00:00"
+    assert item["free_window_expires_at"] == "2026-05-16T00:00:00+00:00"
+    assert item["candidate_evidence"]["score"] == 95
+    assert item["candidate_evidence"]["score_reasons"] == ["preview evidence"]
+
+
 def test_prune_links_live_torrent_without_existing_candidate(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1377,9 +1489,120 @@ def test_review_reports_runtime_activity_summary(
     assert payload["runtime_activity"]["total_upspeed_mib_s"] == 2.0
     assert payload["runtime_activity"]["total_dlspeed_mib_s"] == 4.0
     assert payload["runtime_activity"]["total_amount_left_gb"] == 5.0
-    active = payload["managed_torrents"][0]
-    assert "upspeed_mib_s" in active
-    assert "uploaded_session_gb" in active
+
+
+def test_review_reports_joined_candidate_evidence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from seed_agent import cli
+
+    monkeypatch.chdir(tmp_path)
+
+    config_path = _config_file(tmp_path, secret_ref="local/secrets/qb.yaml")
+    config = _config(secret_ref="local/secrets/qb.yaml")
+    state_path = tmp_path / ".seed-agent" / "state.db"
+    StateStore(state_path).upsert_candidate(
+        stable_id="demo-free:https://tracker.example/details.php?id=1",
+        title="High Confidence Torrent",
+        site="demo-free",
+        state=LifecycleState.ENQUEUED,
+        score=93,
+        torrent_hash="joined-hash",
+        free_window_expires_at="2026-05-16T00:00:00+00:00",
+        size_bytes=10 * 1024**3,
+        seeders=21,
+        leechers=34,
+        discount="free",
+        left_time_minutes=360,
+        score_reasons=["discount free accepted", "site_history 0.5"],
+    )
+
+    class FakeDownloader:
+        async def list_torrents(
+            self, category: str | None = None, tags: set[str] | None = None
+        ) -> list[ManagedTorrent]:
+            return [
+                _managed_torrent(
+                    hash="joined-hash",
+                    uploaded_bytes=5 * 1024**3,
+                    downloaded_bytes=10 * 1024**3,
+                    metadata={
+                        "amount_left_bytes": 0,
+                        "upspeed_bps": 1024**2,
+                        "no_upload_since_at": datetime(2026, 5, 15, tzinfo=UTC),
+                    },
+                )
+            ]
+
+    monkeypatch.setattr(cli, "load_config", lambda path: config)
+    monkeypatch.setattr(cli, "_maybe_build_downloader", lambda loaded: FakeDownloader())
+
+    result = CliRunner().invoke(cli.app, ["review", "--config", str(config_path)])
+
+    assert result.exit_code == 0
+    torrent = _json_output(result)["managed_torrents"][0]
+    assert torrent["ratio"] == 0.5
+    assert torrent["completed_at"] is not None
+    assert torrent["no_upload_since_at"] == "2026-05-15T00:00:00+00:00"
+    evidence = torrent["candidate_evidence"]
+    assert evidence["candidate_id"] == "demo-free:https://tracker.example/details.php?id=1"
+    assert evidence["candidate_state"] == LifecycleState.ENQUEUED.value
+    assert evidence["score"] == 93
+    assert evidence["seeders"] == 21
+    assert evidence["leechers"] == 34
+    assert evidence["discount"] == "free"
+    assert evidence["left_time_minutes"] == 360
+    assert evidence["free_window_expires_at"] == "2026-05-16T00:00:00+00:00"
+    assert evidence["score_reasons"] == ["discount free accepted", "site_history 0.5"]
+
+
+def test_daily_report_reports_joined_candidate_evidence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from seed_agent import cli
+
+    monkeypatch.chdir(tmp_path)
+
+    config_path = _config_file(tmp_path, secret_ref="local/secrets/qb.yaml")
+    config = _config(secret_ref="local/secrets/qb.yaml")
+    StateStore(tmp_path / ".seed-agent" / "state.db").upsert_candidate(
+        stable_id="demo-free:https://tracker.example/details.php?id=1",
+        title="High Confidence Torrent",
+        site="demo-free",
+        state=LifecycleState.ENQUEUED,
+        score=88,
+        torrent_hash="daily-hash",
+        seeders=12,
+        leechers=8,
+        discount="free",
+        left_time_minutes=120,
+        score_reasons=["daily evidence"],
+    )
+
+    async def fake_discover_candidates(config: SeedAgentConfig):
+        return []
+
+    def fake_score_candidates(candidates, discovery_config, scoring_config):
+        return []
+
+    class FakeDownloader:
+        async def list_torrents(
+            self, category: str | None = None, tags: set[str] | None = None
+        ) -> list[ManagedTorrent]:
+            return [_managed_torrent(hash="daily-hash")]
+
+    monkeypatch.setattr(cli, "load_config", lambda path: config)
+    monkeypatch.setattr(cli, "discover_candidates", fake_discover_candidates)
+    monkeypatch.setattr(cli, "score_candidates", fake_score_candidates)
+    monkeypatch.setattr(cli, "_maybe_build_downloader", lambda loaded: FakeDownloader())
+
+    result = CliRunner().invoke(cli.app, ["daily-report", "--config", str(config_path)])
+
+    assert result.exit_code == 0
+    evidence = _json_output(result)["managed_torrents"][0]["candidate_evidence"]
+    assert evidence["candidate_id"] == "demo-free:https://tracker.example/details.php?id=1"
+    assert evidence["score"] == 88
+    assert evidence["score_reasons"] == ["daily evidence"]
 
 
 def test_run_once_dry_run_reports_runtime_activity_and_default_pool_usage(

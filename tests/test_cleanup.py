@@ -116,6 +116,29 @@ def test_cold_managed_torrent_with_meaningful_recent_upload_is_kept(
     assert "recent upload" in decision.reason.lower()
 
 
+def test_currently_uploading_torrent_is_kept_even_with_stale_no_upload_marker() -> None:
+    from seed_agent.policies.cleanup import classify_cleanup
+
+    decision = classify_cleanup(
+        _torrent(
+            state="uploading",
+            metadata={
+                "upspeed_bps": 1024,
+                "recent_upload_gb": 0,
+                "no_upload_since_at": (
+                    datetime.now(UTC) - timedelta(hours=12)
+                ).isoformat(),
+            },
+        ),
+        _cleanup(delete_after_no_upload_hours=2),
+        managed_category="pt-auto",
+        managed_tags={"seed-agent", "pt-auto"},
+    )
+
+    assert decision.action == "keep"
+    assert "currently uploading" in decision.reason
+
+
 def test_managed_torrent_pauses_when_free_window_cannot_survive_next_check() -> None:
     from seed_agent.policies.cleanup import classify_cleanup
 

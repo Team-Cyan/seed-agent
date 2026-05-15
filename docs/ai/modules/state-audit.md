@@ -17,6 +17,8 @@ Persist local lifecycle knowledge and durable decision evidence.
 - persist release candidates and enqueue metadata,
 - persist candidate `free_window_expires_at` for execute-mode enqueue when a
   finite free window is known,
+- persist enqueue-time candidate snapshots such as size, seeders/leechers,
+  discount, left time, and score reasons so later qB outcomes can be explained,
 - persist `9999-12-31T23:59:59+00:00` for API candidates whose FREE window is
   explicitly unlimited,
 - prune stale unqueued candidate rows after the configured retention window,
@@ -44,8 +46,8 @@ Persist local lifecycle knowledge and durable decision evidence.
   alone.
 - Preserve the bridge between enqueue-time candidate data and qB live runtime.
   The most useful optimization evidence is the joined view: original
-  seeders/leechers/free-window data plus current uploaded bytes, ratio,
-  completion time, amount left, state, and cleanup decision.
+  score reasons, seeders/leechers/free-window data plus current uploaded bytes,
+  ratio, completion time, amount left, state, and cleanup decision.
 - For total-zero-upload torrents, record the no-upload observation start from qB
   `added_at` rather than the first time the agent happened to refresh state.
   Otherwise old no-value torrents can survive another full observation window

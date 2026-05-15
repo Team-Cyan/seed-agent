@@ -46,17 +46,30 @@ class StateStore:
         torrent_hash: str | None,
         *,
         free_window_expires_at: str | None | object = _UNSET,
+        size_bytes: int | None | object = _UNSET,
+        seeders: int | None | object = _UNSET,
+        leechers: int | None | object = _UNSET,
+        discount: str | None | object = _UNSET,
+        left_time_minutes: int | None | object = _UNSET,
+        score_reasons: list[str] | None | object = _UNSET,
     ) -> None:
         current = self.get_candidate(stable_id)
         now = _utc_now()
         first_seen_at = current["first_seen_at"] if current is not None else now
-        free_window_value = (
-            current.get("free_window_expires_at")
-            if current is not None and free_window_expires_at is _UNSET
-            else free_window_expires_at
+        free_window_value = _preserved_value(
+            current,
+            "free_window_expires_at",
+            free_window_expires_at,
         )
-        if free_window_value is _UNSET:
-            free_window_value = None
+        size_value = _preserved_value(current, "size_bytes", size_bytes)
+        seeders_value = _preserved_value(current, "seeders", seeders)
+        leechers_value = _preserved_value(current, "leechers", leechers)
+        discount_value = _preserved_value(current, "discount", discount)
+        left_time_value = _preserved_value(current, "left_time_minutes", left_time_minutes)
+        score_reasons_value = _preserved_value(current, "score_reasons", score_reasons)
+        score_reasons_json = (
+            _json_dumps(score_reasons_value) if score_reasons_value is not None else None
+        )
         state_value, score_value, torrent_hash_value = _monotonic_values(
             current,
             state,
@@ -75,10 +88,16 @@ class StateStore:
                     score,
                     torrent_hash,
                     free_window_expires_at,
+                    size_bytes,
+                    seeders,
+                    leechers,
+                    discount,
+                    left_time_minutes,
+                    score_reasons,
                     first_seen_at,
                     updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(stable_id) DO UPDATE SET
                     site = excluded.site,
                     title = excluded.title,
@@ -86,6 +105,12 @@ class StateStore:
                     score = excluded.score,
                     torrent_hash = excluded.torrent_hash,
                     free_window_expires_at = excluded.free_window_expires_at,
+                    size_bytes = excluded.size_bytes,
+                    seeders = excluded.seeders,
+                    leechers = excluded.leechers,
+                    discount = excluded.discount,
+                    left_time_minutes = excluded.left_time_minutes,
+                    score_reasons = excluded.score_reasons,
                     updated_at = excluded.updated_at
                 """,
                 (
@@ -96,6 +121,12 @@ class StateStore:
                     score_value,
                     torrent_hash_value,
                     free_window_value,
+                    size_value,
+                    seeders_value,
+                    leechers_value,
+                    discount_value,
+                    left_time_value,
+                    score_reasons_json,
                     first_seen_at,
                     now,
                 ),
@@ -113,6 +144,12 @@ class StateStore:
                     score,
                     torrent_hash,
                     free_window_expires_at,
+                    size_bytes,
+                    seeders,
+                    leechers,
+                    discount,
+                    left_time_minutes,
+                    score_reasons,
                     first_seen_at,
                     updated_at
                 FROM candidates
@@ -120,7 +157,7 @@ class StateStore:
                 """,
                 (stable_id,),
             ).fetchone()
-        return dict(row) if row is not None else None
+        return _candidate_row(row)
 
     def list_by_state(self, state: LifecycleState) -> list[dict[str, Any]]:
         with self._connect(row_factory=sqlite3.Row) as conn:
@@ -134,6 +171,12 @@ class StateStore:
                     score,
                     torrent_hash,
                     free_window_expires_at,
+                    size_bytes,
+                    seeders,
+                    leechers,
+                    discount,
+                    left_time_minutes,
+                    score_reasons,
                     first_seen_at,
                     updated_at
                 FROM candidates
@@ -142,7 +185,7 @@ class StateStore:
                 """,
                 (state.value,),
             ).fetchall()
-        return [dict(row) for row in rows]
+        return [_candidate_row(row) for row in rows]
 
     def list_by_torrent_hash(self, torrent_hash: str) -> list[dict[str, Any]]:
         with self._connect(row_factory=sqlite3.Row) as conn:
@@ -156,6 +199,12 @@ class StateStore:
                     score,
                     torrent_hash,
                     free_window_expires_at,
+                    size_bytes,
+                    seeders,
+                    leechers,
+                    discount,
+                    left_time_minutes,
+                    score_reasons,
                     first_seen_at,
                     updated_at
                 FROM candidates
@@ -164,7 +213,7 @@ class StateStore:
                 """,
                 (torrent_hash,),
             ).fetchall()
-        return [dict(row) for row in rows]
+        return [_candidate_row(row) for row in rows]
 
     def update_by_torrent_hash(self, torrent_hash: str, state: LifecycleState) -> int:
         rows = self.list_by_torrent_hash(torrent_hash)
@@ -348,6 +397,12 @@ class StateStore:
                     score,
                     torrent_hash,
                     free_window_expires_at,
+                    size_bytes,
+                    seeders,
+                    leechers,
+                    discount,
+                    left_time_minutes,
+                    score_reasons,
                     first_seen_at,
                     updated_at
                 FROM candidates
@@ -358,7 +413,7 @@ class StateStore:
             ).fetchall()
         grouped: dict[str, list[dict[str, Any]]] = {}
         for row in rows:
-            grouped.setdefault(str(row["torrent_hash"]), []).append(dict(row))
+            grouped.setdefault(str(row["torrent_hash"]), []).append(_candidate_row(row))
         return grouped
 
     def _bulk_upsert_torrent_runtime(self, rows: list[tuple[object, ...]]) -> None:
@@ -640,6 +695,12 @@ class StateStore:
                   score INTEGER,
                   torrent_hash TEXT,
                   free_window_expires_at TEXT,
+                  size_bytes INTEGER,
+                  seeders INTEGER,
+                  leechers INTEGER,
+                  discount TEXT,
+                  left_time_minutes INTEGER,
+                  score_reasons TEXT,
                   first_seen_at TEXT NOT NULL,
                   updated_at TEXT NOT NULL
                 );
@@ -757,8 +818,19 @@ class StateStore:
 
     def _migrate_candidates(self, conn: sqlite3.Connection) -> None:
         columns = {row[1] for row in conn.execute("PRAGMA table_info(candidates)").fetchall()}
-        if "free_window_expires_at" not in columns:
-            conn.execute("ALTER TABLE candidates ADD COLUMN free_window_expires_at TEXT")
+        additions = {
+            "free_window_expires_at": "TEXT",
+            "size_bytes": "INTEGER",
+            "seeders": "INTEGER",
+            "leechers": "INTEGER",
+            "discount": "TEXT",
+            "left_time_minutes": "INTEGER",
+            "score_reasons": "TEXT",
+        }
+        for column, column_type in additions.items():
+            if column in columns:
+                continue
+            conn.execute(f"ALTER TABLE candidates ADD COLUMN {column} {column_type}")
 
     def _migrate_torrent_runtime(self, conn: sqlite3.Connection) -> None:
         columns = {row[1] for row in conn.execute("PRAGMA table_info(torrent_runtime)").fetchall()}
@@ -788,6 +860,40 @@ def _utc_now_datetime() -> datetime:
 
 def _json_dumps(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True)
+
+
+def _preserved_value(
+    current: dict[str, Any] | None,
+    key: str,
+    value: Any,
+) -> Any:
+    if value is _UNSET:
+        return current.get(key) if current is not None else None
+    return value
+
+
+def _candidate_row(row: sqlite3.Row | None) -> dict[str, Any] | None:
+    if row is None:
+        return None
+    data = dict(row)
+    data["score_reasons"] = _json_loads_list(data.get("score_reasons"))
+    return data
+
+
+def _json_loads_list(value: Any) -> list[str] | None:
+    if value is None:
+        return None
+    if isinstance(value, list):
+        return [str(item) for item in value]
+    if not isinstance(value, str):
+        return None
+    try:
+        loaded = json.loads(value)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(loaded, list):
+        return None
+    return [str(item) for item in loaded]
 
 
 def _parse_datetime(value: Any) -> datetime | None:
