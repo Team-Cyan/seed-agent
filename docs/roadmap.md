@@ -101,14 +101,18 @@ This file tracks the current project status at a level that is easy for both hum
   surface is still WIP rather than a finished operations UI
 - read-only status UI exists for state summary, configured budget pools, and
   scheduler heartbeat health
-- remaining work includes broader settings coverage, stronger UX polish, and a
-  clearer split from the future read-only dashboard surface
+- downloader, discovery, cleanup, and Phase 2 intent settings can be loaded
+  from YAML and saved through schema validation, while complex policy/source
+  structures remain intentionally conservative
+- remaining work includes stronger UX polish, richer source/search coverage, and
+  a clearer split from the future read-only dashboard surface
 
 ## Next
 
 ### Web Settings UI
 
-- broaden safe configuration coverage beyond tracker-first editing
+- add safe search/source integration editing without exposing secret values
+- add clearer before/after config diff preview before saving
 
 ### qBittorrent Live-State-Grounded Strategy
 

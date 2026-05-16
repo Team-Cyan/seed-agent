@@ -15,6 +15,11 @@ intent:
 
 `local/inbox/*` is gitignored because it can contain private watch preferences or chat-export text.
 
+The local `seed-agent web` UI can also edit the low-risk Phase 2 intent
+thresholds, default resolution, preferred languages, and inbox path. It writes
+the YAML section only after the full project config passes schema validation;
+source credentials still stay in `local/secrets/`.
+
 ## Local Inbox Shape
 
 The JSONL inbox accepts one JSON object per line. Supported text keys are `raw_text`, `text`, `message`, and `title`. Supported id keys are `source_event_id`, `event_id`, and `id`.

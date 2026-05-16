@@ -2,12 +2,21 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict
 
-from seed_agent.config import MTeamApiDiscoveryConfig, SiteConfig, load_config
+from seed_agent.config import MTeamApiDiscoveryConfig, SeedAgentConfig, SiteConfig, load_config
+
+CONFIG_SECTION_NAMES = {
+    "downloader",
+    "discovery",
+    "cleanup",
+    "intent",
+    "search",
+    "sources",
+}
 
 
 class TrackerDraft(BaseModel):
@@ -22,6 +31,37 @@ class TrackerDraft(BaseModel):
     api_key_value: str | None = None
     auth_header: str | None = None
     cookie_ref: str | None = None
+
+
+class ConfigSectionDraft(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    section: Literal["downloader", "discovery", "cleanup", "intent", "search", "sources"]
+    data: dict[str, Any]
+
+
+def config_sections_payload(config: SeedAgentConfig) -> dict[str, Any]:
+    return {
+        name: getattr(config, name).model_dump(mode="json")
+        for name in sorted(CONFIG_SECTION_NAMES)
+    }
+
+
+def save_config_section(config_path: Path, draft: ConfigSectionDraft) -> dict[str, Any]:
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+    if not isinstance(raw, dict):
+        raise ValueError("configuration root must be a mapping")
+    raw[draft.section] = draft.data
+    config = SeedAgentConfig.model_validate(raw)
+    raw[draft.section] = getattr(config, draft.section).model_dump(
+        mode="json",
+        exclude_none=True,
+    )
+    config_path.write_text(
+        yaml.safe_dump(raw, sort_keys=False, allow_unicode=True),
+        encoding="utf-8",
+    )
+    return raw[draft.section]
 
 
 def tracker_draft_to_config(draft: TrackerDraft) -> SiteConfig:

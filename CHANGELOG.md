@@ -12,6 +12,9 @@ All notable project changes are tracked here.
   API endpoints for local operator visibility without opening Docker logs.
 - The local Web UI now opens on a read-only status overview that displays
   heartbeat health, candidate/intent state counts, and configured budget pools.
+- The local Web UI now reads and saves validated downloader, discovery, cleanup,
+  and Phase 2 intent configuration sections instead of showing static mock
+  fields.
 - Added `scripts/bump_version.py` to keep release metadata files aligned during
   deployment-facing version bumps.
 

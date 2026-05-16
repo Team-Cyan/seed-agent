@@ -153,8 +153,65 @@ sites:
         payload = _request_json(base_url, "GET", "/api/config")
 
     assert payload["trackers"][0]["name"] == "mt"
+    assert payload["sections"]["downloader"]["target"] == "local"
+    assert payload["sections"]["intent"]["inbox_ref"] == "local/inbox/intents.jsonl"
     assert payload["trackers"][0]["has_api_key"] is True
     assert "secret-token" not in json.dumps(payload)
+
+
+def test_http_config_section_save_updates_safe_phase2_fields(tmp_path: Path) -> None:
+    config_path = _write_minimal_config(tmp_path)
+
+    with _running_server(config_path) as base_url:
+        payload = _request_json(
+            base_url,
+            "POST",
+            "/api/config/sections",
+            {
+                "section": "intent",
+                "data": {
+                    "confirmation_threshold": 0.7,
+                    "auto_enqueue_threshold": 0.9,
+                    "ambiguity_gap": 0.05,
+                    "default_resolution": "2160p",
+                    "preferred_languages": ["zh", "ja"],
+                    "inbox_ref": "local/inbox/phase2.jsonl",
+                },
+            },
+        )
+
+    assert payload["section"] == "intent"
+    assert payload["status"] == [{"level": "ok", "message": "intent config saved"}]
+    saved = config_path.read_text(encoding="utf-8")
+    assert "default_resolution: 2160p" in saved
+    assert "local/inbox/phase2.jsonl" in saved
+    assert "secret-token" not in saved
+
+
+def test_http_config_section_save_rejects_invalid_threshold_order(tmp_path: Path) -> None:
+    config_path = _write_minimal_config(tmp_path)
+
+    with _running_server(config_path) as base_url:
+        payload = _request_json(
+            base_url,
+            "POST",
+            "/api/config/sections",
+            {
+                "section": "intent",
+                "data": {
+                    "confirmation_threshold": 0.95,
+                    "auto_enqueue_threshold": 0.9,
+                    "ambiguity_gap": 0.05,
+                    "default_resolution": "1080p",
+                    "preferred_languages": ["zh"],
+                    "inbox_ref": "local/inbox/intents.jsonl",
+                },
+            },
+            expected_status=400,
+        )
+
+    assert payload["status"][0]["level"] == "warning"
+    assert "auto_enqueue_threshold" in payload["status"][0]["message"]
 
 
 def test_http_state_summary_reports_local_state_counts(tmp_path: Path) -> None:

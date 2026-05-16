@@ -79,6 +79,8 @@ def test_non_tracker_sections_render_config_panels() -> None:
     assert "updateSettingsPanelStatus" in script
     assert "data-setting-field" in script
     assert "data-setting-action" in script
+    assert 'fetch("/api/config/sections"' in script
+    assert "configSections" in script
     assert "qBittorrent target" in script
     assert "Raw YAML preview" in script
 

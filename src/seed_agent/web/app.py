@@ -12,8 +12,11 @@ from typing import Any
 from seed_agent.actions.pt import _discover_site_candidates, score_candidates
 from seed_agent.config import SiteConfig, load_config
 from seed_agent.web.settings import (
+    ConfigSectionDraft,
     TrackerDraft,
     build_tracker_status,
+    config_sections_payload,
+    save_config_section,
     save_tracker_draft,
     tracker_draft_to_config,
 )
@@ -33,6 +36,7 @@ def make_handler(config_path: Path) -> type[BaseHTTPRequestHandler]:
                     {
                         "config_path": str(resolved_config_path),
                         "trackers": [_tracker_summary(site, root) for site in config.sites],
+                        "sections": config_sections_payload(config),
                     }
                 )
                 return
@@ -66,6 +70,19 @@ def make_handler(config_path: Path) -> type[BaseHTTPRequestHandler]:
             if self.path == "/api/trackers/validate":
                 draft = TrackerDraft.model_validate(self._read_json())
                 self._send_json({"status": build_tracker_status(draft, root)})
+                return
+            if self.path == "/api/config/sections":
+                draft = ConfigSectionDraft.model_validate(self._read_json())
+                saved = save_config_section(resolved_config_path, draft)
+                self._send_json(
+                    {
+                        "section": draft.section,
+                        "data": saved,
+                        "status": [
+                            {"level": "ok", "message": f"{draft.section} config saved"}
+                        ],
+                    }
+                )
                 return
             if self.path == "/api/trackers":
                 draft = TrackerDraft.model_validate(self._read_json())

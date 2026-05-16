@@ -6,6 +6,7 @@ const state = {
     pools: null,
     error: null,
   },
+  configSections: {},
   language: "CN",
   dark: false,
   currentSection: "overview",
@@ -104,46 +105,55 @@ const settingsPanels = {
   downloader: {
     title: "下载器",
     fields: [
-      ["qBittorrent target", "local", "选择 downloader target。后续会映射到 downloader.target。"],
-      ["Default category", "seed", "默认加入的 qB category。"],
-      ["Secret ref", "local/secrets/qbittorrent.json", "本地 qB 凭据文件路径，不保存明文。"],
-      ["Over budget", "add_paused", "预算超限时默认暂停添加，避免直接撑爆容量。"],
+      ["qBittorrent target", "target", "text", "选择 downloader target。后续会映射到 downloader.target。"],
+      ["Default category", "default_category", "text", "默认加入的 qB category。"],
+      ["Secret ref", "secret_ref", "optional-text", "本地 qB 凭据文件路径，不保存明文。"],
     ],
   },
   discovery: {
     title: "发现策略",
     fields: [
-      ["Discounts", "free", "候选折扣过滤，例如 free 或 2xfree。"],
-      ["Min leechers", "1", "低于这个做种需求时不自动加入。"],
-      ["Target seed/leecher ratio", "16", "控制热门程度，不再用绝对 seed cap。"],
-      ["Allow non-free", "false", "是否允许 NORMAL 候选进入评分。"],
+      ["Discounts", "discounts", "csv", "候选折扣过滤，例如 free 或 2xfree。"],
+      ["Min left time minutes", "min_left_time_minutes", "number", "免费窗口剩余时间下限。"],
+      ["Min seeders", "min_seeders", "optional-number", "低于此做种数时不自动加入。"],
+      ["Min leechers", "min_leechers", "number", "低于这个做种需求时不自动加入。"],
+      ["Target seed/leecher ratio", "target_seed_leecher_ratio", "number", "控制热门程度，不再用绝对 seed cap。"],
+      ["Allow non-free", "allow_non_free", "boolean", "是否允许 NORMAL 候选进入评分。"],
+      ["Max size GB", "max_size_gb", "optional-number", "候选硬大小上限。"],
+      ["Max active downloads", "max_active_downloads", "optional-number", "超过后将接受候选转为暂停添加。"],
+      ["Max total amount left GB", "max_total_amount_left_gb", "optional-number", "剩余下载总量超过后暂停添加。"],
     ],
   },
   cleanup: {
     title: "清理策略",
     fields: [
-      ["Cold after days", "7", "多久没有有效上传后视为冷种。"],
-      ["Min upload delta GB", "1", "上传增量低于此值才进入清理候选。"],
-      ["Protect media library", "true", "媒体库相关种子默认保护。"],
-      ["Pause before delete hours", "24", "删除前先暂停观察的小时数。"],
+      ["Cold after days", "cold_after_days", "number", "多久没有有效上传后视为冷种。"],
+      ["Min upload delta GB", "min_upload_delta_gb", "number", "上传增量低于此值才进入清理候选。"],
+      ["Protect HR", "protect_hr", "boolean", "HR 风险项默认保护。"],
+      ["Protect manual", "protect_manual", "boolean", "手动标记项默认保护。"],
+      ["Protect media library", "protect_media_library", "boolean", "媒体库相关种子默认保护。"],
+      ["Delete after no-upload hours", "delete_after_no_upload_hours", "number", "零上传观察窗口。"],
+      ["Pause before delete hours", "pause_before_delete_hours", "number", "删除前先暂停观察的小时数。"],
     ],
   },
   intent: {
     title: "资源意图",
     fields: [
-      ["Min score", "70", "自动入队的最低评分。"],
-      ["Preferred language", "any", "未来用于按语言或地区偏好过滤。"],
-      ["Inbox category", "seed", "待处理资源默认进入的 category。"],
-      ["Manual review below", "70", "低于自动阈值时进入人工 review。"],
+      ["Confirmation threshold", "confirmation_threshold", "number", "高于此阈值可进入确认流程。"],
+      ["Auto enqueue threshold", "auto_enqueue_threshold", "number", "高于此阈值可自动入队。"],
+      ["Ambiguity gap", "ambiguity_gap", "number", "候选分差低于此值时视为模糊。"],
+      ["Default resolution", "default_resolution", "optional-text", "默认解析度偏好。"],
+      ["Preferred languages", "preferred_languages", "csv", "按逗号填写语言偏好。"],
+      ["Inbox ref", "inbox_ref", "text", "本地 intent inbox JSONL 路径。"],
     ],
   },
   advanced: {
     title: "高级 YAML",
     fields: [
-      ["Raw YAML preview", "sites:\\n  - name: mt\\n    discovery_mode: api", "预览即将写入的 YAML 片段。"],
-      ["Diff mode", "before / after", "保存前展示配置差异。"],
-      ["Validation", "strict", "保存前按 seed-agent config schema 校验。"],
-      ["Secret boundary", "local/secrets/*", "明文 secret 只写入本地 gitignored 路径。"],
+      ["Raw YAML preview", "preview", "text", "预览即将写入的 YAML 片段。"],
+      ["Diff mode", "diff", "text", "保存前展示配置差异。"],
+      ["Validation", "validation", "text", "保存前按 seed-agent config schema 校验。"],
+      ["Secret boundary", "secret_boundary", "text", "明文 secret 只写入本地 gitignored 路径。"],
     ],
   },
 };
@@ -223,6 +233,7 @@ async function loadConfig() {
     return;
   }
   const payload = await response.json();
+  state.configSections = payload.sections || {};
   state.trackers = payload.trackers.map((tracker) => ({
     id: crypto.randomUUID(),
     type: tracker.type,
@@ -676,12 +687,13 @@ function renderSettingsPanel(section) {
   const spec = settingsPanels[section];
   const page = document.createElement("div");
   page.className = "settings-panel";
+  const sectionData = state.configSections[section] || {};
   const fields = spec.fields
     .map(
-      ([label, value, description]) => `
+      ([label, key, type, description]) => `
         <label class="field">
           <span>${escapeHtml(label)} ${help(description)}</span>
-          <input data-setting-field="${escapeAttribute(label)}" value="${escapeAttribute(value)}" />
+          ${renderSettingInput(key, type, sectionData[key])}
         </label>
       `,
     )
@@ -713,6 +725,17 @@ function renderSettingsPanel(section) {
 }
 
 function updateSettingsPanelStatus(page, section, action) {
+  if (action === "save" && section !== "advanced") {
+    saveSettingsPanel(page, section);
+    return;
+  }
+  if (action === "preview" && section !== "advanced") {
+    const preview = JSON.stringify(readSettingsPanelData(page, section), null, 2);
+    page.querySelector("[data-setting-status] .status-list").innerHTML = `
+      <div class="status-item info">${escapeHtml(preview)}</div>
+    `;
+    return;
+  }
   const messages = {
     validate: `${settingsPanels[section].title}：配置草稿格式通过。`,
     preview: `${settingsPanels[section].title}：YAML 预览已准备。`,
@@ -721,4 +744,72 @@ function updateSettingsPanelStatus(page, section, action) {
   page.querySelector("[data-setting-status] .status-list").innerHTML = `
     <div class="status-item ok">${escapeHtml(messages[action])}</div>
   `;
+}
+
+function renderSettingInput(key, type, value) {
+  if (type === "boolean") {
+    return `
+      <select data-setting-field="${escapeAttribute(key)}" data-setting-type="${escapeAttribute(type)}">
+        <option value="true" ${value === true ? "selected" : ""}>true</option>
+        <option value="false" ${value === false ? "selected" : ""}>false</option>
+      </select>
+    `;
+  }
+  const displayValue = Array.isArray(value) ? value.join(", ") : value ?? "";
+  return `
+    <input data-setting-field="${escapeAttribute(key)}" data-setting-type="${escapeAttribute(type)}" value="${escapeAttribute(displayValue)}" />
+  `;
+}
+
+function readSettingsPanelData(page, section) {
+  const data = { ...(state.configSections[section] || {}) };
+  page.querySelectorAll("[data-setting-field]").forEach((field) => {
+    data[field.dataset.settingField] = coerceSettingValue(field.value, field.dataset.settingType);
+  });
+  return data;
+}
+
+function coerceSettingValue(value, type) {
+  if (type === "boolean") {
+    return value === "true";
+  }
+  if (type === "number") {
+    return Number(value);
+  }
+  if (type === "optional-number") {
+    return value.trim() === "" ? null : Number(value);
+  }
+  if (type === "csv") {
+    return value
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+  if (type === "optional-text") {
+    return value.trim() === "" ? null : value.trim();
+  }
+  return value;
+}
+
+async function saveSettingsPanel(page, section) {
+  const data = readSettingsPanelData(page, section);
+  try {
+    const response = await fetch("/api/config/sections", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ section, data }),
+    });
+    const payload = await response.json();
+    if (!response.ok) {
+      throw new Error(payload.status?.[0]?.message || `request failed: ${response.status}`);
+    }
+    state.configSections[section] = payload.data;
+    page.querySelector("[data-setting-status] .status-list").innerHTML = `
+      <div class="status-item ok">${escapeHtml(payload.status?.[0]?.message || "config saved")}</div>
+    `;
+  } catch (error) {
+    page.querySelector("[data-setting-status] .status-list").innerHTML = `
+      <div class="status-item warning">${escapeHtml(error.message)}</div>
+    `;
+  }
 }
