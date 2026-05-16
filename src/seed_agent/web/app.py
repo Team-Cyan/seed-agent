@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from asyncio import run
+from datetime import UTC, datetime
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -33,6 +35,15 @@ def make_handler(config_path: Path) -> type[BaseHTTPRequestHandler]:
                         "trackers": [_tracker_summary(site, root) for site in config.sites],
                     }
                 )
+                return
+            if self.path == "/api/state/summary":
+                self._send_json(_state_summary_payload(resolved_config_path, root))
+                return
+            if self.path == "/api/pools":
+                self._send_json(_pools_payload(resolved_config_path))
+                return
+            if self.path == "/api/health":
+                self._send_json(_health_payload(root))
                 return
             if self.path == "/":
                 self._send_static("index.html")
@@ -207,6 +218,131 @@ def _dry_run_payload(
             "accepted": accepted,
         },
     }
+
+
+def _state_summary_payload(config_path: Path, root: Path) -> dict[str, Any]:
+    state_path = _state_db_path(root)
+    payload: dict[str, Any] = {
+        "config_path": str(config_path),
+        "state_path": str(state_path),
+        "state_exists": state_path.exists(),
+        "candidates": {"total": 0, "by_state": {}},
+        "intents": {"total": 0, "by_state": {}},
+        "release_candidates": {"total": 0},
+        "torrent_runtime": {"total": 0},
+    }
+    if not state_path.exists():
+        return payload
+    with sqlite3.connect(state_path) as conn:
+        payload["candidates"] = _table_state_counts(conn, "candidates", "state")
+        payload["intents"] = _table_state_counts(conn, "intents", "state")
+        payload["release_candidates"] = {"total": _table_count(conn, "release_candidates")}
+        payload["torrent_runtime"] = {"total": _table_count(conn, "torrent_runtime")}
+    return payload
+
+
+def _pools_payload(config_path: Path) -> dict[str, Any]:
+    config = load_config(config_path)
+    policies_by_pool: dict[str, list[dict[str, Any]]] = {}
+    for policy in config.downloader.category_policies:
+        policies_by_pool.setdefault(policy.budget_pool, []).append(
+            {
+                "name": policy.name,
+                "mode": policy.mode,
+                "delete_enabled": policy.delete_enabled,
+                "over_budget_behavior": policy.over_budget_behavior,
+            }
+        )
+    return {
+        "budget_pools": [
+            {
+                "name": pool.name,
+                "max_size_tib": pool.max_size_tib,
+                "category_policies": policies_by_pool.get(pool.name, []),
+            }
+            for pool in config.downloader.budget_pools
+        ],
+        "default_category": config.downloader.default_category,
+        "runtime": {
+            "available": False,
+            "reason": "live downloader polling is not exposed by the read-only web API",
+        },
+    }
+
+
+def _health_payload(root: Path) -> dict[str, Any]:
+    heartbeat_path = root / "state" / "schedule-heartbeat.json"
+    payload: dict[str, Any] = {
+        "status": "unknown",
+        "heartbeat_file": str(heartbeat_path),
+        "heartbeat_exists": heartbeat_path.exists(),
+    }
+    if not heartbeat_path.exists():
+        payload["status"] = "missing_heartbeat"
+        return payload
+    try:
+        heartbeat = json.loads(heartbeat_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        payload.update({"status": "invalid_heartbeat", "error": exc.msg})
+        return payload
+    updated_at = _parse_iso_datetime(heartbeat.get("updated_at"))
+    if updated_at is None:
+        payload.update({"status": "invalid_heartbeat", "heartbeat": heartbeat})
+        return payload
+    age_minutes = (datetime.now(UTC) - updated_at).total_seconds() / 60
+    payload.update(
+        {
+            "status": "ok" if age_minutes <= 90 else "stale",
+            "age_minutes": round(age_minutes, 2),
+            "max_staleness_minutes": 90,
+            "heartbeat": heartbeat,
+        }
+    )
+    return payload
+
+
+def _state_db_path(root: Path) -> Path:
+    return root / ".seed-agent" / "state.db"
+
+
+def _table_state_counts(
+    conn: sqlite3.Connection,
+    table_name: str,
+    state_column: str,
+) -> dict[str, Any]:
+    if not _table_exists(conn, table_name):
+        return {"total": 0, "by_state": {}}
+    rows = conn.execute(
+        f"SELECT {state_column}, COUNT(*) FROM {table_name} GROUP BY {state_column}"
+    ).fetchall()
+    by_state = {str(state): int(count) for state, count in rows}
+    return {"total": sum(by_state.values()), "by_state": by_state}
+
+
+def _table_count(conn: sqlite3.Connection, table_name: str) -> int:
+    if not _table_exists(conn, table_name):
+        return 0
+    return int(conn.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()[0])
+
+
+def _table_exists(conn: sqlite3.Connection, table_name: str) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+        (table_name,),
+    ).fetchone()
+    return row is not None
+
+
+def _parse_iso_datetime(value: Any) -> datetime | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
 
 
 def _repo_root_for_config(config_path: Path) -> Path:

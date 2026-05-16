@@ -98,10 +98,18 @@ This file tracks the current project status at a level that is easy for both hum
 - local `seed-agent web` command for configuration editing
 - tracker-first settings UI design and implementation are in place, but the
   surface is still WIP rather than a finished operations UI
+- read-only API foundation exists for state summary, configured budget pools,
+  and scheduler heartbeat health
 - remaining work includes broader settings coverage, stronger UX polish, and a
-  clearer split from the future read-only dashboard/API surface
+  clearer split from the future read-only dashboard surface
 
 ## Next
+
+### Web Settings UI
+
+- wire the read-only state API into the local UI so operators can inspect
+  health, state counts, and configured pools without opening Docker logs
+- broaden safe configuration coverage beyond tracker-first editing
 
 ### qBittorrent Live-State-Grounded Strategy
 
@@ -127,8 +135,7 @@ Reference:
 - auto-reseed
 - Transmission downloader support as the first second-downloader adapter
 - a second non-M-Team API provider to validate provider boundaries
-- read-only dashboard/API surfaces for state, audit, pool usage, cleanup
-  decisions, and intent queues
+- read-only dashboard surface for audit, cleanup decisions, and intent queues
 - richer reporting and feedback-loop scoring that turns tracker/account signals,
   downloader telemetry, historical outcomes, and user confirmations into real
   `site_history_score` inputs

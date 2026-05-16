@@ -19,6 +19,8 @@ Expose the operator-facing command surface and safe summaries.
 - site probe diagnostics,
 - unattended `schedule-run` orchestration for server-side polling,
 - local `web` settings UI server for safe configuration editing,
+- read-only web API endpoints for state summary, configured budget pools, and
+  heartbeat health,
 - free-window safety previewing for freeleech-sensitive workflows,
 - optional per-cycle cleanup through `run-once --prune` and `schedule-run --prune`,
 - stronger prune previews that include live torrent identity, linked candidate
@@ -50,7 +52,8 @@ Expose the operator-facing command surface and safe summaries.
 - keep long-running deployment liveness inspectable through structured
   heartbeat output instead of opaque shell wrappers.
 - keep web UI actions safe by default: tracker-local validation, site probe,
-  and dry-run preview must not execute enqueue or cleanup mutations.
+  dry-run preview, and read-only state endpoints must not execute enqueue or
+  cleanup mutations.
 
 ## Verification
 

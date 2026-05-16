@@ -4,6 +4,13 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.3.0 - 2026-05-16
+
+### Added
+
+- `seed-agent web` now exposes read-only state, budget pool, and heartbeat health
+  API endpoints for local operator visibility without opening Docker logs.
+
 ## 0.2.2 - 2026-05-15
 
 ### Fixed

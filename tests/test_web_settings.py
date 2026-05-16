@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime, timedelta
 from http.client import HTTPConnection
 from pathlib import Path
 from socketserver import TCPServer
 from threading import Thread
 from typing import Any
 
+from seed_agent.models import LifecycleState
+from seed_agent.state import StateStore
 from seed_agent.web.app import make_handler
 from seed_agent.web.settings import (
     TrackerDraft,
@@ -152,6 +155,99 @@ sites:
     assert payload["trackers"][0]["name"] == "mt"
     assert payload["trackers"][0]["has_api_key"] is True
     assert "secret-token" not in json.dumps(payload)
+
+
+def test_http_state_summary_reports_local_state_counts(tmp_path: Path) -> None:
+    config_path = _write_minimal_config(tmp_path)
+    store = StateStore(tmp_path / ".seed-agent" / "state.db")
+    store.upsert_candidate(
+        "candidate-1",
+        "mteam",
+        "Queued Candidate",
+        LifecycleState.ENQUEUED,
+        score=80,
+        torrent_hash="hash-1",
+    )
+    store.upsert_candidate(
+        "candidate-2",
+        "mteam",
+        "Scored Candidate",
+        LifecycleState.SCORED,
+        score=75,
+        torrent_hash=None,
+    )
+    store._upsert_torrent_runtime(  # type: ignore[attr-defined]
+        "hash-1",
+        paused_at=None,
+        uploaded_bytes=10,
+        downloaded_bytes=20,
+        upspeed_bps=0,
+        dlspeed_bps=0,
+        no_upload_since_at=None,
+        seen_at=datetime.now(UTC).isoformat(),
+    )
+
+    with _running_server(config_path) as base_url:
+        payload = _request_json(base_url, "GET", "/api/state/summary")
+
+    assert payload["state_exists"] is True
+    assert payload["candidates"] == {
+        "total": 2,
+        "by_state": {"enqueued": 1, "scored": 1},
+    }
+    assert payload["torrent_runtime"] == {"total": 1}
+    assert payload["release_candidates"] == {"total": 0}
+
+
+def test_http_health_reports_recent_heartbeat(tmp_path: Path) -> None:
+    config_path = _write_minimal_config(tmp_path)
+    heartbeat_path = tmp_path / "state" / "schedule-heartbeat.json"
+    heartbeat_path.parent.mkdir()
+    heartbeat_path.write_text(
+        json.dumps(
+            {
+                "command": "schedule-run",
+                "cycle": 4,
+                "updated_at": (datetime.now(UTC) - timedelta(minutes=5)).isoformat(),
+                "error": None,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with _running_server(config_path) as base_url:
+        payload = _request_json(base_url, "GET", "/api/health")
+
+    assert payload["status"] == "ok"
+    assert payload["heartbeat_exists"] is True
+    assert payload["heartbeat"]["cycle"] == 4
+    assert payload["age_minutes"] < 10
+
+
+def test_http_pools_reports_configured_budget_pools_without_live_polling(
+    tmp_path: Path,
+) -> None:
+    config_path = _write_minimal_config(tmp_path)
+
+    with _running_server(config_path) as base_url:
+        payload = _request_json(base_url, "GET", "/api/pools")
+
+    assert payload["default_category"] == "seed"
+    assert payload["budget_pools"] == [
+        {
+            "name": "downloads",
+            "max_size_tib": 1.0,
+            "category_policies": [
+                {
+                    "name": "seed",
+                    "mode": "mutable",
+                    "delete_enabled": True,
+                    "over_budget_behavior": "add_paused",
+                }
+            ],
+        }
+    ]
+    assert payload["runtime"]["available"] is False
 
 
 def test_http_root_serves_static_ui(tmp_path: Path) -> None:
