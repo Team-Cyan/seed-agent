@@ -10,6 +10,10 @@ All notable project changes are tracked here.
 
 - `seed-agent web` now exposes read-only state, budget pool, and heartbeat health
   API endpoints for local operator visibility without opening Docker logs.
+- The local Web UI now opens on a read-only status overview that displays
+  heartbeat health, candidate/intent state counts, and configured budget pools.
+- Added `scripts/bump_version.py` to keep release metadata files aligned during
+  deployment-facing version bumps.
 
 ## 0.2.2 - 2026-05-15
 

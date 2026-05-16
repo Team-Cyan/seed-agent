@@ -50,8 +50,8 @@ The image name must stay lowercase for registry compatibility.
 1. Classify the change as docs-only, codefix/operational fix, or feature.
 2. Apply the version bump policy when the change affects the published Docker
    image or deployment behavior.
-3. Update `VERSION`, `pyproject.toml`, and `src/seed_agent/__init__.py` when a
-   version bump is required.
+3. When a version bump is required, run `python scripts/bump_version.py <version>`
+   to update release metadata, then review the diff before committing.
 4. Move user-facing entries from `CHANGELOG.md` `Unreleased` into a versioned
    section.
 5. Run:

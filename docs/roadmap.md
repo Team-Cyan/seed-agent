@@ -88,6 +88,7 @@ This file tracks the current project status at a level that is easy for both hum
   OCI labels, and release-version validation
 - documented release version policy: code fixes and operational fixes bump patch
   by `0.0.1`; new features bump minor by `0.1.0`
+- version bump helper keeps release metadata files aligned
 
 ## In Progress
 
@@ -98,8 +99,8 @@ This file tracks the current project status at a level that is easy for both hum
 - local `seed-agent web` command for configuration editing
 - tracker-first settings UI design and implementation are in place, but the
   surface is still WIP rather than a finished operations UI
-- read-only API foundation exists for state summary, configured budget pools,
-  and scheduler heartbeat health
+- read-only status UI exists for state summary, configured budget pools, and
+  scheduler heartbeat health
 - remaining work includes broader settings coverage, stronger UX polish, and a
   clearer split from the future read-only dashboard surface
 
@@ -107,8 +108,6 @@ This file tracks the current project status at a level that is easy for both hum
 
 ### Web Settings UI
 
-- wire the read-only state API into the local UI so operators can inspect
-  health, state counts, and configured pools without opening Docker logs
 - broaden safe configuration coverage beyond tracker-first editing
 
 ### qBittorrent Live-State-Grounded Strategy
@@ -123,7 +122,6 @@ This file tracks the current project status at a level that is easy for both hum
   first server install
 - decide whether Docker Hub publishing should mirror GHCR or remain a manual
   downstream republish path
-- add a small version bump helper once releases become frequent
 
 Reference:
 

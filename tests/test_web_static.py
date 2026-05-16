@@ -20,6 +20,7 @@ def test_index_contains_tracker_first_ui_anchors() -> None:
     assert "aria-label=\"Toggle theme\"" in html
     assert "data-tracker-list" in html
     assert "data-language-menu" in html
+    assert "data-section=\"overview\"" in html
     assert "data-section=\"downloader\"" in html
 
 
@@ -92,3 +93,15 @@ def test_javascript_handles_language_menu_and_section_navigation() -> None:
     assert "setLanguage" in script
     assert "Downloader" in script
     assert ".language-menu[hidden]" in styles
+
+
+def test_javascript_renders_readonly_overview_panel() -> None:
+    script = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
+    styles = (STATIC_ROOT / "styles.css").read_text(encoding="utf-8")
+
+    assert 'fetch("/api/health")' in script
+    assert 'fetch("/api/state/summary")' in script
+    assert 'fetch("/api/pools")' in script
+    assert "renderOverviewPanel" in script
+    assert "metric-card" in script
+    assert ".overview-grid" in styles

@@ -11,7 +11,8 @@
       <aside class="sidebar">
         <div class="brand">seed-agent</div>
         <nav class="nav-list" aria-label="Settings sections">
-          <button class="nav-item active" type="button" data-section="tracker">Tracker</button>
+          <button class="nav-item active" type="button" data-section="overview">状态</button>
+          <button class="nav-item" type="button" data-section="tracker">Tracker</button>
           <button class="nav-item" type="button" data-section="downloader">下载器</button>
           <button class="nav-item" type="button" data-section="discovery">发现策略</button>
           <button class="nav-item" type="button" data-section="cleanup">清理策略</button>
@@ -23,8 +24,8 @@
       <main class="content">
         <header class="page-header">
           <div>
-            <h1>Tracker</h1>
-            <p>新用户初始为空。点击添加后出现一个 Tracker 配置卡。</p>
+            <h1>状态</h1>
+            <p>本地只读状态：heartbeat、候选/意图计数和配置的 budget pool。</p>
           </div>
           <div class="header-actions">
             <div class="language-control">

@@ -1,8 +1,14 @@
 const state = {
   trackers: [],
+  overview: {
+    health: null,
+    stateSummary: null,
+    pools: null,
+    error: null,
+  },
   language: "CN",
   dark: false,
-  currentSection: "tracker",
+  currentSection: "overview",
 };
 
 const trackerList = document.querySelector("[data-tracker-list]");
@@ -16,6 +22,7 @@ const navItems = document.querySelectorAll("[data-section]");
 const copy = {
   CN: {
     nav: {
+      overview: "状态",
       tracker: "Tracker",
       downloader: "下载器",
       discovery: "发现策略",
@@ -23,6 +30,8 @@ const copy = {
       intent: "资源意图",
       advanced: "高级 YAML",
     },
+    overviewTitle: "状态",
+    overviewSubtitle: "本地只读状态：heartbeat、候选/意图计数和配置的 budget pool。",
     trackerTitle: "Tracker",
     trackerSubtitle: "新用户初始为空。点击添加后出现一个 Tracker 配置卡。",
     addTracker: "添加 Tracker",
@@ -52,6 +61,7 @@ const copy = {
   },
   EN: {
     nav: {
+      overview: "Status",
       tracker: "Tracker",
       downloader: "Downloader",
       discovery: "Discovery",
@@ -59,6 +69,8 @@ const copy = {
       intent: "Intent",
       advanced: "Advanced YAML",
     },
+    overviewTitle: "Status",
+    overviewSubtitle: "Local read-only status: heartbeat, candidate/intent counts, and configured budget pools.",
     trackerTitle: "Tracker",
     trackerSubtitle: "New users start empty. Click Add Tracker to create a tracker card.",
     addTracker: "Add Tracker",
@@ -231,9 +243,47 @@ async function loadConfig() {
   renderSection();
 }
 
+async function loadOverview() {
+  try {
+    const [healthResponse, stateResponse, poolsResponse] = await Promise.all([
+      fetch("/api/health"),
+      fetch("/api/state/summary"),
+      fetch("/api/pools"),
+    ]);
+    if (!healthResponse.ok || !stateResponse.ok || !poolsResponse.ok) {
+      throw new Error("status request failed");
+    }
+    state.overview = {
+      health: await healthResponse.json(),
+      stateSummary: await stateResponse.json(),
+      pools: await poolsResponse.json(),
+      error: null,
+    };
+  } catch (error) {
+    state.overview = {
+      health: null,
+      stateSummary: null,
+      pools: null,
+      error: error.message,
+    };
+  }
+}
+
+async function loadInitialData() {
+  await Promise.all([loadConfig(), loadOverview()]);
+  renderSection();
+}
+
 function renderSection() {
   const title = document.querySelector(".page-header h1");
   const subtitle = document.querySelector(".page-header p");
+  if (state.currentSection === "overview") {
+    title.textContent = copy[state.language].overviewTitle;
+    subtitle.textContent = copy[state.language].overviewSubtitle;
+    addTrackerButton.hidden = true;
+    trackerList.replaceChildren(renderOverviewPanel());
+    return;
+  }
   if (state.currentSection !== "tracker") {
     const placeholder = copy[state.language].placeholders[state.currentSection];
     title.textContent = placeholder.title;
@@ -246,6 +296,66 @@ function renderSection() {
   subtitle.textContent = copy[state.language].trackerSubtitle;
   addTrackerButton.hidden = false;
   renderTrackerSection();
+}
+
+function renderOverviewPanel() {
+  const panel = document.createElement("section");
+  panel.className = "overview-grid";
+  const { health, stateSummary, pools, error } = state.overview;
+  if (error) {
+    panel.append(renderMetricCard("状态读取", "失败", error, "warning"));
+    return panel;
+  }
+  if (!health || !stateSummary || !pools) {
+    panel.append(renderMetricCard("状态读取", "加载中", "正在读取本地只读 API。", "info"));
+    return panel;
+  }
+
+  const candidateStates = stateSummary.candidates?.by_state || {};
+  const intentStates = stateSummary.intents?.by_state || {};
+  const budgetPools = pools.budget_pools || [];
+  panel.append(
+    renderMetricCard(
+      "Heartbeat",
+      health.status,
+      health.heartbeat_exists
+        ? `${health.age_minutes ?? "?"} min old · cycle ${health.heartbeat?.cycle ?? "?"}`
+        : "heartbeat file missing",
+      health.status === "ok" ? "ok" : "warning",
+    ),
+  );
+  panel.append(
+    renderMetricCard("Candidates", stateSummary.candidates?.total ?? 0, formatStateCounts(candidateStates), "info"),
+  );
+  panel.append(renderMetricCard("Intents", stateSummary.intents?.total ?? 0, formatStateCounts(intentStates), "info"));
+  panel.append(
+    renderMetricCard(
+      "Budget pools",
+      budgetPools.length,
+      budgetPools.map((pool) => `${pool.name}: ${pool.max_size_tib} TiB`).join(" · ") || "no pools configured",
+      "info",
+    ),
+  );
+  return panel;
+}
+
+function renderMetricCard(label, value, detail, level) {
+  const card = document.createElement("article");
+  card.className = `metric-card ${level}`;
+  card.innerHTML = `
+    <div class="metric-label">${escapeHtml(label)}</div>
+    <div class="metric-value">${escapeHtml(value)}</div>
+    <div class="status-item ${escapeAttribute(level)}">${escapeHtml(detail || "no data")}</div>
+  `;
+  return card;
+}
+
+function formatStateCounts(counts) {
+  const entries = Object.entries(counts);
+  if (entries.length === 0) {
+    return "no state rows";
+  }
+  return entries.map(([name, count]) => `${name}: ${count}`).join(" · ");
 }
 
 function renderTrackerSection() {
@@ -539,7 +649,7 @@ function hideHelpPopover() {
   helpPopover.hidden = true;
 }
 
-loadConfig();
+loadInitialData();
 
 function setLanguage(language) {
   state.language = language;
