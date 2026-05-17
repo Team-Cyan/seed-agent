@@ -2,7 +2,11 @@
 
 This repository keeps durable project knowledge under `docs/`.
 
-## Layout
+## Repository Layout
+
+- `.agents/`
+  - repo-local agent assets and reusable prompts
+  - not a durable knowledge base
 
 - `docs/ai/`
   - shared AI knowledge base

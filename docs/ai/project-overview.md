@@ -106,6 +106,7 @@ Use docs in layers:
 
 - README for humans and high-level orientation
 - root `AGENTS.md` for agent entry routing
+- `.agents/` for repo-local agent assets
 - `docs/ai/` for shared AI session efficiency
 - `docs/specs/` for durable product/design decisions
 - `docs/plans/` for implementation sequencing

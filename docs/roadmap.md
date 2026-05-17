@@ -10,6 +10,7 @@ This file tracks the current project status at a level that is easy for both hum
 - Config-first project structure
 - SQLite local state
 - append-only redacted audit log
+- Thin `AGENTS.md`, `.agents/`, and `docs/` routing for future agent sessions
 
 ### PT Upload Strategy Loop
 

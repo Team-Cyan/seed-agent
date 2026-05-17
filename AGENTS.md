@@ -19,6 +19,7 @@ Do not start by reading every spec or every plan.
 ## Repository Model
 
 - `AGENTS.md`: thin agent entrypoint
+- `.agents/`: repo-local agent assets and reusable prompts
 - `docs/ai/`: reusable AI knowledge base
 - `docs/roadmap.md`: current project state and next work
 - `docs/operations/`: operator workflows and handoff notes
@@ -31,6 +32,7 @@ Do not start by reading every spec or every plan.
 - Reply to the human user in Chinese unless they ask for another language.
 - Prefer small, well-bounded sessions.
 - Work on one module or one roadmap item at a time.
+- Keep `.agents/` thin; keep durable knowledge in `docs/`.
 - Update the most relevant module doc and `docs/roadmap.md` when project state materially changes.
 - Before commit, push, or release, check the release version policy in
   `docs/operations/release-process.md`. Code fixes and operational fixes bump
@@ -54,6 +56,7 @@ Do not start by reading every spec or every plan.
 ## Useful Docs
 
 - `docs/ai/project-overview.md`
+- `.agents/README.md`
 - `docs/ai/harness-workflow.md`
 - `docs/ai/harness-engineering.md`
 - `docs/ai/reference-repos.md`
