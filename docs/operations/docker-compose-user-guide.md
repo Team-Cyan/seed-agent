@@ -114,6 +114,7 @@ Main env vars:
 - `SEED_AGENT_HEARTBEAT_FILE=/state/schedule-heartbeat.json`
 - `SEED_AGENT_MAX_STALENESS_MINUTES=90`
 - `SEED_AGENT_PRUNE=true`
+- `SEED_AGENT_STARTUP_STATUS=true`
 
 The Compose file reads `SEED_AGENT_IMAGE` from `deploy/seed-agent.env`, so you can switch
 between GHCR, Docker Hub, and a private registry without editing YAML.
@@ -145,6 +146,19 @@ Watch logs:
 
 ```bash
 docker compose --env-file deploy/seed-agent.env -f deploy/docker-compose.example.yml logs -f seed-agent
+```
+
+The first log line should be a redacted `runtime-status` JSON payload. It shows
+the installed version, config path, state/audit paths, heartbeat path, and
+whether configured credential files are present.
+
+You can print the same status on demand:
+
+```bash
+docker compose --env-file deploy/seed-agent.env -f deploy/docker-compose.example.yml exec seed-agent \
+  seed-agent runtime-status \
+    --config /app/config/config.yaml \
+    --heartbeat-file /state/schedule-heartbeat.json
 ```
 
 Check runtime files:
@@ -197,10 +211,11 @@ docker compose --env-file deploy/seed-agent.env -f deploy/docker-compose.example
 If the container is unhealthy:
 
 1. check Compose logs,
-2. inspect `state/schedule-heartbeat.json`,
-3. confirm `config/config.yaml` is mounted where `SEED_AGENT_CONFIG` expects,
-4. confirm `local/secrets/` paths match the refs used in YAML,
-5. confirm qB Web API credentials work outside the container.
+2. run `seed-agent runtime-status` inside the container,
+3. inspect `state/schedule-heartbeat.json`,
+4. confirm `config/config.yaml` is mounted where `SEED_AGENT_CONFIG` expects,
+5. confirm `local/secrets/` paths match the refs used in YAML,
+6. confirm qB Web API credentials work outside the container.
 
 If the app starts but discovers nothing:
 

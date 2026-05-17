@@ -259,6 +259,7 @@ def test_cli_help_lists_phase_one_commands() -> None:
     assert "daily-report" in result.output
     assert "run-once" in result.output
     assert "healthcheck" in result.output
+    assert "runtime-status" in result.output
     assert "schedule-run" in result.output
     assert "site-probe" in result.output
 
@@ -335,7 +336,7 @@ def test_discover_command_prints_safe_output_without_raw_download_url(
 def test_schedule_run_executes_single_cycle_and_emits_schedule_metadata(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from seed_agent import cli
+    from seed_agent import __version__, cli
 
     config_path = _config_file(tmp_path)
     heartbeat_path = tmp_path / "state" / "heartbeat.json"
@@ -426,6 +427,7 @@ def test_schedule_run_executes_single_cycle_and_emits_schedule_metadata(
         {
             "accepted": None,
             "command": "schedule-run",
+            "config": str(config_path),
             "cycle": 1,
             "enqueued": None,
             "error": None,
@@ -433,6 +435,7 @@ def test_schedule_run_executes_single_cycle_and_emits_schedule_metadata(
             "interval_minutes": 15,
             "phase": "running",
             "updated_at": startup_heartbeats[0]["updated_at"],
+            "version": __version__,
         }
     ]
     heartbeat = json.loads(heartbeat_path.read_text(encoding="utf-8"))
@@ -720,6 +723,55 @@ def test_healthcheck_fails_for_stale_heartbeat(tmp_path: Path) -> None:
     assert payload["command"] == "healthcheck"
     assert payload["status"] == "error"
     assert "heartbeat stale" in payload["error"]
+
+
+def test_runtime_status_reports_version_config_paths_and_heartbeat(tmp_path: Path) -> None:
+    from seed_agent import __version__
+    from seed_agent.cli import app
+
+    config_path = _config_file(tmp_path, secret_ref="local/secrets/qbittorrent.yaml")
+    secret_path = tmp_path / "local" / "secrets" / "qbittorrent.yaml"
+    secret_path.parent.mkdir(parents=True, exist_ok=True)
+    secret_path.write_text(
+        "base_url: http://qb.example\nusername: user\npassword: pass\n",
+        encoding="utf-8",
+    )
+    heartbeat_path = tmp_path / "state" / "heartbeat.json"
+    heartbeat_path.parent.mkdir(parents=True, exist_ok=True)
+    heartbeat_path.write_text(
+        json.dumps(
+            {
+                "updated_at": datetime.now(UTC).isoformat(),
+                "version": __version__,
+                "cycle": 3,
+                "interval_minutes": 30,
+                "config": str(config_path),
+                "error": None,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "runtime-status",
+            "--config",
+            str(config_path),
+            "--heartbeat-file",
+            str(heartbeat_path),
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = _json_output(result)
+    assert payload["command"] == "runtime-status"
+    assert payload["version"] == __version__
+    assert payload["status"] == "ok"
+    assert payload["config_exists"] is True
+    assert payload["downloader"]["credential_file_present"] is True
+    assert payload["heartbeat"]["cycle"] == 3
+    assert "password" not in result.output
 
 
 def test_site_probe_reports_sparse_and_enriched_counts(

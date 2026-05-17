@@ -4,6 +4,23 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.3.2 - 2026-05-17
+
+### Added
+
+- Added `seed-agent runtime-status` plus startup runtime-status logging so
+  Unraid and Compose installs can see the package version, config path,
+  heartbeat path, state/audit paths, and credential-file visibility without
+  opening application internals.
+
+### Changed
+
+- Scheduler heartbeat files now include the running package version and config
+  path for easier deployment verification.
+- Docker Hub automation remains deferred; GHCR stays the primary automated
+  registry until a runtime-status-verified Unraid install still shows registry
+  update friction.
+
 ## 0.3.1 - 2026-05-17
 
 ### Fixed

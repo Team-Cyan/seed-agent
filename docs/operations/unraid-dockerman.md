@@ -76,6 +76,45 @@ Recommended user-visible defaults:
 - `SEED_AGENT_HEARTBEAT_FILE=/workspace/runtime/state/schedule-heartbeat.json`
 - `SEED_AGENT_EXECUTE=true`
 - `SEED_AGENT_REQUIRE_KNOWN_FREE_WINDOW=true`
+- `SEED_AGENT_STARTUP_STATUS=true`
+
+## Runtime Visibility
+
+Every non-healthcheck container start prints one redacted `runtime-status` JSON
+line to Docker logs before the long-running command starts. Use that line to
+confirm:
+
+- the installed `seed-agent` version,
+- the actual config path Docker passed to the container,
+- whether the config file loaded successfully,
+- whether the qB credential file path exists,
+- state, audit, and heartbeat file paths.
+
+You can also run the same check from the Unraid Docker console:
+
+```sh
+seed-agent runtime-status \
+  --config /workspace/runtime/config/config.yaml \
+  --heartbeat-file /workspace/runtime/state/schedule-heartbeat.json \
+  --max-staleness-minutes 90
+```
+
+For heartbeat-only checks, run:
+
+```sh
+seed-agent healthcheck \
+  --config /workspace/runtime/config/config.yaml \
+  --heartbeat-file /workspace/runtime/state/schedule-heartbeat.json \
+  --max-staleness-minutes 90
+```
+
+The heartbeat JSON now includes the package version and config path in addition
+to cycle, interval, execution mode, accepted/enqueued counts, and the last error
+field. If Unraid's log viewer looks empty, inspect the mounted file directly:
+
+```sh
+cat /workspace/runtime/state/schedule-heartbeat.json
+```
 
 ## Updating The Container
 

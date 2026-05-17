@@ -9,6 +9,7 @@ from typing import Annotated, Any
 
 import typer
 
+from seed_agent import __version__
 from seed_agent.actions.intent import (
     add_intent,
     confirm_intent,
@@ -630,6 +631,22 @@ def healthcheck(
     _print_json(payload)
 
 
+@app.command(name="runtime-status")
+def runtime_status(
+    config: Annotated[Path, typer.Option("--config")] = DEFAULT_CONFIG,
+    heartbeat_file: Annotated[Path | None, typer.Option("--heartbeat-file")] = None,
+    max_staleness_minutes: Annotated[int, typer.Option("--max-staleness-minutes")] = 90,
+) -> None:
+    if max_staleness_minutes < 1:
+        raise typer.BadParameter("max_staleness_minutes must be >= 1")
+    payload = _runtime_status_payload(
+        config,
+        heartbeat_file=heartbeat_file,
+        max_staleness_minutes=max_staleness_minutes,
+    )
+    _print_json(payload)
+
+
 @app.command(name="schedule-run")
 def schedule_run(
     config: Annotated[Path, typer.Option("--config")] = DEFAULT_CONFIG,
@@ -660,6 +677,7 @@ def schedule_run(
                 interval_minutes=interval_minutes,
                 payload={
                     "command": "schedule-run",
+                    "config": str(config),
                     "execute": execute,
                     "phase": "running",
                     "error": None,
@@ -963,9 +981,11 @@ def _write_heartbeat(
     heartbeat_file.parent.mkdir(parents=True, exist_ok=True)
     heartbeat = {
         "updated_at": datetime.now(UTC).isoformat(),
+        "version": __version__,
         "cycle": cycle,
         "interval_minutes": interval_minutes,
         "command": payload.get("command"),
+        "config": payload.get("config"),
         "execute": payload.get("execute"),
         "phase": payload.get("phase"),
         "accepted": payload.get("accepted"),
@@ -1058,6 +1078,108 @@ def _heartbeat_status(
             )
         )
     return status
+
+
+def _runtime_status_payload(
+    config_path: Path,
+    *,
+    heartbeat_file: Path | None,
+    max_staleness_minutes: int,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "command": "runtime-status",
+        "version": __version__,
+        "config": str(config_path),
+        "config_exists": config_path.exists(),
+    }
+    try:
+        loaded = load_config(config_path)
+    except Exception as exc:
+        payload.update(
+            {
+                "status": "config_error",
+                "error": str(exc),
+            }
+        )
+    else:
+        runtime_root = _runtime_root(loaded)
+        payload.update(
+            {
+                "status": "ok",
+                "config_dir": str(loaded.config_dir) if loaded.config_dir else None,
+                "workspace_root": str(_workspace_root(loaded)),
+                "state_path": str(_state_path(loaded)),
+                "state_exists": _state_path(loaded).exists(),
+                "audit_path": str(_audit_path(loaded)),
+                "audit_exists": _audit_path(loaded).exists(),
+                "runtime_root": str(runtime_root),
+                "sites": [
+                    {
+                        "name": site.name,
+                        "type": site.type,
+                        "enabled": site.enabled,
+                        "discovery_mode": site.discovery_mode,
+                        "access_mode": _site_access_mode(site, loaded.config_dir),
+                    }
+                    for site in loaded.sites
+                ],
+                "downloader": {
+                    "type": loaded.downloader.type,
+                    "target": loaded.downloader.target,
+                    "default_category": loaded.downloader.default_category,
+                    "credential_ref_set": loaded.downloader.secret_ref is not None,
+                    "credential_file_present": bool(
+                        loaded.downloader.secret_ref
+                        and _resolve_path(loaded.downloader.secret_ref, loaded.config_dir)
+                        and _resolve_path(loaded.downloader.secret_ref, loaded.config_dir).exists()
+                    ),
+                    "budget_pools": [
+                        {"name": pool.name, "max_size_tib": pool.max_size_tib}
+                        for pool in loaded.downloader.budget_pools
+                    ],
+                    "category_policies": [
+                        {
+                            "name": policy.name,
+                            "mode": policy.mode,
+                            "budget_pool": policy.budget_pool,
+                            "delete_enabled": policy.delete_enabled,
+                        }
+                        for policy in loaded.downloader.category_policies
+                    ],
+                },
+                "discovery": {
+                    "min_leechers": loaded.discovery.min_leechers,
+                    "min_seeders": loaded.discovery.min_seeders,
+                    "max_size_gb": loaded.discovery.max_size_gb,
+                    "max_active_downloads": loaded.discovery.max_active_downloads,
+                    "max_total_amount_left_gb": loaded.discovery.max_total_amount_left_gb,
+                },
+                "cleanup": {
+                    "cold_after_days": loaded.cleanup.cold_after_days,
+                    "delete_after_no_upload_hours": loaded.cleanup.delete_after_no_upload_hours,
+                    "pause_before_delete_hours": loaded.cleanup.pause_before_delete_hours,
+                },
+            }
+        )
+    if heartbeat_file is not None:
+        payload["heartbeat_file"] = str(heartbeat_file)
+        if heartbeat_file.exists():
+            try:
+                payload["heartbeat"] = _heartbeat_status(
+                    heartbeat_file,
+                    max_staleness_minutes=max_staleness_minutes,
+                )
+            except typer.Exit:
+                try:
+                    payload["heartbeat_raw"] = json.loads(
+                        heartbeat_file.read_text(encoding="utf-8")
+                    )
+                except Exception:
+                    payload["heartbeat_raw"] = None
+                payload["heartbeat_status"] = "error"
+        else:
+            payload["heartbeat_status"] = "missing"
+    return payload
 
 
 def _run(value: Any) -> Any:

@@ -30,6 +30,7 @@ HEARTBEAT_FILE="${SEED_AGENT_HEARTBEAT_FILE:-}"
 MAX_STALENESS_MINUTES="${SEED_AGENT_MAX_STALENESS_MINUTES:-}"
 MAX_CYCLES="${SEED_AGENT_MAX_CYCLES:-}"
 PRUNE="${SEED_AGENT_PRUNE:-false}"
+STARTUP_STATUS="${SEED_AGENT_STARTUP_STATUS:-true}"
 
 set -- seed-agent "$MODE" --config "$CONFIG_PATH"
 
@@ -71,6 +72,20 @@ if [ "$MODE" = "healthcheck" ]; then
   if [ -n "$MAX_STALENESS_MINUTES" ]; then
     set -- "$@" --max-staleness-minutes "$MAX_STALENESS_MINUTES"
   fi
+fi
+
+if [ "$STARTUP_STATUS" = "true" ] && [ "$MODE" != "healthcheck" ]; then
+  STATUS_ARGS="runtime-status --config $CONFIG_PATH"
+  if [ -n "$HEARTBEAT_FILE" ]; then
+    STATUS_ARGS="$STATUS_ARGS --heartbeat-file $HEARTBEAT_FILE"
+  fi
+  if [ -n "$MAX_STALENESS_MINUTES" ]; then
+    STATUS_ARGS="$STATUS_ARGS --max-staleness-minutes $MAX_STALENESS_MINUTES"
+  fi
+  # Keep startup diagnostics best-effort so a broken config still reaches the
+  # real command and produces its normal failure/log behavior.
+  # shellcheck disable=SC2086
+  seed-agent $STATUS_ARGS || true
 fi
 
 # Allow explicit `docker run seed-agent:local <mode> <extra args>` overrides for

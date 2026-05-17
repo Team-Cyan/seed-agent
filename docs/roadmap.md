@@ -83,12 +83,17 @@ This file tracks the current project status at a level that is easy for both hum
 - environment-driven container entrypoint for `run-once`, `enqueue`, and `schedule-run`
 - operator docs for long-running pollers vs external scheduled jobs
 - healthcheck and heartbeat support for long-running scheduler containers
+- startup and on-demand runtime status reports for version, config path,
+  heartbeat, state, audit, and credential-file visibility
 - first-class Compose and Kubernetes CronJob deployment examples
 - Docker-first README and Compose user guide for self-hosted NAS deployments
 - Compose-level registry override example for GHCR and Docker Hub style image
   distribution
 - GHCR publish workflow with multi-arch images, semver tags, short-SHA tags,
   OCI labels, and release-version validation
+- Docker Hub automation remains deferred; GHCR stays the primary automated
+  registry until a runtime-status-verified Unraid install still shows registry
+  friction
 - documented release version policy: code fixes and operational fixes bump patch
   by `0.0.1`; new features bump minor by `0.1.0`
 - version bump helper keeps release metadata files aligned
@@ -127,8 +132,6 @@ This file tracks the current project status at a level that is easy for both hum
 
 - extend deployment examples to the user's real target environments after the
   first server install
-- decide whether Docker Hub publishing should mirror GHCR or remain a manual
-  downstream republish path
 
 Reference:
 

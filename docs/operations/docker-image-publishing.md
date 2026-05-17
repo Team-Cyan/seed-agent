@@ -135,5 +135,7 @@ What is now documented:
 
 What still remains optional future work:
 
-- automated Docker Hub publish workflow
+- automated Docker Hub publish workflow; keep GHCR as the primary automated
+  registry until a runtime-status-verified Unraid install still shows GHCR
+  update or pull friction
 - a fully automated changelog/version bump command
