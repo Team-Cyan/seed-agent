@@ -943,7 +943,7 @@ def test_prune_execute_updates_state_to_paused_for_cold_managed_torrent(
         async def list_torrents(
             self, category: str | None = None, tags: set[str] | None = None
         ) -> list[ManagedTorrent]:
-            return [_managed_torrent(hash="abcd1234")]
+            return [_managed_torrent(hash="abcd1234", size_bytes=11 * 1024**4)]
 
         async def pause(self, hash: str) -> None:
             self.calls.append(("pause", hash, None))
@@ -998,6 +998,7 @@ def test_prune_execute_updates_state_to_deleted_for_old_paused_torrent(
                 _managed_torrent(
                     hash="abcd1234",
                     state="pausedUP",
+                    size_bytes=11 * 1024**4,
                     metadata={"paused_at": datetime.now(UTC) - timedelta(days=10)},
                 )
             ]
@@ -1052,7 +1053,14 @@ def test_prune_execute_uses_persisted_pause_timestamp_for_delete(
         async def list_torrents(
             self, category: str | None = None, tags: set[str] | None = None
         ) -> list[ManagedTorrent]:
-            return [_managed_torrent(hash="abcd1234", state="pausedUP", metadata={})]
+            return [
+                _managed_torrent(
+                    hash="abcd1234",
+                    state="pausedUP",
+                    size_bytes=11 * 1024**4,
+                    metadata={},
+                )
+            ]
 
         async def pause(self, hash: str) -> None:
             self.calls.append(("pause", hash, None))
@@ -1158,7 +1166,7 @@ def test_prune_dry_run_previews_live_torrents_without_mutation(
         async def list_torrents(
             self, category: str | None = None, tags: set[str] | None = None
         ) -> list[ManagedTorrent]:
-            return [_managed_torrent(hash="abcd1234")]
+            return [_managed_torrent(hash="abcd1234", size_bytes=11 * 1024**4)]
 
         async def pause(self, hash: str) -> None:
             self.calls.append(("pause", hash, None))
@@ -1810,7 +1818,10 @@ def test_prune_execute_failure_persists_prior_state_and_audit(
         async def list_torrents(
             self, category: str | None = None, tags: set[str] | None = None
         ) -> list[ManagedTorrent]:
-            return [_managed_torrent(hash="first"), _managed_torrent(hash="second")]
+            return [
+                _managed_torrent(hash="first", size_bytes=6 * 1024**4),
+                _managed_torrent(hash="second", size_bytes=6 * 1024**4),
+            ]
 
         async def pause(self, hash: str) -> None:
             self.calls.append(hash)

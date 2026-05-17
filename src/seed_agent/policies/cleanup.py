@@ -32,6 +32,8 @@ def classify_cleanup(
     cleanup: CleanupConfig,
     managed_category: str,
     managed_tags: set[str],
+    *,
+    space_reclamation_required: bool = False,
 ) -> CleanupDecision:
     if not _is_managed(torrent, managed_category, managed_tags):
         return CleanupDecision(
@@ -61,7 +63,12 @@ def classify_cleanup(
             managed=True,
         )
 
-    no_upload_decision = _no_upload_observation_decision(torrent, cleanup, metadata)
+    no_upload_decision = _no_upload_observation_decision(
+        torrent,
+        cleanup,
+        metadata,
+        space_reclamation_required=space_reclamation_required,
+    )
     if no_upload_decision is not None:
         return no_upload_decision
 
@@ -80,6 +87,12 @@ def classify_cleanup(
     if _is_paused_or_stopped(torrent.state):
         paused_at = _paused_at(metadata)
         if paused_at is not None:
+            if not space_reclamation_required:
+                return CleanupDecision(
+                    action="keep",
+                    reason=_reason("paused but space reclamation not required"),
+                    managed=True,
+                )
             paused_age = _utcnow() - paused_at
             if paused_age >= timedelta(hours=cleanup.pause_before_delete_hours):
                 return CleanupDecision(
@@ -116,8 +129,12 @@ def classify_cleanup(
         )
 
     return CleanupDecision(
-        action="pause",
-        reason=_reason("cold managed torrent should be paused before deletion"),
+        action="pause" if space_reclamation_required else "keep",
+        reason=_reason(
+            "cold managed torrent should be paused before deletion"
+            if space_reclamation_required
+            else "cold managed torrent retained; space reclamation not required"
+        ),
         managed=True,
     )
 
@@ -126,9 +143,15 @@ def _no_upload_observation_decision(
     torrent: ManagedTorrent,
     cleanup: CleanupConfig,
     metadata: dict[str, object],
+    *,
+    space_reclamation_required: bool,
 ) -> CleanupDecision | None:
     if torrent.uploaded_bytes <= 0:
-        return _zero_total_upload_decision(cleanup, metadata)
+        return _zero_total_upload_decision(
+            cleanup,
+            metadata,
+            space_reclamation_required=space_reclamation_required,
+        )
     if not _is_completed_seed(torrent):
         return None
     if _is_paused_or_stopped(torrent.state):
@@ -156,6 +179,15 @@ def _no_upload_observation_decision(
     no_upload_age = _utcnow() - no_upload_since_at
     delete_delay = timedelta(hours=cleanup.delete_after_no_upload_hours)
     if no_upload_age >= delete_delay:
+        if not space_reclamation_required:
+            return CleanupDecision(
+                action="keep",
+                reason=_reason(
+                    f"no upload for {no_upload_age.days}d {no_upload_age.seconds // 3600}h "
+                    "but space reclamation not required"
+                ),
+                managed=True,
+            )
         return CleanupDecision(
             action="delete",
             reason=_reason(
@@ -177,6 +209,8 @@ def _no_upload_observation_decision(
 def _zero_total_upload_decision(
     cleanup: CleanupConfig,
     metadata: dict[str, object],
+    *,
+    space_reclamation_required: bool,
 ) -> CleanupDecision | None:
     no_upload_since_at = _no_upload_since_at(metadata)
     if no_upload_since_at is None:
@@ -188,6 +222,15 @@ def _zero_total_upload_decision(
     no_upload_age = _utcnow() - no_upload_since_at
     delete_delay = timedelta(hours=cleanup.delete_after_no_upload_hours)
     if no_upload_age >= delete_delay:
+        if not space_reclamation_required:
+            return CleanupDecision(
+                action="keep",
+                reason=_reason(
+                    f"zero total upload for {no_upload_age.days}d {no_upload_age.seconds // 3600}h "
+                    "but space reclamation not required"
+                ),
+                managed=True,
+            )
         return CleanupDecision(
             action="delete",
             reason=_reason(

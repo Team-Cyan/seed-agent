@@ -52,6 +52,9 @@ This file tracks the current project status at a level that is easy for both hum
   recent upload, and no-upload observation state
 - cleanup keeps currently uploading managed torrents instead of allowing stale
   no-upload markers to drive delete decisions
+- mutable seed cleanup only pauses or deletes cold/no-upload torrents when the
+  configured budget pool is over budget, so normal seed contribution is kept
+  until space reclamation is needed
 
 ### Resource Intent Loop
 

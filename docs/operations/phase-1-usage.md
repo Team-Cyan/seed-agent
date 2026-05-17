@@ -60,6 +60,11 @@ Keep the file gitignored. Do not add tracker URLs, cookies, or other unrelated s
 
 Dry-run is the default behavior for mutating actions. Use it first to inspect what would happen before anything touches qBittorrent.
 
+Cleanup is capacity-driven for mutable seed categories. Cold or zero-upload
+torrents are retained while the configured budget pool is under its limit; prune
+only pauses or deletes them automatically when space reclamation is actually
+needed. Add-only media categories remain protected from cleanup mutations.
+
 ```bash
 uv run seed-agent discover --config config/example.yaml
 uv run seed-agent score --config config/example.yaml

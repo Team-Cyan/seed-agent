@@ -154,7 +154,13 @@ async def prune_cold_torrents(
             metadata = dict(torrent.metadata)
             metadata["free_window_min_remaining_minutes"] = free_window_min_remaining_minutes
             torrent = torrent.model_copy(update={"metadata": metadata})
-        classification = classify_cleanup(torrent, cleanup, policy.name, tags)
+        classification = classify_cleanup(
+            torrent,
+            cleanup,
+            policy.name,
+            tags,
+            space_reclamation_required=bool(pool_usage and pool_usage.over_budget),
+        )
         decision = _decision_for_cleanup(
             torrent,
             classification,

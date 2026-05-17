@@ -18,6 +18,12 @@ All notable project changes are tracked here.
 - Added `scripts/bump_version.py` to keep release metadata files aligned during
   deployment-facing version bumps.
 
+### Fixed
+
+- Mutable seed cleanup now only pauses or deletes cold/no-upload torrents when
+  the relevant budget pool is over budget, keeping ordinary seed contribution
+  intact when no space reclamation is needed.
+
 ## 0.2.2 - 2026-05-15
 
 ### Fixed

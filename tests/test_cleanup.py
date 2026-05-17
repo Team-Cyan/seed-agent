@@ -220,10 +220,30 @@ def test_deletes_stopped_managed_torrent_only_after_pause_delay_without_recent_u
         _cleanup(),
         managed_category="pt-auto",
         managed_tags={"seed-agent", "pt-auto"},
+        space_reclamation_required=True,
     )
 
     assert decision.action == "delete"
     assert "paused" in decision.reason
+
+
+def test_keeps_stopped_managed_torrent_when_space_reclamation_is_not_required() -> None:
+    from seed_agent.policies.cleanup import classify_cleanup
+
+    now = datetime.now(UTC)
+    decision = classify_cleanup(
+        _torrent(
+            state="stopped",
+            metadata={"paused_at": now - timedelta(hours=30)},
+            last_activity_at=now - timedelta(days=10),
+        ),
+        _cleanup(),
+        managed_category="pt-auto",
+        managed_tags={"seed-agent", "pt-auto"},
+    )
+
+    assert decision.action == "keep"
+    assert "space reclamation not required" in decision.reason
 
 
 def test_keeps_active_seed_while_no_upload_observation_window_is_young() -> None:
@@ -266,6 +286,7 @@ def test_deletes_active_seed_after_no_upload_observation_window() -> None:
         _cleanup(),
         managed_category="pt-auto",
         managed_tags={"seed-agent", "pt-auto"},
+        space_reclamation_required=True,
     )
 
     assert decision.action == "delete"
@@ -290,7 +311,32 @@ def test_deletes_incomplete_zero_upload_torrent_after_observation_window() -> No
         _cleanup(),
         managed_category="pt-auto",
         managed_tags={"seed-agent", "pt-auto"},
+        space_reclamation_required=True,
     )
 
     assert decision.action == "delete"
     assert "zero total upload" in decision.reason
+
+
+def test_keeps_zero_upload_torrent_when_space_reclamation_is_not_required() -> None:
+    from seed_agent.policies.cleanup import classify_cleanup
+
+    now = datetime.now(UTC)
+    decision = classify_cleanup(
+        _torrent(
+            state="downloading",
+            uploaded_bytes=0,
+            downloaded_bytes=5 * 1024**3,
+            last_activity_at=now,
+            metadata={
+                "amount_left_bytes": 5 * 1024**3,
+                "no_upload_since_at": now - timedelta(hours=3),
+            },
+        ),
+        _cleanup(),
+        managed_category="pt-auto",
+        managed_tags={"seed-agent", "pt-auto"},
+    )
+
+    assert decision.action == "keep"
+    assert "space reclamation not required" in decision.reason

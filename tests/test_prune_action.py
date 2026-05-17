@@ -88,7 +88,7 @@ async def test_dry_run_prune_does_not_call_downloader() -> None:
 
     assert downloader.calls == []
     assert len(decisions) == 1
-    assert decisions[0].action == "qb.cleanup.pause"
+    assert decisions[0].action == "qb.cleanup.keep"
     assert decisions[0].execute is False
 
 
@@ -104,6 +104,11 @@ async def test_execute_prune_pauses_cold_managed_torrent() -> None:
         _cleanup(),
         _policy(),
         execute=True,
+        pool_usage=PoolUsage(
+            pool_name="downloads",
+            size_bytes=11 * 1024**4,
+            max_size_bytes=10 * 1024**4,
+        ),
     )
 
     assert downloader.calls == [("pause", "abcd1234", None)]
@@ -169,6 +174,11 @@ async def test_prune_orders_mutable_torrents_by_eviction_rank() -> None:
         _cleanup(),
         _policy(),
         execute=True,
+        pool_usage=PoolUsage(
+            pool_name="downloads",
+            size_bytes=11 * 1024**4,
+            max_size_bytes=10 * 1024**4,
+        ),
     )
 
     assert downloader.calls == [("delete", "drop", True)]
@@ -214,6 +224,11 @@ async def test_execute_batch_failure_carries_prior_cleanup_decisions() -> None:
             _cleanup(),
             _policy(),
             execute=True,
+            pool_usage=PoolUsage(
+                pool_name="downloads",
+                size_bytes=11 * 1024**4,
+                max_size_bytes=10 * 1024**4,
+            ),
         )
 
     decisions = raised.value.decisions
@@ -225,3 +240,27 @@ async def test_execute_batch_failure_carries_prior_cleanup_decisions() -> None:
     assert decisions[0].target_id == "first"
     assert decisions[1].target_id == "second"
     assert "pause failed" in decisions[1].reason
+
+
+@pytest.mark.asyncio
+async def test_prune_keeps_cold_torrent_when_pool_is_not_over_budget() -> None:
+    from seed_agent.actions.qb import prune_cold_torrents
+
+    downloader = DummyDownloader()
+
+    decisions = await prune_cold_torrents(
+        [_torrent()],
+        downloader,
+        _cleanup(),
+        _policy(),
+        execute=True,
+        pool_usage=PoolUsage(
+            pool_name="downloads",
+            size_bytes=8 * 1024**4,
+            max_size_bytes=10 * 1024**4,
+        ),
+    )
+
+    assert downloader.calls == []
+    assert decisions[0].action == "qb.cleanup.keep"
+    assert "space reclamation not required" in decisions[0].reason
