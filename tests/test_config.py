@@ -439,6 +439,15 @@ def test_discovery_rejects_invalid_size_limits() -> None:
         SeedAgentConfig(**data)
 
 
+def test_discovery_treats_zero_max_size_as_unbounded() -> None:
+    data = _valid_config_data("local/secrets/qb.yaml")
+    data["discovery"] = {**data["discovery"], "max_size_gb": 0}
+
+    config = SeedAgentConfig(**data)
+
+    assert config.discovery.max_size_gb is None
+
+
 def test_non_mteam_site_rejects_api_discovery_mode() -> None:
     data = _valid_config_data("local/secrets/qb.yaml")
     data["sites"][0] = {

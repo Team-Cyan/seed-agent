@@ -4,6 +4,14 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.3.1 - 2026-05-17
+
+### Fixed
+
+- `discovery.max_size_gb: 0` now disables the hard size ceiling, matching the
+  existing `null` unbounded behavior and avoiding accidental rejection of all
+  normal-sized candidates.
+
 ## 0.3.0 - 2026-05-16
 
 ### Added

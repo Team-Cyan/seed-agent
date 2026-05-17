@@ -181,6 +181,8 @@ class DiscoveryConfig(BaseModel):
         if "target_seed_leecher_ratio" not in data and legacy_max_seeders is not None:
             min_leechers = data.get("min_leechers") or 1
             data["target_seed_leecher_ratio"] = float(legacy_max_seeders) / float(min_leechers)
+        if data.get("max_size_gb") == 0:
+            data["max_size_gb"] = None
         return data
 
     @field_validator("discounts", mode="before")

@@ -31,8 +31,9 @@ Score discovered torrents or ranked releases using explicit policy weights and e
   as `discountEndTime=null` alongside `discount=FREE`, are treated as having a
   known unlimited free window for scoring and execute-time safety gates.
 - `discovery.min_size_gb` and `discovery.max_size_gb` are hard candidate size
-  bounds; `preferred_size_min_gb` and `preferred_size_max_gb` only affect the
-  size score contribution.
+  bounds; set `max_size_gb` to `0` or `null` to disable the hard upper bound.
+  `preferred_size_min_gb` and `preferred_size_max_gb` only affect the size score
+  contribution.
 - `discovery.min_seeders` and `discovery.max_leechers` are hard bounds when
   configured; they protect the seed pool from dead or overly crowded candidates.
 - `discovery.target_seed_leecher_ratio` is a soft seed-pressure score input,
