@@ -4,6 +4,16 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.3.3 - 2026-05-18
+
+### Fixed
+
+- qB live-state refreshes now reconcile known active candidate hashes that are
+  missing from the current qB torrent list, marking them `deleted` locally and
+  storing missing-from-qB evidence for later investigation.
+- qB live-state refreshes also revive stale local `deleted` evidence when the
+  same torrent hash is visible in qB again.
+
 ## 0.3.2 - 2026-05-17
 
 ### Added

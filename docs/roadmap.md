@@ -56,6 +56,10 @@ This file tracks the current project status at a level that is easy for both hum
 - mutable seed cleanup only pauses or deletes cold/no-upload torrents when the
   configured budget pool is over budget, so normal seed contribution is kept
   until space reclamation is needed
+- qB live-state refreshes now reconcile known active candidate hashes that have
+  disappeared from qB into local `deleted` state with missing-from-qB evidence
+- qB live-state refreshes revive stale local `deleted` evidence when the same
+  torrent hash is visible in qB again
 
 ### Resource Intent Loop
 
@@ -128,6 +132,8 @@ This file tracks the current project status at a level that is easy for both hum
 - refine eviction ranking with tracker-side demand signals when available
 - use the new joined evidence reports to tune cleanup thresholds against real
   upload outcomes before adding more automation
+- use missing-from-qB reconciliation evidence to distinguish agent cleanup from
+  external/manual qB deletions when upload history suddenly changes
 
 ### Scheduler And Server Deployments
 

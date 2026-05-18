@@ -24,6 +24,10 @@ Persist local lifecycle knowledge and durable decision evidence.
 - prune stale unqueued candidate rows after the configured retention window,
 - backfill qB live torrents into `qb:<hash>` candidate rows when no candidate
   row is linked yet,
+- reconcile previously active candidate hashes that disappear from the qB live
+  list into local `deleted` state and store `missing_from_qb_*` runtime evidence,
+- revive stale `deleted` candidate state when the same hash appears in the qB
+  live list again,
 - write append-only redacted audit records.
 
 ## Expectations
@@ -44,6 +48,11 @@ Persist local lifecycle knowledge and durable decision evidence.
 - after any bulk qB cleanup, re-query qB and record or report the remaining
   matching count instead of assuming deletion succeeded from command output
   alone.
+- Treat qB live-state reconciliation as evidence capture, not a qB mutation. A
+  missing hash means the torrent is absent from the current Web API listing; it
+  does not by itself prove which actor deleted it.
+- Keep a short grace window before marking a newly linked hash missing, because
+  qB may not immediately show a just-added torrent in the next list response.
 - Preserve the bridge between enqueue-time candidate data and qB live runtime.
   The most useful optimization evidence is the joined view: original
   score reasons, seeders/leechers/free-window data plus current uploaded bytes,

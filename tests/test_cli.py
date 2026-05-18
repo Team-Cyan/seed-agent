@@ -1346,6 +1346,48 @@ def test_prune_links_live_torrent_without_existing_candidate(
     assert row["torrent_hash"] == "legacy-hash"
 
 
+def test_prune_marks_deleted_candidate_present_when_seen_live(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from seed_agent import cli
+
+    monkeypatch.chdir(tmp_path)
+
+    config_path = _config_file(tmp_path, secret_ref="local/secrets/qb.yaml")
+    config = _config(secret_ref="local/secrets/qb.yaml")
+    store = StateStore(tmp_path / ".seed-agent" / "state.db")
+    store.upsert_candidate(
+        stable_id="demo-free:https://tracker.example/details.php?id=1",
+        title="Live Again",
+        site="demo-free",
+        state=LifecycleState.DELETED,
+        score=95,
+        torrent_hash="live-again-hash",
+    )
+
+    class FakeDownloader:
+        async def list_torrents(
+            self, category: str | None = None, tags: set[str] | None = None
+        ) -> list[ManagedTorrent]:
+            return [_managed_torrent(hash="live-again-hash")]
+
+        async def pause(self, hash: str) -> None:
+            raise AssertionError("dry-run prune must not pause torrents")
+
+        async def delete(self, hash: str, delete_files: bool) -> None:
+            raise AssertionError("dry-run prune must not delete torrents")
+
+    monkeypatch.setattr(cli, "load_config", lambda path: config)
+    monkeypatch.setattr(cli, "_maybe_build_downloader", lambda loaded: FakeDownloader())
+
+    result = CliRunner().invoke(cli.app, ["prune", "--config", str(config_path)])
+
+    assert result.exit_code == 0
+    row = store.get_candidate("demo-free:https://tracker.example/details.php?id=1")
+    assert row is not None
+    assert row["state"] == LifecycleState.SEEDING.value
+
+
 def test_prune_dry_run_keeps_recently_uploaded_torrent_from_runtime_snapshot(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1634,6 +1676,56 @@ def test_review_reports_joined_candidate_evidence(
     assert evidence["left_time_minutes"] == 360
     assert evidence["free_window_expires_at"] == "2026-05-16T00:00:00+00:00"
     assert evidence["score_reasons"] == ["discount free accepted", "site_history 0.5"]
+
+
+def test_review_reconciles_missing_qb_torrents(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from seed_agent import cli
+
+    monkeypatch.chdir(tmp_path)
+
+    config_path = _config_file(tmp_path, secret_ref="local/secrets/qb.yaml")
+    config = _config(secret_ref="local/secrets/qb.yaml")
+    store = StateStore(tmp_path / ".seed-agent" / "state.db")
+    store.upsert_candidate(
+        stable_id="demo-free:https://tracker.example/details.php?id=1",
+        title="Missing Torrent",
+        site="demo-free",
+        state=LifecycleState.SEEDING,
+        score=93,
+        torrent_hash="missing-hash",
+    )
+    with store._connect() as conn:  # type: ignore[attr-defined]
+        conn.execute(
+            "UPDATE candidates SET updated_at = ? WHERE stable_id = ?",
+            (
+                (datetime.now(UTC) - timedelta(hours=1)).isoformat(),
+                "demo-free:https://tracker.example/details.php?id=1",
+            ),
+        )
+
+    class FakeDownloader:
+        async def list_torrents(
+            self, category: str | None = None, tags: set[str] | None = None
+        ) -> list[ManagedTorrent]:
+            return [_managed_torrent(hash="present-hash")]
+
+    monkeypatch.setattr(cli, "load_config", lambda path: config)
+    monkeypatch.setattr(cli, "_maybe_build_downloader", lambda loaded: FakeDownloader())
+
+    result = CliRunner().invoke(cli.app, ["review", "--config", str(config_path)])
+
+    assert result.exit_code == 0
+    payload = _json_output(result)
+    assert payload["managed_count"] == 1
+    assert payload["missing_from_qb_reconciled"] == 1
+    row = store.get_candidate("demo-free:https://tracker.example/details.php?id=1")
+    assert row is not None
+    assert row["state"] == LifecycleState.DELETED.value
+    runtime = store.get_torrent_runtime("missing-hash")
+    assert runtime is not None
+    assert runtime["missing_from_qb_reason"] == "missing from qB live torrent list"
 
 
 def test_daily_report_reports_joined_candidate_evidence(

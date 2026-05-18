@@ -19,6 +19,10 @@ Own qBittorrent integration for enqueue, review, and cleanup-safe downloader act
   remaining download volume,
 - expose joined operator evidence that links enqueue-time candidate signals with
   later qB runtime outcomes in `review`, `daily-report`, and prune previews,
+- reconcile known active hashes that are absent from a real qB live listing into
+  local missing/deleted evidence,
+- revive stale local `deleted` evidence when qB still reports the same hash as
+  live,
 - keep enqueue-like CLI commands aligned on the same qB runtime view during
   dry-run and execute flows,
 - support pause/delete flows through explicit decisions.
@@ -52,6 +56,9 @@ Own qBittorrent integration for enqueue, review, and cleanup-safe downloader act
   candidates when the operator's age/category boundary is explicit. Do not
   infer safety from the state string alone; keep the printed candidate set as
   the source of truth.
+- If a torrent is missing from qB after previously being linked in local state,
+  record that absence locally but do not infer that seed-agent deleted it unless
+  an executed `qb.cleanup.delete` audit entry exists for the same hash.
 
 ## Verification
 

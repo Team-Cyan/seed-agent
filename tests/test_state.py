@@ -429,6 +429,129 @@ def test_state_store_stamps_first_seen_pause_timestamp_for_paused_torrent(
     assert runtime["paused_at"] is not None
 
 
+def test_state_store_reconciles_missing_live_torrents(tmp_path: Path) -> None:
+    store = StateStore(tmp_path / "state.sqlite3")
+    store.upsert_candidate(
+        stable_id="demo:gone",
+        title="Gone Torrent",
+        site="demo",
+        state=LifecycleState.SEEDING,
+        score=90,
+        torrent_hash="gone-hash",
+    )
+    store.upsert_candidate(
+        stable_id="demo:present",
+        title="Present Torrent",
+        site="demo",
+        state=LifecycleState.SEEDING,
+        score=80,
+        torrent_hash="present-hash",
+    )
+    store.upsert_candidate(
+        stable_id="demo:scored",
+        title="Scored Torrent",
+        site="demo",
+        state=LifecycleState.SCORED,
+        score=70,
+        torrent_hash="scored-hash",
+    )
+
+    reconciled = store.reconcile_missing_torrents(
+        {"present-hash"},
+        reason="test live qB list did not include torrent",
+        min_age_minutes=0,
+    )
+
+    assert reconciled == 1
+    gone = store.get_candidate("demo:gone")
+    present = store.get_candidate("demo:present")
+    scored = store.get_candidate("demo:scored")
+    assert gone is not None
+    assert present is not None
+    assert scored is not None
+    assert gone["state"] == LifecycleState.DELETED.value
+    assert present["state"] == LifecycleState.SEEDING.value
+    assert scored["state"] == LifecycleState.SCORED.value
+    runtime = store.get_torrent_runtime("gone-hash")
+    assert runtime is not None
+    assert runtime["missing_from_qb_at"] is not None
+    assert runtime["missing_from_qb_reason"] == "test live qB list did not include torrent"
+
+
+def test_state_store_does_not_reconcile_freshly_linked_torrents_as_missing(
+    tmp_path: Path,
+) -> None:
+    store = StateStore(tmp_path / "state.sqlite3")
+    store.upsert_candidate(
+        stable_id="demo:fresh",
+        title="Fresh Torrent",
+        site="demo",
+        state=LifecycleState.ENQUEUED,
+        score=90,
+        torrent_hash="fresh-hash",
+    )
+
+    reconciled = store.reconcile_missing_torrents(set())
+
+    assert reconciled == 0
+    row = store.get_candidate("demo:fresh")
+    assert row is not None
+    assert row["state"] == LifecycleState.ENQUEUED.value
+
+
+def test_state_store_marks_deleted_torrent_present_when_seen_live(tmp_path: Path) -> None:
+    store = StateStore(tmp_path / "state.sqlite3")
+    store.upsert_candidate(
+        stable_id="demo:live-again",
+        title="Live Again",
+        site="demo",
+        state=LifecycleState.DELETED,
+        score=90,
+        torrent_hash="live-hash",
+    )
+
+    updated = store.mark_present_by_torrent_hash("live-hash", LifecycleState.SEEDING)
+
+    assert updated == 1
+    row = store.get_candidate("demo:live-again")
+    assert row is not None
+    assert row["state"] == LifecycleState.SEEDING.value
+
+
+def test_state_store_clears_missing_marker_when_torrent_reappears(tmp_path: Path) -> None:
+    store = StateStore(tmp_path / "state.sqlite3")
+    store.upsert_candidate(
+        stable_id="demo:gone",
+        title="Gone Torrent",
+        site="demo",
+        state=LifecycleState.SEEDING,
+        score=90,
+        torrent_hash="gone-hash",
+    )
+    store.reconcile_missing_torrents({"other-hash"}, min_age_minutes=0)
+
+    torrent = ManagedTorrent(
+        hash="gone-hash",
+        name="Gone Torrent",
+        category="seed",
+        tags={"seed-agent"},
+        state="uploading",
+        size_bytes=10 * 1024**3,
+        uploaded_bytes=1 * 1024**3,
+        downloaded_bytes=10 * 1024**3,
+        added_at=datetime(2026, 4, 1, tzinfo=UTC),
+        last_activity_at=datetime(2026, 4, 2, tzinfo=UTC),
+        metadata={"upspeed_bps": 1024},
+    )
+
+    store.apply_torrent_runtime([torrent])
+
+    runtime = store.get_torrent_runtime("gone-hash")
+    assert runtime is not None
+    assert runtime["missing_from_qb_at"] is None
+    assert runtime["missing_from_qb_reason"] is None
+
+
 def test_state_store_applies_runtime_with_batched_sqlite_access(tmp_path: Path) -> None:
     store = StateStore(tmp_path / "state.sqlite3")
     torrents = [

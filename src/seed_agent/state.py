@@ -228,6 +228,20 @@ class StateStore:
             )
         return len(rows)
 
+    def mark_present_by_torrent_hash(self, torrent_hash: str, state: LifecycleState) -> int:
+        now = _utc_now()
+        with self._connect() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE candidates
+                SET state = ?, updated_at = ?
+                WHERE torrent_hash = ?
+                  AND state = ?
+                """,
+                (state.value, now, torrent_hash, LifecycleState.DELETED.value),
+            )
+            return int(cursor.rowcount)
+
     def prune_stale_candidates(
         self,
         *,
@@ -282,6 +296,8 @@ class StateStore:
                     downloaded_bytes,
                     upspeed_bps,
                     dlspeed_bps,
+                    missing_from_qb_at,
+                    missing_from_qb_reason,
                     no_upload_since_at,
                     seen_at,
                     updated_at
@@ -343,6 +359,8 @@ class StateStore:
                     torrent.downloaded_bytes,
                     int(metadata.get("upspeed_bps", 0) or 0),
                     int(metadata.get("dlspeed_bps", 0) or 0),
+                    None,
+                    None,
                     (
                         no_upload_since_at.isoformat()
                         if no_upload_since_at is not None
@@ -355,6 +373,97 @@ class StateStore:
             enriched.append(torrent.model_copy(update={"metadata": metadata}))
         self._bulk_upsert_torrent_runtime(updates)
         return enriched
+
+    def reconcile_missing_torrents(
+        self,
+        live_hashes: set[str],
+        *,
+        reason: str = "missing from qB live torrent list",
+        min_age_minutes: int = 15,
+    ) -> int:
+        now = _utc_now()
+        cutoff = (
+            _utc_now_datetime() - timedelta(minutes=max(min_age_minutes, 0))
+        ).isoformat()
+        with self._connect() as conn:
+            if live_hashes:
+                placeholders = ", ".join("?" for _ in live_hashes)
+                missing_rows = conn.execute(
+                    f"""
+                    SELECT DISTINCT c.torrent_hash
+                    FROM candidates c
+                    WHERE c.torrent_hash IS NOT NULL
+                      AND c.state IN (?, ?, ?, ?, ?)
+                      AND c.updated_at < ?
+                      AND c.torrent_hash NOT IN ({placeholders})
+                    """,
+                    (
+                        LifecycleState.ENQUEUED.value,
+                        LifecycleState.DOWNLOADING.value,
+                        LifecycleState.SEEDING.value,
+                        LifecycleState.COLD.value,
+                        LifecycleState.PAUSED.value,
+                        cutoff,
+                        *tuple(live_hashes),
+                    ),
+                ).fetchall()
+            else:
+                missing_rows = conn.execute(
+                    """
+                    SELECT DISTINCT c.torrent_hash
+                    FROM candidates c
+                    WHERE c.torrent_hash IS NOT NULL
+                      AND c.state IN (?, ?, ?, ?, ?)
+                      AND c.updated_at < ?
+                    """,
+                    (
+                        LifecycleState.ENQUEUED.value,
+                        LifecycleState.DOWNLOADING.value,
+                        LifecycleState.SEEDING.value,
+                        LifecycleState.COLD.value,
+                        LifecycleState.PAUSED.value,
+                        cutoff,
+                    ),
+                ).fetchall()
+            missing_hashes = [str(row[0]) for row in missing_rows if row[0]]
+            if not missing_hashes:
+                return 0
+            placeholders = ", ".join("?" for _ in missing_hashes)
+            conn.execute(
+                f"""
+                UPDATE candidates
+                SET state = ?, updated_at = ?
+                WHERE torrent_hash IN ({placeholders})
+                  AND state IN (?, ?, ?, ?, ?)
+                """,
+                (
+                    LifecycleState.DELETED.value,
+                    now,
+                    *missing_hashes,
+                    LifecycleState.ENQUEUED.value,
+                    LifecycleState.DOWNLOADING.value,
+                    LifecycleState.SEEDING.value,
+                    LifecycleState.COLD.value,
+                    LifecycleState.PAUSED.value,
+                ),
+            )
+            conn.executemany(
+                """
+                INSERT INTO torrent_runtime (
+                    torrent_hash,
+                    missing_from_qb_at,
+                    missing_from_qb_reason,
+                    updated_at
+                )
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(torrent_hash) DO UPDATE SET
+                    missing_from_qb_at = excluded.missing_from_qb_at,
+                    missing_from_qb_reason = excluded.missing_from_qb_reason,
+                    updated_at = excluded.updated_at
+                """,
+                [(torrent_hash, now, reason, now) for torrent_hash in missing_hashes],
+            )
+            return len(missing_hashes)
 
     def _torrent_runtime_by_hash(self, torrent_hashes: list[str]) -> dict[str, dict[str, Any]]:
         if not torrent_hashes:
@@ -370,6 +479,8 @@ class StateStore:
                     downloaded_bytes,
                     upspeed_bps,
                     dlspeed_bps,
+                    missing_from_qb_at,
+                    missing_from_qb_reason,
                     no_upload_since_at,
                     seen_at,
                     updated_at
@@ -429,17 +540,21 @@ class StateStore:
                     downloaded_bytes,
                     upspeed_bps,
                     dlspeed_bps,
+                    missing_from_qb_at,
+                    missing_from_qb_reason,
                     no_upload_since_at,
                     seen_at,
                     updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(torrent_hash) DO UPDATE SET
                     paused_at = excluded.paused_at,
                     uploaded_bytes = excluded.uploaded_bytes,
                     downloaded_bytes = excluded.downloaded_bytes,
                     upspeed_bps = excluded.upspeed_bps,
                     dlspeed_bps = excluded.dlspeed_bps,
+                    missing_from_qb_at = excluded.missing_from_qb_at,
+                    missing_from_qb_reason = excluded.missing_from_qb_reason,
                     no_upload_since_at = excluded.no_upload_since_at,
                     seen_at = excluded.seen_at,
                     updated_at = excluded.updated_at
@@ -457,6 +572,8 @@ class StateStore:
         downloaded_bytes: int | None = None,
         upspeed_bps: int | None = None,
         dlspeed_bps: int | None = None,
+        missing_from_qb_at: str | None | object = _UNSET,
+        missing_from_qb_reason: str | None | object = _UNSET,
         no_upload_since_at: str | None = None,
         seen_at: str | None = None,
     ) -> None:
@@ -476,17 +593,21 @@ class StateStore:
                     downloaded_bytes,
                     upspeed_bps,
                     dlspeed_bps,
+                    missing_from_qb_at,
+                    missing_from_qb_reason,
                     no_upload_since_at,
                     seen_at,
                     updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(torrent_hash) DO UPDATE SET
                     paused_at = excluded.paused_at,
                     uploaded_bytes = excluded.uploaded_bytes,
                     downloaded_bytes = excluded.downloaded_bytes,
                     upspeed_bps = excluded.upspeed_bps,
                     dlspeed_bps = excluded.dlspeed_bps,
+                    missing_from_qb_at = excluded.missing_from_qb_at,
+                    missing_from_qb_reason = excluded.missing_from_qb_reason,
                     no_upload_since_at = excluded.no_upload_since_at,
                     seen_at = excluded.seen_at,
                     updated_at = excluded.updated_at
@@ -500,6 +621,12 @@ class StateStore:
                     else current.get("downloaded_bytes"),
                     upspeed_bps if upspeed_bps is not None else current.get("upspeed_bps"),
                     dlspeed_bps if dlspeed_bps is not None else current.get("dlspeed_bps"),
+                    missing_from_qb_at
+                    if missing_from_qb_at is not _UNSET
+                    else current.get("missing_from_qb_at"),
+                    missing_from_qb_reason
+                    if missing_from_qb_reason is not _UNSET
+                    else current.get("missing_from_qb_reason"),
                     no_upload_since_at,
                     seen_at if seen_at is not None else current.get("seen_at"),
                     now,
@@ -738,6 +865,8 @@ class StateStore:
                   downloaded_bytes INTEGER,
                   upspeed_bps INTEGER,
                   dlspeed_bps INTEGER,
+                  missing_from_qb_at TEXT,
+                  missing_from_qb_reason TEXT,
                   no_upload_since_at TEXT,
                   seen_at TEXT,
                   updated_at TEXT NOT NULL
@@ -839,6 +968,8 @@ class StateStore:
             "downloaded_bytes": "INTEGER",
             "upspeed_bps": "INTEGER",
             "dlspeed_bps": "INTEGER",
+            "missing_from_qb_at": "TEXT",
+            "missing_from_qb_reason": "TEXT",
             "no_upload_since_at": "TEXT",
             "seen_at": "TEXT",
         }

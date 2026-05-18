@@ -172,6 +172,7 @@ def enqueue(
     ] = False,
 ) -> None:
     loaded = load_config(config)
+    store = StateStore(_state_path(loaded))
     candidates = _discover_candidates(loaded)
     scored = score_candidates(candidates, loaded.discovery, loaded.scoring)
     scored = _apply_free_window_safety(
@@ -182,8 +183,8 @@ def enqueue(
     if execute:
         scored = _run(resolve_deferred_download_urls(scored, loaded))
     default_policy = _default_category_policy(loaded)
-    downloader, live_torrents, paused, pool_usage = _enqueue_runtime_context(
-        loaded, execute=execute
+    downloader, live_torrents, paused, pool_usage, missing_reconciled = _enqueue_runtime_context(
+        loaded, store=store, execute=execute
     )
     batch_error = None
     enqueue_batches = _enqueue_candidate_batches(scored, loaded, live_torrents, pool_usage)
@@ -214,6 +215,7 @@ def enqueue(
         "scores": [_score_summary(item) for item in scored],
         "decisions": [_decision_summary(item) for item in decisions],
         "runtime_activity": _runtime_activity_summary(live_torrents),
+        "missing_from_qb_reconciled": missing_reconciled,
     }
     if pool_usage is not None:
         payload["default_pool_usage"] = _pool_usage_item_summary(pool_usage)
@@ -396,8 +398,8 @@ def intent_enqueue(
     loaded = load_config(config)
     store = StateStore(_state_path(loaded))
     default_policy = _default_category_policy(loaded)
-    downloader, live_torrents, paused, pool_usage = _enqueue_runtime_context(
-        loaded, execute=execute
+    downloader, live_torrents, paused, pool_usage, missing_reconciled = _enqueue_runtime_context(
+        loaded, store=store, execute=execute
     )
     batch_error = None
     pause_reasons = _enqueue_pause_reasons(loaded, live_torrents, pool_usage)
@@ -431,6 +433,7 @@ def intent_enqueue(
         "enqueued": sum(1 for item in decisions if item.action == "qb.enqueue"),
         "decisions": [_decision_summary(item) for item in decisions],
         "runtime_activity": _runtime_activity_summary(live_torrents),
+        "missing_from_qb_reconciled": missing_reconciled,
     }
     if pool_usage is not None:
         payload["default_pool_usage"] = _pool_usage_item_summary(pool_usage)
@@ -453,8 +456,8 @@ def intent_run_once(
     providers = _build_search_providers(loaded)
     inbox_path = _resolve_path(loaded.intent.inbox_ref, loaded.config_dir)
     default_policy = _default_category_policy(loaded)
-    downloader, live_torrents, paused, pool_usage = _enqueue_runtime_context(
-        loaded, execute=execute
+    downloader, live_torrents, paused, pool_usage, missing_reconciled = _enqueue_runtime_context(
+        loaded, store=store, execute=execute
     )
     batch_error = None
     pause_reasons = _enqueue_pause_reasons(loaded, live_torrents, pool_usage)
@@ -490,6 +493,7 @@ def intent_run_once(
         "enqueue_candidates": len(result.enqueue_selected) if result is not None else 0,
         "decisions": [_decision_summary(item) for item in decisions],
         "runtime_activity": _runtime_activity_summary(live_torrents),
+        "missing_from_qb_reconciled": missing_reconciled,
     }
     if pool_usage is not None:
         payload["default_pool_usage"] = _pool_usage_item_summary(pool_usage)
@@ -525,12 +529,13 @@ def review(
 
     policy_lookup = _policy_lookup(loaded)
     torrents = _load_policy_torrents(downloader, loaded)
-    torrents = store.apply_torrent_runtime(torrents)
+    torrents, missing_reconciled = _apply_live_torrent_state(store, torrents)
     _persist_live_torrent_candidates(store, torrents)
     payload = {
         "command": "review",
         "config": str(config),
         "managed_count": len(torrents),
+        "missing_from_qb_reconciled": missing_reconciled,
         "pool_usage": _pool_usage_summary(loaded, torrents),
         "runtime_activity": _runtime_activity_summary(torrents),
         "managed_torrents": [
@@ -564,7 +569,9 @@ def daily_report_command(
     store = StateStore(_state_path(loaded))
     candidates = _discover_candidates(loaded)
     scored = score_candidates(candidates, loaded.discovery, loaded.scoring)
-    managed_torrents = _managed_torrents_for_report(loaded, store=store)
+    managed_torrents, missing_reconciled = _managed_torrents_for_report_with_reconciliation(
+        loaded, store=store
+    )
     policy_lookup = _policy_lookup(loaded)
     payload = {
         "command": "daily-report",
@@ -573,6 +580,7 @@ def daily_report_command(
         "pool_usage": _pool_usage_summary(loaded, managed_torrents),
         "runtime_activity": _runtime_activity_summary(managed_torrents),
         "managed_count": len(managed_torrents),
+        "missing_from_qb_reconciled": missing_reconciled,
         "managed_torrents": [
             _managed_torrent_summary(
                 torrent,
@@ -735,8 +743,11 @@ def _prune_payload(
         if downloader is None:
             downloader = _NullDownloader()
     all_torrents = _load_policy_torrents(downloader, loaded)
-    all_torrents = store.apply_torrent_runtime(all_torrents)
-    _persist_live_torrent_candidates(store, all_torrents)
+    if isinstance(downloader, _NullDownloader):
+        missing_reconciled = 0
+    else:
+        all_torrents, missing_reconciled = _apply_live_torrent_state(store, all_torrents)
+        _persist_live_torrent_candidates(store, all_torrents)
     mutable_policy_names = {policy.name for policy in mutable_policies}
     torrents = [torrent for torrent in all_torrents if torrent.category in mutable_policy_names]
     batch_error = None
@@ -774,6 +785,7 @@ def _prune_payload(
         "config": str(config_path),
         "execute": execute,
         "managed_count": len(torrents),
+        "missing_from_qb_reconciled": missing_reconciled,
         "pool_usage": _pool_usage_summary(loaded, all_torrents),
         "decisions": [_decision_summary(item) for item in decisions],
         "preview": _prune_preview(decisions, torrents, store),
@@ -832,8 +844,8 @@ def _run_once_payload(
         retention_days=loaded.state.candidate_retention_days
     )
 
-    downloader, live_torrents, paused, pool_usage = _enqueue_runtime_context(
-        loaded, execute=execute
+    downloader, live_torrents, paused, pool_usage, missing_reconciled = _enqueue_runtime_context(
+        loaded, store=store, execute=execute
     )
     batch_error = None
     enqueue_batches = _enqueue_candidate_batches(scored, loaded, live_torrents, pool_usage)
@@ -869,6 +881,7 @@ def _run_once_payload(
         "scores": [_score_summary(item) for item in scored],
         "decisions": [_decision_summary(item) for item in decisions],
         "runtime_activity": _runtime_activity_summary(live_torrents),
+        "missing_from_qb_reconciled": missing_reconciled,
         "stale_candidates_pruned": stale_candidates_pruned,
     }
     if pool_usage is not None:
@@ -1382,11 +1395,30 @@ def _managed_torrents_for_report(
     *,
     store: StateStore | None = None,
 ) -> list[ManagedTorrent]:
+    torrents, _ = _managed_torrents_for_report_with_reconciliation(config, store=store)
+    return torrents
+
+
+def _managed_torrents_for_report_with_reconciliation(
+    config: SeedAgentConfig,
+    *,
+    store: StateStore | None = None,
+) -> tuple[list[ManagedTorrent], int]:
     downloader = _maybe_build_downloader(config)
     if downloader is None:
-        return []
+        return [], 0
     torrents = _load_policy_torrents(downloader, config)
-    return (store or StateStore(_state_path(config))).apply_torrent_runtime(torrents)
+    return _apply_live_torrent_state(store or StateStore(_state_path(config)), torrents)
+
+
+def _apply_live_torrent_state(
+    store: StateStore,
+    torrents: list[ManagedTorrent],
+) -> tuple[list[ManagedTorrent], int]:
+    enriched = store.apply_torrent_runtime(torrents)
+    live_hashes = {torrent.hash for torrent in enriched if torrent.hash}
+    missing_count = store.reconcile_missing_torrents(live_hashes)
+    return enriched, missing_count
 
 
 def _candidate_evidence_summary(store: StateStore, torrent_hash: str) -> dict[str, Any] | None:
@@ -1491,15 +1523,18 @@ def _default_category_budget_state_from_torrents(
 def _enqueue_runtime_context(
     config: SeedAgentConfig,
     *,
+    store: StateStore,
     execute: bool,
-) -> tuple[QbittorrentClient | _NullDownloader, list[ManagedTorrent], bool, PoolUsage | None]:
+) -> tuple[QbittorrentClient | _NullDownloader, list[ManagedTorrent], bool, PoolUsage | None, int]:
     live_downloader = build_downloader(config) if execute else _maybe_build_downloader(config)
     if live_downloader is None:
-        return _NullDownloader(), [], False, None
+        return _NullDownloader(), [], False, None, 0
     live_torrents = _load_policy_torrents(live_downloader, config)
+    live_torrents, missing_reconciled = _apply_live_torrent_state(store, live_torrents)
+    _persist_live_torrent_candidates(store, live_torrents)
     paused, pool_usage = _default_category_budget_state_from_torrents(config, live_torrents)
     paused = paused or bool(_enqueue_pause_reasons(config, live_torrents, pool_usage))
-    return live_downloader, live_torrents, paused, pool_usage
+    return live_downloader, live_torrents, paused, pool_usage, missing_reconciled
 
 
 async def _enqueue_candidate_batches_action(
@@ -1668,6 +1703,10 @@ def _persist_live_torrent_candidates(
 ) -> None:
     for torrent in torrents:
         if store.list_by_torrent_hash(torrent.hash):
+            store.mark_present_by_torrent_hash(
+                torrent.hash,
+                _lifecycle_state_from_torrent(torrent),
+            )
             continue
         store.upsert_candidate(
             stable_id=f"qb:{torrent.hash}",

@@ -25,6 +25,8 @@ Expose the operator-facing command surface and safe summaries.
 - optional per-cycle cleanup through `run-once --prune` and `schedule-run --prune`,
 - stronger prune previews that include live torrent identity, linked candidate
   state, action, reason, and whether delete actions remove files,
+- `review`, `daily-report`, `prune`, `run-once`, and scheduler-backed runs
+  report how many known active torrents were reconciled as missing from qB,
 - heartbeat reporting and healthcheck probes for long-running deployments.
 
 ## Expectations
