@@ -28,6 +28,9 @@ from seed_agent.actions.pt import (
     score_candidates,
 )
 from seed_agent.actions.pt import daily_report as build_daily_report
+from seed_agent.actions.pt import (
+    strategy_report as build_strategy_report,
+)
 from seed_agent.actions.qb import MutationBatchError, enqueue_candidates, prune_cold_torrents
 from seed_agent.audit import AuditLogger, redact_payload
 from seed_agent.config import (
@@ -589,6 +592,38 @@ def daily_report_command(
             )
             for torrent in managed_torrents
         ],
+    }
+    _print_json(payload)
+
+
+@app.command(name="strategy-report")
+def strategy_report_command(
+    config: Annotated[Path, typer.Option("--config")] = DEFAULT_CONFIG,
+) -> None:
+    loaded = load_config(config)
+    store = StateStore(_state_path(loaded))
+    candidates = _discover_candidates(loaded)
+    scored = score_candidates(candidates, loaded.discovery, loaded.scoring)
+    downloader = _maybe_build_downloader(loaded)
+    managed_torrents = _load_policy_torrents(downloader, loaded) if downloader is not None else []
+    policy_lookup = _policy_lookup(loaded)
+    managed_summaries = [
+        _managed_torrent_summary(
+            torrent,
+            policy_lookup.get(torrent.category or ""),
+            store=store,
+        )
+        for torrent in managed_torrents
+    ]
+    payload = {
+        "command": "strategy-report",
+        "config": str(config),
+        "report": build_strategy_report(
+            scored,
+            managed_torrents,
+            managed_summaries=managed_summaries,
+        ),
+        "managed_torrents": managed_summaries,
     }
     _print_json(payload)
 

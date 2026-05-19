@@ -118,6 +118,34 @@ def test_leecher_minimum_gets_full_contribution() -> None:
     assert "leechers 8 >= min 8" in at_min.reasons
 
 
+def test_configured_leecher_full_score_multiplier_rewards_stronger_demand() -> None:
+    leecher_only = scoring(
+        weights={
+            "discount": 0,
+            "leechers": 100,
+            "seeders": 0,
+            "left_time": 0,
+            "size": 0,
+            "site_history": 0,
+        }
+    )
+    weak = score_candidate(
+        make_candidate(leechers=8),
+        discovery(leecher_score_full_at_multiplier=3.0),
+        leecher_only,
+    )
+    strong = score_candidate(
+        make_candidate(leechers=24),
+        discovery(leecher_score_full_at_multiplier=3.0),
+        leecher_only,
+    )
+
+    assert weak.score == 33
+    assert strong.score == 100
+    assert "leechers 8 between min 8 and full-score 24" in weak.reasons
+    assert "leechers 24 >= full-score 24" in strong.reasons
+
+
 def test_zero_min_leechers_does_not_drop_leecher_score_to_zero() -> None:
     result = score_candidate(
         make_candidate(leechers=0),
@@ -231,6 +259,23 @@ def test_configured_preferred_size_range_changes_size_contribution() -> None:
 
     assert result.accepted is True
     assert "size 100.0 GiB preferred" in result.reasons
+
+
+def test_configured_size_partial_max_extends_large_pack_partial_credit() -> None:
+    large = score_candidate(
+        make_candidate(size_bytes=220 * 1024 * 1024 * 1024),
+        discovery(size_partial_max_gb=300),
+        scoring(),
+    )
+    too_large = score_candidate(
+        make_candidate(size_bytes=320 * 1024 * 1024 * 1024),
+        discovery(size_partial_max_gb=300),
+        scoring(),
+    )
+
+    assert large.score > too_large.score
+    assert "size 220.0 GiB above preferred range" in large.reasons
+    assert "size 320.0 GiB above preferred range" in too_large.reasons
 
 
 def test_normal_discount_not_in_config_is_rejected() -> None:

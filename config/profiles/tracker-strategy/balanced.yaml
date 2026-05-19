@@ -1,0 +1,42 @@
+# Balanced tracker strategy example.
+# Copy selected blocks into your real config; this is not a standalone config.
+
+sites:
+  - name: mt
+    type: mteam
+    discovery_mode: api
+    api_discovery:
+      only_free: true
+      sort_field: leechers
+      sort_order: desc
+      page_size: 100
+      max_pages: 5
+      min_seeders: 1
+      max_seeders: 0
+      min_leechers: 0
+
+discovery:
+  discounts: [free, 2xfree]
+  min_left_time_minutes: 120
+  min_seeders: 1
+  min_leechers: 5
+  leecher_score_full_at_multiplier: 1.0
+  target_seed_leecher_ratio: 16
+  max_size_gb: 150
+  preferred_size_min_gb: 2
+  preferred_size_max_gb: 80
+  size_partial_max_gb: 150
+  max_active_downloads: 3
+  max_total_amount_left_gb: 150
+  allow_non_free: false
+  allow_hr: false
+
+scoring:
+  min_score_to_enqueue: 70
+  weights:
+    discount: 30
+    leechers: 25
+    seeders: 15
+    left_time: 15
+    size: 10
+    site_history: 5

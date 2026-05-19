@@ -140,7 +140,17 @@ def _score_leechers(
     maximum = discovery.max_leechers
     if maximum is not None and leechers > maximum:
         return _ComponentScore(0.0, f"leechers {leechers} > max {maximum}", True)
-    return _ComponentScore(weight, f"leechers {leechers} >= min {minimum}")
+    multiplier = discovery.leecher_score_full_at_multiplier
+    if minimum <= 0 or multiplier <= 1:
+        return _ComponentScore(weight, f"leechers {leechers} >= min {minimum}")
+    full_score_at = max(minimum, int(round(minimum * multiplier)))
+    if leechers >= full_score_at:
+        return _ComponentScore(weight, f"leechers {leechers} >= full-score {full_score_at}")
+    factor = max(0.0, min(1.0, leechers / full_score_at))
+    return _ComponentScore(
+        weight * factor,
+        f"leechers {leechers} between min {minimum} and full-score {full_score_at}",
+    )
 
 
 def _score_seeders(
@@ -200,7 +210,7 @@ def _score_size(
     preferred_max = discovery.preferred_size_max_gb
     if preferred_max is None:
         preferred_max = 80.0
-    partial_max = max(preferred_max, 150.0)
+    partial_max = max(preferred_max, discovery.size_partial_max_gb)
     if preferred_min <= size_gib <= preferred_max:
         return _ComponentScore(weight, f"size {size_gib:.1f} GiB preferred")
     if preferred_max < size_gib <= partial_max:

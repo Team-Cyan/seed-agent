@@ -697,3 +697,76 @@ def test_daily_report_returns_stable_counts() -> None:
     assert report["rejected"] == 1
     assert report["managed_torrents"] == 1
     assert report["top_candidates"][0]["score"] == 95
+
+
+def test_strategy_report_groups_tracker_signals_and_runtime_outcomes() -> None:
+    from seed_agent.actions.pt import strategy_report
+
+    hot_large = _candidate(
+        title="Hot Large Pack",
+        source_url="https://tracker.example/details.php?id=10",
+        size_bytes=220 * 1024**3,
+        seeders=180,
+        leechers=30,
+    )
+    cold_small = _candidate(
+        title="Cold Small Pack",
+        source_url="https://tracker.example/details.php?id=11",
+        size_bytes=12 * 1024**3,
+        seeders=100,
+        leechers=2,
+    )
+    scored = [
+        ScoreBreakdown(
+            candidate_id=hot_large.stable_id,
+            score=91,
+            accepted=True,
+            reasons=["ok"],
+            candidate=hot_large,
+        ),
+        ScoreBreakdown(
+            candidate_id=cold_small.stable_id,
+            score=0,
+            accepted=False,
+            reasons=["leechers 2 < min 8"],
+            candidate=cold_small,
+        ),
+    ]
+    managed = [
+        ManagedTorrent(
+            hash="hot-hash",
+            name="Hot Large Pack",
+            state="seeding",
+            size_bytes=220 * 1024**3,
+            uploaded_bytes=80 * 1024**3,
+            downloaded_bytes=220 * 1024**3,
+            added_at=datetime(2026, 5, 19, 0, 0, tzinfo=UTC),
+        )
+    ]
+    managed_summaries = [
+        {
+            "hash": "hot-hash",
+            "uploaded_gb": 80.0,
+            "state": "seeding",
+            "candidate_evidence": {
+                "candidate_id": hot_large.stable_id,
+                "seeders": 180,
+                "leechers": 30,
+                "size_gb": 220.0,
+                "score": 91,
+            },
+        }
+    ]
+
+    report = strategy_report(scored, managed, managed_summaries=managed_summaries)
+
+    assert report["candidate_distribution"]["total_scored"] == 2
+    assert report["candidate_distribution"]["accepted"] == 1
+    assert report["candidate_distribution"]["leechers"]["25+"]["accepted"] == 1
+    assert report["candidate_distribution"]["leechers"]["0-4"]["rejected"] == 1
+    assert report["candidate_distribution"]["size_gb"]["150+"]["accepted"] == 1
+    assert report["runtime_outcomes"]["managed_torrents"] == 1
+    assert report["runtime_outcomes"]["with_candidate_evidence"] == 1
+    assert report["runtime_outcomes"]["uploaded_count"] == 1
+    assert report["runtime_outcomes"]["avg_uploaded_gb"] == 80.0
+    assert report["runtime_outcomes"]["by_candidate_leechers"]["25+"]["avg_uploaded_gb"] == 80.0

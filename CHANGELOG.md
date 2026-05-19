@@ -4,6 +4,22 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.4.0 - 2026-05-19
+
+### Added
+
+- Added `seed-agent strategy-report`, a read-only tracker strategy report that
+  groups current candidates and linked qB outcomes by demand, size, score, and
+  original enqueue evidence.
+- Added recommendation-only tracker strategy config examples for balanced,
+  upload-farming, and space-saving tuning.
+
+### Changed
+
+- Added fine-grained discovery knobs for leecher score ramping and large-pack
+  partial size credit so strategy can be tuned through concrete config
+  combinations instead of a coarse runtime profile field.
+
 ## 0.3.3 - 2026-05-18
 
 ### Fixed

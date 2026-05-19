@@ -60,6 +60,10 @@ This file tracks the current project status at a level that is easy for both hum
   disappeared from qB into local `deleted` state with missing-from-qB evidence
 - qB live-state refreshes revive stale local `deleted` evidence when the same
   torrent hash is visible in qB again
+- tracker strategy tuning is evidence-driven through `strategy-report`, with
+  concrete knobs for leecher score ramping and large-pack partial size credit
+  plus recommendation-only config examples for balanced, upload-farming, and
+  space-saving strategies
 
 ### Resource Intent Loop
 

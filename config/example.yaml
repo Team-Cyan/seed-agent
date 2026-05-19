@@ -48,6 +48,11 @@ discovery:
   min_left_time_minutes: 120
   min_seeders: 1
   min_leechers: 8
+  # Set above 1.0 to make leecher score ramp up from min_leechers to
+  # min_leechers * multiplier instead of granting full credit at the minimum.
+  # This is useful for upload-farming configurations that should favor
+  # stronger live demand without adding a strategy_profile switch.
+  leecher_score_full_at_multiplier: 1.0
   # Soft scoring pressure: seeders / max(leechers, 1). Higher ratios lose
   # seeder-score credit but are not hard-rejected.
   target_seed_leecher_ratio: 10
@@ -61,6 +66,10 @@ discovery:
   # but are not rejected unless they violate min_size_gb/max_size_gb.
   preferred_size_min_gb: 2
   preferred_size_max_gb: 80
+  # Upper bound for partial size credit after preferred_size_max_gb. Raise this
+  # for upload-farming profiles that intentionally allow very large hot packs,
+  # or lower it for space-saving profiles.
+  size_partial_max_gb: 150
   # Optional conservative runtime gates. When exceeded, enqueue-like commands
   # still add accepted torrents but mark them paused by policy.
   # max_active_downloads: 3

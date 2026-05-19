@@ -1,0 +1,42 @@
+# Upload-farming tracker strategy example.
+# Copy selected blocks into your real config; this is not a standalone config.
+
+sites:
+  - name: mt
+    type: mteam
+    discovery_mode: api
+    api_discovery:
+      only_free: true
+      sort_field: leechers
+      sort_order: desc
+      page_size: 100
+      max_pages: 8
+      min_seeders: 1
+      max_seeders: 0
+      min_leechers: 0
+
+discovery:
+  discounts: [free, 2xfree]
+  min_left_time_minutes: 120
+  min_seeders: 1
+  min_leechers: 5
+  leecher_score_full_at_multiplier: 3.0
+  target_seed_leecher_ratio: 30
+  max_size_gb: null
+  preferred_size_min_gb: 2
+  preferred_size_max_gb: 120
+  size_partial_max_gb: 300
+  max_active_downloads: 4
+  max_total_amount_left_gb: 300
+  allow_non_free: false
+  allow_hr: false
+
+scoring:
+  min_score_to_enqueue: 68
+  weights:
+    discount: 25
+    leechers: 35
+    seeders: 15
+    left_time: 10
+    size: 10
+    site_history: 5

@@ -1777,6 +1777,87 @@ def test_daily_report_reports_joined_candidate_evidence(
     assert evidence["score_reasons"] == ["daily evidence"]
 
 
+def test_strategy_report_cli_reports_candidate_distribution_and_runtime_outcomes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from seed_agent import cli
+
+    monkeypatch.chdir(tmp_path)
+
+    config_path = _config_file(tmp_path, secret_ref="local/secrets/qb.yaml")
+    config = _config(secret_ref="local/secrets/qb.yaml")
+    candidate = _candidate(
+        source_url="https://tracker.example/details.php?id=42",
+        size_bytes=220 * 1024**3,
+        seeders=180,
+        leechers=30,
+    )
+    scored = [
+        ScoreBreakdown(
+            candidate_id=candidate.stable_id,
+            score=91,
+            accepted=True,
+            reasons=["ok"],
+            candidate=candidate,
+        )
+    ]
+    StateStore(tmp_path / ".seed-agent" / "state.db").upsert_candidate(
+        stable_id=candidate.stable_id,
+        title=candidate.title,
+        site=candidate.site,
+        state=LifecycleState.ENQUEUED,
+        score=91,
+        torrent_hash="strategy-hash",
+        size_bytes=candidate.size_bytes,
+        seeders=candidate.seeders,
+        leechers=candidate.leechers,
+        discount=candidate.discount.value,
+        left_time_minutes=candidate.left_time_minutes,
+        score_reasons=["strategy evidence"],
+    )
+
+    async def fake_discover_candidates(config: SeedAgentConfig):
+        return [candidate]
+
+    def fake_score_candidates(candidates, discovery_config, scoring_config):
+        return scored
+
+    class FakeDownloader:
+        async def list_torrents(
+            self, category: str | None = None, tags: set[str] | None = None
+        ) -> list[ManagedTorrent]:
+            return [
+                _managed_torrent(
+                    hash="strategy-hash",
+                    size_bytes=220 * 1024**3,
+                    uploaded_bytes=80 * 1024**3,
+                    downloaded_bytes=220 * 1024**3,
+                )
+            ]
+
+    monkeypatch.setattr(cli, "load_config", lambda path: config)
+    monkeypatch.setattr(cli, "discover_candidates", fake_discover_candidates)
+    monkeypatch.setattr(cli, "score_candidates", fake_score_candidates)
+    monkeypatch.setattr(cli, "_maybe_build_downloader", lambda loaded: FakeDownloader())
+    monkeypatch.setattr(
+        cli,
+        "_apply_live_torrent_state",
+        lambda store, torrents: pytest.fail("strategy-report must not mutate live state"),
+    )
+
+    result = CliRunner().invoke(cli.app, ["strategy-report", "--config", str(config_path)])
+
+    assert result.exit_code == 0
+    payload = _json_output(result)
+    assert payload["command"] == "strategy-report"
+    assert payload["report"]["candidate_distribution"]["accepted"] == 1
+    assert payload["report"]["candidate_distribution"]["size_gb"]["150+"]["accepted"] == 1
+    outcomes = payload["report"]["runtime_outcomes"]
+    assert outcomes["managed_torrents"] == 1
+    assert outcomes["with_candidate_evidence"] == 1
+    assert outcomes["by_candidate_leechers"]["25+"]["avg_uploaded_gb"] == 80.0
+
+
 def test_run_once_dry_run_reports_runtime_activity_and_default_pool_usage(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -164,10 +164,12 @@ class DiscoveryConfig(BaseModel):
     allow_hr: bool = False
     min_seeders: int | None = None
     max_leechers: int | None = None
+    leecher_score_full_at_multiplier: float = 1.0
     min_size_gb: float | None = None
     max_size_gb: float | None = None
     preferred_size_min_gb: float | None = None
     preferred_size_max_gb: float | None = None
+    size_partial_max_gb: float = 150.0
     max_active_downloads: int | None = None
     max_total_amount_left_gb: float | None = None
 
@@ -203,6 +205,7 @@ class DiscoveryConfig(BaseModel):
             "max_size_gb",
             "preferred_size_min_gb",
             "preferred_size_max_gb",
+            "size_partial_max_gb",
             "target_seed_leecher_ratio",
             "max_active_downloads",
             "max_total_amount_left_gb",
@@ -222,6 +225,8 @@ class DiscoveryConfig(BaseModel):
             and self.preferred_size_max_gb < self.preferred_size_min_gb
         ):
             raise ValueError("preferred_size_max_gb must be >= preferred_size_min_gb")
+        if self.leecher_score_full_at_multiplier < 1:
+            raise ValueError("leecher_score_full_at_multiplier must be >= 1")
         return self
 
 
