@@ -71,6 +71,7 @@ Copy or import:
 Recommended user-visible defaults:
 
 - `Network=bridge`
+- restart policy `unless-stopped`
 - `SEED_AGENT_MODE=schedule-run`
 - `SEED_AGENT_CONFIG=/workspace/runtime/config/config.yaml`
 - `SEED_AGENT_HEARTBEAT_FILE=/workspace/runtime/state/schedule-heartbeat.json`
@@ -139,6 +140,18 @@ Afterward, confirm the container still has:
 
 ```text
 net.unraid.docker.managed=dockerman
+```
+
+Also confirm Docker kept the scheduler restart policy:
+
+```sh
+docker inspect seed-agent --format '{{json .HostConfig.RestartPolicy}}'
+```
+
+Expected:
+
+```json
+{"Name":"unless-stopped","MaximumRetryCount":0}
 ```
 
 If repeated `latest` pulls leave old `ghcr.io/team-cyan/seed-agent:<none>`

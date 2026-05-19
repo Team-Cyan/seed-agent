@@ -4,6 +4,14 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.4.1 - 2026-05-19
+
+### Fixed
+
+- Unraid DockerMan template now applies `--restart=unless-stopped`, matching the
+  Compose deployment behavior so the long-running scheduler is restarted after
+  host/container restarts or unexpected process exits.
+
 ## 0.4.0 - 2026-05-19
 
 ### Added
