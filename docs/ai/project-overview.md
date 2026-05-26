@@ -34,6 +34,8 @@ The current architecture has two shipped loops:
 
 2. Resource intent loop
    - ingest or add intents,
+   - sync configured Douban and IMDb Want List sources,
+   - merge repeated wants by reliable external ID aliases,
    - search candidate releases,
    - rank releases,
    - confirm or reject ambiguous choices,
@@ -49,6 +51,7 @@ The current architecture has two shipped loops:
 - Models: `src/seed_agent/models.py`
 - State store: `src/seed_agent/state.py`
 - Audit: `src/seed_agent/audit.py`
+- Architecture snapshot: `docs/architecture.md`
 
 ## Release Discipline
 
@@ -58,8 +61,8 @@ The current architecture has two shipped loops:
 - New features bump the minor slot by `0.1.0`.
 - Documentation-only changes may keep the version unchanged unless they are part
   of an operator handoff or deployment release.
-- When bumping, keep `VERSION`, `pyproject.toml`, `src/seed_agent/__init__.py`,
-  and `CHANGELOG.md` aligned.
+- When bumping, keep `VERSION`, `Dockerfile`, `pyproject.toml`,
+  `src/seed_agent/__init__.py`, and `CHANGELOG.md` aligned.
 - After pushing a release intended for Unraid, verify the GHCR tag or manifest
   before touching the live host. Pulling `latest` too early can leave the host
   on the previous digest while the GitHub Action is still publishing.
@@ -72,11 +75,14 @@ The current architecture has two shipped loops:
 
 - `nexusphp`: RSS-first with richer feed fields
 - `mteam`: RSS discovery, API-key detail enrichment, and API-driven discovery
+  plus API-backed intent search
 
 Important nuance:
 
 - RSS must stay in the codebase because it is useful for other sites and fallback flows.
 - M-Team API discovery is the preferred authenticated path when an API key is configured.
+- Intent search can be Remux-first through generic search keywords and can
+  prefer season packs or individual episodes through `intent.series_search_mode`.
 
 ## Current Downloader Story
 

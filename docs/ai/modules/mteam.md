@@ -7,8 +7,10 @@ Handle M-Team-specific discovery, detail enrichment, and download-token generati
 ## Primary Files
 
 - `src/seed_agent/sites/mteam.py`
+- `src/seed_agent/search/mteam.py`
 - `src/seed_agent/sites/rss.py`
 - `tests/test_mteam_site.py`
+- `tests/test_search_mteam.py`
 - `docs/specs/2026-04-24-mteam-api-driven-discovery.md`
 
 ## Current Status
@@ -21,6 +23,13 @@ Implemented today:
   activity-based sorting
 - deferred `genDlToken` download URL generation for accepted API-discovered
   candidates during execute-mode enqueue
+- M-Team API-backed resource intent search, using the same search endpoint while
+  keeping download-token resolution deferred until execute-mode intent enqueue
+- ID-first intent search through native M-Team `douban` and `imdb` filters when
+  the source event provides external IDs, with Douban tried first and IMDb used
+  as fallback when the Douban result set has no locally acceptable release
+- intent search supports generic Remux/quality preferences through `search.*`
+  keyword lists and TV/anime pack behavior through `intent.series_search_mode`
 - `site-probe` visibility for authenticated M-Team access and discovery mode
 
 Current preferred auth:
@@ -41,8 +50,20 @@ Current fallback still present in code:
   enqueue is executing.
 - Treat `discount=FREE` plus an explicit `discountEndTime=null` from the M-Team
   API as a known unlimited free window rather than an unknown expiry.
-- Keep M-Team search knobs in `api_discovery`; credentials stay in
-  `api_key_ref` / ignored local secret files.
+- Keep upload discovery knobs in `api_discovery`; credentials stay in
+  `api_key_ref` / ignored local secret files. Intent search uses conservative
+  search-specific defaults and should not inherit adult/freeleech upload
+  discovery filters.
+- For upload discovery, `api_discovery.min_seeders` and `min_leechers` can be
+  `null` to inherit global `discovery` thresholds. Explicit `0` keeps the
+  native M-Team API lower-bound filter open.
+- For intent search, keep user quality preferences generic in `search`
+  (`required_keywords`, `preferred_keywords`, and `excluded_keywords`) rather
+  than inventing M-Team-only Remux/Profile switches. Use
+  `intent.series_search_mode` for season-pack vs episode behavior.
+- ID-first intent search should not put quality terms such as Remux into the
+  API keyword field. Fetch by Douban/IMDb ID first, then apply generic title
+  filters locally.
 
 ## Desired Future State
 
@@ -51,7 +72,7 @@ Current fallback still present in code:
 
 ## Verification
 
-- `uv run pytest -q tests/test_mteam_site.py tests/test_rss_site.py`
+- `uv run pytest -q tests/test_mteam_site.py tests/test_search_mteam.py tests/test_rss_site.py`
 - `uv run seed-agent site-probe --config <mteam-config>`
 
 ## If You Get Stuck

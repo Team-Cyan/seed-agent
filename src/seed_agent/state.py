@@ -77,7 +77,7 @@ class StateStore:
             torrent_hash,
         )
 
-        with self._connect() as conn:
+        with self._connect(row_factory=sqlite3.Row) as conn:
             conn.execute(
                 """
                 INSERT INTO candidates (
@@ -230,7 +230,7 @@ class StateStore:
 
     def mark_present_by_torrent_hash(self, torrent_hash: str, state: LifecycleState) -> int:
         now = _utc_now()
-        with self._connect() as conn:
+        with self._connect(row_factory=sqlite3.Row) as conn:
             cursor = conn.execute(
                 """
                 UPDATE candidates
@@ -745,6 +745,227 @@ class StateStore:
         self.upsert_intent(intent, selected_release_id=selected_release_id)
         return True
 
+    def find_intent_id_by_alias(self, alias: str) -> str | None:
+        with self._connect(row_factory=sqlite3.Row) as conn:
+            row = conn.execute(
+                "SELECT intent_id FROM intent_aliases WHERE alias = ?",
+                (alias,),
+            ).fetchone()
+        return None if row is None else str(row["intent_id"])
+
+    def upsert_intent_alias(self, alias: str, intent_id: str) -> None:
+        now = _utc_now()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO intent_aliases (alias, intent_id, created_at, updated_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(alias) DO UPDATE SET
+                    intent_id = excluded.intent_id,
+                    updated_at = excluded.updated_at
+                """,
+                (alias, intent_id, now, now),
+            )
+
+    def list_intent_aliases(self, intent_id: str) -> list[str]:
+        with self._connect(row_factory=sqlite3.Row) as conn:
+            rows = conn.execute(
+                """
+                SELECT alias
+                FROM intent_aliases
+                WHERE intent_id = ?
+                ORDER BY alias ASC
+                """,
+                (intent_id,),
+            ).fetchall()
+        return [str(row["alias"]) for row in rows]
+
+    def upsert_intent_source_evidence(
+        self,
+        *,
+        intent_id: str,
+        source: str,
+        raw_text: str,
+        source_event_id: str | None,
+        requested_at: str | None,
+        metadata: dict[str, Any],
+    ) -> None:
+        source_config_id = _optional_text(metadata.get("source_config_id"))
+        source_label = _optional_text(metadata.get("source_label"))
+        evidence_id = _evidence_id(source, source_config_id, source_event_id, raw_text)
+        now = _utc_now()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO intent_source_evidence (
+                    evidence_id,
+                    intent_id,
+                    source,
+                    source_event_id,
+                    source_config_id,
+                    source_label,
+                    requested_at,
+                    raw_text,
+                    metadata_json,
+                    created_at,
+                    updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(evidence_id) DO UPDATE SET
+                    intent_id = excluded.intent_id,
+                    source = excluded.source,
+                    source_event_id = excluded.source_event_id,
+                    source_config_id = excluded.source_config_id,
+                    source_label = excluded.source_label,
+                    requested_at = excluded.requested_at,
+                    raw_text = excluded.raw_text,
+                    metadata_json = excluded.metadata_json,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    evidence_id,
+                    intent_id,
+                    source,
+                    source_event_id,
+                    source_config_id,
+                    source_label,
+                    requested_at,
+                    raw_text,
+                    _json_dumps(metadata),
+                    now,
+                    now,
+                ),
+            )
+
+    def list_intent_source_evidence(self, intent_id: str) -> list[dict[str, Any]]:
+        with self._connect(row_factory=sqlite3.Row) as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    evidence_id,
+                    intent_id,
+                    source,
+                    source_event_id,
+                    source_config_id,
+                    source_label,
+                    requested_at,
+                    raw_text,
+                    metadata_json,
+                    created_at,
+                    updated_at
+                FROM intent_source_evidence
+                WHERE intent_id = ?
+                ORDER BY
+                    COALESCE(requested_at, created_at) ASC,
+                    created_at ASC,
+                    evidence_id ASC
+                """,
+                (intent_id,),
+            ).fetchall()
+        items: list[dict[str, Any]] = []
+        for row in rows:
+            item = dict(row)
+            try:
+                loaded = json.loads(str(item.pop("metadata_json")))
+            except json.JSONDecodeError:
+                loaded = {}
+            item["metadata"] = loaded if isinstance(loaded, dict) else {}
+            items.append(item)
+        return items
+
+    def merge_intents(self, canonical_intent_id: str, duplicate_intent_id: str) -> bool:
+        if canonical_intent_id == duplicate_intent_id:
+            return True
+        canonical = self.get_intent(canonical_intent_id)
+        duplicate = self.get_intent(duplicate_intent_id)
+        if canonical is None or duplicate is None:
+            return False
+        canonical_payload = json.loads(str(canonical["normalized_json"]))
+        duplicate_payload = json.loads(str(duplicate["normalized_json"]))
+        canonical_metadata = dict(canonical_payload.get("metadata") or {})
+        duplicate_metadata = dict(duplicate_payload.get("metadata") or {})
+        canonical_payload["metadata"] = _merge_intent_metadata(
+            canonical_metadata,
+            duplicate_metadata,
+        )
+        merged_intent = ResourceIntent.model_validate(canonical_payload)
+        selected_release_id = canonical["selected_release_id"] or duplicate["selected_release_id"]
+        now = _utc_now()
+        with self._connect(row_factory=sqlite3.Row) as conn:
+            duplicate_rows = conn.execute(
+                """
+                SELECT release_id, site, title, score, confidence, accepted,
+                       confirmation_required, release_json, created_at
+                FROM release_candidates
+                WHERE intent_id = ?
+                """,
+                (duplicate_intent_id,),
+            ).fetchall()
+            for row in duplicate_rows:
+                data = dict(row)
+                try:
+                    release_payload = json.loads(str(data["release_json"]))
+                except json.JSONDecodeError:
+                    release_payload = {}
+                if isinstance(release_payload, dict):
+                    release_payload["intent_id"] = canonical_intent_id
+                conn.execute(
+                    """
+                    INSERT INTO release_candidates (
+                        intent_id,
+                        release_id,
+                        site,
+                        title,
+                        score,
+                        confidence,
+                        accepted,
+                        confirmation_required,
+                        release_json,
+                        created_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(intent_id, release_id) DO UPDATE SET
+                        site = excluded.site,
+                        title = excluded.title,
+                        score = excluded.score,
+                        confidence = excluded.confidence,
+                        accepted = excluded.accepted,
+                        confirmation_required = excluded.confirmation_required,
+                        release_json = excluded.release_json
+                    """,
+                    (
+                        canonical_intent_id,
+                        data["release_id"],
+                        data["site"],
+                        data["title"],
+                        data["score"],
+                        data["confidence"],
+                        data["accepted"],
+                        data["confirmation_required"],
+                        _json_dumps(release_payload),
+                        data["created_at"],
+                    ),
+                )
+            conn.execute(
+                "UPDATE intent_aliases SET intent_id = ?, updated_at = ? WHERE intent_id = ?",
+                (canonical_intent_id, now, duplicate_intent_id),
+            )
+            conn.execute(
+                """
+                UPDATE intent_source_evidence
+                SET intent_id = ?, updated_at = ?
+                WHERE intent_id = ?
+                """,
+                (canonical_intent_id, now, duplicate_intent_id),
+            )
+            conn.execute(
+                "DELETE FROM release_candidates WHERE intent_id = ?",
+                (duplicate_intent_id,),
+            )
+            conn.execute("DELETE FROM intents WHERE intent_id = ?", (duplicate_intent_id,))
+        self.upsert_intent(merged_intent, selected_release_id=selected_release_id)
+        return True
+
     def save_ranked_releases(self, releases: list[RankedRelease]) -> None:
         now = _utc_now()
         with self._connect() as conn:
@@ -858,6 +1079,29 @@ class StateStore:
                   created_at TEXT NOT NULL,
                   PRIMARY KEY (intent_id, release_id)
                 );
+                CREATE TABLE IF NOT EXISTS intent_aliases (
+                  alias TEXT PRIMARY KEY,
+                  intent_id TEXT NOT NULL,
+                  created_at TEXT NOT NULL,
+                  updated_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_intent_aliases_intent
+                  ON intent_aliases(intent_id);
+                CREATE TABLE IF NOT EXISTS intent_source_evidence (
+                  evidence_id TEXT PRIMARY KEY,
+                  intent_id TEXT NOT NULL,
+                  source TEXT NOT NULL,
+                  source_event_id TEXT,
+                  source_config_id TEXT,
+                  source_label TEXT,
+                  requested_at TEXT,
+                  raw_text TEXT NOT NULL,
+                  metadata_json TEXT NOT NULL,
+                  created_at TEXT NOT NULL,
+                  updated_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_intent_source_evidence_intent
+                  ON intent_source_evidence(intent_id);
                 CREATE TABLE IF NOT EXISTS torrent_runtime (
                   torrent_hash TEXT PRIMARY KEY,
                   paused_at TEXT,
@@ -991,6 +1235,41 @@ def _utc_now_datetime() -> datetime:
 
 def _json_dumps(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True)
+
+
+def _optional_text(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _evidence_id(
+    source: str,
+    source_config_id: str | None,
+    source_event_id: str | None,
+    raw_text: str,
+) -> str:
+    identity = source_event_id or raw_text
+    return f"{source}:{source_config_id or ''}:{identity}"
+
+
+def _merge_intent_metadata(
+    canonical: dict[str, Any],
+    duplicate: dict[str, Any],
+) -> dict[str, Any]:
+    merged = {**canonical, **duplicate}
+    external_ids = {
+        **_dict_value(canonical.get("external_ids")),
+        **_dict_value(duplicate.get("external_ids")),
+    }
+    if external_ids:
+        merged["external_ids"] = external_ids
+    return merged
+
+
+def _dict_value(value: Any) -> dict[str, Any]:
+    return dict(value) if isinstance(value, dict) else {}
 
 
 def _preserved_value(

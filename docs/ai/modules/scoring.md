@@ -17,6 +17,8 @@ Score discovered torrents or ranked releases using explicit policy weights and e
 - produce explainable breakdowns,
 - keep enqueue decisions auditable,
 - rank releases for intent workflows.
+- apply generic intent-search keyword preferences, including required,
+  preferred, and excluded title terms.
 
 ## Expectations
 
@@ -62,6 +64,13 @@ Score discovered torrents or ranked releases using explicit policy weights and e
 - Do not overfit a single live run. Use live review/prune samples to identify
   suspicious bands, then encode changes as explainable scoring weights or
   retention thresholds with tests.
+- Keep quality wishes such as Remux, BluRay, 2160p, HDR, or Dolby Vision in
+  `search.required_keywords` / `search.preferred_keywords` /
+  `search.excluded_keywords` so users can compose profiles without adding a
+  hardcoded `profile` enum.
+- For TV/anime resource intents, `intent.series_search_mode=season` treats
+  SxxEyy requests as season-pack searches and does not penalize missing episode
+  tokens. Use `episode` when the operator wants one episode at a time.
 
 ## Verification
 

@@ -264,6 +264,16 @@ def test_cli_help_lists_phase_one_commands() -> None:
     assert "site-probe" in result.output
 
 
+def test_cli_version_option_reports_package_version() -> None:
+    from seed_agent import __version__
+    from seed_agent.cli import app
+
+    result = CliRunner().invoke(app, ["--version"])
+
+    assert result.exit_code == 0
+    assert result.output.strip() == __version__
+
+
 def test_enqueue_help_includes_execute_flag() -> None:
     from seed_agent.cli import app
 

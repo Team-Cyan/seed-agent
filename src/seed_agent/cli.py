@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Any
@@ -46,22 +47,46 @@ from seed_agent.models import (
     LifecycleState,
     ManagedTorrent,
     RankedRelease,
+    ReleaseCandidate,
     ResourceIntent,
     ScoreBreakdown,
     TorrentCandidate,
     safe_url_identity,
 )
 from seed_agent.policies.category_policy import PoolUsage, usage_by_pool
+from seed_agent.search.base import SearchProvider
+from seed_agent.search.mteam import (
+    MTeamSearchProvider,
+    resolve_mteam_release_download_url,
+)
 from seed_agent.search.rss import RssSearchProvider
+from seed_agent.sources.base import SourceIntentEvent
+from seed_agent.sources.douban import fetch_douban_wanted_user, read_douban_wanted
+from seed_agent.sources.imdb import fetch_imdb_watchlist, read_imdb_watchlist_csv
 from seed_agent.state import STATE_PRIORITY, StateStore
+
+ReleaseDownloadResolver = Callable[[ReleaseCandidate], Awaitable[ReleaseCandidate | None]]
 
 app = typer.Typer(help="Docker-first PT automation for NAS and homelab operations.")
 DEFAULT_CONFIG = Path("config/example.yaml")
 
 
 @app.callback(invoke_without_command=True)
-def main(ctx: typer.Context) -> None:
+def main(
+    ctx: typer.Context,
+    version: Annotated[
+        bool,
+        typer.Option(
+            "--version",
+            help="Show the seed-agent version and exit.",
+            is_eager=True,
+        ),
+    ] = False,
+) -> None:
     """Seed Agent CLI."""
+    if version:
+        typer.echo(__version__)
+        raise typer.Exit()
     if ctx.invoked_subcommand is None:
         typer.echo(ctx.get_help())
 
@@ -407,6 +432,7 @@ def intent_enqueue(
     batch_error = None
     pause_reasons = _enqueue_pause_reasons(loaded, live_torrents, pool_usage)
     try:
+        release_resolver = _build_release_download_resolver(loaded)
         intent, ranked, decisions = _run(
             enqueue_intent(
                 intent_id,
@@ -417,6 +443,7 @@ def intent_enqueue(
                 paused=paused,
                 pool_usage=pool_usage,
                 pause_reasons=pause_reasons,
+                release_resolver=release_resolver,
             )
         )
     except ValueError as exc:
@@ -465,6 +492,7 @@ def intent_run_once(
     batch_error = None
     pause_reasons = _enqueue_pause_reasons(loaded, live_torrents, pool_usage)
     try:
+        release_resolver = _build_release_download_resolver(loaded)
         result = _run(
             run_intent_once(
                 inbox_path=inbox_path,
@@ -478,6 +506,8 @@ def intent_run_once(
                 paused=paused,
                 pool_usage=pool_usage,
                 pause_reasons=pause_reasons,
+                source_events=_read_configured_source_events(loaded),
+                release_resolver=release_resolver,
             )
         )
         decisions = result.decisions
@@ -1885,20 +1915,118 @@ def build_downloader(config: SeedAgentConfig) -> QbittorrentClient:
     return downloader
 
 
-def _build_search_providers(config: SeedAgentConfig) -> list[RssSearchProvider]:
-    providers: list[RssSearchProvider] = []
+def _build_search_providers(config: SeedAgentConfig) -> list[SearchProvider]:
+    providers: list[SearchProvider] = []
     for site in config.enabled_sites:
+        api_key = _read_secret_ref(site.api_key_ref, config.config_dir)
+        cookie = _read_cookie_ref(site.cookie_ref, config.config_dir)
+        if site.type == "mteam" and site.discovery_mode == "api" and api_key:
+            providers.append(
+                MTeamSearchProvider(
+                    site=site.name,
+                    api_key=api_key,
+                    api_key_header=site.auth_header,
+                    cookie=cookie,
+                    search_config=config.search,
+                    default_resolution=config.intent.default_resolution,
+                    series_search_mode=config.intent.series_search_mode,
+                )
+            )
+            continue
         providers.append(
             RssSearchProvider(
                 url=site.rss_url,
                 site=site.name,
                 site_type=site.type,
-                cookie=_read_cookie_ref(site.cookie_ref, config.config_dir),
-                api_key=_read_secret_ref(site.api_key_ref, config.config_dir),
+                cookie=cookie,
+                api_key=api_key,
                 max_results=config.search.max_results_per_site,
             )
         )
     return providers
+
+
+def _read_configured_source_events(config: SeedAgentConfig) -> list[SourceIntentEvent]:
+    events: list[SourceIntentEvent] = []
+    for source in config.sources.want_lists:
+        if not source.enabled:
+            continue
+        if source.provider == "douban":
+            if source.export_ref:
+                export_path = _resolve_path(source.export_ref, config.config_dir)
+                if export_path is not None:
+                    events.extend(
+                        read_douban_wanted(
+                            export_path,
+                            source_config_id=source.id,
+                            label=source.label,
+                        )
+                    )
+            if source.user_name:
+                events.extend(
+                    fetch_douban_wanted_user(
+                        source.user_name,
+                        max_pages=source.max_pages,
+                        source_config_id=source.id,
+                        label=source.label,
+                    )
+                )
+            continue
+        if source.provider == "imdb":
+            if source.export_ref:
+                export_path = _resolve_path(source.export_ref, config.config_dir)
+                if export_path is not None:
+                    events.extend(
+                        read_imdb_watchlist_csv(
+                            export_path,
+                            source_config_id=source.id,
+                            label=source.label,
+                        )
+                    )
+            if source.watchlist_url:
+                events.extend(
+                    fetch_imdb_watchlist(
+                        source.watchlist_url,
+                        source_config_id=source.id,
+                        label=source.label,
+                    )
+                )
+    douban = config.sources.douban_wanted
+    if not douban.enabled:
+        return events
+    if douban.export_ref:
+        export_path = _resolve_path(douban.export_ref, config.config_dir)
+        if export_path is not None:
+            events.extend(read_douban_wanted(export_path))
+    if douban.user_name:
+        events.extend(fetch_douban_wanted_user(douban.user_name, max_pages=douban.max_pages))
+    return events
+
+
+def _build_release_download_resolver(config: SeedAgentConfig) -> ReleaseDownloadResolver | None:
+    mteam_auth: dict[str, tuple[str, str]] = {}
+    for site in config.enabled_sites:
+        if site.type != "mteam":
+            continue
+        api_key = _read_secret_ref(site.api_key_ref, config.config_dir)
+        if api_key:
+            mteam_auth[site.name] = (api_key, site.auth_header or "x-api-key")
+    if not mteam_auth:
+        return None
+
+    async def resolver(release: ReleaseCandidate) -> ReleaseCandidate | None:
+        if release.site not in mteam_auth:
+            return release
+        if release.metadata.get("download_url_source") != "mteam_api_deferred":
+            return release
+        api_key, api_key_header = mteam_auth[release.site]
+        return await resolve_mteam_release_download_url(
+            release,
+            api_key=api_key,
+            api_key_header=api_key_header,
+        )
+
+    return resolver
 
 
 def _site_access_mode(site: Any, config_dir: Path | None) -> str:

@@ -11,23 +11,50 @@
       <aside class="sidebar">
         <div class="brand">seed-agent</div>
         <nav class="nav-list" aria-label="Settings sections">
-          <button class="nav-item active" type="button" data-section="overview">状态</button>
-          <button class="nav-item" type="button" data-section="tracker">Tracker</button>
-          <button class="nav-item" type="button" data-section="downloader">下载器</button>
-          <button class="nav-item" type="button" data-section="discovery">发现策略</button>
-          <button class="nav-item" type="button" data-section="cleanup">清理策略</button>
-          <button class="nav-item" type="button" data-section="intent">资源意图</button>
-          <button class="nav-item" type="button" data-section="advanced">高级 YAML</button>
+          <div class="nav-group" data-nav-group="operations">
+            <div class="nav-group-label" data-nav-group-label="operations">运行</div>
+            <button class="nav-item active" type="button" data-section="overview">状态</button>
+            <button class="nav-item" type="button" data-section="wants">想看列表</button>
+          </div>
+          <div class="nav-group" data-nav-group="automation">
+            <div class="nav-group-label" data-nav-group-label="automation">连接</div>
+            <button class="nav-item" type="button" data-section="tracker">站点</button>
+            <button class="nav-item" type="button" data-section="downloader">下载器</button>
+          </div>
+          <div class="nav-group" data-nav-group="acquisition">
+            <div class="nav-group-label" data-nav-group-label="acquisition">策略</div>
+            <button class="nav-item" type="button" data-section="discovery">发现策略</button>
+            <button class="nav-item" type="button" data-section="cleanup">清理策略</button>
+            <button class="nav-item" type="button" data-section="intent">获取决策</button>
+            <button class="nav-item" type="button" data-section="search">种子筛选</button>
+          </div>
+          <div class="nav-group" data-nav-group="advanced">
+            <div class="nav-group-label" data-nav-group-label="advanced">配置</div>
+            <button class="nav-item" type="button" data-section="advanced">配置文件</button>
+          </div>
         </nav>
       </aside>
 
       <main class="content">
         <header class="page-header">
           <div>
+            <div class="section-eyebrow" data-section-group-label>运行</div>
             <h1>状态</h1>
             <p>本地只读状态：heartbeat、候选/意图计数和配置的 budget pool。</p>
+            <div class="config-path" data-config-path>配置文件: 加载中</div>
           </div>
           <div class="header-actions">
+            <select class="mobile-section-select" data-section-switcher aria-label="Settings section">
+              <option value="overview">状态</option>
+              <option value="wants">想看列表</option>
+              <option value="tracker">站点</option>
+              <option value="downloader">下载器</option>
+              <option value="discovery">发现策略</option>
+              <option value="cleanup">清理策略</option>
+              <option value="intent">获取决策</option>
+              <option value="search">种子筛选</option>
+              <option value="advanced">配置文件</option>
+            </select>
             <div class="language-control">
               <button class="icon-button" type="button" aria-label="Language" data-language-button>
                 ◎
@@ -40,13 +67,13 @@
             <button class="icon-button theme-button" type="button" aria-label="Toggle theme" data-theme-button>
               ☀
             </button>
-            <button class="primary-button" type="button" data-add-tracker aria-label="Add Tracker">
-              添加 Tracker
+            <button class="primary-button" type="button" data-add-tracker aria-label="添加站点">
+              添加站点
             </button>
           </div>
         </header>
 
-        <section class="tracker-list" data-tracker-list aria-label="Trackers"></section>
+        <section class="tracker-list" data-tracker-list aria-label="配置内容"></section>
       </main>
     </div>
     <div class="help-popover" data-help-popover hidden role="tooltip"></div>

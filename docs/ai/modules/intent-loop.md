@@ -15,6 +15,13 @@ Convert human requests into search/rank/confirm/enqueue workflows.
 ## Current Responsibilities
 
 - ingest intents,
+- ingest Douban wanted events with source user, subject metadata, wish date, and
+  inferred media type, using mobile subject-page enrichment when the public list
+  page is ambiguous,
+- ingest IMDb watchlist/list events from CSV exports or best-effort public page
+  parsing,
+- merge Douban and IMDb source events into canonical Want List works through
+  `douban:<subject_id>` and `imdb:<tt_id>` aliases,
 - normalize text,
 - search sources,
 - rank release candidates,
@@ -24,6 +31,10 @@ Convert human requests into search/rank/confirm/enqueue workflows.
 ## Expectations
 
 - preserve deterministic local state transitions,
+- keep source metadata on `ResourceIntent.metadata` when it is useful for UI or
+  later search behavior,
+- preserve source evidence separately from canonical intent rows so repeated
+  wants from different configured lists do not duplicate searches or downloads,
 - keep search providers modular,
 - do not entangle source ingestion with downloader logic.
 

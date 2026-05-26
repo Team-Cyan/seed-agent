@@ -93,6 +93,33 @@ def _ranked(
     )
 
 
+def _mteam_deferred_ranked(intent_id: str) -> RankedRelease:
+    return RankedRelease(
+        intent_id=intent_id,
+        release=ReleaseCandidate(
+            release_id="mt:https://kp.m-team.cc/detail/26799731",
+            site="mt",
+            title="Call Me by Your Name 2017 2160p BluRay REMUX",
+            source_url="https://kp.m-team.cc/detail/26799731",
+            download_url="mteam-api://torrent/26799731",
+            size_bytes=66 * 1024**3,
+            seeders=12,
+            leechers=3,
+            discount=Discount.NORMAL,
+            metadata={
+                "mteam_torrent_id": "26799731",
+                "download_url_source": "mteam_api_deferred",
+            },
+        ),
+        score=96,
+        confidence=0.96,
+        accepted=True,
+        confirmation_required=False,
+        reasons=["required keyword matched: Remux"],
+        risks=[],
+    )
+
+
 def _json_output(result) -> dict[str, object]:
     parsed = json.loads(result.output)
     assert isinstance(parsed, dict)
@@ -286,6 +313,84 @@ def test_intent_enqueue_execute_uses_confirmed_release_and_updates_state(
     assert row["selected_release_id"] == ranked.release.release_id
     audit = (tmp_path / ".seed-agent" / "audit.jsonl").read_text(encoding="utf-8")
     assert "qb.enqueue" in audit
+
+
+def test_intent_enqueue_execute_resolves_mteam_deferred_download_url(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from seed_agent import cli
+
+    monkeypatch.chdir(tmp_path)
+    downloader = _DummyDownloader()
+    monkeypatch.setattr(cli, "build_downloader", lambda config: downloader)
+
+    async def fake_resolve_release(release, **kwargs):
+        assert kwargs["api_key"] == "secret-api-key"
+        return release.model_copy(
+            update={
+                "download_url": "https://dl.m-team.example/26799731?passkey=secret",
+                "metadata": {
+                    **release.metadata,
+                    "download_url_source": "mteam_api",
+                },
+            }
+        )
+
+    monkeypatch.setattr(cli, "resolve_mteam_release_download_url", fake_resolve_release)
+    config_path = _write_config(tmp_path)
+    (tmp_path / "local" / "secrets").mkdir(parents=True)
+    (tmp_path / "local" / "secrets" / "mt.api-key").write_text(
+        "secret-api-key",
+        encoding="utf-8",
+    )
+    config_path.write_text(
+        config_path.read_text(encoding="utf-8").replace(
+            """
+sites:
+  - name: demo-free
+    type: nexusphp
+    enabled: true
+    rss_url: https://tracker.example/rss.php
+    cookie_ref: null
+""",
+            """
+sites:
+  - name: mt
+    type: mteam
+    enabled: true
+    rss_url: https://rss.m-team.example/fallback
+    discovery_mode: api
+    api_key_ref: local/secrets/mt.api-key
+    api_discovery:
+      mode: movie
+      only_free: false
+""",
+        ),
+        encoding="utf-8",
+    )
+    store = StateStore(tmp_path / ".seed-agent" / "state.db")
+    intent, _ = add_intent("Call Me by Your Name 2017 Remux", store)
+    ranked = _mteam_deferred_ranked(intent.intent_id)
+    store.save_ranked_releases([ranked])
+
+    result = CliRunner().invoke(
+        cli.app,
+        ["intent-enqueue", intent.intent_id, "--config", str(config_path), "--execute"],
+    )
+
+    assert result.exit_code == 0
+    assert downloader.calls == [
+        (
+            "https://dl.m-team.example/26799731?passkey=secret",
+            "seed",
+            ["seed-agent", "seed"],
+        )
+    ]
+    rows = store.list_release_candidates(intent.intent_id)
+    stored = json.loads(str(rows[0]["release_json"]))
+    assert stored["release"]["metadata"]["download_url_source"] == "mteam_api"
+    assert "passkey=secret" not in result.output
 
 
 def test_intent_enqueue_requires_confirmation_for_ambiguous_release(

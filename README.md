@@ -52,18 +52,19 @@ The default deployment shape for self-hosted use is a Docker container running
 | Transmission downloader | Planned | Candidate for the first second-downloader adapter. |
 | NexusPHP-style RSS | Supported | RSS remains useful for fallback flows and non-M-Team sites. |
 | M-Team RSS | Supported | Available as fallback and compatibility path. |
-| M-Team API discovery | Supported | Preferred authenticated path when `api_key_ref` is configured. |
-| Resource intent loop | Supported | Local intent add, inbox ingestion, search, ranking, confirmation, and enqueue are implemented. |
-| Web Settings UI | WIP | Local configuration UI exists, but it is not a full operations dashboard yet. |
-| Read-only dashboard/API | Planned | Future observability surface for state, audit, pool usage, cleanup decisions, and intent queues. |
+| M-Team API discovery/search | Supported | Preferred authenticated path when `api_key_ref` is configured, including intent search with execute-time deferred download-token resolution. |
+| Resource intent loop | Supported | Local intent add, inbox/Douban/IMDb Want List ingestion, search, ranking, confirmation, and enqueue are implemented. |
+| Want List | Supported | Web UI page shows canonical Douban/IMDb wants with source/type filters, mobile cards, added time, merged source evidence, and release/search status. |
+| Web Settings UI | WIP | Local configuration UI exists for grouped safe settings edits with schema validation, diff previews, per-section YAML editing, sticky save actions, mobile navigation, read-only status, and Want List. |
+| Read-only dashboard/API | Partial | State summary, heartbeat health, budget pools, and Want List are exposed; richer audit/cleanup dashboards remain planned. |
 
 ## Roadmap Snapshot
 
 The immediate credibility pass is in place: license clarity, pull-request CI,
-Docker smoke testing, README visibility, and clear source-adapter status. The
-next product work stays grounded in qB live state, conservative enqueue/prune
-decisions, and better reporting before wider dashboard or multi-downloader
-expansion.
+Docker smoke testing, README visibility, clear source-adapter status, and the
+first Web UI Want List. The next product work stays grounded in qB live state,
+conservative enqueue/prune decisions, and better reporting before wider
+dashboard or multi-downloader expansion.
 
 Medium-term work should validate extensibility with Transmission and a second
 non-M-Team API provider, then turn tracker/account signals, downloader telemetry,
@@ -76,7 +77,8 @@ historical outcomes, and user confirmations into real scoring feedback.
 | file inbox | Wired | JSONL inbox ingestion is the supported local source path. |
 | Telegram | Parser skeleton | Parses Telegram update payloads; no bot loop or hosted receiver is shipped. |
 | WeChat bridge | Parser skeleton | Parses bridge payloads; no personal-account automation is shipped. |
-| Douban wanted | Local export reader | Reads local wanted-list export JSON. |
+| Douban wanted | Wired | Reads one or more public Douban wanted pages or local wanted-list export JSON files. |
+| IMDb watchlist/list | Wired | Reads IMDb watchlist/list CSV exports and best-effort public page data when reachable. |
 | subscription | Planned | Config shape exists for future rules, but no subscription runner is shipped. |
 
 ## Quick Start
@@ -174,6 +176,24 @@ For M-Team, the preferred authenticated path is API-driven discovery with
 `api_key_ref`. RSS remains in the repo as a fallback path for other sites and
 compatibility flows.
 
+For resource intents, `sources.want_lists` can hold multiple Douban users and
+IMDb watchlists/lists. Douban source entries use `user_name`; IMDb entries use
+`watchlist_url` or a CSV `export_ref`. The intent loop merges repeated wants by
+Douban/IMDb IDs, then `search.required_keywords` / `search.preferred_keywords`
+describe the desired release shape, such as Remux, 2160p, HDR, or Dolby Vision.
+The same source/search boundary is intended to support later movie-list sites,
+chat bridges, or API-triggered requests.
+
+For TV or anime intents, `intent.series_search_mode` controls whether episode
+requests search/rank full-season packs (`season`, the default) or individual
+episodes (`episode`).
+
+The local Web Settings UI keeps one physical config file for Docker/Unraid/CLI
+compatibility. Each settings page also exposes the YAML block for its own
+top-level section, so operators can edit `search:`, `intent:`, `downloader:`,
+and similar blocks directly without splitting the runtime config into multiple
+files.
+
 ## Runtime Safety Defaults
 
 Recommended unattended protections:
@@ -206,6 +226,7 @@ These guards help avoid:
 ## Documentation
 
 - [Docs Index](docs/README.md)
+- [Architecture And Supported Features](docs/architecture.md)
 - [Roadmap](docs/roadmap.md)
 - [Docker Compose User Guide](docs/operations/docker-compose-user-guide.md)
 - [Docker Scheduling](docs/operations/docker-scheduling.md)
@@ -263,6 +284,7 @@ uv run seed-agent run-once --config config/config.yaml
 uv run seed-agent run-once --config config/config.yaml --execute
 uv run seed-agent schedule-run --config config/config.yaml --execute --interval-minutes 30
 uv run seed-agent healthcheck --config config/config.yaml
+uv run seed-agent web --config config/config.yaml --host 127.0.0.1 --port 8765
 ```
 
 ## Runtime Files

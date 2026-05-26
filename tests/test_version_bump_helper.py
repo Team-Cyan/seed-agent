@@ -17,6 +17,7 @@ def load_bump_module():
 def test_bump_version_updates_release_metadata(tmp_path: Path) -> None:
     for relative in (
         "VERSION",
+        "Dockerfile",
         "pyproject.toml",
         "src/seed_agent/__init__.py",
         "uv.lock",
@@ -33,6 +34,7 @@ def test_bump_version_updates_release_metadata(tmp_path: Path) -> None:
 
     assert {path.relative_to(tmp_path).as_posix() for path in changed} == {
         "VERSION",
+        "Dockerfile",
         "pyproject.toml",
         "src/seed_agent/__init__.py",
         "uv.lock",
@@ -40,6 +42,7 @@ def test_bump_version_updates_release_metadata(tmp_path: Path) -> None:
         "tests/test_package_import.py",
     }
     assert (tmp_path / "VERSION").read_text(encoding="utf-8") == "1.2.3\n"
+    assert "ARG VERSION=1.2.3" in (tmp_path / "Dockerfile").read_text(encoding="utf-8")
     assert 'version = "1.2.3"' in (tmp_path / "pyproject.toml").read_text(encoding="utf-8")
     assert '__version__ = "1.2.3"' in (tmp_path / "src/seed_agent/__init__.py").read_text(
         encoding="utf-8",

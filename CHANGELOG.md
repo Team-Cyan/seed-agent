@@ -4,6 +4,55 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.5.0 - 2026-05-26
+
+### Added
+
+- Web Settings UI now shows the active config path, supports schema-validated
+  diff previews before non-tracker config saves, and can edit search,
+  acquisition-decision, and Want List source settings without accepting
+  plaintext secret values.
+- Resource intent runs can ingest a configured public Douban wanted list and use
+  M-Team API-backed intent search with execute-time deferred download-token
+  resolution plus configurable required, preferred, and excluded release-title
+  keywords such as Remux, 2160p, HDR, or Dolby Vision.
+- Web UI now includes a Want List page backed by intent state, with Douban and
+  IMDb sources, source/type filters, merged source evidence, media type, added
+  time, and search/download status.
+- Want List ingestion now canonicalizes duplicate wants by Douban/IMDb external
+  IDs so multiple configured lists do not duplicate searches or downloads.
+- IMDb watchlist/list ingestion supports CSV exports and best-effort public page
+  parsing.
+- Douban wanted ingestion now preserves source user, subject URL, intro, wish
+  date, and inferred media type, with mobile subject-page enrichment for TV
+  classification when the public list page is ambiguous.
+- `intent.series_search_mode` controls whether TV/anime episode intents search
+  and rank full-season packs or individual episodes.
+- M-Team API discovery thresholds can inherit global discovery lower bounds by
+  setting `api_discovery.min_seeders` or `api_discovery.min_leechers` to `null`;
+  explicit `0` still keeps native API lower-bound filtering open.
+- M-Team API-backed intent search now uses native Douban/IMDb ID filters when
+  available, falls back from Douban ID to IMDb ID when needed, and applies
+  Remux/quality keyword preferences locally.
+
+### Fixed
+
+- Want List duplicate evidence now records the incoming source row instead of
+  reusing canonical intent fields.
+- Intent search now keeps ranked candidates and state on the earliest canonical
+  intent when M-Team release metadata reveals that Douban and IMDb IDs refer to
+  the same work.
+- Repeated wants in one source sync are searched once, and post-search ranking
+  follows the canonical intent after alias merges.
+- Intent merges preserve a selected release from the duplicate row when the
+  canonical row does not already have one.
+- Web UI Want List search now ranks the canonical intent after release-ID
+  backfill merges.
+- Web Settings UI now resets save confirmation after both text input and select
+  changes, preventing stale diff previews from confirming a later edit.
+- Search priority map inputs now reject malformed entries such as missing values
+  or extra delimiters instead of coercing them silently.
+
 ## 0.4.1 - 2026-05-19
 
 ### Fixed

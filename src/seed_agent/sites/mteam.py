@@ -267,6 +267,9 @@ class MTeamApiClient:
             "times_completed": times_completed,
             "download_url_source": "mteam_api_deferred",
         }
+        external_ids = _external_ids_from_api_row(row)
+        if external_ids:
+            metadata["external_ids"] = external_ids
         if left_time_minutes is None and discount in {Discount.FREE, Discount.TWO_X_FREE}:
             metadata["left_time_source"] = _left_time_source_from_api_row(row)
 
@@ -523,6 +526,25 @@ def _has_explicit_open_ended_discount(row: dict[str, Any]) -> bool:
             if field in container and container.get(field) is None:
                 return True
     return False
+
+
+def _external_ids_from_api_row(row: dict[str, Any]) -> dict[str, str]:
+    ids: dict[str, str] = {}
+    for container in _api_row_containers(row):
+        douban = _optional_id(container.get("douban") or container.get("doubanId"))
+        imdb = _optional_id(container.get("imdb") or container.get("imdbId"))
+        if douban:
+            ids["douban"] = douban
+        if imdb:
+            ids["imdb"] = imdb
+    return ids
+
+
+def _optional_id(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
 
 
 def _api_row_containers(row: dict[str, Any]) -> list[dict[str, Any]]:

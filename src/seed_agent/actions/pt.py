@@ -25,7 +25,7 @@ class SiteDiscoveryConfigError(RuntimeError):
 
 async def discover_candidates(config: SeedAgentConfig) -> list[TorrentCandidate]:
     tasks = [
-        _discover_site_candidates(site, config.config_dir)
+        _discover_site_candidates(site, config.config_dir, config.discovery)
         for site in config.enabled_sites
     ]
     results = await asyncio.gather(*tasks, return_exceptions=True) if tasks else []
@@ -41,7 +41,11 @@ async def discover_candidates(config: SeedAgentConfig) -> list[TorrentCandidate]
     return candidates
 
 
-async def _discover_site_candidates(site, config_dir: Path | None) -> list[TorrentCandidate]:
+async def _discover_site_candidates(
+    site,
+    config_dir: Path | None,
+    discovery_config: DiscoveryConfig | None = None,
+) -> list[TorrentCandidate]:
     cookie = _read_cookie(site.cookie_ref, config_dir)
     api_key = _read_secret(site.api_key_ref, config_dir)
 
@@ -57,7 +61,7 @@ async def _discover_site_candidates(site, config_dir: Path | None) -> list[Torre
             site=site.name,
             api_key=api_key,
             cookie=cookie,
-            options=MTeamApiDiscoveryOptions.model_validate(site.api_discovery.model_dump()),
+            options=_mteam_api_options(site.api_discovery, discovery_config),
             **api_kwargs,
         )
 
@@ -68,6 +72,18 @@ async def _discover_site_candidates(site, config_dir: Path | None) -> list[Torre
         api_key=api_key,
         site_type=site.type,
     )
+
+
+def _mteam_api_options(
+    api_discovery,
+    discovery_config: DiscoveryConfig | None,
+) -> MTeamApiDiscoveryOptions:
+    data = api_discovery.model_dump()
+    if data.get("min_seeders") is None:
+        data["min_seeders"] = discovery_config.min_seeders if discovery_config else 0
+    if data.get("min_leechers") is None:
+        data["min_leechers"] = discovery_config.min_leechers if discovery_config else 0
+    return MTeamApiDiscoveryOptions.model_validate(data)
 
 
 def score_candidates(

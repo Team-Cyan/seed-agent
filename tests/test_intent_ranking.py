@@ -65,6 +65,9 @@ def _search_config(**overrides: object) -> SearchConfig:
         "max_results_per_site": 20,
         "prefer_free": True,
         "reject_hr_by_default": True,
+        "required_keywords": [],
+        "preferred_keywords": [],
+        "excluded_keywords": [],
     }
     data.update(overrides)
     return SearchConfig(**data)
@@ -166,3 +169,69 @@ def test_rank_releases_orders_by_score() -> None:
         "demo:https://tracker.example/details.php?id=high",
         "demo:https://tracker.example/details.php?id=low",
     ]
+
+
+def test_rank_releases_applies_configured_keyword_preferences() -> None:
+    ranked = rank_releases(
+        _intent(resolution=None),
+        [
+            _release(
+                release_id="demo:https://tracker.example/details.php?id=remux",
+                title="Inception 2010 2160p BluRay Remux HDR",
+                discount=Discount.NORMAL,
+            ),
+            _release(
+                release_id="demo:https://tracker.example/details.php?id=web",
+                title="Inception 2010 2160p WEB-DL",
+                discount=Discount.FREE,
+                seeders=100,
+                leechers=20,
+            ),
+        ],
+        _intent_config(default_resolution="2160p"),
+        _search_config(required_keywords=["Remux"], preferred_keywords=["HDR"]),
+    )
+
+    assert ranked[0].release.release_id.endswith("remux")
+    assert "required keyword matched: Remux" in ranked[0].reasons
+    assert "preferred keyword matched: HDR" in ranked[0].reasons
+    assert "required keyword missing: Remux" in ranked[1].risks
+
+
+def test_rank_releases_defaults_episode_intents_to_season_pack_matching() -> None:
+    ranked = rank_releases(
+        _intent(
+            kind=IntentKind.EPISODE,
+            title="Severance",
+            raw_text="Severance S02E03 2025",
+            year=2025,
+            season=2,
+            episode=3,
+            resolution="2160p",
+        ),
+        [_release(title="Severance 2025 S02 2160p BluRay Remux")],
+        _intent_config(default_resolution="2160p"),
+        _search_config(required_keywords=["Remux"]),
+    )
+
+    assert "season matched" in ranked[0].reasons
+    assert "episode missing" not in ranked[0].risks
+
+
+def test_rank_releases_can_require_episode_when_configured() -> None:
+    ranked = rank_releases(
+        _intent(
+            kind=IntentKind.EPISODE,
+            title="Severance",
+            raw_text="Severance S02E03 2025",
+            year=2025,
+            season=2,
+            episode=3,
+            resolution="2160p",
+        ),
+        [_release(title="Severance 2025 S02 2160p BluRay Remux")],
+        _intent_config(default_resolution="2160p", series_search_mode="episode"),
+        _search_config(required_keywords=["Remux"]),
+    )
+
+    assert "episode missing" in ranked[0].risks

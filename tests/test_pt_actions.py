@@ -558,6 +558,122 @@ async def test_discover_candidates_uses_mteam_api_mode_when_configured(
 
 
 @pytest.mark.asyncio
+async def test_discover_candidates_inherits_mteam_api_thresholds_from_discovery(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from seed_agent.actions import pt as pt_actions
+
+    api_key_path = tmp_path / "mt.api-key"
+    api_key_path.write_text("secret-api-key\n", encoding="utf-8")
+    base = _config().model_dump()
+    base["discovery"]["min_seeders"] = 2
+    base["discovery"]["min_leechers"] = 8
+    config = SeedAgentConfig(
+        **{
+            **base,
+            "sites": [
+                {
+                    "name": "mt",
+                    "type": "mteam",
+                    "enabled": True,
+                    "rss_url": "https://rss.m-team.cc/api/rss/fetch?dl=1",
+                    "api_key_ref": str(api_key_path),
+                    "discovery_mode": "api",
+                    "api_discovery": {
+                        "mode": "adult",
+                        "only_free": True,
+                        "sort_field": "downloads",
+                        "sort_order": "desc",
+                        "page_size": 50,
+                        "min_seeders": None,
+                        "max_seeders": 200,
+                        "min_leechers": None,
+                        "min_times_completed": 0,
+                    },
+                }
+            ],
+        }
+    )
+
+    seen: list[tuple[int, int]] = []
+
+    async def fake_fetch_api_candidates(
+        *,
+        site: str,
+        api_key: str,
+        options,
+        cookie: str | None = None,
+    ):
+        seen.append((options.min_seeders, options.min_leechers))
+        return []
+
+    monkeypatch.setattr(pt_actions, "fetch_mteam_api_candidates", fake_fetch_api_candidates)
+
+    await pt_actions.discover_candidates(config)
+
+    assert seen == [(2, 8)]
+
+
+@pytest.mark.asyncio
+async def test_discover_candidates_preserves_explicit_zero_mteam_api_thresholds(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from seed_agent.actions import pt as pt_actions
+
+    api_key_path = tmp_path / "mt.api-key"
+    api_key_path.write_text("secret-api-key\n", encoding="utf-8")
+    base = _config().model_dump()
+    base["discovery"]["min_seeders"] = 2
+    base["discovery"]["min_leechers"] = 8
+    config = SeedAgentConfig(
+        **{
+            **base,
+            "sites": [
+                {
+                    "name": "mt",
+                    "type": "mteam",
+                    "enabled": True,
+                    "rss_url": "https://rss.m-team.cc/api/rss/fetch?dl=1",
+                    "api_key_ref": str(api_key_path),
+                    "discovery_mode": "api",
+                    "api_discovery": {
+                        "mode": "adult",
+                        "only_free": True,
+                        "sort_field": "downloads",
+                        "sort_order": "desc",
+                        "page_size": 50,
+                        "min_seeders": 0,
+                        "max_seeders": 200,
+                        "min_leechers": 0,
+                        "min_times_completed": 0,
+                    },
+                }
+            ],
+        }
+    )
+
+    seen: list[tuple[int, int]] = []
+
+    async def fake_fetch_api_candidates(
+        *,
+        site: str,
+        api_key: str,
+        options,
+        cookie: str | None = None,
+    ):
+        seen.append((options.min_seeders, options.min_leechers))
+        return []
+
+    monkeypatch.setattr(pt_actions, "fetch_mteam_api_candidates", fake_fetch_api_candidates)
+
+    await pt_actions.discover_candidates(config)
+
+    assert seen == [(0, 0)]
+
+
+@pytest.mark.asyncio
 async def test_resolve_deferred_download_urls_uses_mteam_api_key(
     tmp_path: Path,
     monkeypatch,

@@ -5,7 +5,7 @@ import re
 from seed_agent.config import IntentConfig, SearchConfig
 from seed_agent.models import Discount, RankedRelease, ReleaseCandidate, ResourceIntent
 
-TOKEN_RE = re.compile(r"[a-z0-9]+", re.IGNORECASE)
+TOKEN_RE = re.compile(r"[a-z0-9]+|[\u4e00-\u9fff]+", re.IGNORECASE)
 
 
 def rank_releases(
@@ -80,19 +80,38 @@ def _rank_one(
         else:
             risks.append("season missing")
 
-    if intent.episode is not None:
+    if _requires_episode_match(intent, intent_config):
         if _has_episode(release.title, intent.episode):
             score += 8
             reasons.append("episode matched")
         else:
             risks.append("episode missing")
 
-    if intent.resolution is not None:
-        if intent.resolution.lower() in _tokens(release.title):
+    effective_resolution = intent.resolution or intent_config.default_resolution
+    if effective_resolution is not None:
+        if effective_resolution.lower() in _tokens(release.title):
             score += 12
             reasons.append("resolution matched")
         else:
             risks.append("resolution missing")
+
+    for keyword in search_config.required_keywords:
+        if _keyword_in_title(keyword, release.title):
+            score += 8
+            reasons.append(f"required keyword matched: {keyword}")
+        else:
+            risks.append(f"required keyword missing: {keyword}")
+            score -= 25
+
+    for keyword in search_config.preferred_keywords:
+        if _keyword_in_title(keyword, release.title):
+            score += 5
+            reasons.append(f"preferred keyword matched: {keyword}")
+
+    for keyword in search_config.excluded_keywords:
+        if _keyword_in_title(keyword, release.title):
+            risks.append(f"excluded keyword matched: {keyword}")
+            score -= 25
 
     site_bonus = min(max(search_config.site_priority.get(release.site, 0), 0), 10)
     if site_bonus:
@@ -150,5 +169,17 @@ def _has_episode(title: str, episode: int) -> bool:
     return any(token in item for item in _tokens(title))
 
 
+def _requires_episode_match(intent: ResourceIntent, intent_config: IntentConfig) -> bool:
+    if intent.episode is None:
+        return False
+    return intent_config.series_search_mode == "episode" or intent.season is None
+
+
 def _tokens(value: str) -> set[str]:
     return {match.group(0).lower() for match in TOKEN_RE.finditer(value)}
+
+
+def _keyword_in_title(keyword: str, title: str) -> bool:
+    normalized_keyword = " ".join(keyword.lower().split())
+    normalized_title = " ".join(title.lower().replace(".", " ").replace("_", " ").split())
+    return normalized_keyword in normalized_title

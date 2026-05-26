@@ -10,13 +10,18 @@ Turn external site-specific list sources into `TorrentCandidate` objects.
 - `src/seed_agent/sites/mteam.py`
 - `src/seed_agent/actions/pt.py`
 - `src/seed_agent/search/rss.py`
+- `src/seed_agent/search/mteam.py`
 
 ## Current Responsibilities
 
 - fetch RSS feeds,
 - fetch M-Team API-discovered candidates when configured,
+- inherit global discovery thresholds into M-Team API lower-bound filters when
+  site-level API thresholds are set to `null`,
 - parse site-specific candidate fields,
 - support M-Team detail enrichment,
+- search M-Team API candidates for resource intents when an API key is
+  configured,
 - hand discovered candidates to scoring and search flows.
 
 ## Current Expectations
@@ -36,4 +41,8 @@ Turn external site-specific list sources into `TorrentCandidate` objects.
 
 - keep RSS solid,
 - prefer `discovery_mode: api` for M-Team when `api_key_ref` is available,
+- use explicit `0` in M-Team API thresholds when the operator wants broad native
+  API retrieval followed by local scoring,
 - keep `TorrentCandidate` as the stable boundary between discovery and scoring.
+- keep source integrations such as Douban, chat bridges, and future rating sites
+  upstream of the generic `ResourceIntent` boundary.

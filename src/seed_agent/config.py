@@ -72,9 +72,9 @@ class MTeamApiDiscoveryConfig(BaseModel):
         Literal["kid", "director", "series", "maker", "label", "product_number"] | None
     ) = None
     dmm_keyword: str | None = None
-    min_seeders: int = 0
+    min_seeders: int | None = 0
     max_seeders: int | None = 200
-    min_leechers: int = 0
+    min_leechers: int | None = 0
     min_times_completed: int = 0
 
     @field_validator(
@@ -112,15 +112,16 @@ class MTeamApiDiscoveryConfig(BaseModel):
             raise ValueError("labels must be >= 0")
         if self.visible < 0:
             raise ValueError("visible must be >= 0")
-        if self.min_seeders < 0:
+        if self.min_seeders is not None and self.min_seeders < 0:
             raise ValueError("min_seeders must be >= 0")
-        if self.min_leechers < 0:
+        if self.min_leechers is not None and self.min_leechers < 0:
             raise ValueError("min_leechers must be >= 0")
         if self.min_times_completed < 0:
             raise ValueError("min_times_completed must be >= 0")
+        min_seeders = self.min_seeders or 0
         if (
             self.max_seeders not in {None, 0}
-            and self.max_seeders < self.min_seeders
+            and self.max_seeders < min_seeders
         ):
             raise ValueError("max_seeders must be >= min_seeders")
         return self
@@ -347,6 +348,7 @@ class IntentConfig(BaseModel):
     auto_enqueue_threshold: float = 0.94
     ambiguity_gap: float = 0.08
     default_resolution: str | None = "1080p"
+    series_search_mode: Literal["season", "episode"] = "season"
     preferred_languages: list[str] = Field(default_factory=lambda: ["zh", "en"])
     inbox_ref: str = "local/inbox/intents.jsonl"
 
@@ -368,6 +370,9 @@ class SearchConfig(BaseModel):
     max_results_per_site: int = 20
     prefer_free: bool = True
     reject_hr_by_default: bool = True
+    required_keywords: list[str] = Field(default_factory=list)
+    preferred_keywords: list[str] = Field(default_factory=list)
+    excluded_keywords: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_limits(self) -> SearchConfig:
@@ -388,6 +393,41 @@ class DoubanWantedSourceConfig(BaseModel):
 
     enabled: bool = False
     export_ref: str | None = None
+    user_name: str | None = None
+    max_pages: int = 1
+
+    @model_validator(mode="after")
+    def validate_max_pages(self) -> DoubanWantedSourceConfig:
+        if self.max_pages < 1:
+            raise ValueError("max_pages must be >= 1")
+        return self
+
+
+class WantListSourceConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    provider: Literal["douban", "imdb"]
+    id: str
+    label: str
+    enabled: bool = True
+    user_name: str | None = None
+    watchlist_url: str | None = None
+    export_ref: str | None = None
+    max_pages: int = 1
+
+    @model_validator(mode="after")
+    def validate_want_list_source(self) -> WantListSourceConfig:
+        if not self.id.strip():
+            raise ValueError("want list id must not be empty")
+        if not self.label.strip():
+            raise ValueError("want list label must not be empty")
+        if self.max_pages < 1:
+            raise ValueError("max_pages must be >= 1")
+        if self.enabled and self.provider == "douban" and not (self.user_name or self.export_ref):
+            raise ValueError("douban want list requires user_name or export_ref")
+        if self.enabled and self.provider == "imdb" and not (self.watchlist_url or self.export_ref):
+            raise ValueError("imdb want list requires watchlist_url or export_ref")
+        return self
 
 
 class SubscriptionSourceConfig(BaseModel):
@@ -403,6 +443,7 @@ class SourcesConfig(BaseModel):
     telegram: SecretSourceConfig = Field(default_factory=SecretSourceConfig)
     wechat_bridge: SecretSourceConfig = Field(default_factory=SecretSourceConfig)
     douban_wanted: DoubanWantedSourceConfig = Field(default_factory=DoubanWantedSourceConfig)
+    want_lists: list[WantListSourceConfig] = Field(default_factory=list)
     subscription: SubscriptionSourceConfig = Field(default_factory=SubscriptionSourceConfig)
 
 

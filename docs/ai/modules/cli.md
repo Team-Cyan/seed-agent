@@ -19,8 +19,18 @@ Expose the operator-facing command surface and safe summaries.
 - site probe diagnostics,
 - unattended `schedule-run` orchestration for server-side polling,
 - local `web` settings UI server for safe configuration editing,
+- grouped Web UI navigation and mobile section switching for the local settings
+  surface,
 - read-only web API endpoints for state summary, configured budget pools, and
   heartbeat health,
+- web Want List endpoints for listing canonical Douban/IMDb wants and triggering
+  search-only dry runs,
+- schema-validated web config previews that return before/after diffs before
+  non-tracker section saves write YAML,
+- per-section web YAML editing for top-level config blocks while preserving a
+  single physical runtime config file,
+- configured source-event ingestion during `intent-run-once`, including Douban
+  wanted-list and IMDb watchlist/list events,
 - free-window safety previewing for freeleech-sensitive workflows,
 - optional per-cycle cleanup through `run-once --prune` and `schedule-run --prune`,
 - stronger prune previews that include live torrent identity, linked candidate
@@ -64,3 +74,4 @@ Expose the operator-facing command surface and safe summaries.
 - `uv run seed-agent schedule-run --help`
 - `uv run seed-agent healthcheck --help`
 - `uv run seed-agent web --help`
+- `uv run seed-agent intent-run-once --config <config>`

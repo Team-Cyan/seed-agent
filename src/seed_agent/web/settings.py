@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import re
+from difflib import unified_diff
 from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from seed_agent.config import MTeamApiDiscoveryConfig, SeedAgentConfig, SiteConfig, load_config
 
@@ -40,11 +41,40 @@ class ConfigSectionDraft(BaseModel):
     data: dict[str, Any]
 
 
+class ConfigSectionYamlDraft(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True, strict=True)
+
+    section: Literal["downloader", "discovery", "cleanup", "intent", "search", "sources"]
+    yaml_text: str = Field(alias="yaml")
+
+
 def config_sections_payload(config: SeedAgentConfig) -> dict[str, Any]:
     return {
         name: getattr(config, name).model_dump(mode="json")
         for name in sorted(CONFIG_SECTION_NAMES)
     }
+
+
+def config_section_yamls_payload(config: SeedAgentConfig) -> dict[str, str]:
+    return {
+        name: config_section_yaml_fragment(
+            name,
+            getattr(config, name).model_dump(mode="json", exclude_none=True),
+        )
+        for name in sorted(CONFIG_SECTION_NAMES)
+    }
+
+
+def normalized_config_yaml(config: SeedAgentConfig) -> str:
+    return _normalized_config_yaml(config)
+
+
+def config_section_yaml_fragment(section: str, data: dict[str, Any]) -> str:
+    return yaml.safe_dump(
+        {section: data},
+        sort_keys=False,
+        allow_unicode=True,
+    )
 
 
 def save_config_section(config_path: Path, draft: ConfigSectionDraft) -> dict[str, Any]:
@@ -62,6 +92,58 @@ def save_config_section(config_path: Path, draft: ConfigSectionDraft) -> dict[st
         encoding="utf-8",
     )
     return raw[draft.section]
+
+
+def save_config_section_yaml(config_path: Path, draft: ConfigSectionYamlDraft) -> dict[str, Any]:
+    data = _section_data_from_yaml(draft)
+    saved = save_config_section(
+        config_path,
+        ConfigSectionDraft(section=draft.section, data=data),
+    )
+    return {
+        "section": draft.section,
+        "data": saved,
+        "yaml": config_section_yaml_fragment(draft.section, saved),
+    }
+
+
+def preview_config_section(config_path: Path, draft: ConfigSectionDraft) -> dict[str, Any]:
+    before_raw = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+    if not isinstance(before_raw, dict):
+        raise ValueError("configuration root must be a mapping")
+    after_raw = dict(before_raw)
+    after_raw[draft.section] = draft.data
+
+    before_config = SeedAgentConfig.model_validate(before_raw)
+    after_config = SeedAgentConfig.model_validate(after_raw)
+    normalized_section = getattr(after_config, draft.section).model_dump(
+        mode="json",
+        exclude_none=True,
+    )
+    before_yaml = _normalized_config_yaml(before_config)
+    after_yaml = _normalized_config_yaml(after_config)
+    diff = "".join(
+        unified_diff(
+            before_yaml.splitlines(keepends=True),
+            after_yaml.splitlines(keepends=True),
+            fromfile="current",
+            tofile="preview",
+        )
+    )
+    return {
+        "section": draft.section,
+        "data": normalized_section,
+        "diff": diff,
+        "yaml": config_section_yaml_fragment(draft.section, normalized_section),
+    }
+
+
+def preview_config_section_yaml(config_path: Path, draft: ConfigSectionYamlDraft) -> dict[str, Any]:
+    data = _section_data_from_yaml(draft)
+    return preview_config_section(
+        config_path,
+        ConfigSectionDraft(section=draft.section, data=data),
+    )
 
 
 def tracker_draft_to_config(draft: TrackerDraft) -> SiteConfig:
@@ -192,3 +274,30 @@ def _generated_api_key_ref(draft: TrackerDraft) -> str | None:
     if not slug:
         slug = "tracker"
     return f"local/secrets/{slug}.api-key"
+
+
+def _section_data_from_yaml(draft: ConfigSectionYamlDraft) -> dict[str, Any]:
+    loaded = yaml.safe_load(draft.yaml_text) or {}
+    if not isinstance(loaded, dict):
+        raise ValueError("section YAML must be a mapping")
+
+    if draft.section in loaded:
+        section_data = loaded[draft.section] or {}
+        if not isinstance(section_data, dict):
+            raise ValueError(f"{draft.section} must be a mapping")
+        extra_keys = set(loaded) - {draft.section}
+        if extra_keys:
+            raise ValueError(
+                f"section YAML should only contain {draft.section}, got extra keys: "
+                f"{', '.join(sorted(extra_keys))}"
+            )
+        return section_data
+    return loaded
+
+
+def _normalized_config_yaml(config: SeedAgentConfig) -> str:
+    return yaml.safe_dump(
+        config.model_dump(mode="json", exclude_none=True),
+        sort_keys=False,
+        allow_unicode=True,
+    )

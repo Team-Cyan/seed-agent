@@ -86,6 +86,9 @@ def _phase2_data() -> dict[str, object]:
                 "max_results_per_site": 20,
                 "prefer_free": True,
                 "reject_hr_by_default": True,
+                "required_keywords": ["Remux"],
+                "preferred_keywords": ["2160p", "HDR"],
+                "excluded_keywords": ["CAM"],
             },
             "sources": {
                 "telegram": {
@@ -99,7 +102,27 @@ def _phase2_data() -> dict[str, object]:
                 "douban_wanted": {
                     "enabled": False,
                     "export_ref": "local/inbox/douban-wanted.json",
+                    "user_name": "LancerC",
+                    "max_pages": 2,
                 },
+                "want_lists": [
+                    {
+                        "provider": "douban",
+                        "id": "douban-me",
+                        "label": "我",
+                        "enabled": True,
+                        "user_name": "LancerC",
+                        "max_pages": 2,
+                    },
+                    {
+                        "provider": "imdb",
+                        "id": "imdb-weekend",
+                        "label": "周末清单",
+                        "enabled": True,
+                        "watchlist_url": "https://www.imdb.com/user/p.demo/watchlist/",
+                        "export_ref": "local/inbox/imdb-weekend.csv",
+                    },
+                ],
                 "subscription": {
                     "enabled": False,
                     "rules_ref": "config/subscriptions.yaml",
@@ -116,17 +139,43 @@ def test_phase2_config_accepts_intent_search_and_source_sections() -> None:
     assert config.intent.confirmation_threshold == 0.82
     assert config.intent.auto_enqueue_threshold == 0.94
     assert config.intent.inbox_ref == "local/inbox/intents.jsonl"
+    assert config.intent.series_search_mode == "season"
     assert config.search.site_priority == {"demo-free": 10}
+    assert config.search.required_keywords == ["Remux"]
+    assert config.search.preferred_keywords == ["2160p", "HDR"]
+    assert config.search.excluded_keywords == ["CAM"]
     assert config.sources.telegram.secret_ref == "local/secrets/telegram.yaml"
     assert config.sources.douban_wanted.export_ref == "local/inbox/douban-wanted.json"
+    assert config.sources.douban_wanted.user_name == "LancerC"
+    assert config.sources.douban_wanted.max_pages == 2
+    assert config.sources.want_lists[0].provider == "douban"
+    assert config.sources.want_lists[0].id == "douban-me"
+    assert config.sources.want_lists[0].label == "我"
+    assert config.sources.want_lists[1].provider == "imdb"
+    assert config.sources.want_lists[1].watchlist_url == "https://www.imdb.com/user/p.demo/watchlist/"
 
 
 def test_phase2_config_defaults_keep_phase1_configs_loadable() -> None:
     config = SeedAgentConfig(**_valid_config_data("local/secrets/qb.yaml"))
 
     assert config.intent.confirmation_threshold == 0.82
+    assert config.intent.series_search_mode == "season"
     assert config.search.max_results_per_site == 20
+    assert config.search.required_keywords == []
     assert config.sources.telegram.enabled is False
+    assert config.sources.douban_wanted.max_pages == 1
+    assert config.sources.want_lists == []
+
+
+def test_phase2_config_accepts_episode_series_search_mode() -> None:
+    data = _phase2_data()
+    intent = data["intent"]
+    assert isinstance(intent, dict)
+    intent["series_search_mode"] = "episode"
+
+    config = SeedAgentConfig(**data)
+
+    assert config.intent.series_search_mode == "episode"
 
 
 def test_load_config_reads_phase2_example(tmp_path: Path) -> None:
@@ -190,6 +239,9 @@ search:
   max_results_per_site: 20
   prefer_free: true
   reject_hr_by_default: true
+  required_keywords: ["Remux"]
+  preferred_keywords: ["2160p"]
+  excluded_keywords: ["CAM"]
 sources:
   telegram:
     enabled: false
@@ -200,6 +252,21 @@ sources:
   douban_wanted:
     enabled: false
     export_ref: local/inbox/douban-wanted.json
+    user_name: LancerC
+    max_pages: 2
+  want_lists:
+    - provider: douban
+      id: douban-me
+      label: 我
+      enabled: true
+      user_name: LancerC
+      max_pages: 2
+    - provider: imdb
+      id: imdb-weekend
+      label: 周末清单
+      enabled: true
+      watchlist_url: https://www.imdb.com/user/p.demo/watchlist/
+      export_ref: local/inbox/imdb-weekend.csv
   subscription:
     enabled: false
     rules_ref: config/subscriptions.yaml
@@ -211,8 +278,26 @@ sources:
 
     assert config.intent.default_resolution == "1080p"
     assert config.search.site_priority["demo-free"] == 10
+    assert config.search.required_keywords == ["Remux"]
+    assert config.sources.douban_wanted.user_name == "LancerC"
+    assert config.sources.douban_wanted.max_pages == 2
+    assert config.sources.want_lists[0].provider == "douban"
+    assert config.sources.want_lists[1].provider == "imdb"
+    assert config.sources.want_lists[1].export_ref == "local/inbox/imdb-weekend.csv"
     assert config.sources.subscription.rules_ref == "config/subscriptions.yaml"
     assert config.downloader.default_category == "seed"
+
+
+def test_phase2_config_rejects_invalid_douban_page_limit() -> None:
+    data = _phase2_data()
+    sources = dict(data["sources"])  # type: ignore[arg-type]
+    douban = dict(sources["douban_wanted"])  # type: ignore[index]
+    douban["max_pages"] = 0
+    sources["douban_wanted"] = douban
+    data["sources"] = sources
+
+    with pytest.raises(ValidationError, match="max_pages"):
+        SeedAgentConfig(**data)
 
 
 def test_phase2_config_accepts_category_policy_downloader_shape() -> None:

@@ -18,5 +18,6 @@ config/live-*.yaml
 .superpowers/
 local/inbox/*
 !local/inbox/.gitkeep
+local/runtime/*
 local/secrets/*
 !local/secrets/.gitkeep

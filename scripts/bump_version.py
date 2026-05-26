@@ -8,6 +8,7 @@ VERSION_PATTERN = re.compile(r"^\d+\.\d+\.\d+$")
 
 FILES = (
     "VERSION",
+    "Dockerfile",
     "pyproject.toml",
     "src/seed_agent/__init__.py",
     "uv.lock",
@@ -22,6 +23,12 @@ def bump_version(root: Path, version: str) -> list[Path]:
 
     replacements = {
         "VERSION": lambda _text: f"{version}\n",
+        "Dockerfile": lambda text: _replace(
+            text,
+            r"ARG VERSION=\d+\.\d+\.\d+",
+            f"ARG VERSION={version}",
+            count=1,
+        ),
         "pyproject.toml": lambda text: _replace(
             text,
             r'version = "\d+\.\d+\.\d+"',

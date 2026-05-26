@@ -1,169 +1,182 @@
 # Roadmap
 
-This file tracks the current project status at a level that is easy for both humans and AI sessions to refresh quickly.
+This roadmap is intentionally a single vertical list: completed work is ordered
+by completion period, and unfinished work is ordered by current priority.
 
-## Completed
+## Timeline And Priority List
 
-### Foundation
+- Completed 2026-04 - Foundation
+  - Python package bootstrap with `uv`, Typer CLI, tests, and linting.
+  - Config-first project structure.
+  - SQLite local state and append-only redacted audit log.
+  - Thin `AGENTS.md`, `.agents/`, and `docs/` routing for future agent sessions.
 
-- Python package bootstrap with `uv`, Typer CLI, tests, and linting
-- Config-first project structure
-- SQLite local state
-- append-only redacted audit log
-- Thin `AGENTS.md`, `.agents/`, and `docs/` routing for future agent sessions
+- Completed 2026-04 - PT upload strategy loop
+  - RSS discovery, score-based candidate evaluation, dry-run-first qBittorrent
+    enqueue, managed torrent review, daily reports, and `run-once`.
+  - Balanced cleanup with pause-before-delete behavior.
+  - Scheduler command surface with free-window preview/enforcement.
+  - Scheduled pruning through `run-once --prune` and `schedule-run --prune`.
+  - Enqueue-time evidence persistence for finite and unlimited M-Team free
+    windows.
 
-### PT Upload Strategy Loop
+- Completed 2026-04 - qB category and budget safety
+  - Category policy became the cleanup authority boundary.
+  - Mutable `seed` pools and add-only media pools were separated.
+  - Shared budget pools can force paused enqueue without widening cleanup.
+  - Runtime enqueue gates use score-prioritized headroom planning.
+  - Stopped zero-progress placeholders are excluded from active download
+    liability calculations.
 
-- RSS discovery for current site adapters
-- score-based candidate evaluation
-- qBittorrent enqueue path with dry-run first
-- managed torrent review
-- balanced cleanup policy with pause-before-delete behavior
-- completed active seeds can be observed for a no-upload window before deletion,
-  avoiding pause-first cleanup when upload contribution still needs measuring
-- daily report and run-once command surface
-- unattended scheduler command surface with free-window safety preview and enforcement
-- optional scheduled pruning through `run-once --prune` and `schedule-run --prune`
-- execute-mode enqueue persists candidate `free_window_expires_at` when a finite
-  free window is known
-- unlimited M-Team API free windows persist as `9999-12-31T23:59:59+00:00`
-- `schedule-run --prune` pauses managed torrents whose persisted free window
-  cannot survive until the next scheduled check
-- scoring uses a soft seeder/leecher pressure ratio instead of an absolute
-  seeder cap, with explicit `allow_non_free` control for NORMAL candidates
-- stale unqueued candidate rows are pruned by retention policy while linked qB
-  lifecycle rows are kept
-- prune payloads include a stronger preview and qB live torrents are backfilled
-  into local candidate state when no candidate row exists yet
-- runtime enqueue gates use score-prioritized headroom planning, so higher-score
-  accepted candidates can start while lower-priority candidates are added paused
-- zero-progress stopped download placeholders are excluded from active download
-  liability calculations
-- qB policy torrent loading and runtime SQLite enrichment are batched for lower
-  scheduler, review, and prune overhead
-- qB `completion_on <= 0` is treated as unknown completion time, preventing
-  incomplete torrents from looking like 1969 completions
-- zero-total-upload managed torrents are observed from qB `added_at` and can be
-  pruned after the configured no-upload window, including incomplete downloads
-  that consumed space but never uploaded
-- candidate state now preserves enqueue-time evidence such as size,
-  seeders/leechers, discount, left time, and score reasons
-- `review`, `daily-report`, and prune previews join enqueue-time evidence with
-  later qB runtime outcomes such as ratio, completion time, amount left,
-  recent upload, and no-upload observation state
-- cleanup keeps currently uploading managed torrents instead of allowing stale
-  no-upload markers to drive delete decisions
-- mutable seed cleanup only pauses or deletes cold/no-upload torrents when the
-  configured budget pool is over budget, so normal seed contribution is kept
-  until space reclamation is needed
-- qB live-state refreshes now reconcile known active candidate hashes that have
-  disappeared from qB into local `deleted` state with missing-from-qB evidence
-- qB live-state refreshes revive stale local `deleted` evidence when the same
-  torrent hash is visible in qB again
-- tracker strategy tuning is evidence-driven through `strategy-report`, with
-  concrete knobs for leecher score ramping and large-pack partial size credit
-  plus recommendation-only config examples for balanced, upload-farming, and
-  space-saving strategies
+- Completed 2026-04 - M-Team API discovery
+  - M-Team RSS remained supported.
+  - API-key detail enrichment and API-driven discovery were added.
+  - Native OpenAPI filters, FREE/discount filtering, activity sorting, and
+    deferred `genDlToken` resolution were implemented.
+  - `site-probe` reports authenticated access mode and discovery mode.
 
-### Resource Intent Loop
+- Completed 2026-04 - Deployment readiness
+  - Docker image build path, container entrypoint, Compose example, Kubernetes
+    CronJob example, healthcheck, heartbeat, and runtime status.
+  - GHCR publish workflow with multi-arch images, semver tags, short-SHA tags,
+    OCI labels, and release-version validation.
+  - Unraid DockerMan template and operator docs.
+  - Release version policy documented: code/ops fixes bump patch by `0.0.1`,
+    new features bump minor by `0.1.0`, docs-only may keep version.
 
-- intent add and inbox ingestion
-- deterministic intent parsing
-- RSS-backed search provider
-- release ranking and ambiguity handling
-- confirm and reject commands
-- enqueue reuse through shared downloader path
-- intent run-once loop
-- source adapter skeletons for file inbox, Telegram, WeChat bridge, and Douban
+- Completed 2026-05 - Runtime evidence and cleanup refinement
+  - qB live-state refresh batches policy torrent loading and SQLite enrichment.
+  - `completion_on <= 0` is treated as unknown completion time.
+  - Zero-total-upload managed torrents can be observed and pruned after the
+    configured no-upload window.
+  - `review`, `daily-report`, and prune previews join enqueue-time evidence
+    with qB runtime outcomes.
+  - Currently uploading managed torrents are protected from stale no-upload
+    cleanup.
+  - Mutable seed cleanup pauses/deletes cold or no-upload torrents only when the
+    configured budget pool is over budget.
+  - Missing-from-qB reconciliation marks disappeared hashes as locally deleted
+    and revives stale deleted evidence when hashes reappear.
 
-### M-Team Current Integration
+- Completed 2026-05 - Evidence-driven tracker strategy
+  - `strategy-report` exposes live pool size/upload/ratio/download evidence.
+  - Scoring uses soft seeder/leecher pressure rather than an absolute seed cap.
+  - `allow_non_free`, leecher ramping, large-pack partial size credit, and
+    recommended balanced/upload-farming/space-saving profiles are available.
+  - M-Team `api_discovery.min_seeders` and `min_leechers` can now be `null` to
+    inherit global discovery thresholds, while explicit `0` keeps native API
+    filtering open.
 
-- M-Team RSS parsing
-- M-Team `x-api-key` detail enrichment
-- real-world confirmation that `torrent/detail` works with the laboratory access token
-- deferred `genDlToken` resolution for accepted API candidates during execute-mode enqueue
-- M-Team API-driven discovery with native OpenAPI filters, FREE/discount filtering,
-  and activity-based sorting
-- `site-probe` reporting for authenticated M-Team access and discovery mode
+- Completed 2026-05 - Resource intent loop
+  - Intent add, file inbox ingestion, deterministic parsing, RSS-backed search,
+    ranking, ambiguity handling, confirm/reject commands, and enqueue reuse.
+  - Source adapter skeletons for file inbox, Telegram, WeChat bridge, Douban,
+    and subscription config shape.
+  - `intent run-once` can ingest configured sources and process the intent loop.
 
-### Deployment Readiness
+- Completed 2026-05 - Douban wanted and M-Team intent search
+  - Douban wanted ingestion supports a public user page and local export JSON.
+  - Douban events now preserve source user, subject URL, intro, wish date, and
+    inferred media type (`movie`, `anime`, `tv`), with mobile subject-page
+    enrichment for TV classification when the list page is ambiguous.
+  - IMDb watchlist/list ingestion supports CSV exports and best-effort public
+    page parsing.
+  - M-Team API-backed intent search uses native search, prefers Douban/IMDb ID
+    filters when available, and defers download-token resolution until
+    execute-mode enqueue.
+  - Search preferences are generic config knobs:
+    `required_keywords`, `preferred_keywords`, and `excluded_keywords`.
+  - `intent.series_search_mode` controls TV/anime season-pack vs episode search
+    and ranking.
+  - Want List ingestion stores source evidence and merges duplicate wants by
+    `douban:<subject_id>` / `imdb:<tt_id>` aliases.
 
-- Docker image build path for server-side operation
-- environment-driven container entrypoint for `run-once`, `enqueue`, and `schedule-run`
-- operator docs for long-running pollers vs external scheduled jobs
-- healthcheck and heartbeat support for long-running scheduler containers
-- startup and on-demand runtime status reports for version, config path,
-  heartbeat, state, audit, and credential-file visibility
-- first-class Compose and Kubernetes CronJob deployment examples
-- Docker-first README and Compose user guide for self-hosted NAS deployments
-- Compose-level registry override example for GHCR and Docker Hub style image
-  distribution
-- GHCR publish workflow with multi-arch images, semver tags, short-SHA tags,
-  OCI labels, and release-version validation
-- Docker Hub automation remains deferred; GHCR stays the primary automated
-  registry until a runtime-status-verified Unraid install still shows registry
-  friction
-- documented release version policy: code fixes and operational fixes bump patch
-  by `0.0.1`; new features bump minor by `0.1.0`
-- version bump helper keeps release metadata files aligned
+- Completed 2026-05 - Web UI settings and Want List
+  - Local `seed-agent web` command serves the settings UI.
+  - Grouped navigation separates run status, Want List, connection settings,
+    strategy settings, and a configuration-file overview.
+  - Tracker-first settings, read-only status, budget-pool summary, and heartbeat
+    health are present.
+  - Downloader, discovery, cleanup, acquisition decision, and torrent-filter
+    settings can be loaded from YAML and saved through schema validation and
+    diff preview.
+  - Each settings page exposes its own editable top-level YAML block while the
+    runtime still uses one physical config file for Docker, CLI, and Unraid
+    compatibility.
+  - Search keyword preferences and Want List source settings can be edited
+    without exposing secret values.
+  - Generic source integration settings remain in the config/API layer, but the
+    Web UI navigation only exposes Douban/IMDb Want List configuration from the
+    Want List page until additional sources are product-ready.
+  - Want List page shows canonical Douban/IMDb wants with source/type filters,
+    source evidence summaries, media type, added time, mobile card layout, and
+    search/download queue status.
+  - Settings pages include mobile section switching and sticky draft/preview/save
+    actions inspired by the reference repo UI patterns, without adopting a
+    dashboard-first product shape.
+  - Web UI Want List search is dry-run/search-only; it does not enqueue or
+    download unless the separate intent enqueue path is explicitly executed.
 
-## In Progress
+- Next P0 - Verify and harden Want List in the live Unraid preview
+  - Run the Web UI against `local/runtime/unraid-config.yaml`.
+  - Confirm Douban/IMDb Want List source settings display correctly with the
+    copied local M-Team API key and no secret leaks.
+  - Add a small operator note for preview/local runtime setup if the workflow
+    proves stable.
 
-- Codex project initialization and harness-oriented AI docs
+- Next P0 - Close the intent automation loop with real M-Team results
+  - Run Douban and IMDb ingestion for configured public/export sources.
+  - Search M-Team for Remux-first matches.
+  - Verify Douban-ID and IMDb-ID searches against real M-Team results.
+  - Verify season-pack vs episode behavior on real TV/anime examples.
+  - Keep qB enqueue dry-run unless explicitly executing.
 
-### Web Settings UI
+- Next P1 - Web UI polish
+  - Extend before/after diff preview to tracker edits.
+  - Add clearer empty/loading/error states, richer source filters, and stronger
+    dashboard-style evidence summaries where they support operations.
+  - Split settings UI from the future read-only operations dashboard only after
+    the current local tool feels stable.
 
-- local `seed-agent web` command for configuration editing
-- tracker-first settings UI design and implementation are in place, but the
-  surface is still WIP rather than a finished operations UI
-- read-only status UI exists for state summary, configured budget pools, and
-  scheduler heartbeat health
-- downloader, discovery, cleanup, and Phase 2 intent settings can be loaded
-  from YAML and saved through schema validation, while complex policy/source
-  structures remain intentionally conservative
-- remaining work includes stronger UX polish, richer source/search coverage, and
-  a clearer split from the future read-only dashboard surface
+- Next P1 - qB live-state-grounded strategy
+  - Refine eviction ranking with tracker-side demand signals where available.
+  - Tune cleanup thresholds against real upload outcomes from joined reports.
+  - Distinguish agent cleanup from external/manual qB deletions when upload
+    history changes suddenly.
 
-## Next
+- Next P1 - Reporting and feedback loop
+  - Turn tracker/account signals, downloader telemetry, historical outcomes,
+    and user confirmations into real `site_history_score` inputs.
+  - Add read-only dashboard surfaces for audit, cleanup decisions, and intent
+    queues.
 
-### Web Settings UI
+- Next P2 - Additional sources and providers
+  - Add another non-Douban/IMDb rating/list source to validate source adapter
+    boundaries.
+  - Add an authenticated or push-style source runner only after local event
+    models prove stable.
+  - Add a second non-M-Team API provider to validate provider boundaries.
 
-- add safe search/source integration editing without exposing secret values
-- add clearer before/after config diff preview before saving
+- Next P2 - Downloader expansion
+  - Add Transmission as the first second-downloader adapter.
+  - Keep qBittorrent as the reference implementation until downloader contracts
+    are proven.
 
-### qBittorrent Live-State-Grounded Strategy
+- Later - Product expansion
+  - Rule import/export.
+  - Auto-reseed.
+  - Richer configurable release profiles built from composable search/source
+    knobs rather than a single hardcoded profile switch.
+  - Live-state enqueue headroom planning v2 after joined evidence proves which
+    qB runtime signals reliably predict good enqueue outcomes.
 
-- refine eviction ranking with tracker-side demand signals when available
-- use the new joined evidence reports to tune cleanup thresholds against real
-  upload outcomes before adding more automation
-- use missing-from-qB reconciliation evidence to distinguish agent cleanup from
-  external/manual qB deletions when upload history suddenly changes
-
-### Scheduler And Server Deployments
-
-- extend deployment examples to the user's real target environments after the
-  first server install
+- Deferred / intentionally not in scope
+  - Dashboard-first product work.
+  - Browser-login automation as a core M-Team strategy.
+  - Broad multi-site plugin framework before current module boundaries are
+    stable.
 
 Reference:
 
+- `docs/architecture.md`
 - `docs/specs/2026-04-25-qb-category-policy-budgeting.md`
-
-## Later
-
-- rule import/export
-- auto-reseed
-- Transmission downloader support as the first second-downloader adapter
-- a second non-M-Team API provider to validate provider boundaries
-- read-only dashboard surface for audit, cleanup decisions, and intent queues
-- richer reporting and feedback-loop scoring that turns tracker/account signals,
-  downloader telemetry, historical outcomes, and user confirmations into real
-  `site_history_score` inputs
-- live-state enqueue headroom planning v2, after joined evidence proves which
-  qB runtime signals reliably predict good enqueue outcomes
-- stronger source integrations beyond local skeletons
-
-## Deferred Or Intentionally Not In Scope
-
-- dashboard-first product work
-- browser-login automation as a core M-Team strategy
-- broad multi-site plugin framework before current module boundaries are stable

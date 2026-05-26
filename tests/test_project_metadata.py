@@ -25,7 +25,7 @@ def test_readme_exposes_support_matrix_and_source_status() -> None:
     assert "| file inbox | Wired |" in readme
     assert "| Telegram | Parser skeleton |" in readme
     assert "| WeChat bridge | Parser skeleton |" in readme
-    assert "| Douban wanted | Local export reader |" in readme
+    assert "| Douban wanted | Wired |" in readme
 
 
 def test_ci_workflow_has_python_and_docker_smoke_gates() -> None:

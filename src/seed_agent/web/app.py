@@ -9,14 +9,32 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
+from seed_agent.actions.intent import rank_intent, search_intent
 from seed_agent.actions.pt import _discover_site_candidates, score_candidates
-from seed_agent.config import SiteConfig, load_config
+from seed_agent.config import (
+    IntentConfig as SeedIntentConfig,
+)
+from seed_agent.config import (
+    SearchConfig,
+    SiteConfig,
+    load_config,
+)
+from seed_agent.models import IntentSource
+from seed_agent.search.base import SearchProvider
+from seed_agent.state import StateStore
 from seed_agent.web.settings import (
     ConfigSectionDraft,
+    ConfigSectionYamlDraft,
     TrackerDraft,
     build_tracker_status,
+    config_section_yaml_fragment,
+    config_section_yamls_payload,
     config_sections_payload,
+    normalized_config_yaml,
+    preview_config_section,
+    preview_config_section_yaml,
     save_config_section,
+    save_config_section_yaml,
     save_tracker_draft,
     tracker_draft_to_config,
 )
@@ -37,6 +55,8 @@ def make_handler(config_path: Path) -> type[BaseHTTPRequestHandler]:
                         "config_path": str(resolved_config_path),
                         "trackers": [_tracker_summary(site, root) for site in config.sites],
                         "sections": config_sections_payload(config),
+                        "section_yamls": config_section_yamls_payload(config),
+                        "config_yaml": normalized_config_yaml(config),
                     }
                 )
                 return
@@ -46,11 +66,17 @@ def make_handler(config_path: Path) -> type[BaseHTTPRequestHandler]:
             if self.path == "/api/pools":
                 self._send_json(_pools_payload(resolved_config_path))
                 return
+            if self.path == "/api/wants":
+                self._send_json(_wants_payload(root))
+                return
             if self.path == "/api/health":
                 self._send_json(_health_payload(root))
                 return
             if self.path == "/":
                 self._send_static("index.html")
+                return
+            if self.path == "/favicon.ico":
+                self._send_bytes(b"", content_type="image/x-icon")
                 return
             if self.path.startswith("/static/"):
                 self._send_static(self.path.removeprefix("/static/"))
@@ -74,12 +100,61 @@ def make_handler(config_path: Path) -> type[BaseHTTPRequestHandler]:
             if self.path == "/api/config/sections":
                 draft = ConfigSectionDraft.model_validate(self._read_json())
                 saved = save_config_section(resolved_config_path, draft)
+                updated_config = load_config(resolved_config_path)
                 self._send_json(
                     {
                         "section": draft.section,
                         "data": saved,
+                        "yaml": config_section_yaml_fragment(draft.section, saved),
+                        "section_yamls": config_section_yamls_payload(updated_config),
+                        "config_yaml": normalized_config_yaml(updated_config),
                         "status": [
                             {"level": "ok", "message": f"{draft.section} config saved"}
+                        ],
+                    }
+                )
+                return
+            if self.path == "/api/config/sections/preview":
+                draft = ConfigSectionDraft.model_validate(self._read_json())
+                preview = preview_config_section(resolved_config_path, draft)
+                self._send_json(
+                    {
+                        **preview,
+                        "status": [
+                            {
+                                "level": "ok",
+                                "message": f"{draft.section} config preview ready",
+                            }
+                        ],
+                    }
+                )
+                return
+            if self.path == "/api/config/sections/yaml":
+                draft = ConfigSectionYamlDraft.model_validate(self._read_json())
+                saved = save_config_section_yaml(resolved_config_path, draft)
+                updated_config = load_config(resolved_config_path)
+                self._send_json(
+                    {
+                        **saved,
+                        "section_yamls": config_section_yamls_payload(updated_config),
+                        "config_yaml": normalized_config_yaml(updated_config),
+                        "status": [
+                            {"level": "ok", "message": f"{draft.section} YAML saved"}
+                        ],
+                    }
+                )
+                return
+            if self.path == "/api/config/sections/yaml/preview":
+                draft = ConfigSectionYamlDraft.model_validate(self._read_json())
+                preview = preview_config_section_yaml(resolved_config_path, draft)
+                self._send_json(
+                    {
+                        **preview,
+                        "status": [
+                            {
+                                "level": "ok",
+                                "message": f"{draft.section} YAML preview ready",
+                            }
                         ],
                     }
                 )
@@ -101,6 +176,11 @@ def make_handler(config_path: Path) -> type[BaseHTTPRequestHandler]:
             if self.path == "/api/trackers/dry-run":
                 draft = TrackerDraft.model_validate(self._read_json())
                 self._send_json(_dry_run_payload(draft, resolved_config_path, root))
+                return
+            if self.path == "/api/wants/search":
+                self._send_json(
+                    _search_wants_payload(self._read_json(), resolved_config_path, root)
+                )
                 return
             self._send_json({"error": "not found"}, status=HTTPStatus.NOT_FOUND)
 
@@ -187,7 +267,7 @@ def _site_probe_payload(
     try:
         site = tracker_draft_to_config(draft)
         config = load_config(config_path)
-        candidates = run(_discover_site_candidates(site, config.config_dir))
+        candidates = run(_discover_site_candidates(site, config.config_dir, config.discovery))
     except Exception as exc:
         return {
             "status": [*status, {"level": "warning", "message": _friendly_error(exc)}],
@@ -216,7 +296,7 @@ def _dry_run_payload(
     try:
         site = tracker_draft_to_config(draft)
         config = load_config(config_path)
-        candidates = run(_discover_site_candidates(site, config.config_dir))
+        candidates = run(_discover_site_candidates(site, config.config_dir, config.discovery))
         scored = score_candidates(candidates, config.discovery, config.scoring)
     except Exception as exc:
         return {
@@ -285,6 +365,276 @@ def _pools_payload(config_path: Path) -> dict[str, Any]:
             "reason": "live downloader polling is not exposed by the read-only web API",
         },
     }
+
+
+def _wants_payload(root: Path) -> dict[str, Any]:
+    state_path = _state_db_path(root)
+    payload: dict[str, Any] = {
+        "state_path": str(state_path),
+        "state_exists": state_path.exists(),
+        "total": 0,
+        "items": [],
+    }
+    if not state_path.exists():
+        return payload
+    store = StateStore(state_path)
+    with sqlite3.connect(state_path) as conn:
+        conn.row_factory = sqlite3.Row
+        if not _table_exists(conn, "intents"):
+            return payload
+        release_counts = _intent_release_counts(conn)
+        rows = conn.execute(
+            """
+            SELECT
+                intent_id,
+                source,
+                raw_text,
+                title,
+                kind,
+                state,
+                normalized_json,
+                selected_release_id,
+                created_at,
+                updated_at
+            FROM intents
+            ORDER BY created_at DESC, intent_id ASC
+            LIMIT 500
+            """
+        ).fetchall()
+    items = []
+    for row in rows:
+        if str(row["source"]) == IntentSource.MANUAL.value:
+            continue
+        intent_id = str(row["intent_id"])
+        items.append(
+            _want_item(
+                dict(row),
+                release_counts.get(intent_id, {}),
+                store.list_intent_source_evidence(intent_id),
+            )
+        )
+    payload["total"] = len(items)
+    payload["items"] = items
+    return payload
+
+
+def _search_wants_payload(body: dict[str, Any], config_path: Path, root: Path) -> dict[str, Any]:
+    state_path = _state_db_path(root)
+    if not state_path.exists():
+        return {"searched": 0, "status": [{"level": "ok", "message": "no wants"}]}
+    payload = _wants_payload(root)
+    items = _filter_want_items(payload["items"], body)
+    config = load_config(config_path)
+    store = StateStore(state_path)
+    providers = _build_want_search_providers(config)
+    searched = run(_search_want_items(items, store, providers, config.intent, config.search))
+    return {
+        "searched": searched,
+        "status": [{"level": "ok", "message": f"searched {searched} wants"}],
+    }
+
+
+async def _search_want_items(
+    items: list[dict[str, Any]],
+    store: StateStore,
+    providers: list[SearchProvider],
+    intent_config: SeedIntentConfig,
+    search_config: SearchConfig,
+) -> int:
+    searched = 0
+    for item in items:
+        intent_id = str(item.get("intent_id") or "")
+        if not intent_id:
+            continue
+        searched_intent, _, _ = await search_intent(intent_id, store, providers)
+        rank_intent(searched_intent.intent_id, store, intent_config, search_config)
+        searched += 1
+    return searched
+
+
+def _build_want_search_providers(config) -> list[SearchProvider]:
+    from seed_agent.cli import _build_search_providers
+
+    return _build_search_providers(config)
+
+
+def _filter_want_items(
+    items: list[dict[str, Any]],
+    filters: dict[str, Any],
+) -> list[dict[str, Any]]:
+    source = str(filters.get("source") or "all")
+    media_type = str(filters.get("media_type") or "all")
+    filtered = items
+    if source != "all":
+        filtered = [item for item in filtered if source in set(item.get("source_keys") or [])]
+    if media_type != "all":
+        filtered = [item for item in filtered if item.get("media_type") == media_type]
+    return filtered
+
+
+def _intent_release_counts(conn: sqlite3.Connection) -> dict[str, dict[str, Any]]:
+    if not _table_exists(conn, "release_candidates"):
+        return {}
+    rows = conn.execute(
+        """
+        SELECT
+            intent_id,
+            COUNT(*) AS release_count,
+            MAX(accepted) AS has_accepted,
+            MAX(confirmation_required) AS has_confirmation_required
+        FROM release_candidates
+        GROUP BY intent_id
+        """
+    ).fetchall()
+    return {
+        str(row["intent_id"]): {
+            "release_count": int(row["release_count"] or 0),
+            "has_accepted": bool(row["has_accepted"]),
+            "has_confirmation_required": bool(row["has_confirmation_required"]),
+        }
+        for row in rows
+    }
+
+
+def _want_item(
+    row: dict[str, Any],
+    release_count: dict[str, Any],
+    evidence: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    normalized = _want_normalized_json(row.get("normalized_json"))
+    metadata = normalized.get("metadata") if isinstance(normalized.get("metadata"), dict) else {}
+    source = str(row.get("source") or normalized.get("source") or "")
+    state = str(row.get("state") or normalized.get("state") or "")
+    selected_release_id = row.get("selected_release_id")
+    releases = int(release_count.get("release_count") or 0)
+    source_label, source_keys, added_at = _want_source_summary(source, metadata, evidence or [])
+    return {
+        "intent_id": row.get("intent_id") or normalized.get("intent_id"),
+        "title": row.get("title") or normalized.get("title") or row.get("raw_text") or "",
+        "raw_text": row.get("raw_text") or normalized.get("raw_text") or "",
+        "kind": row.get("kind") or normalized.get("kind") or "unknown",
+        "media_type": _want_media_type(normalized, metadata),
+        "source": source,
+        "source_label": source_label,
+        "source_keys": source_keys,
+        "added_at": added_at or normalized.get("requested_at") or row.get("created_at"),
+        "state": state,
+        "status": _want_download_status(state, releases, bool(selected_release_id)),
+        "status_label": _want_download_status_label(state, releases, bool(selected_release_id)),
+        "selected_release_id": selected_release_id,
+        "release_count": releases,
+        "updated_at": row.get("updated_at"),
+    }
+
+
+def _want_normalized_json(value: Any) -> dict[str, Any]:
+    if not isinstance(value, str) or not value:
+        return {}
+    try:
+        loaded = json.loads(value)
+    except json.JSONDecodeError:
+        return {}
+    return loaded if isinstance(loaded, dict) else {}
+
+
+def _want_media_type(normalized: dict[str, Any], metadata: dict[str, Any]) -> str:
+    media_type = _normalize_want_media_type(metadata.get("media_type") or metadata.get("kind"))
+    if media_type != "unknown":
+        return media_type
+    kind = str(normalized.get("kind") or "").lower()
+    if kind in {"show", "episode"}:
+        return "tv"
+    if kind == "movie":
+        return "movie"
+    return "unknown"
+
+
+def _normalize_want_media_type(value: Any) -> str:
+    normalized = str(value or "").strip().lower()
+    aliases = {
+        "movie": "movie",
+        "film": "movie",
+        "电影": "movie",
+        "anime": "anime",
+        "animation": "anime",
+        "动画": "anime",
+        "tv": "tv",
+        "show": "tv",
+        "series": "tv",
+        "电视剧": "tv",
+        "剧集": "tv",
+    }
+    return aliases.get(normalized, "unknown")
+
+
+def _want_source_label(source: str, metadata: dict[str, Any]) -> str:
+    label = metadata.get("source_label")
+    if isinstance(label, str) and label.strip():
+        return label.strip()
+    if source == IntentSource.DOUBAN_WANTED.value:
+        user_name = metadata.get("douban_user_name")
+        return f"豆瓣 / {user_name}" if user_name else "豆瓣"
+    if source == IntentSource.IMDB_WATCHLIST.value:
+        return "IMDb"
+    if source == IntentSource.MANUAL.value:
+        return "Manual"
+    return source or "unknown"
+
+
+def _want_source_summary(
+    source: str,
+    metadata: dict[str, Any],
+    evidence: list[dict[str, Any]],
+) -> tuple[str, list[str], str | None]:
+    if not evidence:
+        return _want_source_label(source, metadata), [_want_source_key(source, metadata)], None
+    labels: list[str] = []
+    keys: list[str] = []
+    for item in evidence:
+        item_metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+        label = item.get("source_label") or _want_source_label(
+            str(item.get("source") or ""),
+            item_metadata,
+        )
+        key = _want_source_key(str(item.get("source") or ""), item_metadata)
+        if label not in labels:
+            labels.append(str(label))
+        if key not in keys:
+            keys.append(key)
+    first = labels[0] if labels else _want_source_label(source, metadata)
+    suffix = f" +{len(labels) - 1}" if len(labels) > 1 else ""
+    return f"{first}{suffix}", keys, str(evidence[0].get("requested_at") or "") or None
+
+
+def _want_source_key(source: str, metadata: dict[str, Any]) -> str:
+    config_id = metadata.get("source_config_id")
+    if config_id:
+        return str(config_id)
+    return source or "unknown"
+
+
+def _want_download_status(state: str, release_count: int, selected: bool) -> str:
+    if state == "enqueued" or selected:
+        return "queued"
+    if state == "failed":
+        return "failed"
+    if state == "rejected":
+        return "rejected"
+    if release_count > 0:
+        return "found"
+    return "pending"
+
+
+def _want_download_status_label(state: str, release_count: int, selected: bool) -> str:
+    status = _want_download_status(state, release_count, selected)
+    labels = {
+        "queued": "已加入下载队列",
+        "found": "已找到候选",
+        "pending": "待搜索",
+        "failed": "失败",
+        "rejected": "已拒绝",
+    }
+    return labels[status]
 
 
 def _health_payload(root: Path) -> dict[str, Any]:

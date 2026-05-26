@@ -164,3 +164,50 @@ def test_intent_search_missing_intent_exits_nonzero(tmp_path: Path, monkeypatch)
 
     assert result.exit_code != 0
     assert "unknown intent: missing" in result.output
+
+
+def test_build_search_providers_uses_mteam_api_for_intent_search(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from seed_agent import cli
+    from seed_agent.search.mteam import MTeamSearchProvider
+
+    monkeypatch.chdir(tmp_path)
+    secret = tmp_path / "local" / "secrets" / "mt.api-key"
+    secret.parent.mkdir(parents=True)
+    secret.write_text("secret-api-key", encoding="utf-8")
+    config_path = _write_config(tmp_path)
+    config_path.write_text(
+        config_path.read_text(encoding="utf-8").replace(
+            """
+sites:
+  - name: demo-free
+    type: nexusphp
+    enabled: true
+    rss_url: https://tracker.example/rss.php
+    cookie_ref: null
+""",
+            """
+sites:
+  - name: mt
+    type: mteam
+    enabled: true
+    rss_url: https://rss.m-team.example/fallback
+    discovery_mode: api
+    api_key_ref: local/secrets/mt.api-key
+    api_discovery:
+      mode: movie
+      only_free: false
+      sort_field: seeders
+      sort_order: desc
+""",
+        ),
+        encoding="utf-8",
+    )
+    loaded = cli.load_config(config_path)
+
+    providers = cli._build_search_providers(loaded)
+
+    assert len(providers) == 1
+    assert isinstance(providers[0], MTeamSearchProvider)

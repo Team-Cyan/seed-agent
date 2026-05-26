@@ -197,6 +197,56 @@ def test_state_store_keeps_same_release_for_multiple_intents(tmp_path: Path) -> 
     assert [row["release_id"] for row in second_rows] == [shared_release.release_id]
 
 
+def test_state_store_merges_intent_alias_conflicts_to_canonical_intent(
+    tmp_path: Path,
+) -> None:
+    store = StateStore(tmp_path / "state.sqlite3")
+    canonical = _intent(
+        intent_id="douban_wanted:older",
+        source=IntentSource.DOUBAN_WANTED,
+        raw_text="Call Me by Your Name 2017",
+        title="Call Me by Your Name",
+        requested_at=datetime(2025, 1, 1, tzinfo=UTC),
+        metadata={"external_ids": {"douban": "26799731"}},
+    )
+    duplicate = _intent(
+        intent_id="imdb_watchlist:newer",
+        source=IntentSource.IMDB_WATCHLIST,
+        raw_text="Call Me by Your Name 2017",
+        title="Call Me by Your Name",
+        requested_at=datetime(2025, 1, 5, tzinfo=UTC),
+        metadata={"external_ids": {"imdb": "tt5726616"}},
+    )
+    store.upsert_intent(canonical)
+    store.upsert_intent(duplicate)
+    store.upsert_intent_alias("douban:26799731", canonical.intent_id)
+    store.upsert_intent_alias("imdb:tt5726616", duplicate.intent_id)
+    duplicate_release = _release(release_id="mt:https://kp.m-team.cc/detail/1")
+    store.save_ranked_releases(
+        [
+            _ranked(
+                intent_id=duplicate.intent_id,
+                release=duplicate_release,
+            )
+        ]
+    )
+    store.upsert_intent(duplicate, selected_release_id=duplicate_release.release_id)
+
+    merged = store.merge_intents(canonical.intent_id, duplicate.intent_id)
+
+    assert merged is True
+    canonical_row = store.get_intent(canonical.intent_id)
+    assert canonical_row is not None
+    assert canonical_row["selected_release_id"] == duplicate_release.release_id
+    assert store.get_intent(duplicate.intent_id) is None
+    assert store.find_intent_id_by_alias("douban:26799731") == canonical.intent_id
+    assert store.find_intent_id_by_alias("imdb:tt5726616") == canonical.intent_id
+    assert [row["intent_id"] for row in store.list_release_candidates(canonical.intent_id)] == [
+        canonical.intent_id
+    ]
+    assert store.list_release_candidates(duplicate.intent_id) == []
+
+
 def test_state_store_clears_stale_paused_runtime_when_torrent_is_active(tmp_path: Path) -> None:
     from seed_agent.models import ManagedTorrent
 

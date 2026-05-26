@@ -8,7 +8,17 @@ from socketserver import TCPServer
 from threading import Thread
 from typing import Any
 
-from seed_agent.models import LifecycleState
+from seed_agent.actions.intent import ingest_events
+from seed_agent.models import (
+    Discount,
+    IntentKind,
+    IntentSource,
+    IntentState,
+    LifecycleState,
+    ReleaseCandidate,
+    ResourceIntent,
+)
+from seed_agent.sources.base import SourceIntentEvent
 from seed_agent.state import StateStore
 from seed_agent.web.app import make_handler
 from seed_agent.web.settings import (
@@ -186,6 +196,346 @@ def test_http_config_section_save_updates_safe_phase2_fields(tmp_path: Path) -> 
     assert "default_resolution: 2160p" in saved
     assert "local/inbox/phase2.jsonl" in saved
     assert "secret-token" not in saved
+
+
+def test_http_wants_lists_canonical_source_rows_without_manual_add(tmp_path: Path) -> None:
+    config_path = _write_minimal_config(tmp_path)
+    store = StateStore(tmp_path / ".seed-agent" / "state.db")
+    douban_intent = ingest_events(
+        [
+            SourceIntentEvent(
+                source=IntentSource.DOUBAN_WANTED,
+                raw_text="葬送的芙莉莲 2023",
+                source_event_id="douban:35797709",
+                requested_at=datetime(2025, 1, 2, tzinfo=UTC),
+                metadata={
+                    "douban_user_name": "LancerC",
+                    "media_type": "anime",
+                    "douban_wish_date": "2025-01-02",
+                    "external_ids": {"douban": "35797709"},
+                    "source_config_id": "douban-me",
+                    "source_label": "豆瓣-我",
+                },
+            ),
+            SourceIntentEvent(
+                source=IntentSource.IMDB_WATCHLIST,
+                raw_text="Frieren Beyond Journey's End 2023",
+                source_event_id="imdb:tt22248376",
+                requested_at=datetime(2025, 1, 4, tzinfo=UTC),
+                metadata={
+                    "media_type": "anime",
+                    "external_ids": {"douban": "35797709", "imdb": "tt22248376"},
+                    "source_config_id": "imdb-weekend",
+                    "source_label": "IMDb-周末清单",
+                },
+            ),
+        ],
+        store,
+    )[0][0]
+
+    with _running_server(config_path) as base_url:
+        initial = _request_json(base_url, "GET", "/api/wants")
+        manual_payload = _request_json(
+            base_url,
+            "POST",
+            "/api/wants",
+            {"raw_text": "请以你的名字呼唤我 2017 Remux", "media_type": "movie"},
+            expected_status=404,
+        )
+
+    assert initial["items"][0]["intent_id"] == douban_intent.intent_id
+    assert initial["items"][0]["source_label"] == "豆瓣-我 +1"
+    assert initial["items"][0]["media_type"] == "anime"
+    assert initial["items"][0]["added_at"].startswith("2025-01-02")
+    assert initial["total"] == 1
+    assert manual_payload["error"] == "not found"
+
+
+def test_http_wants_search_runs_filtered_search_without_downloader(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from seed_agent.web import app as web_app
+
+    class FakeSearchProvider:
+        async def search(self, intent):
+            return []
+
+    config_path = _write_minimal_config(tmp_path)
+    store = StateStore(tmp_path / ".seed-agent" / "state.db")
+    intent = ingest_events(
+        [
+            SourceIntentEvent(
+                source=IntentSource.DOUBAN_WANTED,
+                raw_text="葬送的芙莉莲 2023",
+                source_event_id="douban:35797709",
+                requested_at=datetime(2025, 1, 2, tzinfo=UTC),
+                metadata={
+                    "media_type": "anime",
+                    "external_ids": {"douban": "35797709"},
+                    "source_config_id": "douban-me",
+                    "source_label": "豆瓣-我",
+                },
+            )
+        ],
+        store,
+    )[0][0]
+    monkeypatch.setattr(
+        web_app,
+        "_build_want_search_providers",
+        lambda config: [FakeSearchProvider()],
+    )
+
+    with _running_server(config_path) as base_url:
+        payload = _request_json(
+            base_url,
+            "POST",
+            "/api/wants/search",
+            {"source": "douban-me", "media_type": "anime"},
+        )
+
+    row = store.get_intent(intent.intent_id)
+    assert payload["searched"] == 1
+    assert row is not None
+    assert row["state"] == IntentState.CONFIRMATION_REQUIRED.value
+    assert row["selected_release_id"] is None
+
+
+def test_http_wants_search_ranks_canonical_after_release_id_merge(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from seed_agent.web import app as web_app
+
+    class MappingSearchProvider:
+        async def search(self, intent):
+            return [
+                ReleaseCandidate(
+                    release_id="mt:https://kp.m-team.cc/detail/1",
+                    site="mt",
+                    title="Call Me by Your Name 2017 BluRay",
+                    source_url="https://kp.m-team.cc/detail/1",
+                    download_url="mteam-api://torrent/1",
+                    size_bytes=44 * 1024**3,
+                    seeders=10,
+                    leechers=2,
+                    discount=Discount.NORMAL,
+                    metadata={"external_ids": {"douban": "26799731", "imdb": "tt5726616"}},
+                )
+            ]
+
+    config_path = _write_minimal_config(tmp_path)
+    store = StateStore(tmp_path / ".seed-agent" / "state.db")
+    older = ResourceIntent(
+        intent_id="douban_wanted:older",
+        source=IntentSource.DOUBAN_WANTED,
+        raw_text="Call Me by Your Name 2017",
+        kind=IntentKind.MOVIE,
+        title="Call Me by Your Name",
+        year=2017,
+        requested_at=datetime(2025, 1, 1, tzinfo=UTC),
+        metadata={"external_ids": {"douban": "26799731"}},
+    )
+    store.upsert_intent(older)
+    store.upsert_intent_alias("douban:26799731", older.intent_id)
+    newer = ingest_events(
+        [
+            SourceIntentEvent(
+                source=IntentSource.IMDB_WATCHLIST,
+                raw_text="Call Me by Your Name 2017",
+                source_event_id="imdb:tt5726616",
+                requested_at=datetime(2025, 1, 5, tzinfo=UTC),
+                metadata={
+                    "media_type": "movie",
+                    "external_ids": {"imdb": "tt5726616"},
+                    "source_config_id": "imdb-weekend",
+                    "source_label": "IMDb-周末清单",
+                },
+            )
+        ],
+        store,
+    )[0][0]
+    monkeypatch.setattr(
+        web_app,
+        "_build_want_search_providers",
+        lambda config: [MappingSearchProvider()],
+    )
+
+    with _running_server(config_path) as base_url:
+        payload = _request_json(
+            base_url,
+            "POST",
+            "/api/wants/search",
+            {"source": "imdb-weekend", "media_type": "movie"},
+        )
+
+    assert payload["searched"] == 1
+    assert store.get_intent(newer.intent_id) is None
+    assert store.get_intent(older.intent_id)["state"] == IntentState.CONFIRMATION_REQUIRED.value
+    assert [row["intent_id"] for row in store.list_release_candidates(older.intent_id)] == [
+        older.intent_id
+    ]
+
+
+def test_http_config_section_preview_returns_diff_without_writing(
+    tmp_path: Path,
+) -> None:
+    config_path = _write_minimal_config(tmp_path)
+    before = config_path.read_text(encoding="utf-8")
+
+    with _running_server(config_path) as base_url:
+        payload = _request_json(
+            base_url,
+            "POST",
+            "/api/config/sections/preview",
+            {
+                "section": "intent",
+                "data": {
+                    "confirmation_threshold": 0.7,
+                    "auto_enqueue_threshold": 0.9,
+                    "ambiguity_gap": 0.05,
+                    "default_resolution": "2160p",
+                    "preferred_languages": ["zh", "ja"],
+                    "inbox_ref": "local/inbox/phase2.jsonl",
+                },
+            },
+        )
+
+    assert config_path.read_text(encoding="utf-8") == before
+    assert payload["section"] == "intent"
+    assert payload["data"]["default_resolution"] == "2160p"
+    assert payload["status"] == [
+        {"level": "ok", "message": "intent config preview ready"}
+    ]
+    assert "-  default_resolution: 1080p" in payload["diff"]
+    assert "+  default_resolution: 2160p" in payload["diff"]
+    assert "secret-token" not in json.dumps(payload)
+
+
+def test_http_config_section_save_updates_search_and_source_refs_without_secrets(
+    tmp_path: Path,
+) -> None:
+    config_path = _write_minimal_config(tmp_path)
+
+    with _running_server(config_path) as base_url:
+        search_payload = _request_json(
+            base_url,
+            "POST",
+            "/api/config/sections",
+            {
+                "section": "search",
+                "data": {
+                    "site_priority": {"mt": 30, "demo": 10},
+                    "max_results_per_site": 12,
+                    "prefer_free": True,
+                    "reject_hr_by_default": False,
+                    "required_keywords": ["Remux"],
+                    "preferred_keywords": ["2160p", "HDR"],
+                    "excluded_keywords": ["CAM"],
+                },
+            },
+        )
+        sources_payload = _request_json(
+            base_url,
+            "POST",
+            "/api/config/sections",
+            {
+                "section": "sources",
+                "data": {
+                    "telegram": {
+                        "enabled": True,
+                        "secret_ref": "local/secrets/telegram.yaml",
+                    },
+                    "wechat_bridge": {
+                        "enabled": False,
+                        "secret_ref": "local/secrets/wechat-bridge.yaml",
+                    },
+                    "douban_wanted": {
+                        "enabled": True,
+                        "export_ref": "local/inbox/douban-wanted.json",
+                        "user_name": "LancerC",
+                        "max_pages": 2,
+                    },
+                    "subscription": {
+                        "enabled": False,
+                        "rules_ref": "config/subscriptions.yaml",
+                    },
+                },
+            },
+        )
+
+    assert search_payload["data"]["site_priority"] == {"mt": 30, "demo": 10}
+    assert search_payload["data"]["required_keywords"] == ["Remux"]
+    assert sources_payload["data"]["telegram"]["enabled"] is True
+    assert sources_payload["data"]["douban_wanted"]["user_name"] == "LancerC"
+    assert sources_payload["data"]["douban_wanted"]["max_pages"] == 2
+    saved = config_path.read_text(encoding="utf-8")
+    assert "secret_ref: local/secrets/telegram.yaml" in saved
+    assert "token:" not in saved
+    assert "secret-token" not in saved
+
+
+def test_http_config_exposes_and_saves_section_yaml_without_splitting_file(
+    tmp_path: Path,
+) -> None:
+    config_path = _write_minimal_config(tmp_path)
+
+    with _running_server(config_path) as base_url:
+        initial = _request_json(base_url, "GET", "/api/config")
+        preview = _request_json(
+            base_url,
+            "POST",
+            "/api/config/sections/yaml/preview",
+            {
+                "section": "search",
+                "yaml": """
+search:
+  site_priority:
+    mt: 30
+  max_results_per_site: 6
+  prefer_free: true
+  reject_hr_by_default: true
+  required_keywords:
+    - Remux
+  preferred_keywords:
+    - 2160p
+  excluded_keywords:
+    - CAM
+""".strip(),
+            },
+        )
+        saved = _request_json(
+            base_url,
+            "POST",
+            "/api/config/sections/yaml",
+            {
+                "section": "search",
+                "yaml": """
+search:
+  site_priority:
+    mt: 30
+  max_results_per_site: 6
+  prefer_free: true
+  reject_hr_by_default: true
+  required_keywords:
+    - Remux
+  preferred_keywords:
+    - 2160p
+  excluded_keywords:
+    - CAM
+""".strip(),
+            },
+        )
+
+    assert "section_yamls" in initial
+    assert "search:" in initial["section_yamls"]["search"]
+    assert "config_yaml" in initial
+    assert preview["section"] == "search"
+    assert "+  max_results_per_site: 6" in preview["diff"]
+    assert "search:" in preview["yaml"]
+    assert saved["data"]["max_results_per_site"] == 6
+    assert saved["data"]["required_keywords"] == ["Remux"]
+    assert "max_results_per_site: 6" in config_path.read_text(encoding="utf-8")
 
 
 def test_http_config_section_save_rejects_invalid_threshold_order(tmp_path: Path) -> None:

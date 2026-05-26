@@ -16,6 +16,10 @@ This repository keeps durable project knowledge under `docs/`.
   - current project status
   - completed, next, later, deferred work
 
+- `docs/architecture.md`
+  - current architecture diagram
+  - supported feature matrix
+
 - `docs/specs/`
   - durable design and architecture decisions
 
@@ -35,13 +39,14 @@ This repository keeps durable project knowledge under `docs/`.
 
 1. `README.md`
 2. `docs/roadmap.md`
-3. `docs/operations/docker-compose-user-guide.md`
-4. `docs/operations/docker-scheduling.md`
-5. `docs/operations/docker-image-publishing.md`
-6. `docs/operations/release-process.md`
-7. `deploy/docker-compose.example.yml`
-8. `deploy/seed-agent.env.example`
-9. `docs/operations/phase-1-usage.md` or `docs/operations/phase-2-usage.md`
+3. `docs/architecture.md`
+4. `docs/operations/docker-compose-user-guide.md`
+5. `docs/operations/docker-scheduling.md`
+6. `docs/operations/docker-image-publishing.md`
+7. `docs/operations/release-process.md`
+8. `deploy/docker-compose.example.yml`
+9. `deploy/seed-agent.env.example`
+10. `docs/operations/phase-1-usage.md` or `docs/operations/phase-2-usage.md`
 
 ### For agents
 

@@ -56,10 +56,12 @@ class LifecycleState(StrEnum):
 
 class IntentSource(StrEnum):
     CLI = "cli"
+    MANUAL = "manual"
     FILE_INBOX = "file_inbox"
     TELEGRAM = "telegram"
     WECHAT_BRIDGE = "wechat_bridge"
     DOUBAN_WANTED = "douban_wanted"
+    IMDB_WATCHLIST = "imdb_watchlist"
     SUBSCRIPTION = "subscription"
 
 

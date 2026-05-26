@@ -73,6 +73,10 @@ search:
   max_results_per_site: 20
   prefer_free: true
   reject_hr_by_default: true
+sources:
+  douban_wanted:
+    enabled: false
+    export_ref: null
 """,
         encoding="utf-8",
     )
@@ -172,6 +176,50 @@ def test_intent_run_once_with_missing_inbox_is_noop(tmp_path: Path, monkeypatch)
     assert payload["ingested"] == 0
     assert payload["searched"] == 0
     assert payload["decisions"] == []
+
+
+def test_intent_run_once_ingests_configured_douban_source(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from seed_agent import cli
+    from seed_agent.models import IntentSource
+    from seed_agent.sources.base import SourceIntentEvent
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli, "_build_search_providers", lambda config: [_FakeSearchProvider()])
+    monkeypatch.setattr(
+        cli,
+        "_read_configured_source_events",
+        lambda config: [
+            SourceIntentEvent(
+                source=IntentSource.DOUBAN_WANTED,
+                raw_text="Inception 2010 1080p",
+                source_event_id="douban:1292052",
+                metadata={"source_adapter": "douban_wanted_public"},
+            )
+        ],
+    )
+    config_path = _write_config(tmp_path)
+    content = config_path.read_text(encoding="utf-8").replace(
+        "enabled: false\n    export_ref: null",
+        "enabled: true\n    export_ref: null\n    user_name: LancerC",
+    )
+    config_path.write_text(content, encoding="utf-8")
+
+    result = CliRunner().invoke(
+        cli.app,
+        ["intent-run-once", "--config", str(config_path)],
+    )
+
+    assert result.exit_code == 0
+    payload = _json_output(result)
+    assert payload["ingested"] == 1
+    assert payload["searched"] == 1
+    store = StateStore(tmp_path / ".seed-agent" / "state.db")
+    rows = store.list_intents_by_state(IntentState.SEARCHED)
+    assert len(rows) == 1
+    assert rows[0]["source"] == IntentSource.DOUBAN_WANTED.value
 
 
 def test_intent_run_once_dry_run_reports_runtime_activity_when_qb_visible(

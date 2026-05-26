@@ -36,10 +36,14 @@ sites:
   #     # teams: [9]
   #     # labels_new: []
   #     # hot: true
-  #     min_seeders: 0
+  #     # null inherits discovery.min_seeders for upload discovery. Use 0 to
+  #     # intentionally disable the native lower-bound filter at the M-Team API layer.
+  #     min_seeders: null
   #     # 0 or null means no native API seeder upper-bound filter.
   #     max_seeders: 0
-  #     min_leechers: 0
+  #     # null inherits discovery.min_leechers for upload discovery. Use 0 for
+  #     # broad search followed by local scoring.
+  #     min_leechers: null
   #     min_times_completed: 0
   #   # Optional compatibility fallback: a logged-in M-Team site cookie.
   #   cookie_ref: local/secrets/mt.cookie
@@ -126,6 +130,9 @@ intent:
   auto_enqueue_threshold: 0.94
   ambiguity_gap: 0.08
   default_resolution: 1080p
+  # For TV/anime episode intents, "season" searches and ranks full-season packs;
+  # use "episode" when the operator prefers one episode at a time.
+  series_search_mode: season
   preferred_languages: [zh, en]
   inbox_ref: local/inbox/intents.jsonl
 search:
@@ -134,6 +141,11 @@ search:
   max_results_per_site: 20
   prefer_free: true
   reject_hr_by_default: true
+  # Intent search quality preferences. For a Remux-first setup, require Remux
+  # and optionally prefer 2160p/HDR/Dolby Vision terms.
+  required_keywords: []
+  preferred_keywords: []
+  excluded_keywords: []
 state:
   candidate_retention_days: 30
 sources:
@@ -145,7 +157,32 @@ sources:
     secret_ref: local/secrets/wechat-bridge.yaml
   douban_wanted:
     enabled: false
+    # Public Douban user name or profile URL, for example LancerC or
+    # https://www.douban.com/people/LancerC
+    user_name: null
+    max_pages: 1
+    # Optional local export fallback. Keep private exports under local/inbox.
     export_ref: local/inbox/douban-wanted.json
+  # Canonical Want List sources shown by the Web UI and synced by intent runs.
+  # Configure multiple Douban users or IMDb watchlists/lists here; repeated
+  # works are merged by Douban/IMDb IDs and only the earliest want is searched.
+  want_lists:
+    - provider: douban
+      id: douban-me
+      label: 我
+      enabled: false
+      user_name: LancerC
+      max_pages: 1
+      # Optional local export fallback. Keep private exports under local/inbox.
+      # export_ref: local/inbox/douban-me.json
+    - provider: imdb
+      id: imdb-weekend
+      label: 周末清单
+      enabled: false
+      watchlist_url: https://www.imdb.com/user/p.example/watchlist/
+      # IMDb public pages may challenge server-side fetches. CSV export refs are
+      # the stable fallback when public HTML is not reachable.
+      export_ref: local/inbox/imdb-weekend.csv
   subscription:
     enabled: false
     rules_ref: config/subscriptions.yaml

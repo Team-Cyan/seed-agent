@@ -16,9 +16,67 @@ intent:
 `local/inbox/*` is gitignored because it can contain private watch preferences or chat-export text.
 
 The local `seed-agent web` UI can also edit the low-risk Phase 2 intent
-thresholds, default resolution, preferred languages, and inbox path. It writes
-the YAML section only after the full project config passes schema validation;
-source credentials still stay in `local/secrets/`.
+thresholds, default resolution, preferred languages, inbox path, search
+preferences, and Want List source settings. It writes a YAML section only after
+the full project config passes schema validation and shows a before/after diff
+preview; source credentials still stay in `local/secrets/` and are not entered
+as plaintext in the UI. Generic source integration refs remain YAML/API-level
+configuration until those sources have a product-ready UI.
+
+The same Web UI exposes a Want List page. It reads local intent state, shows
+canonical Douban/IMDb source labels, media type, added time, and
+search/download status. The page can trigger search-only dry runs for filtered
+rows; it does not add manual wants or enqueue downloads.
+
+For a Remux-first Douban/IMDb-to-M-Team intent flow:
+
+```yaml
+sites:
+  - name: mt
+    type: mteam
+    enabled: true
+    rss_url: https://rss.m-team.example/fallback
+    api_key_ref: local/secrets/mt.api-key
+    discovery_mode: api
+    api_discovery:
+      mode: movie
+      only_free: false
+      sort_field: seeders
+      sort_order: desc
+
+intent:
+  default_resolution: 2160p
+  series_search_mode: season
+
+search:
+  required_keywords: [Remux]
+  preferred_keywords: [HDR, Dolby Vision]
+  excluded_keywords: [CAM, TC]
+
+sources:
+  want_lists:
+    - provider: douban
+      id: douban-me
+      label: 我
+      enabled: true
+      user_name: LancerC
+      max_pages: 1
+    - provider: imdb
+      id: imdb-weekend
+      label: 周末清单
+      enabled: true
+      watchlist_url: https://www.imdb.com/user/p.example/watchlist/
+      export_ref: local/inbox/imdb-weekend.csv
+```
+
+`required_keywords` are hard filters for M-Team API-backed intent search.
+`preferred_keywords` add ranking credit when present. `excluded_keywords` filter
+M-Team API search results and penalize any fallback search result that contains
+them.
+
+For TV/anime episode intents, `series_search_mode: season` searches and ranks
+full-season packs. Use `series_search_mode: episode` when the operator prefers
+one episode at a time.
 
 ## Local Inbox Shape
 
@@ -79,14 +137,17 @@ uv run seed-agent intent-enqueue <intent-id> --config config/example.yaml --exec
 
 ## Combined Run-Once
 
-`intent-run-once` processes intents ingested from the configured inbox during that invocation:
+`intent-run-once` processes intents ingested from the configured inbox and
+enabled source adapters during that invocation:
 
 ```bash
 uv run seed-agent intent-run-once --config config/example.yaml
 uv run seed-agent intent-run-once --config config/example.yaml --execute
 ```
 
-The command is dry-run by default. If the inbox is absent, it exits with an empty JSON result and does not search configured sites.
+The command is dry-run by default. If the inbox is absent and no source adapter
+emits events, it exits with an empty JSON result and does not search configured
+sites.
 
 ## Runtime And Audit
 
@@ -109,6 +170,15 @@ The current integration adapters are local/off by default:
 - `file_inbox`: reads local JSONL inbox files.
 - `telegram`: parses Telegram update payloads without running a bot loop.
 - `wechat_bridge`: parses bridge payloads without depending on a live WeChat session.
-- `douban_wanted`: reads local Douban wanted-list export JSON.
+- `want_lists` with `provider: douban`: reads public Douban wanted pages through
+  `user_name`/`max_pages` and can also read local wanted-list export JSON. It
+  preserves Douban user, subject URL, wish date, intro, inferred media type, and
+  external IDs.
+- `want_lists` with `provider: imdb`: reads IMDb watchlist/list CSV exports and
+  best-effort public page data, preserving IMDb title IDs and source labels.
+
+Want List sources are canonicalized by `douban:<subject_id>` and `imdb:<tt_id>`
+aliases. Repeated wants from multiple configured lists are kept as source
+evidence on the earliest canonical intent rather than duplicated as new rows.
 
 Secrets and tokens stay outside version control under `local/secrets/`.
