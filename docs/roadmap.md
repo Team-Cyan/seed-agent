@@ -93,6 +93,8 @@ by completion period, and unfinished work is ordered by current priority.
 
 - Completed 2026-05 - Web UI settings and Want List
   - Local `seed-agent web` command serves the settings UI.
+  - Docker and Unraid deployments can publish the settings UI on port `8765`
+    while the same container keeps `schedule-run` as the foreground process.
   - Grouped navigation separates run status, Want List, connection settings,
     strategy settings, and a configuration-file overview.
   - Tracker-first settings, read-only status, budget-pool summary, and heartbeat
@@ -118,9 +120,10 @@ by completion period, and unfinished work is ordered by current priority.
     download unless the separate intent enqueue path is explicitly executed.
 
 - Next P0 - Verify and harden Want List in the live Unraid preview
-  - Run the Web UI against `local/runtime/unraid-config.yaml`.
-  - Confirm Douban/IMDb Want List source settings display correctly with the
-    copied local M-Team API key and no secret leaks.
+  - Rebuild the Unraid DockerMan container from the updated template and confirm
+    `docker port seed-agent` publishes `8765/tcp`.
+  - Open the DockerMan WebUI button and confirm Douban/IMDb Want List source
+    settings display correctly with no secret leaks.
   - Add a small operator note for preview/local runtime setup if the workflow
     proves stable.
 

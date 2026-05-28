@@ -78,6 +78,10 @@ Recommended user-visible defaults:
 - `SEED_AGENT_EXECUTE=true`
 - `SEED_AGENT_REQUIRE_KNOWN_FREE_WINDOW=true`
 - `SEED_AGENT_STARTUP_STATUS=true`
+- `SEED_AGENT_WEB_ENABLED=true`
+- `SEED_AGENT_WEB_HOST=0.0.0.0`
+- `SEED_AGENT_WEB_PORT=8765`
+- WebUI host port `8765` mapped to container port `8765/tcp`
 
 ## Runtime Visibility
 
@@ -160,10 +164,39 @@ images behind, remove only unused seed-agent dangling images. Avoid broad
 
 ## WebUI Button
 
-`seed-agent` does not expose an HTTP control panel today.
+`seed-agent` exposes the settings Web UI on container port `8765` when
+`SEED_AGENT_WEB_ENABLED=true`.
 
-The Unraid template therefore points the WebUI button at the GitHub project
-page so the container still has a useful landing target in DockerMan.
+The DockerMan template maps host port `8765` to container port `8765/tcp` and
+sets:
 
-If the project later grows a read-only status UI, update the template to point
-WebUI at that service instead.
+```text
+SEED_AGENT_WEB_ENABLED=true
+SEED_AGENT_WEB_HOST=0.0.0.0
+SEED_AGENT_WEB_PORT=8765
+WebUI=http://[IP]:[PORT:8765]
+```
+
+If the Docker page shows the container as healthy but the WebUI button opens an
+unavailable page, check these live facts before changing application config:
+
+```sh
+docker port seed-agent
+docker inspect seed-agent --format '{{json .NetworkSettings.Ports}}'
+docker inspect seed-agent --format '{{index .Config.Labels "net.unraid.docker.webui"}}'
+docker exec seed-agent seed-agent --version
+docker exec seed-agent seed-agent runtime-status \
+  --config /workspace/runtime/config/config.yaml \
+  --heartbeat-file /workspace/runtime/state/schedule-heartbeat.json \
+  --max-staleness-minutes 90
+```
+
+A healthy scheduler with `ports={}` means the image updated, but the installed
+DockerMan template did not publish the Web UI port. Update the template from
+`deploy/unraid/seed-agent.xml`, then use Unraid's **Apply Update** action or:
+
+```sh
+/usr/local/emhttp/plugins/dynamix.docker.manager/scripts/update_container seed-agent
+```
+
+After the rebuild, `docker port seed-agent` should show a `8765/tcp` mapping.

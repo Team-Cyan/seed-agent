@@ -1,6 +1,6 @@
 FROM python:3.14-slim
 
-ARG VERSION=0.5.0
+ARG VERSION=0.5.1
 ARG REVISION=unknown
 ARG BUILD_DATE=unknown
 
@@ -26,5 +26,7 @@ COPY docker /app/docker
 RUN pip install --no-cache-dir uv \
     && uv sync --frozen --no-dev --no-editable
 RUN chmod +x /app/docker/entrypoint.sh
+
+EXPOSE 8765
 
 ENTRYPOINT ["/app/docker/entrypoint.sh"]

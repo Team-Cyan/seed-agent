@@ -31,6 +31,9 @@ MAX_STALENESS_MINUTES="${SEED_AGENT_MAX_STALENESS_MINUTES:-}"
 MAX_CYCLES="${SEED_AGENT_MAX_CYCLES:-}"
 PRUNE="${SEED_AGENT_PRUNE:-false}"
 STARTUP_STATUS="${SEED_AGENT_STARTUP_STATUS:-true}"
+WEB_ENABLED="${SEED_AGENT_WEB_ENABLED:-false}"
+WEB_HOST="${SEED_AGENT_WEB_HOST:-0.0.0.0}"
+WEB_PORT="${SEED_AGENT_WEB_PORT:-8765}"
 
 set -- seed-agent "$MODE" --config "$CONFIG_PATH"
 
@@ -74,6 +77,10 @@ if [ "$MODE" = "healthcheck" ]; then
   fi
 fi
 
+if [ "$MODE" = "web" ]; then
+  set -- "$@" --host "$WEB_HOST" --port "$WEB_PORT"
+fi
+
 if [ "$STARTUP_STATUS" = "true" ] && [ "$MODE" != "healthcheck" ]; then
   STATUS_ARGS="runtime-status --config $CONFIG_PATH"
   if [ -n "$HEARTBEAT_FILE" ]; then
@@ -86,6 +93,11 @@ if [ "$STARTUP_STATUS" = "true" ] && [ "$MODE" != "healthcheck" ]; then
   # real command and produces its normal failure/log behavior.
   # shellcheck disable=SC2086
   seed-agent $STATUS_ARGS || true
+fi
+
+if [ "$WEB_ENABLED" = "true" ] && [ "$MODE" != "web" ] && [ "$MODE" != "healthcheck" ]; then
+  echo "Starting seed-agent web UI at http://$WEB_HOST:$WEB_PORT"
+  seed-agent web --config "$CONFIG_PATH" --host "$WEB_HOST" --port "$WEB_PORT" &
 fi
 
 # Allow explicit `docker run seed-agent:local <mode> <extra args>` overrides for

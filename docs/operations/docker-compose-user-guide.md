@@ -115,6 +115,13 @@ Main env vars:
 - `SEED_AGENT_MAX_STALENESS_MINUTES=90`
 - `SEED_AGENT_PRUNE=true`
 - `SEED_AGENT_STARTUP_STATUS=true`
+- `SEED_AGENT_WEB_ENABLED=true`
+- `SEED_AGENT_WEB_HOST=0.0.0.0`
+- `SEED_AGENT_WEB_PORT=8765`
+
+The example publishes host port `8765` to the container's Web UI port. That lets
+one long-running container serve the settings UI while `schedule-run` remains
+the foreground process.
 
 The Compose file reads `SEED_AGENT_IMAGE` from `deploy/seed-agent.env`, so you can switch
 between GHCR, Docker Hub, and a private registry without editing YAML.
@@ -177,6 +184,18 @@ Expected files:
 It is normal for the very first scheduler cycle to take a couple of minutes
 before the first heartbeat appears. The example Compose file leaves a four-minute
 `start_period` for that reason.
+
+Check the Web UI:
+
+```bash
+open http://127.0.0.1:8765
+```
+
+If the page does not load, first confirm that the container has a published port:
+
+```bash
+docker compose --env-file deploy/seed-agent.env -f deploy/docker-compose.example.yml port seed-agent 8765
+```
 
 ## 7. Common Operations
 

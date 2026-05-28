@@ -64,7 +64,7 @@ flowchart TB
 
 | Area | Current support |
 | --- | --- |
-| Deployment | Docker image, Docker Compose, Unraid DockerMan template, Kubernetes CronJob example, scheduler heartbeat, runtime status, healthcheck. |
+| Deployment | Docker image, Docker Compose, Unraid DockerMan template, Kubernetes CronJob example, scheduler heartbeat, runtime status, healthcheck, optional Web UI sidecar process in the scheduler container. |
 | Downloader | qBittorrent only. Category policies define mutable seed pools and add-only media pools. |
 | PT discovery | NexusPHP-style RSS, M-Team RSS fallback, M-Team API discovery with native filters and deferred download-token resolution. |
 | Seed strategy | Free/2x-free filtering, leecher/seeder scoring, size scoring, runtime enqueue gates, budget-pool pause behavior, review, prune, stale-state reconciliation. |

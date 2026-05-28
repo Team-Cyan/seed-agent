@@ -19,6 +19,8 @@ Expose the operator-facing command surface and safe summaries.
 - site probe diagnostics,
 - unattended `schedule-run` orchestration for server-side polling,
 - local `web` settings UI server for safe configuration editing,
+- Docker entrypoint support for running the settings Web UI beside
+  `schedule-run` when `SEED_AGENT_WEB_ENABLED=true`,
 - grouped Web UI navigation and mobile section switching for the local settings
   surface,
 - read-only web API endpoints for state summary, configured budget pools, and

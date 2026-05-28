@@ -113,6 +113,7 @@ docker compose --env-file deploy/seed-agent.env -f deploy/docker-compose.example
 ```bash
 docker compose --env-file deploy/seed-agent.env -f deploy/docker-compose.example.yml logs -f seed-agent
 docker compose --env-file deploy/seed-agent.env -f deploy/docker-compose.example.yml ps
+open http://127.0.0.1:8765
 ```
 
 State and audit files are written under `.seed-agent/` in the mounted workspace.
@@ -148,6 +149,13 @@ Key environment variables:
 - `SEED_AGENT_HEARTBEAT_FILE=/state/schedule-heartbeat.json`
 - `SEED_AGENT_MAX_STALENESS_MINUTES=90`
 - `SEED_AGENT_PRUNE=true`
+- `SEED_AGENT_WEB_ENABLED=true`
+- `SEED_AGENT_WEB_HOST=0.0.0.0`
+- `SEED_AGENT_WEB_PORT=8765`
+
+The example publishes `8765:8765`, so the same container can run the scheduler
+and the settings Web UI. Open `http://127.0.0.1:8765` for local
+Compose installs, or the DockerMan WebUI button for Unraid installs.
 
 See:
 
@@ -249,6 +257,8 @@ The project is structured to work with:
 For Unraid users who want native DockerMan actions such as edit, update checks,
 and template-driven rebuilds, the repository now includes a first-party Unraid
 template and a GitHub Actions workflow that publishes `ghcr.io/team-cyan/seed-agent`.
+The template runs the scheduler and settings Web UI in one container, publishing
+host port `8765` for DockerMan's WebUI button.
 
 On `main`, GHCR receives `latest`, `main`, and `sha-<short-sha>` tags. On
 release tags such as `v0.2.0`, GHCR also receives `v0.2.0`, `0.2.0`, and `0.2`.

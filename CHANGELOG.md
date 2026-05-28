@@ -4,6 +4,17 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.5.1 - 2026-05-28
+
+### Fixed
+
+- Docker and Unraid deployments can now start the settings Web UI beside the
+  long-running scheduler with `SEED_AGENT_WEB_ENABLED=true`, publish container
+  port `8765`, and open DockerMan's WebUI button at the live local service.
+- Unraid deployment docs now explain how to diagnose a healthy scheduler
+  container whose WebUI button is unavailable because no web process or port
+  mapping is present.
+
 ## 0.5.0 - 2026-05-26
 
 ### Added
