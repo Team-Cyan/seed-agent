@@ -121,6 +121,8 @@ def test_non_tracker_sections_render_config_panels() -> None:
     assert "data-setting-action" in script
     assert 'fetch("/api/config/sections"' in script
     assert "configSections" in script
+    assert "newClientId" in script
+    assert "globalThis.crypto?.randomUUID" in script
     assert "qBittorrent 目标" in script
     assert "种子筛选" in script
     assert "required_keywords" in script
@@ -131,6 +133,7 @@ def test_non_tracker_sections_render_config_panels() -> None:
     assert "removeprefix" not in script
     assert "renderWantsPanel" in script
     assert 'fetch("/api/wants"' in script
+    assert 'fetch("/api/wants/sync"' in script
     assert "manual-add" not in script
     assert "手动添加" not in script
     assert "coerceSettingValue" in script

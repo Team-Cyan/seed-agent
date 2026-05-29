@@ -236,7 +236,7 @@ const sectionGroupBySection = {
 
 addTrackerButton.addEventListener("click", () => {
   state.trackers.unshift({
-    id: crypto.randomUUID(),
+    id: newClientId(),
     type: "",
     name: "",
     enabled: true,
@@ -338,7 +338,7 @@ async function loadConfig() {
   state.configYaml = payload.config_yaml || "";
   state.configPath = payload.config_path || "";
   state.trackers = payload.trackers.map((tracker) => ({
-    id: crypto.randomUUID(),
+    id: newClientId(),
     type: tracker.type,
     name: tracker.name,
     enabled: tracker.enabled,
@@ -831,6 +831,15 @@ async function handleWantAction(panel, action, event) {
     const payload = await submitWantSourceConfig(panel, "/api/config/sections");
     if (payload?.data) {
       state.configSections.sources = payload.data;
+      if (payload.section_yamls) {
+        state.sectionYamls = payload.section_yamls;
+      }
+      if (payload.config_yaml) {
+        state.configYaml = payload.config_yaml;
+      }
+      await syncConfiguredWants(panel);
+      await loadWants();
+      renderSection();
     }
   }
 }
@@ -848,10 +857,33 @@ async function searchFilteredWants(panel) {
       throw new Error(payload.status?.[0]?.message || `请求失败：${response.status}`);
     }
     await loadWants();
-    status.innerHTML = `<div class="status-item ok">${escapeHtml(payload.status?.[0]?.message || "搜索已完成")}</div>`;
     renderSection();
+    const refreshedStatus = document.querySelector("[data-want-status]");
+    if (refreshedStatus) {
+      refreshedStatus.innerHTML = `<div class="status-item ok">${escapeHtml(payload.status?.[0]?.message || "搜索已完成")}</div>`;
+    }
   } catch (error) {
     status.innerHTML = `<div class="status-item warning">${escapeHtml(error.message)}</div>`;
+  }
+}
+
+async function syncConfiguredWants(panel) {
+  const status = panel.querySelector("[data-want-config-status]") || panel.querySelector("[data-want-status]");
+  try {
+    const response = await fetch("/api/wants/sync", { method: "POST" });
+    const payload = await response.json();
+    if (!response.ok) {
+      throw new Error(payload.status?.[0]?.message || `请求失败：${response.status}`);
+    }
+    if (status) {
+      status.innerHTML = `<div class="status-item ok">${escapeHtml(payload.status?.[0]?.message || "想看来源已同步")}</div>`;
+    }
+    return payload;
+  } catch (error) {
+    if (status) {
+      status.innerHTML = `<div class="status-item warning">${escapeHtml(error.message)}</div>`;
+    }
+    return null;
   }
 }
 
@@ -1247,6 +1279,14 @@ function escapeAttribute(value) {
 
 function help(text) {
   return `<button class="help" type="button" data-help="${escapeAttribute(text)}" aria-label="字段说明">?</button>`;
+}
+
+function newClientId() {
+  if (globalThis.crypto?.randomUUID) {
+    return globalThis.crypto.randomUUID();
+  }
+  const randomPart = Math.random().toString(36).slice(2, 10);
+  return `client-${Date.now().toString(36)}-${randomPart}`;
 }
 
 function showHelpPopover(target) {

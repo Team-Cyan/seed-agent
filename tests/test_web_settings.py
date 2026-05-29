@@ -301,6 +301,92 @@ def test_http_wants_search_runs_filtered_search_without_downloader(
     assert row["selected_release_id"] is None
 
 
+def test_http_wants_sync_ingests_configured_sources(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from seed_agent.web import app as web_app
+
+    config_path = _write_minimal_config(tmp_path)
+    monkeypatch.setattr(
+        web_app,
+        "_read_configured_want_source_events",
+        lambda config: [
+            SourceIntentEvent(
+                source=IntentSource.DOUBAN_WANTED,
+                raw_text="葬送的芙莉莲 2023",
+                source_event_id="douban:35797709",
+                requested_at=datetime(2025, 1, 2, tzinfo=UTC),
+                metadata={
+                    "media_type": "anime",
+                    "external_ids": {"douban": "35797709"},
+                    "source_config_id": "douban-me",
+                    "source_label": "豆瓣-我",
+                },
+            )
+        ],
+    )
+
+    with _running_server(config_path) as base_url:
+        sync_payload = _request_json(base_url, "POST", "/api/wants/sync")
+        wants_payload = _request_json(base_url, "GET", "/api/wants")
+
+    assert sync_payload["ingested"] == 1
+    assert sync_payload["total"] == 1
+    assert wants_payload["total"] == 1
+    assert wants_payload["items"][0]["source_label"] == "豆瓣-我"
+
+
+def test_http_wants_search_syncs_sources_before_search(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from seed_agent.web import app as web_app
+
+    class FakeSearchProvider:
+        async def search(self, intent):
+            return []
+
+    config_path = _write_minimal_config(tmp_path)
+    monkeypatch.setattr(
+        web_app,
+        "_read_configured_want_source_events",
+        lambda config: [
+            SourceIntentEvent(
+                source=IntentSource.IMDB_WATCHLIST,
+                raw_text="Frieren Beyond Journey's End 2023",
+                source_event_id="imdb:tt22248376",
+                requested_at=datetime(2025, 1, 4, tzinfo=UTC),
+                metadata={
+                    "media_type": "anime",
+                    "external_ids": {"imdb": "tt22248376"},
+                    "source_config_id": "imdb-weekend",
+                    "source_label": "IMDb-周末清单",
+                },
+            )
+        ],
+    )
+    monkeypatch.setattr(
+        web_app,
+        "_build_want_search_providers",
+        lambda config: [FakeSearchProvider()],
+    )
+
+    with _running_server(config_path) as base_url:
+        payload = _request_json(
+            base_url,
+            "POST",
+            "/api/wants/search",
+            {"source": "imdb-weekend", "media_type": "anime"},
+        )
+        wants_payload = _request_json(base_url, "GET", "/api/wants")
+
+    assert payload["synced"] == 1
+    assert payload["searched"] == 1
+    assert wants_payload["total"] == 1
+    assert wants_payload["items"][0]["source_label"] == "IMDb-周末清单"
+
+
 def test_http_wants_search_ranks_canonical_after_release_id_merge(
     tmp_path: Path,
     monkeypatch,

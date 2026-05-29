@@ -4,6 +4,16 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.5.2 - 2026-05-29
+
+### Fixed
+
+- Web Settings tracker cards now render and the add-site button works when the
+  UI is opened from non-localhost HTTP hosts such as Unraid LAN addresses.
+- Want List source saves can immediately sync configured Douban/IMDb lists into
+  local intent state, and Want List search now syncs configured sources before
+  searching while keeping downloads disabled.
+
 ## 0.5.1 - 2026-05-28
 
 ### Fixed

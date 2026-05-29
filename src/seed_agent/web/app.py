@@ -9,7 +9,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
-from seed_agent.actions.intent import rank_intent, search_intent
+from seed_agent.actions.intent import ingest_events, rank_intent, search_intent
 from seed_agent.actions.pt import _discover_site_candidates, score_candidates
 from seed_agent.config import (
     IntentConfig as SeedIntentConfig,
@@ -181,6 +181,9 @@ def make_handler(config_path: Path) -> type[BaseHTTPRequestHandler]:
                 self._send_json(
                     _search_wants_payload(self._read_json(), resolved_config_path, root)
                 )
+                return
+            if self.path == "/api/wants/sync":
+                self._send_json(_sync_wants_payload(resolved_config_path, root))
                 return
             self._send_json({"error": "not found"}, status=HTTPStatus.NOT_FOUND)
 
@@ -419,6 +422,7 @@ def _wants_payload(root: Path) -> dict[str, Any]:
 
 
 def _search_wants_payload(body: dict[str, Any], config_path: Path, root: Path) -> dict[str, Any]:
+    sync_payload = _sync_wants_payload(config_path, root)
     state_path = _state_db_path(root)
     if not state_path.exists():
         return {"searched": 0, "status": [{"level": "ok", "message": "no wants"}]}
@@ -429,9 +433,35 @@ def _search_wants_payload(body: dict[str, Any], config_path: Path, root: Path) -
     providers = _build_want_search_providers(config)
     searched = run(_search_want_items(items, store, providers, config.intent, config.search))
     return {
+        "synced": sync_payload["ingested"],
         "searched": searched,
         "status": [{"level": "ok", "message": f"searched {searched} wants"}],
     }
+
+
+def _sync_wants_payload(config_path: Path, root: Path) -> dict[str, Any]:
+    config = load_config(config_path)
+    state_path = _state_db_path(root)
+    store = StateStore(state_path)
+    events = _read_configured_want_source_events(config)
+    ingested = ingest_events(events, store)
+    payload = _wants_payload(root)
+    return {
+        "ingested": len(ingested),
+        "total": payload["total"],
+        "status": [
+            {
+                "level": "ok",
+                "message": f"synced {len(ingested)} configured wants",
+            }
+        ],
+    }
+
+
+def _read_configured_want_source_events(config) -> list[Any]:
+    from seed_agent.cli import _read_configured_source_events
+
+    return _read_configured_source_events(config)
 
 
 async def _search_want_items(
