@@ -43,6 +43,7 @@ from seed_agent.config import (
 from seed_agent.downloaders.qbittorrent import QbittorrentClient
 from seed_agent.models import (
     Decision,
+    IntentKind,
     IntentSource,
     LifecycleState,
     ManagedTorrent,
@@ -426,6 +427,10 @@ def intent_enqueue(
     loaded = load_config(config)
     store = StateStore(_state_path(loaded))
     default_policy = _default_category_policy(loaded)
+
+    def policy_resolver(intent: ResourceIntent) -> CategoryPolicyConfig:
+        return _intent_category_policy(loaded, intent)
+
     downloader, live_torrents, paused, pool_usage, missing_reconciled = _enqueue_runtime_context(
         loaded, store=store, execute=execute
     )
@@ -444,6 +449,7 @@ def intent_enqueue(
                 pool_usage=pool_usage,
                 pause_reasons=pause_reasons,
                 release_resolver=release_resolver,
+                policy_resolver=policy_resolver,
             )
         )
     except ValueError as exc:
@@ -486,6 +492,10 @@ def intent_run_once(
     providers = _build_search_providers(loaded)
     inbox_path = _resolve_path(loaded.intent.inbox_ref, loaded.config_dir)
     default_policy = _default_category_policy(loaded)
+
+    def policy_resolver(intent: ResourceIntent) -> CategoryPolicyConfig:
+        return _intent_category_policy(loaded, intent)
+
     downloader, live_torrents, paused, pool_usage, missing_reconciled = _enqueue_runtime_context(
         loaded, store=store, execute=execute
     )
@@ -508,6 +518,7 @@ def intent_run_once(
                 pause_reasons=pause_reasons,
                 source_events=_read_configured_source_events(loaded),
                 release_resolver=release_resolver,
+                policy_resolver=policy_resolver,
             )
         )
         decisions = result.decisions
@@ -1517,6 +1528,26 @@ def _policy_lookup(config: SeedAgentConfig) -> dict[str, CategoryPolicyConfig]:
 
 def _default_category_policy(config: SeedAgentConfig) -> CategoryPolicyConfig:
     return _policy_lookup(config)[config.downloader.default_category]
+
+
+def _intent_category_policy(
+    config: SeedAgentConfig,
+    intent: ResourceIntent,
+) -> CategoryPolicyConfig:
+    policies = _policy_lookup(config)
+    media_type = str(
+        intent.metadata.get("media_type") or intent.metadata.get("kind") or ""
+    ).strip().lower()
+    if intent.kind == IntentKind.MOVIE or media_type == "movie":
+        return policies.get("movie") or _default_category_policy(config)
+    if intent.kind in {IntentKind.SHOW, IntentKind.EPISODE} or media_type in {
+        "tv",
+        "show",
+        "series",
+        "anime",
+    }:
+        return policies.get("tv") or _default_category_policy(config)
+    return _default_category_policy(config)
 
 
 def _load_policy_torrents(

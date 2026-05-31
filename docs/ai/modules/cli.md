@@ -29,6 +29,10 @@ Expose the operator-facing command surface and safe summaries.
   search-only dry runs, reviewing saved release candidates, selecting a release,
   and explicitly enqueueing the selected release through the same intent enqueue
   path,
+- intent enqueue routes resource downloads by media type when matching category
+  policies exist: movie requests use `movie`, and show/episode/anime requests
+  use `tv`; only unknown resource types fall back to the downloader default
+  category,
 - schema-validated web config previews that return before/after diffs before
   non-tracker section saves write YAML,
 - per-section web YAML editing for top-level config blocks while preserving a

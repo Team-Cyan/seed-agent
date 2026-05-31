@@ -4,6 +4,15 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.6.1 - 2026-05-31
+
+### Fixed
+
+- Want List and intent enqueue now route movie requests to the configured
+  `movie` qB category and show/episode/anime requests to `tv` when those
+  policies exist, instead of sending all resource downloads through the
+  upload-farming `seed` category.
+
 ## 0.6.0 - 2026-05-31
 
 ### Added

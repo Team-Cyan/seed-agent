@@ -559,6 +559,7 @@ def _enqueue_want_payload(
         _default_category_policy,
         _enqueue_pause_reasons,
         _enqueue_runtime_context,
+        _intent_category_policy,
         _pool_usage_item_summary,
         _ranked_release_summary,
         _runtime_activity_summary,
@@ -595,6 +596,7 @@ def _enqueue_want_payload(
                 pool_usage=pool_usage,
                 pause_reasons=pause_reasons,
                 release_resolver=release_resolver,
+                policy_resolver=lambda intent: _intent_category_policy(config, intent),
             )
         )
         decisions.extend(enqueue_decisions)

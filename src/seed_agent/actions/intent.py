@@ -29,6 +29,7 @@ from seed_agent.sources.file_inbox import read_file_inbox
 from seed_agent.state import StateStore
 
 ReleaseDownloadResolver = Callable[[ReleaseCandidate], Awaitable[ReleaseCandidate | None]]
+IntentPolicyResolver = Callable[[ResourceIntent], CategoryPolicyConfig]
 
 
 @dataclass(frozen=True)
@@ -341,8 +342,10 @@ async def enqueue_intent(
     pool_usage: PoolUsage | None = None,
     pause_reasons: list[str] | None = None,
     release_resolver: ReleaseDownloadResolver | None = None,
+    policy_resolver: IntentPolicyResolver | None = None,
 ) -> tuple[ResourceIntent, RankedRelease, list[Decision]]:
     intent, selected_release_id = _load_intent_with_selected(store, intent_id)
+    selected_policy = policy_resolver(intent) if policy_resolver is not None else policy
     ranked = _enqueueable_release(
         intent,
         selected_release_id,
@@ -359,7 +362,7 @@ async def enqueue_intent(
     decisions = await enqueue_candidates(
         [_score_breakdown_from_ranked(ranked)],
         downloader,
-        policy,
+        selected_policy,
         execute,
         paused=paused,
         pool_usage=pool_usage,
@@ -391,6 +394,7 @@ async def run_intent_once(
     pause_reasons: list[str] | None = None,
     source_events: Iterable[SourceIntentEvent] = (),
     release_resolver: ReleaseDownloadResolver | None = None,
+    policy_resolver: IntentPolicyResolver | None = None,
 ) -> IntentRunResult:
     ingested_pairs = ingest_inbox(inbox_path, store) if inbox_path is not None else []
     ingested_pairs.extend(ingest_events(source_events, store))
@@ -430,6 +434,7 @@ async def run_intent_once(
                 pool_usage=pool_usage,
                 pause_reasons=pause_reasons,
                 release_resolver=release_resolver,
+                policy_resolver=policy_resolver,
             )
             enqueue_selected.append(selected)
             decisions.extend(enqueue_decisions)

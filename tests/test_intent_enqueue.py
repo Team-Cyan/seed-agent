@@ -48,8 +48,22 @@ downloader:
       delete_enabled: true
       over_budget_behavior: add_paused
       tags: ["seed-agent", "seed"]
+    - name: movie
+      mode: add_only
+      budget_pool: media
+      delete_enabled: false
+      over_budget_behavior: add_paused
+      tags: ["seed-agent", "movie"]
+    - name: tv
+      mode: add_only
+      budget_pool: media
+      delete_enabled: false
+      over_budget_behavior: add_paused
+      tags: ["seed-agent", "tv"]
   budget_pools:
     - name: downloads
+      max_size_tib: 10
+    - name: media
       max_size_tib: 10
   secret_ref: null
 cleanup:
@@ -303,8 +317,8 @@ def test_intent_enqueue_execute_uses_confirmed_release_and_updates_state(
     assert downloader.calls == [
         (
             ranked.release.download_url,
-            "seed",
-            ["seed-agent", "seed"],
+            "movie",
+            ["seed-agent", "movie"],
         )
     ]
     row = store.get_intent(intent.intent_id)
@@ -313,6 +327,70 @@ def test_intent_enqueue_execute_uses_confirmed_release_and_updates_state(
     assert row["selected_release_id"] == ranked.release.release_id
     audit = (tmp_path / ".seed-agent" / "audit.jsonl").read_text(encoding="utf-8")
     assert "qb.enqueue" in audit
+
+
+def test_intent_enqueue_routes_movie_intent_to_movie_category(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from seed_agent import cli
+
+    monkeypatch.chdir(tmp_path)
+    downloader = _DummyDownloader()
+    monkeypatch.setattr(cli, "build_downloader", lambda config: downloader)
+    config_path = _write_config(tmp_path)
+    store = StateStore(tmp_path / ".seed-agent" / "state.db")
+    intent, _ = add_intent(
+        "Call Me by Your Name 2017 Remux",
+        store,
+        metadata={"media_type": "movie"},
+    )
+    ranked = _ranked(intent.intent_id)
+    store.save_ranked_releases([ranked])
+
+    result = CliRunner().invoke(
+        cli.app,
+        ["intent-enqueue", intent.intent_id, "--config", str(config_path), "--execute"],
+    )
+
+    assert result.exit_code == 0
+    assert downloader.calls == [
+        (
+            ranked.release.download_url,
+            "movie",
+            ["seed-agent", "movie"],
+        )
+    ]
+
+
+def test_intent_enqueue_routes_show_intent_to_tv_category(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from seed_agent import cli
+
+    monkeypatch.chdir(tmp_path)
+    downloader = _DummyDownloader()
+    monkeypatch.setattr(cli, "build_downloader", lambda config: downloader)
+    config_path = _write_config(tmp_path)
+    store = StateStore(tmp_path / ".seed-agent" / "state.db")
+    intent, _ = add_intent("show Severance 2022 S01", store)
+    ranked = _ranked(intent.intent_id)
+    store.save_ranked_releases([ranked])
+
+    result = CliRunner().invoke(
+        cli.app,
+        ["intent-enqueue", intent.intent_id, "--config", str(config_path), "--execute"],
+    )
+
+    assert result.exit_code == 0
+    assert downloader.calls == [
+        (
+            ranked.release.download_url,
+            "tv",
+            ["seed-agent", "tv"],
+        )
+    ]
 
 
 def test_intent_enqueue_execute_resolves_mteam_deferred_download_url(
@@ -383,8 +461,8 @@ sites:
     assert downloader.calls == [
         (
             "https://dl.m-team.example/26799731?passkey=secret",
-            "seed",
-            ["seed-agent", "seed"],
+            "movie",
+            ["seed-agent", "movie"],
         )
     ]
     rows = store.list_release_candidates(intent.intent_id)
