@@ -52,9 +52,9 @@ The default deployment shape for self-hosted use is a Docker container running
 | Transmission downloader | Planned | Candidate for the first second-downloader adapter. |
 | NexusPHP-style RSS | Supported | RSS remains useful for fallback flows and non-M-Team sites. |
 | M-Team RSS | Supported | Available as fallback and compatibility path. |
-| M-Team API discovery/search | Supported | Preferred authenticated path when `api_key_ref` is configured, including intent search with execute-time deferred download-token resolution. |
+| M-Team API discovery/search | Supported | Preferred authenticated path when `api_key_ref` is configured, including intent search with Douban/IMDb ID lookup, broad keyword fallback, M-Team tag capture, and execute-time deferred download-token resolution. |
 | Resource intent loop | Supported | Local intent add, inbox/Douban/IMDb Want List ingestion, search, ranking, confirmation, and enqueue are implemented. |
-| Want List | Supported | Web UI page shows canonical Douban/IMDb wants with source/type filters, mobile cards, added time, merged source evidence, and release/search status. |
+| Want List | Supported | Web UI page shows canonical Douban/IMDb wants with source/type filters, mobile cards, added time, merged source evidence, release/search status, and candidate review with explicit qB actions. |
 | Web Settings UI | WIP | Local configuration UI exists for grouped safe settings edits with schema validation, diff previews, per-section YAML editing, sticky save actions, mobile navigation, read-only status, and Want List. |
 | Read-only dashboard/API | Partial | State summary, heartbeat health, budget pools, and Want List are exposed; richer audit/cleanup dashboards remain planned. |
 
@@ -189,6 +189,9 @@ IMDb watchlists/lists. Douban source entries use `user_name`; IMDb entries use
 `watchlist_url` or a CSV `export_ref`. The intent loop merges repeated wants by
 Douban/IMDb IDs, then `search.required_keywords` / `search.preferred_keywords`
 describe the desired release shape, such as Remux, 2160p, HDR, or Dolby Vision.
+M-Team intent search fetches by Douban/IMDb IDs first and supplements with a
+broad title/year keyword query; quality terms are applied during ranking so the
+Web UI can show both matching candidates and lower-match fallback releases.
 The same source/search boundary is intended to support later movie-list sites,
 chat bridges, or API-triggered requests.
 

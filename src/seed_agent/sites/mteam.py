@@ -270,6 +270,11 @@ class MTeamApiClient:
         external_ids = _external_ids_from_api_row(row)
         if external_ids:
             metadata["external_ids"] = external_ids
+        tag_summary = _mteam_tag_summary_from_api_row(row)
+        if tag_summary["labels"]:
+            metadata["mteam_tags"] = tag_summary["labels"]
+        if tag_summary["raw"]:
+            metadata["mteam_raw_tags"] = tag_summary["raw"]
         if left_time_minutes is None and discount in {Discount.FREE, Discount.TWO_X_FREE}:
             metadata["left_time_source"] = _left_time_source_from_api_row(row)
 
@@ -436,9 +441,7 @@ def _merge_detail(candidate: TorrentCandidate, detail: dict[str, Any]) -> Torren
             "seeders": seeders,
             "leechers": leechers,
             "left_time_minutes": (
-                left_time_minutes
-                if left_time_minutes is not None
-                else candidate.left_time_minutes
+                left_time_minutes if left_time_minutes is not None else candidate.left_time_minutes
             ),
             "metadata": metadata,
         }
@@ -545,6 +548,67 @@ def _optional_id(value: Any) -> str | None:
         return None
     text = str(value).strip()
     return text or None
+
+
+MTEAM_TAG_LABELS: dict[str, dict[str, str]] = {
+    "medium": {
+        "0": "Blu-ray",
+        "10": "WEB-DL",
+    },
+    "standard": {
+        "1": "1080p",
+        "6": "4K",
+    },
+    "videoCodec": {
+        "1": "H.264/x264",
+        "16": "H.265/HEVC",
+    },
+    "audioCodec": {
+        "3": "DTS",
+        "6": "AAC",
+        "7": "TrueHD",
+        "11": "DTS-HD MA",
+    },
+}
+
+
+def _mteam_tag_summary_from_api_row(row: dict[str, Any]) -> dict[str, Any]:
+    labels: list[str] = []
+    raw: dict[str, Any] = {}
+    raw_names = {
+        "medium": "medium",
+        "standard": "standard",
+        "videoCodec": "video_codec",
+        "audioCodec": "audio_codec",
+    }
+    for field in ("medium", "standard", "videoCodec", "audioCodec"):
+        value = _optional_id(row.get(field))
+        if value is None:
+            continue
+        raw[raw_names[field]] = value
+        labels.append(MTEAM_TAG_LABELS.get(field, {}).get(value, f"{field}:{value}"))
+    labels_new = row.get("labelsNew")
+    if isinstance(labels_new, list):
+        clean_labels = [str(item).strip() for item in labels_new if str(item).strip()]
+        if clean_labels:
+            raw["labels_new"] = clean_labels
+            labels.extend(clean_labels)
+    return {"labels": _dedupe_labels(labels), "raw": raw}
+
+
+def _dedupe_labels(labels: list[str]) -> list[str]:
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for label in labels:
+        normalized = str(label).strip()
+        if not normalized:
+            continue
+        key = normalized.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(normalized)
+    return deduped
 
 
 def _api_row_containers(row: dict[str, Any]) -> list[dict[str, Any]]:

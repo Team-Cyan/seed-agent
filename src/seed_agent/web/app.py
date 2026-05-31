@@ -8,9 +8,18 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote, urlparse
 
-from seed_agent.actions.intent import ingest_events, rank_intent, search_intent
+from seed_agent.actions.intent import (
+    confirm_intent,
+    enqueue_intent,
+    ingest_events,
+    rank_intent,
+    search_intent,
+)
 from seed_agent.actions.pt import _discover_site_candidates, score_candidates
+from seed_agent.actions.qb import MutationBatchError
+from seed_agent.audit import redact_payload
 from seed_agent.config import (
     IntentConfig as SeedIntentConfig,
 )
@@ -19,7 +28,7 @@ from seed_agent.config import (
     SiteConfig,
     load_config,
 )
-from seed_agent.models import IntentSource
+from seed_agent.models import IntentSource, RankedRelease, ReleaseCandidate
 from seed_agent.search.base import SearchProvider
 from seed_agent.state import StateStore
 from seed_agent.web.settings import (
@@ -48,6 +57,11 @@ def make_handler(config_path: Path) -> type[BaseHTTPRequestHandler]:
 
     class SeedAgentWebHandler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
+            want_candidates_id = _want_subresource_intent_id(self.path, "candidates")
+            if want_candidates_id is not None:
+                payload, status = _want_candidates_payload(root, want_candidates_id)
+                self._send_json(payload, status=status)
+                return
             if self.path == "/api/config":
                 config = load_config(resolved_config_path)
                 self._send_json(
@@ -108,9 +122,7 @@ def make_handler(config_path: Path) -> type[BaseHTTPRequestHandler]:
                         "yaml": config_section_yaml_fragment(draft.section, saved),
                         "section_yamls": config_section_yamls_payload(updated_config),
                         "config_yaml": normalized_config_yaml(updated_config),
-                        "status": [
-                            {"level": "ok", "message": f"{draft.section} config saved"}
-                        ],
+                        "status": [{"level": "ok", "message": f"{draft.section} config saved"}],
                     }
                 )
                 return
@@ -138,9 +150,7 @@ def make_handler(config_path: Path) -> type[BaseHTTPRequestHandler]:
                         **saved,
                         "section_yamls": config_section_yamls_payload(updated_config),
                         "config_yaml": normalized_config_yaml(updated_config),
-                        "status": [
-                            {"level": "ok", "message": f"{draft.section} YAML saved"}
-                        ],
+                        "status": [{"level": "ok", "message": f"{draft.section} YAML saved"}],
                     }
                 )
                 return
@@ -184,6 +194,21 @@ def make_handler(config_path: Path) -> type[BaseHTTPRequestHandler]:
                 return
             if self.path == "/api/wants/sync":
                 self._send_json(_sync_wants_payload(resolved_config_path, root))
+                return
+            want_confirm_id = _want_subresource_intent_id(self.path, "confirm")
+            if want_confirm_id is not None:
+                payload, status = _confirm_want_payload(self._read_json(), root, want_confirm_id)
+                self._send_json(payload, status=status)
+                return
+            want_enqueue_id = _want_subresource_intent_id(self.path, "enqueue")
+            if want_enqueue_id is not None:
+                payload, status = _enqueue_want_payload(
+                    self._read_json(),
+                    resolved_config_path,
+                    root,
+                    want_enqueue_id,
+                )
+                self._send_json(payload, status=status)
                 return
             self._send_json({"error": "not found"}, status=HTTPStatus.NOT_FOUND)
 
@@ -458,6 +483,160 @@ def _sync_wants_payload(config_path: Path, root: Path) -> dict[str, Any]:
     }
 
 
+def _want_subresource_intent_id(path: str, action: str) -> str | None:
+    parsed_path = urlparse(path).path
+    prefix = "/api/wants/"
+    suffix = f"/{action}"
+    if not parsed_path.startswith(prefix) or not parsed_path.endswith(suffix):
+        return None
+    raw_intent_id = parsed_path[len(prefix) : -len(suffix)]
+    if not raw_intent_id:
+        return None
+    return unquote(raw_intent_id)
+
+
+def _want_candidates_payload(root: Path, intent_id: str) -> tuple[dict[str, Any], HTTPStatus]:
+    state_path = _state_db_path(root)
+    if not state_path.exists():
+        return {"error": "state db not found"}, HTTPStatus.NOT_FOUND
+    store = StateStore(state_path)
+    row = store.get_intent(intent_id)
+    if row is None:
+        return {"error": "want not found"}, HTTPStatus.NOT_FOUND
+    ranked = [_ranked_release_from_row(item) for item in store.list_release_candidates(intent_id)]
+    candidates = [_want_candidate_item(item, row.get("selected_release_id")) for item in ranked]
+    candidates.sort(
+        key=lambda item: (
+            0 if item["matches_requirements"] else 1,
+            -int(item["score"] or 0),
+            str(item["title"]),
+        )
+    )
+    return {
+        "intent": _want_item(
+            row,
+            {"release_count": len(candidates)},
+            store.list_intent_source_evidence(intent_id),
+        ),
+        "total": len(candidates),
+        "items": candidates,
+    }, HTTPStatus.OK
+
+
+def _confirm_want_payload(
+    body: dict[str, Any],
+    root: Path,
+    intent_id: str,
+) -> tuple[dict[str, Any], HTTPStatus]:
+    release_id = str(body.get("release_id") or "").strip()
+    if not release_id:
+        return {"error": "release_id is required"}, HTTPStatus.BAD_REQUEST
+    store = StateStore(_state_db_path(root))
+    try:
+        intent, ranked, decision = confirm_intent(intent_id, release_id, store)
+    except ValueError as exc:
+        return {"error": str(exc)}, HTTPStatus.BAD_REQUEST
+    return {
+        "intent": _want_item(
+            store.get_intent(intent.intent_id) or {},
+            {"release_count": len(store.list_release_candidates(intent.intent_id))},
+            store.list_intent_source_evidence(intent.intent_id),
+        ),
+        "selected": _want_candidate_item(ranked, ranked.release.release_id),
+        "decision": _decision_summary_payload(decision),
+        "status": [{"level": "ok", "message": "候选已选择"}],
+    }, HTTPStatus.OK
+
+
+def _enqueue_want_payload(
+    body: dict[str, Any],
+    config_path: Path,
+    root: Path,
+    intent_id: str,
+) -> tuple[dict[str, Any], HTTPStatus]:
+    from seed_agent.cli import (
+        _build_release_download_resolver,
+        _default_category_policy,
+        _enqueue_pause_reasons,
+        _enqueue_runtime_context,
+        _pool_usage_item_summary,
+        _ranked_release_summary,
+        _runtime_activity_summary,
+        _write_audit_decisions,
+    )
+
+    release_id = str(body.get("release_id") or "").strip()
+    execute = body.get("execute") is True
+    store = StateStore(_state_db_path(root))
+    config = load_config(config_path)
+    decisions = []
+    try:
+        if release_id:
+            _, _, confirm_decision = confirm_intent(intent_id, release_id, store)
+            decisions.append(confirm_decision)
+        default_policy = _default_category_policy(config)
+        downloader, live_torrents, paused, pool_usage, missing_reconciled = (
+            _enqueue_runtime_context(
+                config,
+                store=store,
+                execute=execute,
+            )
+        )
+        pause_reasons = _enqueue_pause_reasons(config, live_torrents, pool_usage)
+        release_resolver = _build_release_download_resolver(config)
+        intent, ranked, enqueue_decisions = run(
+            enqueue_intent(
+                intent_id,
+                store,
+                downloader,
+                default_policy,
+                execute,
+                paused=paused,
+                pool_usage=pool_usage,
+                pause_reasons=pause_reasons,
+                release_resolver=release_resolver,
+            )
+        )
+        decisions.extend(enqueue_decisions)
+        _write_audit_decisions(config, decisions)
+    except ValueError as exc:
+        return {"error": str(exc)}, HTTPStatus.BAD_REQUEST
+    except MutationBatchError as exc:
+        decisions.extend(exc.decisions)
+        _write_audit_decisions(config, decisions)
+        return {
+            "error": str(exc),
+            "execute": execute,
+            "decisions": [_decision_summary_payload(item) for item in decisions],
+        }, HTTPStatus.BAD_REQUEST
+
+    payload: dict[str, Any] = {
+        "execute": execute,
+        "intent": _want_item(
+            store.get_intent(intent.intent_id) or {},
+            {"release_count": len(store.list_release_candidates(intent.intent_id))},
+            store.list_intent_source_evidence(intent.intent_id),
+        ),
+        "selected": _ranked_release_summary(ranked),
+        "enqueued": sum(1 for item in decisions if item.action == "qb.enqueue"),
+        "decisions": [_decision_summary_payload(item) for item in decisions],
+        "runtime_activity": _runtime_activity_summary(live_torrents),
+        "missing_from_qb_reconciled": missing_reconciled,
+        "status": [
+            {
+                "level": "ok",
+                "message": "已加入 qB" if execute else "入队试运行完成",
+            }
+        ],
+    }
+    if pool_usage is not None:
+        payload["default_pool_usage"] = _pool_usage_item_summary(pool_usage)
+        payload["enqueue_paused_by_pool_policy"] = paused
+    if pause_reasons:
+        payload["enqueue_paused_reasons"] = pause_reasons
+    return payload, HTTPStatus.OK
+
+
 def _read_configured_want_source_events(config) -> list[Any]:
     from seed_agent.cli import _read_configured_source_events
 
@@ -555,6 +734,127 @@ def _want_item(
         "release_count": releases,
         "updated_at": row.get("updated_at"),
     }
+
+
+def _ranked_release_from_row(row: dict[str, Any]) -> RankedRelease:
+    payload = json.loads(str(row.get("release_json") or "{}"))
+    if isinstance(payload, dict) and "release" in payload:
+        return RankedRelease.model_validate(payload)
+    release = ReleaseCandidate.model_validate(payload)
+    return RankedRelease(
+        intent_id=str(row.get("intent_id") or ""),
+        release=release,
+        score=int(row.get("score") or 0),
+        confidence=float(row.get("confidence") or 0),
+        accepted=bool(row.get("accepted")),
+        confirmation_required=bool(row.get("confirmation_required")),
+        reasons=[],
+        risks=[],
+    )
+
+
+def _want_candidate_item(
+    ranked: RankedRelease,
+    selected_release_id: Any,
+) -> dict[str, Any]:
+    release = ranked.release
+    metadata = release.metadata if isinstance(release.metadata, dict) else {}
+    matches_requirements = _candidate_matches_requirements(ranked)
+    return {
+        "release_id": release.release_id,
+        "site": release.site,
+        "title": release.title,
+        "source_url": release.source_url,
+        "download_url_source": metadata.get("download_url_source"),
+        "size_bytes": release.size_bytes,
+        "size_gb": round(release.size_bytes / (1024**3), 2),
+        "seeders": release.seeders,
+        "leechers": release.leechers,
+        "discount": release.discount.value,
+        "score": ranked.score,
+        "confidence": ranked.confidence,
+        "accepted": ranked.accepted,
+        "confirmation_required": ranked.confirmation_required,
+        "matches_requirements": matches_requirements,
+        "status_label": "符合偏好" if matches_requirements else "不符合偏好",
+        "selected": release.release_id == selected_release_id,
+        "reasons": list(ranked.reasons),
+        "risks": list(ranked.risks),
+        "official_tags": _clean_label_list(metadata.get("mteam_tags")),
+        "raw_tags": metadata.get("mteam_raw_tags")
+        if isinstance(metadata.get("mteam_raw_tags"), dict)
+        else {},
+        "inferred_tags": _inferred_release_tags(release.title),
+        "mteam_torrent_id": metadata.get("mteam_torrent_id"),
+    }
+
+
+def _candidate_matches_requirements(ranked: RankedRelease) -> bool:
+    requirement_risk_prefixes = (
+        "required keyword missing",
+        "excluded keyword matched",
+        "resolution missing",
+        "season missing",
+        "episode missing",
+    )
+    return not any(
+        any(risk.startswith(prefix) for prefix in requirement_risk_prefixes)
+        for risk in ranked.risks
+    )
+
+
+def _clean_label_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    labels: list[str] = []
+    seen: set[str] = set()
+    for item in value:
+        text = str(item).strip()
+        if not text:
+            continue
+        key = text.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        labels.append(text)
+    return labels
+
+
+def _inferred_release_tags(title: str) -> list[str]:
+    text = f" {title.upper().replace('.', ' ').replace('_', ' ')} "
+    tags: list[str] = []
+    checks = [
+        ("REMUX", "Remux"),
+        ("BLU-RAY", "Blu-ray"),
+        ("BLURAY", "Blu-ray"),
+        ("WEB-DL", "WEB-DL"),
+        ("WEB DL", "WEB-DL"),
+        ("2160P", "2160p"),
+        (" 4K ", "4K"),
+        ("1080P", "1080p"),
+        ("DOLBY VISION", "Dolby Vision"),
+        (" DOVI ", "Dolby Vision"),
+        (" DV ", "Dolby Vision"),
+        ("HDR10+", "HDR10+"),
+        (" HDR ", "HDR"),
+        ("HEVC", "HEVC"),
+        ("H 265", "H.265"),
+        ("H265", "H.265"),
+        ("AVC", "AVC"),
+        ("H 264", "H.264"),
+        ("H264", "H.264"),
+        ("DTS-HD MA", "DTS-HD MA"),
+        ("TRUEHD", "TrueHD"),
+        ("ATMOS", "Atmos"),
+    ]
+    for needle, label in checks:
+        if needle in text and label not in tags:
+            tags.append(label)
+    return tags
+
+
+def _decision_summary_payload(item: Any) -> dict[str, Any]:
+    return redact_payload(item.model_dump(mode="json"))
 
 
 def _want_normalized_json(value: Any) -> dict[str, Any]:

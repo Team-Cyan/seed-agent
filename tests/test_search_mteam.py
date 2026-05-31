@@ -32,7 +32,7 @@ def _intent(**overrides: object) -> ResourceIntent:
 
 
 @pytest.mark.asyncio
-async def test_mteam_search_provider_uses_configured_keyword_preferences() -> None:
+async def test_mteam_search_provider_keeps_non_matching_candidates_for_review() -> None:
     calls: list[dict[str, object]] = []
 
     async def fake_fetch_candidates(**kwargs):
@@ -79,13 +79,14 @@ async def test_mteam_search_provider_uses_configured_keyword_preferences() -> No
 
     releases = await provider.search(_intent())
 
-    assert len(releases) == 1
+    assert len(releases) == 2
     assert releases[0].title.endswith("REMUX AVC DTS-HD MA 5.1")
+    assert releases[1].title.endswith("1080p WEB-DL")
     assert releases[0].download_url == "mteam-api://torrent/26799731"
     assert releases[0].metadata["download_url_source"] == "mteam_api_deferred"
     assert releases[0].release_id == "mt:https://kp.m-team.cc/detail/26799731"
     options = calls[0]["options"]
-    assert options.keyword == "请以你的名字呼唤我 Call Me by Your Name 2017 2160p Remux"
+    assert options.keyword == "请以你的名字呼唤我 Call Me by Your Name 2017 2160p"
     assert calls[0]["api_key"] == "secret-api-key"
 
 
@@ -141,14 +142,20 @@ async def test_mteam_search_provider_prefers_douban_identifier_search() -> None:
     assert options.keyword is None
     assert options.mode == "movie"
     assert options.only_free is False
-    assert len(calls) == 1
+    assert len(calls) == 3
+    assert calls[1]["options"].douban is None
+    assert calls[1]["options"].imdb == "tt5726616"
+    assert calls[2]["options"].douban is None
+    assert calls[2]["options"].imdb is None
+    assert calls[2]["options"].keyword == "请以你的名字呼唤我 Call Me by Your Name 2017"
     assert [release.title for release in releases] == [
-        "Call Me by Your Name 2017 2160p BluRay REMUX AVC DTS-HD MA 5.1"
+        "Call Me by Your Name 2017 2160p BluRay REMUX AVC DTS-HD MA 5.1",
+        "Call Me by Your Name 2017 1080p WEB-DL",
     ]
 
 
 @pytest.mark.asyncio
-async def test_mteam_search_provider_falls_back_to_imdb_when_douban_has_no_match() -> None:
+async def test_mteam_search_provider_supplements_douban_with_imdb_and_keyword_results() -> None:
     calls: list[dict[str, object]] = []
 
     async def fake_fetch_candidates(**kwargs):
@@ -199,13 +206,17 @@ async def test_mteam_search_provider_falls_back_to_imdb_when_douban_has_no_match
         _intent(metadata={"external_ids": {"douban": "26799731", "imdb": "tt5726616"}})
     )
 
-    assert len(calls) == 2
+    assert len(calls) == 3
     assert calls[0]["options"].douban == "26799731"
     assert calls[0]["options"].imdb is None
     assert calls[1]["options"].douban is None
     assert calls[1]["options"].imdb == "tt5726616"
+    assert calls[2]["options"].douban is None
+    assert calls[2]["options"].imdb is None
+    assert calls[2]["options"].keyword == "请以你的名字呼唤我 Call Me by Your Name 2017"
     assert [release.title for release in releases] == [
-        "Call Me by Your Name 2017 2160p BluRay REMUX AVC DTS-HD MA 5.1"
+        "Call Me by Your Name 2017 1080p WEB-DL",
+        "Call Me by Your Name 2017 2160p BluRay REMUX AVC DTS-HD MA 5.1",
     ]
 
 
@@ -226,10 +237,14 @@ async def test_mteam_search_provider_uses_imdb_identifier_when_douban_is_missing
 
     await provider.search(_intent(metadata={"external_ids": {"imdb": "tt5726616"}}))
 
+    assert len(calls) == 2
     options = calls[0]["options"]
     assert options.douban is None
     assert options.imdb == "tt5726616"
     assert options.keyword is None
+    assert calls[1]["options"].douban is None
+    assert calls[1]["options"].imdb is None
+    assert calls[1]["options"].keyword == "请以你的名字呼唤我 Call Me by Your Name 2017"
 
 
 @pytest.mark.asyncio
@@ -260,7 +275,7 @@ async def test_mteam_search_provider_defaults_episode_intents_to_season_keyword(
     )
 
     options = calls[0]["options"]
-    assert options.keyword == "Severance 2025 S02 2160p Remux"
+    assert options.keyword == "Severance 2025 S02 2160p"
 
 
 @pytest.mark.asyncio
@@ -292,7 +307,7 @@ async def test_mteam_search_provider_can_search_episode_keywords() -> None:
     )
 
     options = calls[0]["options"]
-    assert options.keyword == "Severance 2025 S02 E03 2160p Remux"
+    assert options.keyword == "Severance 2025 S02 E03 2160p"
 
 
 @pytest.mark.asyncio

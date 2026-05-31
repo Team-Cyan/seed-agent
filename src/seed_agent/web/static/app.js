@@ -289,6 +289,7 @@ document.addEventListener("click", (event) => {
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
     hideHelpPopover();
+    closeOpenModal();
   }
 });
 
@@ -555,12 +556,13 @@ function renderWantsPanel() {
         </label>
       </div>
       <div class="tracker-actions-group">
-        <button class="secondary-button" type="button" data-want-action="search">搜索</button>
-        <button class="primary-button" type="button" data-want-action="config-open">配置</button>
+        <button class="secondary-button" type="button" data-want-action="search" aria-label="搜索当前筛选">搜索</button>
+        <button class="primary-button" type="button" data-want-action="config-open" aria-label="配置想看来源">来源配置</button>
       </div>
     </div>
     <div class="status-list" data-want-status></div>
     ${renderWantConfigModal()}
+    ${renderWantCandidateModal()}
     <div class="section-title">想看资源</div>
   `;
   panel.querySelector('[data-want-filter="source"]').value = state.wants.filters.source;
@@ -578,10 +580,41 @@ function renderWantsPanel() {
     }
   });
   panel.addEventListener("click", (event) => {
-    const action = event.target?.dataset?.wantAction;
-    if (action) {
-      handleWantAction(panel, action, event);
+    if (event.target?.matches?.("[data-want-config-modal]")) {
+      panel.querySelector("[data-want-config-modal]")?.classList.add("hidden");
+      return;
     }
+    if (event.target?.matches?.("[data-want-candidate-modal]")) {
+      closeWantCandidateModal(panel);
+      return;
+    }
+    const candidateButton = event.target?.closest?.("[data-want-candidate-action]");
+    const candidateAction = candidateButton?.dataset?.wantCandidateAction;
+    if (candidateAction) {
+      handleWantCandidateAction(panel, candidateAction, candidateButton);
+      return;
+    }
+    const actionButton = event.target?.closest?.("[data-want-action]");
+    const action = actionButton?.dataset?.wantAction;
+    if (action) {
+      handleWantAction(panel, action, actionButton);
+      return;
+    }
+    const wantTarget = event.target?.closest?.("[data-want-id]");
+    if (wantTarget?.dataset?.wantId) {
+      openWantCandidates(panel, wantTarget.dataset.wantId);
+    }
+  });
+  panel.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") {
+      return;
+    }
+    const wantTarget = event.target?.closest?.("[data-want-id]");
+    if (!wantTarget?.dataset?.wantId) {
+      return;
+    }
+    event.preventDefault();
+    openWantCandidates(panel, wantTarget.dataset.wantId);
   });
   return panel;
 }
@@ -631,6 +664,24 @@ function renderWantConfigModal() {
           <button class="primary-button" type="button" data-want-action="config-save">保存</button>
         </div>
         <div class="status-list" data-want-config-status></div>
+      </div>
+    </div>
+  `;
+}
+
+function renderWantCandidateModal() {
+  return `
+    <div class="modal-backdrop hidden" data-want-candidate-modal>
+      <div class="modal-panel candidate-modal">
+        <div class="modal-header">
+          <div>
+            <div class="section-title" data-want-candidate-title>候选种子</div>
+            <div class="muted-line">符合偏好的候选排在前面；低匹配候选会灰显，但仍可手动强制加入 qB。</div>
+          </div>
+          <button class="icon-button" type="button" data-want-candidate-action="close" aria-label="关闭候选种子">×</button>
+        </div>
+        <div class="status-list" data-want-candidate-status></div>
+        <div class="candidate-list" data-want-candidate-list></div>
       </div>
     </div>
   `;
@@ -771,7 +822,7 @@ function filteredWantItems() {
 
 function renderWantRow(item) {
   return `
-    <tr>
+    <tr class="want-row" data-want-id="${escapeAttribute(item.intent_id)}" role="button" tabindex="0" aria-label="查看 ${escapeAttribute(item.title || item.raw_text)} 的候选种子">
       <td>
         <strong>${escapeHtml(item.title || item.raw_text)}</strong>
         <div class="muted-line">${escapeHtml(item.raw_text || "")}</div>
@@ -779,14 +830,17 @@ function renderWantRow(item) {
       <td>${escapeHtml(formatMediaType(item.media_type))}</td>
       <td>${escapeHtml(item.source_label || item.source)}</td>
       <td>${escapeHtml(formatDateTime(item.added_at))}</td>
-      <td><span class="badge ${item.status === "queued" ? "ok" : ""}">${escapeHtml(item.status_label || item.state)}</span></td>
+      <td>
+        <span class="badge ${item.status === "queued" ? "ok" : ""}">${escapeHtml(item.status_label || item.state)}</span>
+        <span class="inline-action">查看候选</span>
+      </td>
     </tr>
   `;
 }
 
 function renderWantCard(item) {
   return `
-    <article class="want-card">
+    <article class="want-card" data-want-id="${escapeAttribute(item.intent_id)}" role="button" tabindex="0" aria-label="查看 ${escapeAttribute(item.title || item.raw_text)} 的候选种子">
       <div class="want-card-header">
         <strong>${escapeHtml(item.title || item.raw_text)}</strong>
         <span class="badge ${item.status === "queued" ? "ok" : ""}">${escapeHtml(item.status_label || item.state)}</span>
@@ -797,8 +851,147 @@ function renderWantCard(item) {
         <span>${escapeHtml(item.source_label || item.source)}</span>
         <span>${escapeHtml(formatDateTime(item.added_at))}</span>
       </div>
+      <div class="want-card-footer">
+        <span class="inline-action">查看候选</span>
+      </div>
     </article>
   `;
+}
+
+async function openWantCandidates(panel, intentId, message = "") {
+  const modal = panel.querySelector("[data-want-candidate-modal]");
+  const title = modal.querySelector("[data-want-candidate-title]");
+  const list = modal.querySelector("[data-want-candidate-list]");
+  const status = modal.querySelector("[data-want-candidate-status]");
+  modal.dataset.intentId = intentId;
+  modal.classList.remove("hidden");
+  title.textContent = "候选种子";
+  status.innerHTML = message ? `<div class="status-item ok">${escapeHtml(message)}</div>` : "";
+  list.innerHTML = '<div class="empty-state">正在读取候选</div>';
+  try {
+    const response = await fetch(`/api/wants/${encodeURIComponent(intentId)}/candidates`);
+    const payload = await response.json();
+    if (!response.ok) {
+      throw new Error(payload.error || `请求失败：${response.status}`);
+    }
+    title.textContent = payload.intent?.title || "候选种子";
+    list.innerHTML = renderWantCandidateList(payload.items || []);
+  } catch (error) {
+    list.innerHTML = `<div class="status-item warning">${escapeHtml(error.message)}</div>`;
+  }
+}
+
+function renderWantCandidateList(items) {
+  if (items.length === 0) {
+    return '<div class="empty-state">还没有候选。先点“搜索”。</div>';
+  }
+  const matching = items.filter((item) => item.matches_requirements);
+  const lower = items.filter((item) => !item.matches_requirements);
+  return `
+    ${matching.length ? '<div class="candidate-group-title">符合偏好</div>' : ""}
+    ${matching.map(renderWantCandidateCard).join("")}
+    ${lower.length ? '<div class="candidate-group-title muted">低匹配，可强制</div>' : ""}
+    ${lower.map(renderWantCandidateCard).join("")}
+  `;
+}
+
+function renderWantCandidateCard(item) {
+  const tags = [...(item.official_tags || []), ...(item.inferred_tags || [])];
+  const uniqueTags = Array.from(new Set(tags));
+  const actionLabel = item.matches_requirements ? "加入 qB" : "强制加入 qB";
+  const previewLabel = item.matches_requirements ? "预览入队" : "预览强制入队";
+  return `
+    <article class="candidate-card ${item.matches_requirements ? "" : "dimmed"} ${item.selected ? "selected" : ""}">
+      <div class="candidate-card-head">
+        <div>
+          <strong>${escapeHtml(item.title)}</strong>
+          <div class="muted-line">${escapeHtml(item.site)} · ${escapeHtml(formatCandidateSize(item))} · ${escapeHtml(item.seeders)} 做种 / ${escapeHtml(item.leechers)} 下载</div>
+        </div>
+        <div class="candidate-score">
+          <span>${escapeHtml(item.score)}</span>
+          <small>${escapeHtml(item.status_label)}</small>
+        </div>
+      </div>
+      <div class="candidate-tags">
+        ${uniqueTags.map((tag) => `<span class="badge">${escapeHtml(tag)}</span>`).join("") || '<span class="badge">无标签</span>'}
+      </div>
+      ${renderCandidateNotes(item)}
+      <div class="tracker-actions-group candidate-actions">
+        <button class="secondary-button" type="button" data-want-candidate-action="select" data-release-id="${escapeAttribute(item.release_id)}">选择候选</button>
+        <button class="secondary-button" type="button" data-want-candidate-action="preview" data-release-id="${escapeAttribute(item.release_id)}">${previewLabel}</button>
+        <button class="${item.matches_requirements ? "primary-button" : "secondary-button"}" type="button" data-want-candidate-action="enqueue" data-release-id="${escapeAttribute(item.release_id)}">${actionLabel}</button>
+      </div>
+    </article>
+  `;
+}
+
+function renderCandidateNotes(item) {
+  const risks = item.risks || [];
+  const reasons = item.reasons || [];
+  if (risks.length === 0 && reasons.length === 0) {
+    return "";
+  }
+  return `
+    <div class="candidate-notes">
+      ${risks.map((risk) => `<span class="status-item warning">${escapeHtml(risk)}</span>`).join("")}
+      ${reasons.slice(0, 4).map((reason) => `<span class="status-item info">${escapeHtml(reason)}</span>`).join("")}
+    </div>
+  `;
+}
+
+function formatCandidateSize(item) {
+  if (typeof item.size_gb === "number") {
+    return `${item.size_gb.toFixed(item.size_gb >= 10 ? 1 : 2)} GB`;
+  }
+  return "未知体积";
+}
+
+async function handleWantCandidateAction(panel, action, button) {
+  const modal = panel.querySelector("[data-want-candidate-modal]");
+  if (action === "close") {
+    closeWantCandidateModal(panel);
+    return;
+  }
+  const intentId = modal.dataset.intentId;
+  const releaseId = button?.dataset?.releaseId;
+  if (!intentId || !releaseId) {
+    return;
+  }
+  if (action === "enqueue") {
+    const ok = window.confirm("确认把这个候选加入 qB 下载队列？这会向 qB 发送添加任务。");
+    if (!ok) {
+      return;
+    }
+  }
+  const status = modal.querySelector("[data-want-candidate-status]");
+  const endpoint =
+    action === "select"
+      ? `/api/wants/${encodeURIComponent(intentId)}/confirm`
+      : `/api/wants/${encodeURIComponent(intentId)}/enqueue`;
+  const body =
+    action === "select"
+      ? { release_id: releaseId }
+      : { release_id: releaseId, execute: action === "enqueue" };
+  try {
+    setModalBusy(modal, true);
+    status.innerHTML = '<div class="status-item info">正在处理</div>';
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const payload = await response.json();
+    if (!response.ok) {
+      throw new Error(payload.error || `请求失败：${response.status}`);
+    }
+    await loadWants();
+    const message = payload.status?.[0]?.message || (action === "select" ? "候选已选择" : "操作完成");
+    await openWantCandidates(panel, intentId, message);
+  } catch (error) {
+    status.innerHTML = `<div class="status-item warning">${escapeHtml(error.message)}</div>`;
+  } finally {
+    setModalBusy(modal, false);
+  }
 }
 
 async function handleWantAction(panel, action, event) {
@@ -819,7 +1012,7 @@ async function handleWantAction(panel, action, event) {
     return;
   }
   if (action === "config-remove") {
-    const row = event?.target?.closest("[data-want-source-row]");
+    const row = event?.closest?.("[data-want-source-row]");
     row?.remove();
     return;
   }
@@ -1173,7 +1366,7 @@ function renderTrackerDetailFooter(tracker) {
     </div>
   `;
   footer.addEventListener("click", (event) => {
-    const action = event.target?.dataset?.action;
+    const action = event.target?.closest?.("[data-action]")?.dataset?.action;
     if (action) {
       handleTrackerAction(tracker, action);
     }
@@ -1303,6 +1496,28 @@ function hideHelpPopover() {
   helpPopover.hidden = true;
 }
 
+function closeOpenModal() {
+  const wantsPanel = document.querySelector(".wants-panel");
+  if (!wantsPanel) {
+    return;
+  }
+  wantsPanel.querySelector("[data-want-config-modal]")?.classList.add("hidden");
+  closeWantCandidateModal(wantsPanel, false);
+}
+
+function closeWantCandidateModal(panel, rerender = true) {
+  panel.querySelector("[data-want-candidate-modal]")?.classList.add("hidden");
+  if (rerender) {
+    renderSection();
+  }
+}
+
+function setModalBusy(modal, busy) {
+  modal.querySelectorAll("button").forEach((button) => {
+    button.disabled = busy;
+  });
+}
+
 syncNavigationLabels();
 loadInitialData();
 
@@ -1412,7 +1627,7 @@ function renderSettingsPanel(section) {
     </div>
   `;
   page.addEventListener("click", (event) => {
-    const action = event.target?.dataset?.settingAction;
+    const action = event.target?.closest?.("[data-setting-action]")?.dataset?.settingAction;
     if (action) {
       updateSettingsPanelStatus(page, section, action);
     }

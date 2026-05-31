@@ -16,16 +16,16 @@ def test_index_contains_tracker_first_ui_anchors() -> None:
 
     assert "添加站点" in html
     assert "站点" in html
-    assert "aria-label=\"Language\"" in html
-    assert "aria-label=\"Toggle theme\"" in html
+    assert 'aria-label="Language"' in html
+    assert 'aria-label="Toggle theme"' in html
     assert "data-tracker-list" in html
     assert "data-language-menu" in html
     assert "data-config-path" in html
-    assert "data-section=\"overview\"" in html
-    assert "data-section=\"downloader\"" in html
-    assert "data-section=\"search\"" in html
-    assert "data-section=\"sources\"" not in html
-    assert "data-section=\"wants\"" in html
+    assert 'data-section="overview"' in html
+    assert 'data-section="downloader"' in html
+    assert 'data-section="search"' in html
+    assert 'data-section="sources"' not in html
+    assert 'data-section="wants"' in html
     assert "获取决策" in html
     assert "种子筛选" in html
     assert "配置文件" in html
@@ -43,8 +43,8 @@ def test_navigation_is_grouped_and_mobile_switchable() -> None:
     assert 'data-nav-group="acquisition"' in html
     assert 'data-nav-group="automation"' in html
     assert 'data-nav-group-label="operations"' in html
-    assert 'data-section-switcher' in html
-    assert 'data-section-group-label' in html
+    assert "data-section-switcher" in html
+    assert "data-section-group-label" in html
     assert "sectionGroupBySection" in script
     assert "switchSection" in script
     assert "syncNavigationLabels" in script
@@ -87,8 +87,8 @@ def test_tracker_header_row_toggles_collapse() -> None:
 
     assert "toggleTrackerCard" in script
     assert 'setAttribute("data-tracker-toggle", "header")' in script
-    assert 'header.tabIndex = 0' in script
-    assert "event.key === \"Enter\"" in script
+    assert "header.tabIndex = 0" in script
+    assert 'event.key === "Enter"' in script
     assert "event.stopPropagation()" in script
     assert ".tracker-header" in styles
     assert "cursor: pointer" in styles
@@ -196,8 +196,42 @@ def test_want_list_has_mobile_card_layout() -> None:
     assert "renderWantCard" in script
     assert "want-table-desktop" in script
     assert "want-card-list" in script
+    assert 'role="button" tabindex="0"' in script
+    assert "查看候选" in script
+    assert 'event.key !== "Enter" && event.key !== " "' in script
     assert ".want-card-list" in styles
     assert ".want-card" in styles
+    assert ".inline-action" in styles
+
+
+def test_want_list_exposes_candidate_review_drawer() -> None:
+    script = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
+    styles = (STATIC_ROOT / "styles.css").read_text(encoding="utf-8")
+
+    assert "renderWantCandidateModal" in script
+    assert "openWantCandidates" in script
+    assert "data-want-id" in script
+    assert "data-want-candidate-modal" in script
+    assert "/api/wants/${encodeURIComponent(intentId)}/candidates" in script
+    assert "强制加入 qB" in script
+    assert "预览强制入队" in script
+    assert "低匹配" in script
+    assert "closeOpenModal" in script
+    assert "setModalBusy" in script
+    assert ".candidate-card.dimmed" in styles
+    assert ".candidate-score" in styles
+    assert "opacity: 0.72" not in styles
+
+
+def test_mobile_ui_uses_touch_sized_controls_and_modal_actions() -> None:
+    styles = (STATIC_ROOT / "styles.css").read_text(encoding="utf-8")
+
+    assert "touch-action: manipulation" in styles
+    assert "min-height: 44px" in styles
+    assert "grid-template-columns: minmax(0, 1fr) 44px 44px" in styles
+    assert ".candidate-actions button:last-child" in styles
+    assert "max-height: calc(100vh - 16px)" in styles
+    assert "position: sticky" in styles
 
 
 def test_general_sources_panel_is_not_exposed_in_frontend() -> None:

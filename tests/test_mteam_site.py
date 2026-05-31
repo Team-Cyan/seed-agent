@@ -63,6 +63,11 @@ async def test_mteam_api_client_discovers_free_candidates_with_sorting() -> None
                             "name": "Inception 2010 1080p BluRay",
                             "discountEndTime": "2099-01-01T00:00:00+00:00",
                             "size": "1234567890",
+                            "medium": 10,
+                            "standard": 1,
+                            "videoCodec": 16,
+                            "audioCodec": 3,
+                            "labelsNew": ["中字"],
                             "status": {
                                 "discount": "FREE",
                                 "seeders": 15,
@@ -129,6 +134,20 @@ async def test_mteam_api_client_discovers_free_candidates_with_sorting() -> None
     assert candidate.metadata["download_url_source"] == "mteam_api_deferred"
     assert candidate.metadata["mteam_torrent_id"] == "1171443"
     assert candidate.metadata["times_completed"] == 28
+    assert candidate.metadata["mteam_tags"] == [
+        "WEB-DL",
+        "1080p",
+        "H.265/HEVC",
+        "DTS",
+        "中字",
+    ]
+    assert candidate.metadata["mteam_raw_tags"] == {
+        "medium": "10",
+        "standard": "1",
+        "video_codec": "16",
+        "audio_codec": "3",
+        "labels_new": ["中字"],
+    }
 
 
 @pytest.mark.asyncio
@@ -263,8 +282,7 @@ async def test_mteam_api_client_discovers_multiple_pages() -> None:
 
     assert route.call_count == 2
     requested_pages = [
-        json.loads(call.request.content.decode("utf-8"))["pageNumber"]
-        for call in route.calls
+        json.loads(call.request.content.decode("utf-8"))["pageNumber"] for call in route.calls
     ]
     assert requested_pages == [1, 2]
     assert [candidate.title for candidate in candidates] == [

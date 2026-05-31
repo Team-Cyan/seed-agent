@@ -113,9 +113,20 @@ by completion period, and unfinished work is ordered by current priority.
   - Want List page shows canonical Douban/IMDb wants with source/type filters,
     source evidence summaries, media type, added time, mobile card layout, and
     search/download queue status.
+  - Want List rows open a candidate review modal. Matching releases stay first
+    with score, size, seeder/leecher counts, M-Team tags, inferred quality tags,
+    and reasons; lower-match releases stay visible but dimmed for operator
+    override.
+  - Candidate review supports explicit selection, dry-run enqueue preview, and
+    user-confirmed qB enqueue/forced enqueue. Search remains non-mutating, and
+    M-Team download tokens are still resolved only for execute-mode enqueue.
   - Settings pages include mobile section switching and sticky draft/preview/save
     actions inspired by the reference repo UI patterns, without adopting a
     dashboard-first product shape.
+  - Mobile Web UI ergonomics now include touch-sized controls, clearer Want List
+    row/card affordances, keyboard-accessible candidate opening, sticky modal
+    headers, backdrop/Escape modal close behavior, and stronger lower-match
+    candidate styling that stays actionable.
   - Web UI Want List search is dry-run/search-only; it does not enqueue or
     download unless the separate intent enqueue path is explicitly executed.
 
@@ -129,15 +140,18 @@ by completion period, and unfinished work is ordered by current priority.
 
 - Next P0 - Close the intent automation loop with real M-Team results
   - Run Douban and IMDb ingestion for configured public/export sources.
-  - Search M-Team for Remux-first matches.
-  - Verify Douban-ID and IMDb-ID searches against real M-Team results.
+  - Verify Douban-ID, IMDb-ID, and title/year fallback searches against real
+    M-Team results, including cases where only WEB-DL or lower-match candidates
+    exist.
+  - Verify the Web UI candidate review and explicit qB enqueue flow on live
+    Unraid with a safe dry-run first.
   - Verify season-pack vs episode behavior on real TV/anime examples.
   - Keep qB enqueue dry-run unless explicitly executing.
 
 - Next P1 - Web UI polish
   - Extend before/after diff preview to tracker edits.
-  - Add clearer empty/loading/error states, richer source filters, and stronger
-    dashboard-style evidence summaries where they support operations.
+  - Add richer source filters and stronger dashboard-style evidence summaries
+    where they support operations.
   - Split settings UI from the future read-only operations dashboard only after
     the current local tool feels stable.
 

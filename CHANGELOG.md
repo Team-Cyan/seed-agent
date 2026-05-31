@@ -4,6 +4,30 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.6.0 - 2026-05-31
+
+### Added
+
+- Want List candidate review now shows all saved M-Team candidates for an item,
+  with matching releases ranked first and lower-match releases kept visible for
+  explicit operator override.
+- Web UI candidate review now exposes release size, seeder/leecher counts,
+  M-Team tags, inferred quality tags, score, reasons, risks, release selection,
+  dry-run enqueue preview, and user-confirmed qB enqueue actions.
+- M-Team API-backed intent search now supplements Douban/IMDb ID lookup with a
+  broad title/year fallback query and keeps non-matching candidates for review
+  instead of hiding them before ranking.
+
+### Changed
+
+- Required, preferred, and excluded search keywords now act as ranking and
+  review requirements for intent search, allowing old or urgent items to be
+  force-selected from lower-match candidates.
+- Mobile Web UI controls, Want List cards, and candidate modals now use larger
+  touch targets, clearer action labels, keyboard-accessible candidate opening,
+  sticky modal headers, backdrop/Escape close behavior, and actionable dimmed
+  styling for lower-match releases.
+
 ## 0.5.2 - 2026-05-29
 
 ### Fixed

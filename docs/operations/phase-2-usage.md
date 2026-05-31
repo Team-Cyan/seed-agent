@@ -26,7 +26,11 @@ configuration until those sources have a product-ready UI.
 The same Web UI exposes a Want List page. It reads local intent state, shows
 canonical Douban/IMDb source labels, media type, added time, and
 search/download status. The page can trigger search-only dry runs for filtered
-rows; it does not add manual wants or enqueue downloads.
+rows. Clicking a row opens candidate review: matching releases appear first with
+score, size, M-Team tags, inferred quality tags, and ranking reasons; lower-match
+releases remain visible and dimmed so an operator can force a download when
+waiting for Remux/Blu-ray/4K is not worth it. qB enqueue still requires an
+explicit button click and browser confirmation; search itself never enqueues.
 
 For a Remux-first Douban/IMDb-to-M-Team intent flow:
 
@@ -69,10 +73,11 @@ sources:
       export_ref: local/inbox/imdb-weekend.csv
 ```
 
-`required_keywords` are hard filters for M-Team API-backed intent search.
-`preferred_keywords` add ranking credit when present. `excluded_keywords` filter
-M-Team API search results and penalize any fallback search result that contains
-them.
+`required_keywords` are ranking requirements for M-Team API-backed intent
+search: missing required terms push a candidate into the lower-match review
+group instead of hiding it. `preferred_keywords` add ranking credit when present.
+`excluded_keywords` penalize matching search results and mark them as not meeting
+the operator preference.
 
 For TV/anime episode intents, `series_search_mode: season` searches and ranks
 full-season packs. Use `series_search_mode: episode` when the operator prefers

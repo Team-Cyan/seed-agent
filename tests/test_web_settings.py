@@ -15,6 +15,7 @@ from seed_agent.models import (
     IntentSource,
     IntentState,
     LifecycleState,
+    RankedRelease,
     ReleaseCandidate,
     ResourceIntent,
 )
@@ -463,6 +464,175 @@ def test_http_wants_search_ranks_canonical_after_release_id_merge(
     ]
 
 
+def test_http_want_candidates_show_matching_and_lower_match_releases(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from seed_agent.web import app as web_app
+
+    class FakeSearchProvider:
+        async def search(self, intent):
+            return [
+                ReleaseCandidate(
+                    release_id="mt:https://kp.m-team.cc/detail/740962",
+                    site="mt",
+                    title="Call Me by Your Name 2017 2160p UHD Blu-ray REMUX HEVC",
+                    source_url="https://kp.m-team.cc/detail/740962",
+                    download_url="mteam-api://torrent/740962",
+                    size_bytes=66 * 1024**3,
+                    seeders=12,
+                    leechers=3,
+                    discount=Discount.NORMAL,
+                    metadata={
+                        "mteam_torrent_id": "740962",
+                        "download_url_source": "mteam_api_deferred",
+                        "mteam_tags": ["Blu-ray", "4K", "H.265/HEVC", "DTS-HD MA"],
+                        "mteam_raw_tags": {
+                            "medium": "0",
+                            "standard": "6",
+                            "video_codec": "16",
+                            "audio_codec": "11",
+                        },
+                    },
+                ),
+                ReleaseCandidate(
+                    release_id="mt:https://kp.m-team.cc/detail/99",
+                    site="mt",
+                    title="Call Me by Your Name 2017 1080p WEB-DL",
+                    source_url="https://kp.m-team.cc/detail/99",
+                    download_url="mteam-api://torrent/99",
+                    size_bytes=8 * 1024**3,
+                    seeders=100,
+                    leechers=1,
+                    discount=Discount.FREE,
+                    metadata={
+                        "mteam_torrent_id": "99",
+                        "download_url_source": "mteam_api_deferred",
+                        "mteam_tags": ["WEB-DL", "1080p"],
+                    },
+                ),
+            ]
+
+    config_path = _write_minimal_config(tmp_path)
+    config_path.write_text(
+        config_path.read_text(encoding="utf-8")
+        + """
+search:
+  required_keywords: [Remux]
+  preferred_keywords: [2160p]
+intent:
+  default_resolution: null
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        web_app,
+        "_read_configured_want_source_events",
+        lambda config: [
+            SourceIntentEvent(
+                source=IntentSource.DOUBAN_WANTED,
+                raw_text="请以你的名字呼唤我 Call Me by Your Name 2017",
+                source_event_id="douban:26799731",
+                requested_at=datetime(2025, 1, 2, tzinfo=UTC),
+                metadata={
+                    "media_type": "movie",
+                    "external_ids": {"douban": "26799731"},
+                    "source_config_id": "douban-me",
+                    "source_label": "豆瓣-我",
+                },
+            )
+        ],
+    )
+    monkeypatch.setattr(
+        web_app,
+        "_build_want_search_providers",
+        lambda config: [FakeSearchProvider()],
+    )
+
+    with _running_server(config_path) as base_url:
+        _request_json(base_url, "POST", "/api/wants/search", {"source": "all"})
+        wants_payload = _request_json(base_url, "GET", "/api/wants")
+        intent_id = wants_payload["items"][0]["intent_id"]
+        candidates_payload = _request_json(
+            base_url,
+            "GET",
+            f"/api/wants/{intent_id}/candidates",
+        )
+
+    assert candidates_payload["total"] == 2
+    assert candidates_payload["items"][0]["matches_requirements"] is True
+    assert candidates_payload["items"][0]["status_label"] == "符合偏好"
+    assert candidates_payload["items"][0]["official_tags"] == [
+        "Blu-ray",
+        "4K",
+        "H.265/HEVC",
+        "DTS-HD MA",
+    ]
+    assert candidates_payload["items"][0]["size_gb"] == 66.0
+    assert candidates_payload["items"][1]["matches_requirements"] is False
+    assert candidates_payload["items"][1]["status_label"] == "不符合偏好"
+    assert "required keyword missing: Remux" in candidates_payload["items"][1]["risks"]
+
+
+def test_http_want_enqueue_preview_can_select_lower_match_release(
+    tmp_path: Path,
+) -> None:
+    config_path = _write_minimal_config(tmp_path)
+    store = StateStore(tmp_path / ".seed-agent" / "state.db")
+    intent = ResourceIntent(
+        intent_id="douban_wanted:call-me-by-your-name",
+        source=IntentSource.DOUBAN_WANTED,
+        raw_text="Call Me by Your Name 2017",
+        kind=IntentKind.MOVIE,
+        title="Call Me by Your Name",
+        year=2017,
+        requested_at=datetime(2025, 1, 1, tzinfo=UTC),
+        state=IntentState.CONFIRMATION_REQUIRED,
+    )
+    store.upsert_intent(intent)
+    store.save_ranked_releases(
+        [
+            RankedRelease(
+                intent_id=intent.intent_id,
+                release=ReleaseCandidate(
+                    release_id="mt:https://kp.m-team.cc/detail/99",
+                    site="mt",
+                    title="Call Me by Your Name 2017 1080p WEB-DL",
+                    source_url="https://kp.m-team.cc/detail/99",
+                    download_url="mteam-api://torrent/99",
+                    size_bytes=8 * 1024**3,
+                    seeders=100,
+                    leechers=1,
+                    discount=Discount.FREE,
+                    metadata={"download_url_source": "mteam_api_deferred"},
+                ),
+                score=40,
+                confidence=0.4,
+                accepted=False,
+                confirmation_required=True,
+                reasons=["title tokens matched"],
+                risks=["required keyword missing: Remux"],
+            )
+        ]
+    )
+
+    with _running_server(config_path) as base_url:
+        payload = _request_json(
+            base_url,
+            "POST",
+            f"/api/wants/{intent.intent_id}/enqueue",
+            {"release_id": "mt:https://kp.m-team.cc/detail/99", "execute": "false"},
+        )
+
+    assert payload["execute"] is False
+    assert payload["selected"]["release_id"] == "mt:https://kp.m-team.cc/detail/99"
+    assert payload["enqueued"] == 1
+    assert any(item["action"] == "qb.enqueue" for item in payload["decisions"])
+    row = store.get_intent(intent.intent_id)
+    assert row["selected_release_id"] == "mt:https://kp.m-team.cc/detail/99"
+    assert row["state"] == IntentState.CONFIRMED.value
+
+
 def test_http_config_section_preview_returns_diff_without_writing(
     tmp_path: Path,
 ) -> None:
@@ -490,9 +660,7 @@ def test_http_config_section_preview_returns_diff_without_writing(
     assert config_path.read_text(encoding="utf-8") == before
     assert payload["section"] == "intent"
     assert payload["data"]["default_resolution"] == "2160p"
-    assert payload["status"] == [
-        {"level": "ok", "message": "intent config preview ready"}
-    ]
+    assert payload["status"] == [{"level": "ok", "message": "intent config preview ready"}]
     assert "-  default_resolution: 1080p" in payload["diff"]
     assert "+  default_resolution: 2160p" in payload["diff"]
     assert "secret-token" not in json.dumps(payload)

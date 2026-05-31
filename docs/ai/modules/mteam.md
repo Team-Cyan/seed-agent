@@ -26,8 +26,11 @@ Implemented today:
 - M-Team API-backed resource intent search, using the same search endpoint while
   keeping download-token resolution deferred until execute-mode intent enqueue
 - ID-first intent search through native M-Team `douban` and `imdb` filters when
-  the source event provides external IDs, with Douban tried first and IMDb used
-  as fallback when the Douban result set has no locally acceptable release
+  the source event provides external IDs, with Douban tried first, IMDb used as
+  a supplement, and a broad title/year keyword fallback added to catch rows that
+  lack external-ID metadata
+- search result metadata captures M-Team API tag fields such as medium,
+  standard, video codec, audio codec, and labels for Web UI candidate review
 - intent search supports generic Remux/quality preferences through `search.*`
   keyword lists and TV/anime pack behavior through `intent.series_search_mode`
 - `site-probe` visibility for authenticated M-Team access and discovery mode
@@ -62,8 +65,9 @@ Current fallback still present in code:
   than inventing M-Team-only Remux/Profile switches. Use
   `intent.series_search_mode` for season-pack vs episode behavior.
 - ID-first intent search should not put quality terms such as Remux into the
-  API keyword field. Fetch by Douban/IMDb ID first, then apply generic title
-  filters locally.
+  API keyword field. Fetch by Douban/IMDb ID first, supplement with a broad
+  title/year keyword query, then apply generic quality preferences during
+  ranking so lower-match candidates remain visible for operator override.
 
 ## Desired Future State
 

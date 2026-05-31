@@ -63,12 +63,6 @@ class MTeamSearchProvider:
                 options=options,
             )
             for candidate in candidates:
-                if not _matches_search_preferences(
-                    candidate.title,
-                    self.search_config,
-                    intent.resolution or self.default_resolution,
-                ):
-                    continue
                 release = _release_from_candidate(candidate)
                 if release.release_id in seen_release_ids:
                     continue
@@ -76,7 +70,7 @@ class MTeamSearchProvider:
                 seen_release_ids.add(release.release_id)
                 if len(releases) >= self.search_config.max_results_per_site:
                     break
-            if releases:
+            if len(releases) >= self.search_config.max_results_per_site:
                 break
         return releases
 
@@ -113,14 +107,11 @@ def _search_keyword(
         terms.append(str(intent.year))
     if intent.season is not None:
         terms.append(f"S{intent.season:02d}")
-    if intent.episode is not None and (
-        series_search_mode == "episode" or intent.season is None
-    ):
+    if intent.episode is not None and (series_search_mode == "episode" or intent.season is None):
         terms.append(f"E{intent.episode:02d}")
     resolution = intent.resolution or default_resolution
     if resolution is not None:
         terms.append(resolution)
-    terms.extend(search_config.required_keywords)
     return " ".join(_dedupe_terms(terms))
 
 
@@ -189,6 +180,23 @@ def _api_option_sequence_for_intent(
             )
         )
     if options:
+        options.append(
+            base_options.model_copy(
+                update={
+                    "mode": _mode_for_intent(intent),
+                    "keyword": _search_keyword(
+                        intent,
+                        search_config,
+                        default_resolution,
+                        series_search_mode,
+                    ),
+                    "imdb": None,
+                    "douban": None,
+                    "only_free": False,
+                    "discount": None,
+                }
+            )
+        )
         return options
     return [
         base_options.model_copy(
@@ -224,20 +232,6 @@ def _mode_for_intent(intent: ResourceIntent) -> str:
     if intent.kind in {IntentKind.SHOW, IntentKind.EPISODE} or media_type == "tv":
         return "tvshow"
     return "movie"
-
-
-def _matches_search_preferences(
-    title: str,
-    search_config: SearchConfig,
-    resolution: str | None,
-) -> bool:
-    if resolution is not None and not _keyword_in_title(resolution, title):
-        return False
-    if any(not _keyword_in_title(keyword, title) for keyword in search_config.required_keywords):
-        return False
-    if any(_keyword_in_title(keyword, title) for keyword in search_config.excluded_keywords):
-        return False
-    return True
 
 
 def _release_from_candidate(candidate: TorrentCandidate) -> ReleaseCandidate:
@@ -290,9 +284,3 @@ def _dedupe_terms(terms: list[str]) -> list[str]:
         deduped.append(normalized)
         seen.add(key)
     return deduped
-
-
-def _keyword_in_title(keyword: str, title: str) -> bool:
-    normalized_keyword = " ".join(keyword.lower().split())
-    normalized_title = " ".join(title.lower().replace(".", " ").replace("_", " ").split())
-    return normalized_keyword in normalized_title

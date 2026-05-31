@@ -21,12 +21,14 @@ Expose the operator-facing command surface and safe summaries.
 - local `web` settings UI server for safe configuration editing,
 - Docker entrypoint support for running the settings Web UI beside
   `schedule-run` when `SEED_AGENT_WEB_ENABLED=true`,
-- grouped Web UI navigation and mobile section switching for the local settings
-  surface,
+- grouped Web UI navigation, mobile section switching, touch-sized controls, and
+  modal interactions for the local settings surface,
 - read-only web API endpoints for state summary, configured budget pools, and
   heartbeat health,
-- web Want List endpoints for listing canonical Douban/IMDb wants and triggering
-  search-only dry runs,
+- web Want List endpoints for listing canonical Douban/IMDb wants, triggering
+  search-only dry runs, reviewing saved release candidates, selecting a release,
+  and explicitly enqueueing the selected release through the same intent enqueue
+  path,
 - schema-validated web config previews that return before/after diffs before
   non-tracker section saves write YAML,
 - per-section web YAML editing for top-level config blocks while preserving a
@@ -66,8 +68,11 @@ Expose the operator-facing command surface and safe summaries.
 - keep long-running deployment liveness inspectable through structured
   heartbeat output instead of opaque shell wrappers.
 - keep web UI actions safe by default: tracker-local validation, site probe,
-  dry-run preview, and read-only state endpoints must not execute enqueue or
-  cleanup mutations.
+  search, dry-run previews, and read-only state endpoints must not execute
+  enqueue or cleanup mutations. qB enqueue from the Want List must remain an
+  explicit candidate-level action with a confirmation step. Candidate review UI
+  should keep lower-match releases visibly distinct without making their force
+  actions look disabled.
 
 ## Verification
 
