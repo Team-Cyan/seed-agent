@@ -48,14 +48,14 @@ The default deployment shape for self-hosted use is a Docker container running
 | Area | Status | Notes |
 | --- | --- | --- |
 | Docker deployment | Supported | Compose, Unraid template, Kubernetes CronJob example, heartbeat, and healthcheck are present. |
-| qBittorrent downloader | Supported | The only implemented downloader; category policy is the cleanup authority boundary. |
+| qBittorrent downloader | Supported | The only implemented downloader; category policy is the cleanup authority boundary, and Want List media types can be routed to configured qB categories. |
 | Transmission downloader | Planned | Candidate for the first second-downloader adapter. |
 | NexusPHP-style RSS | Supported | RSS remains useful for fallback flows and non-M-Team sites. |
 | M-Team RSS | Supported | Available as fallback and compatibility path. |
 | M-Team API discovery/search | Supported | Preferred authenticated path when `api_key_ref` is configured, including intent search with Douban/IMDb ID lookup, broad keyword fallback, M-Team tag capture, and execute-time deferred download-token resolution. |
 | Resource intent loop | Supported | Local intent add, inbox/Douban/IMDb Want List ingestion, search, ranking, confirmation, and enqueue are implemented. |
 | Want List | Supported | Web UI page shows canonical Douban/IMDb wants with source/type filters, mobile cards, added time, merged source evidence, release/search status, and candidate review with explicit qB actions. |
-| Web Settings UI | WIP | Local configuration UI exists for grouped safe settings edits with schema validation, diff previews, per-section YAML editing, sticky save actions, mobile navigation, read-only status, and Want List. |
+| Web Settings UI | WIP | Local configuration UI exists for grouped safe settings edits with schema validation, diff previews, per-section YAML editing, visual downloader category/budget routing, sticky save actions, mobile navigation, read-only status, and Want List. |
 | Read-only dashboard/API | Partial | State summary, heartbeat health, budget pools, and Want List are exposed; richer audit/cleanup dashboards remain planned. |
 
 ## Roadmap Snapshot
@@ -99,6 +99,7 @@ cp config/example.yaml config/config.yaml
 - tracker/site config under `sites:`
 - strategy thresholds under `discovery:` and `scoring:`
 - qB category ownership under `downloader.category_policies:`
+- Want List routing under `downloader.media_category_map:`
 - cleanup thresholds under `cleanup:`
 
 4. Start the container:
@@ -204,6 +205,10 @@ compatibility. Each settings page also exposes the YAML block for its own
 top-level section, so operators can edit `search:`, `intent:`, `downloader:`,
 and similar blocks directly without splitting the runtime config into multiple
 files.
+
+On the downloader page, common qB settings are editable without hand-writing
+YAML: category policies, budget pools, and the movie/TV/anime Want List routing
+map. The YAML editor remains available for advanced edits and review.
 
 ## Runtime Safety Defaults
 

@@ -1538,14 +1538,24 @@ def _intent_category_policy(
     media_type = str(
         intent.metadata.get("media_type") or intent.metadata.get("kind") or ""
     ).strip().lower()
+    if media_type == "anime":
+        mapped_category = config.downloader.media_category_map.get("anime")
+        if mapped_category and mapped_category in policies:
+            return policies[mapped_category]
+        return policies.get("tv") or _default_category_policy(config)
     if intent.kind == IntentKind.MOVIE or media_type == "movie":
+        mapped_category = config.downloader.media_category_map.get("movie")
+        if mapped_category and mapped_category in policies:
+            return policies[mapped_category]
         return policies.get("movie") or _default_category_policy(config)
     if intent.kind in {IntentKind.SHOW, IntentKind.EPISODE} or media_type in {
         "tv",
         "show",
         "series",
-        "anime",
     }:
+        mapped_category = config.downloader.media_category_map.get("tv")
+        if mapped_category and mapped_category in policies:
+            return policies[mapped_category]
         return policies.get("tv") or _default_category_policy(config)
     return _default_category_policy(config)
 

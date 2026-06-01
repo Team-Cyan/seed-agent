@@ -9,7 +9,12 @@ from seed_agent.models import Discount, IntentState, RankedRelease, ReleaseCandi
 from seed_agent.state import StateStore
 
 
-def _write_config(tmp_path: Path, *, discovery_extra: str = "") -> Path:
+def _write_config(
+    tmp_path: Path,
+    *,
+    discovery_extra: str = "",
+    downloader_extra: str = "",
+) -> Path:
     path = tmp_path / "config.yaml"
     discovery_block = discovery_extra if discovery_extra else ""
     path.write_text(
@@ -66,6 +71,7 @@ downloader:
     - name: media
       max_size_tib: 10
   secret_ref: null
+{downloader_extra}\
 cleanup:
   cold_after_days: 7
   min_upload_delta_gb: 1
@@ -389,6 +395,46 @@ def test_intent_enqueue_routes_show_intent_to_tv_category(
             ranked.release.download_url,
             "tv",
             ["seed-agent", "tv"],
+        )
+    ]
+
+
+def test_intent_enqueue_uses_downloader_media_category_map_for_anime(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from seed_agent import cli
+
+    monkeypatch.chdir(tmp_path)
+    downloader = _DummyDownloader()
+    monkeypatch.setattr(cli, "build_downloader", lambda config: downloader)
+    config_path = _write_config(
+        tmp_path,
+        downloader_extra="""
+  media_category_map:
+    anime: movie
+""",
+    )
+    store = StateStore(tmp_path / ".seed-agent" / "state.db")
+    intent, _ = add_intent(
+        "葬送的芙莉莲 2023",
+        store,
+        metadata={"media_type": "anime"},
+    )
+    ranked = _ranked(intent.intent_id)
+    store.save_ranked_releases([ranked])
+
+    result = CliRunner().invoke(
+        cli.app,
+        ["intent-enqueue", intent.intent_id, "--config", str(config_path), "--execute"],
+    )
+
+    assert result.exit_code == 0
+    assert downloader.calls == [
+        (
+            ranked.release.download_url,
+            "movie",
+            ["seed-agent", "movie"],
         )
     ]
 

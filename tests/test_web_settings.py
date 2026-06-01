@@ -729,6 +729,87 @@ def test_http_config_section_save_updates_search_and_source_refs_without_secrets
     assert "secret-token" not in saved
 
 
+def test_http_config_section_save_updates_downloader_visual_fields(
+    tmp_path: Path,
+) -> None:
+    config_path = _write_minimal_config(tmp_path)
+
+    with _running_server(config_path) as base_url:
+        payload = _request_json(
+            base_url,
+            "POST",
+            "/api/config/sections",
+            {
+                "section": "downloader",
+                "data": {
+                    "type": "qbittorrent",
+                    "target": "local",
+                    "default_category": "seed",
+                    "secret_ref": None,
+                    "media_category_map": {
+                        "movie": "movie",
+                        "tv": "tv",
+                        "anime": "anime",
+                    },
+                    "category_policies": [
+                        {
+                            "name": "seed",
+                            "mode": "mutable",
+                            "budget_pool": "downloads",
+                            "delete_enabled": True,
+                            "over_budget_behavior": "add_paused",
+                            "tags": ["seed-agent"],
+                        },
+                        {
+                            "name": "movie",
+                            "mode": "add_only",
+                            "budget_pool": "media",
+                            "delete_enabled": False,
+                            "over_budget_behavior": "add_paused",
+                            "tags": ["seed-agent", "movie"],
+                        },
+                        {
+                            "name": "tv",
+                            "mode": "add_only",
+                            "budget_pool": "media",
+                            "delete_enabled": False,
+                            "over_budget_behavior": "add_paused",
+                            "tags": ["seed-agent", "tv"],
+                        },
+                        {
+                            "name": "anime",
+                            "mode": "add_only",
+                            "budget_pool": "media",
+                            "delete_enabled": False,
+                            "over_budget_behavior": "add_paused",
+                            "tags": ["seed-agent", "anime"],
+                        },
+                    ],
+                    "budget_pools": [
+                        {"name": "downloads", "max_size_tib": 1},
+                        {"name": "media", "max_size_tib": 10},
+                    ],
+                },
+            },
+        )
+
+    assert payload["data"]["media_category_map"] == {
+        "movie": "movie",
+        "tv": "tv",
+        "anime": "anime",
+    }
+    assert [item["name"] for item in payload["data"]["category_policies"]] == [
+        "seed",
+        "movie",
+        "tv",
+        "anime",
+    ]
+    saved = config_path.read_text(encoding="utf-8")
+    assert "media_category_map:" in saved
+    assert "anime: anime" in saved
+    assert "max_size_tib: 10" in saved
+
+
 def test_http_config_exposes_and_saves_section_yaml_without_splitting_file(
     tmp_path: Path,
 ) -> None:

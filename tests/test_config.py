@@ -234,6 +234,55 @@ cleanup:
     assert [pool.name for pool in config.downloader.budget_pools] == ["downloads", "media"]
 
 
+def test_downloader_media_category_map_routes_want_types_to_configured_categories() -> None:
+    data = _valid_config_data("local/secrets/qb.yaml")
+    data["downloader"]["category_policies"].append(
+        {
+            "name": "anime",
+            "mode": "add_only",
+            "budget_pool": "media",
+            "delete_enabled": False,
+            "over_budget_behavior": "add_paused",
+            "tags": ["seed-agent", "anime"],
+        }
+    )
+    data["downloader"]["category_policies"].append(
+        {
+            "name": "tv",
+            "mode": "add_only",
+            "budget_pool": "media",
+            "delete_enabled": False,
+            "over_budget_behavior": "add_paused",
+            "tags": ["seed-agent", "tv"],
+        }
+    )
+    data["downloader"]["media_category_map"] = {
+        "movie": "movie",
+        "tv": "tv",
+        "anime": "anime",
+    }
+
+    config = SeedAgentConfig(**data)
+
+    assert config.downloader.media_category_map == {
+        "movie": "movie",
+        "tv": "tv",
+        "anime": "anime",
+    }
+
+
+def test_downloader_media_category_map_rejects_unknown_category() -> None:
+    data = _valid_config_data("local/secrets/qb.yaml")
+    data["downloader"]["media_category_map"] = {"movie": "missing"}
+
+    try:
+        SeedAgentConfig(**data)
+    except ValueError as exc:
+        assert "media_category_map movie references unknown category missing" in str(exc)
+    else:
+        raise AssertionError("expected media_category_map validation failure")
+
+
 def test_load_config_accepts_optional_runtime_enqueue_gates(tmp_path: Path) -> None:
     data = _valid_config_data("local/secrets/qb.yaml")
     data["discovery"] = {

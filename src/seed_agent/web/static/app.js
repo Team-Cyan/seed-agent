@@ -91,6 +91,169 @@ const copy = {
         description: "查看当前配置文件和各配置页对应的 YAML 区块。",
       },
     },
+    ui: {
+      addedAt: "添加时间",
+      addSource: "新增来源",
+      all: "全部",
+      apiKeyExists: "API key 文件已存在",
+      apiKeyFile: "API key 文件",
+      apiKeyFileHelp: "API 发现方式需要。这里只保存本地 secret 文件路径，例如 local/secrets/mt_api_key。",
+      apiKeyValue: "API key 明文",
+      apiKeyValueHelp: "可选填写。保存时写入 API key 文件指向的本地文件，保存后不回显明文。",
+      anime: "动漫",
+      authHeaderHelp: "API 请求使用的认证 header。M-Team 默认是 x-api-key。",
+      basics: "基础",
+      addBudgetPool: "新增容量池",
+      addCategoryPolicy: "新增 qB 分类",
+      budgetPools: "容量池",
+      budgetPoolName: "容量池名称",
+      candidateTorrents: "候选种子",
+      candidateTorrentsCount: "候选种子",
+      categoryPolicies: "qB 分类策略",
+      categoryPolicyName: "qB 分类名称",
+      cleanupNoConfigChanges: "没有实际配置变化。",
+      close: "关闭",
+      closeCandidates: "关闭候选种子",
+      collapseTracker: "折叠站点",
+      configFileDescription: "当前仍保持一个物理 YAML 文件，避免 CLI、Docker 和 Unraid 部署同时迁移。各配置页会显示并保存自己的 YAML 区块。",
+      configFileTitle: "配置文件",
+      configNotLoaded: "配置未加载",
+      configPathLoadedPrefix: "配置文件: ",
+      configPathMissing: "配置文件: 尚未加载",
+      configSaved: "配置已保存",
+      configYamlNotLoaded: "配置尚未加载。",
+      confirmEnqueue: "确认把这个候选加入 qB 下载队列？这会向 qB 发送添加任务。",
+      confirmSaveForm: "确认保存表单",
+      cookieFile: "Cookie 文件",
+      cookieFileHelp: "可选。只保存本地 cookie secret 文件路径，不保存明文。",
+      currentConfigFile: "当前配置文件",
+      deleteEnabled: "允许自动清理",
+      discoveryMode: "发现方式",
+      discoveryModeHelp: "M-Team 支持 RSS 或 API。先选这里，再出现对应的认证和地址字段。",
+      downloaders: "下载",
+      enabled: "启用",
+      enqueueQb: "加入 qB",
+      expandTracker: "展开站点",
+      exportFile: "导出文件",
+      failed: "失败",
+      fieldHelp: "字段说明",
+      forceEnqueueQb: "强制加入 qB",
+      formEditable: "表单可编辑，尚未写入 YAML。",
+      formPreviewReady: "表单预览已准备。",
+      formSavedPageState: "表单已保存在当前页面状态。",
+      formValid: "表单格式通过。",
+      fromYaml: "来自 YAML",
+      fullConfigPreview: "完整配置预览",
+      fullConfigPreviewDescription: "这里是归一化后的只读预览。需要修改时，进入对应配置页编辑“本页 YAML”。",
+      heartbeat: "心跳",
+      heartbeatMissing: "心跳文件不存在",
+      heartbeatStale: "过期",
+      heartbeatMissingStatus: "缺失",
+      heartbeatOk: "正常",
+      imdbWatchlistUrl: "IMDb watchlist URL",
+      invalidMapPrefix: "无效映射项",
+      invalidMapSuffix: "请使用 site=priority，例如 demo=10。",
+      leechers: "下载",
+      loading: "加载中",
+      loadingCandidates: "正在读取候选",
+      localApiLoading: "正在读取本地只读 API。",
+      lowerMatch: "低匹配，可强制",
+      maxSizeTib: "容量上限 TiB",
+      mediaCategoryMap: "想看类型路由",
+      mediaType: "类型",
+      mode: "模式",
+      modeAddOnly: "只新增",
+      modeMutable: "可清理",
+      minutesAgoCycle: "分钟前 · 第",
+      movie: "电影",
+      name: "名称",
+      newSite: "新站点",
+      noCandidates: "还没有候选。先点“搜索”。",
+      noData: "无数据",
+      noPools: "未配置容量池",
+      noStateRecords: "暂无状态记录",
+      noTags: "无标签",
+      noWants: "暂无想看资源",
+      notChecked: "尚未检查",
+      notSaved: "尚未保存",
+      operationComplete: "操作完成",
+      pages: "页数",
+      preview: "预览",
+      previewEnqueue: "预览入队",
+      previewForceEnqueue: "预览强制入队",
+      previewFormChanges: "预览表单改动",
+      previewThisPageYaml: "预览本页 YAML",
+      provider: "来源",
+      readingStatus: "状态读取",
+      remove: "移除",
+      requestFailedPrefix: "请求失败",
+      resourceIntents: "获取意图",
+      rssUrlHelp: "RSS 发现方式需要填写订阅地址。选择 API 时不会要求这个字段。",
+      save: "保存",
+      saveConfirmation: "保存确认",
+      saveForm: "保存表单",
+      saveThisPageYaml: "保存本页 YAML",
+      search: "搜索",
+      searchCompleted: "搜索已完成",
+      searchCurrentFilter: "搜索当前筛选",
+      sectionYamlDescription: "对应 {path} 中的 {section}: 区块。可以保留顶层区块名，也可以只填写区块内容。",
+      sectionYamlTitle: "本页 YAML",
+      seeders: "做种",
+      selectCandidate: "选择候选",
+      selectType: "选择类型...",
+      settingsDescription: "可以用表单编辑常用项，也可以直接编辑本页 YAML 区块。保存前会先做 schema 校验。",
+      siteName: "站点名称",
+      siteNameFilled: "站点名称已填写",
+      siteNameHelp: "第二个必填项。用于配置引用、日志、站点优先级和搜索结果。",
+      siteNameRequired: "站点名称必填",
+      sourceConfig: "来源配置",
+      sourceConfigTitle: "想看来源配置",
+      status: "状态",
+      tags: "标签",
+      overBudgetBehavior: "超预算处理",
+      overBudgetAddPaused: "暂停添加",
+      statusAccepted: "已接受",
+      statusConfirmationRequired: "待确认",
+      statusDeleted: "已删除",
+      statusDownloading: "下载中",
+      statusEnqueued: "已入队",
+      statusFailed: "失败",
+      statusRejected: "已拒绝",
+      statusScored: "已评分",
+      statusSeeding: "做种中",
+      syncWantsCompleted: "想看来源已同步",
+      title: "标题",
+      trackerCancel: "取消",
+      trackerConfigMteam: "M-Team 配置",
+      trackerConfigNexusphp: "NexusPHP 配置",
+      trackerDryRun: "试运行预览",
+      trackerProbe: "站点探测",
+      trackerValidate: "验证此站点",
+      tv: "电视剧",
+      type: "类型",
+      typeHelp: "第一个必填项。选择后，下方才显示该类型需要继续配置的字段。",
+      typeRequired: "类型必填",
+      typeSelected: "类型已选择",
+      unknown: "未知",
+      unknownSize: "未知体积",
+      unsaved: "未保存",
+      validateForm: "验证表单",
+      viewCandidates: "查看候选",
+      waitingType: "等待类型",
+      wantRoutingHelp: "把想看列表里的电影、电视剧、动漫分别映射到 qB 分类。留空会使用后端默认回退。",
+      wantCandidateSubtitle: "符合偏好的候选排在前面；低匹配候选会灰显，但仍可手动强制加入 qB。",
+      wantResources: "想看资源",
+      wantsReadFailed: "想看列表读取失败",
+      yes: "是",
+      no: "否",
+      doubanUser: "Douban 用户",
+      chooseTypeFirst: "先选择类型。选完类型后，只显示这个类型需要继续配置的选项。",
+      matchingPreference: "符合偏好",
+      processing: "正在处理",
+      selectedCandidate: "候选已选择",
+      thisPageYamlSaved: "本页 YAML 已保存",
+      thisPageYamlPreviewReady: "本页 YAML 预览已准备",
+    },
   },
   EN: {
     groups: {
@@ -146,18 +309,182 @@ const copy = {
         description: "Review the active config file and the YAML sections edited by each page.",
       },
     },
+    ui: {
+      addedAt: "Added at",
+      addSource: "Add source",
+      all: "All",
+      apiKeyExists: "API key file exists",
+      apiKeyFile: "API key file",
+      apiKeyFileHelp: "Required for API discovery. Stores only the local secret file path, for example local/secrets/mt_api_key.",
+      apiKeyValue: "API key value",
+      apiKeyValueHelp: "Optional. On save, writes the value into the configured API key file and does not echo it back.",
+      anime: "Anime",
+      authHeaderHelp: "Authentication header used by API requests. M-Team defaults to x-api-key.",
+      basics: "Basics",
+      addBudgetPool: "Add budget pool",
+      addCategoryPolicy: "Add qB category",
+      budgetPools: "Budget pools",
+      budgetPoolName: "Budget pool name",
+      candidateTorrents: "Candidate torrents",
+      candidateTorrentsCount: "Candidate torrents",
+      categoryPolicies: "qB category policies",
+      categoryPolicyName: "qB category name",
+      cleanupNoConfigChanges: "No actual config changes.",
+      close: "Close",
+      closeCandidates: "Close candidate torrents",
+      collapseTracker: "Collapse tracker",
+      configFileDescription: "The runtime still uses one physical YAML file so CLI, Docker, and Unraid deployments migrate together. Each settings page can show and save its own YAML section.",
+      configFileTitle: "Config file",
+      configNotLoaded: "Config file is not loaded",
+      configPathLoadedPrefix: "Config file: ",
+      configPathMissing: "Config file: not loaded",
+      configSaved: "Config saved",
+      configYamlNotLoaded: "Config is not loaded.",
+      confirmEnqueue: "Add this candidate to the qB download queue? This sends an add request to qB.",
+      confirmSaveForm: "Confirm save form",
+      cookieFile: "Cookie file",
+      cookieFileHelp: "Optional. Stores only the local cookie secret file path, not the cookie value.",
+      currentConfigFile: "current config file",
+      deleteEnabled: "Allow cleanup",
+      discoveryMode: "Discovery mode",
+      discoveryModeHelp: "M-Team supports RSS or API. Pick this first, then only the fields for that mode appear.",
+      downloaders: "Downloads",
+      enabled: "Enabled",
+      enqueueQb: "Add to qB",
+      expandTracker: "Expand tracker",
+      exportFile: "Export file",
+      failed: "Failed",
+      fieldHelp: "Field help",
+      forceEnqueueQb: "Force add to qB",
+      formEditable: "Form is editable and has not been written to YAML.",
+      formPreviewReady: "Form preview is ready.",
+      formSavedPageState: "Form is saved in the current page state.",
+      formValid: "Form format is valid.",
+      fromYaml: "From YAML",
+      fullConfigPreview: "Full config preview",
+      fullConfigPreviewDescription: "This is the normalized read-only preview. To edit, open the matching settings page and update This page YAML.",
+      heartbeat: "Heartbeat",
+      heartbeatMissing: "Heartbeat file is missing",
+      heartbeatStale: "Stale",
+      heartbeatMissingStatus: "Missing",
+      heartbeatOk: "OK",
+      imdbWatchlistUrl: "IMDb watchlist URL",
+      invalidMapPrefix: "Invalid map entry",
+      invalidMapSuffix: "Use site=priority, for example demo=10.",
+      leechers: "leechers",
+      loading: "Loading",
+      loadingCandidates: "Loading candidates",
+      localApiLoading: "Reading the local read-only API.",
+      lowerMatch: "Lower match, force allowed",
+      maxSizeTib: "Size limit TiB",
+      mediaCategoryMap: "Want type routing",
+      mediaType: "Type",
+      mode: "Mode",
+      modeAddOnly: "Add only",
+      modeMutable: "Mutable",
+      minutesAgoCycle: "minutes ago · cycle",
+      movie: "Movie",
+      name: "Name",
+      newSite: "New tracker",
+      noCandidates: "No candidates yet. Run Search first.",
+      noData: "No data",
+      noPools: "No budget pools configured",
+      noStateRecords: "No state records yet",
+      noTags: "No tags",
+      noWants: "No wants yet",
+      notChecked: "Not checked",
+      notSaved: "Not saved",
+      operationComplete: "Operation completed",
+      pages: "Pages",
+      preview: "Preview",
+      previewEnqueue: "Preview enqueue",
+      previewForceEnqueue: "Preview forced enqueue",
+      previewFormChanges: "Preview form changes",
+      previewThisPageYaml: "Preview this page YAML",
+      provider: "Source",
+      readingStatus: "Status read",
+      remove: "Remove",
+      requestFailedPrefix: "Request failed",
+      resourceIntents: "Resource intents",
+      rssUrlHelp: "RSS discovery needs a feed URL. This field is not required in API mode.",
+      save: "Save",
+      saveConfirmation: "Save confirmation",
+      saveForm: "Save form",
+      saveThisPageYaml: "Save this page YAML",
+      search: "Search",
+      searchCompleted: "Search completed",
+      searchCurrentFilter: "Search current filters",
+      sectionYamlDescription: "Maps to the {section}: block in {path}. You can keep the top-level section name or enter only the section body.",
+      sectionYamlTitle: "This page YAML",
+      seeders: "seeders",
+      selectCandidate: "Select candidate",
+      selectType: "Select type...",
+      settingsDescription: "Edit common options with the form, or edit this page YAML directly. Saves run schema validation first.",
+      siteName: "Site name",
+      siteNameFilled: "Site name filled",
+      siteNameHelp: "The second required field. Used by config references, logs, site priority, and search results.",
+      siteNameRequired: "Site name is required",
+      sourceConfig: "Source config",
+      sourceConfigTitle: "Want source config",
+      status: "Status",
+      tags: "Tags",
+      overBudgetBehavior: "Over budget",
+      overBudgetAddPaused: "Add paused",
+      statusAccepted: "Accepted",
+      statusConfirmationRequired: "Needs confirmation",
+      statusDeleted: "Deleted",
+      statusDownloading: "Downloading",
+      statusEnqueued: "Queued",
+      statusFailed: "Failed",
+      statusRejected: "Rejected",
+      statusScored: "Scored",
+      statusSeeding: "Seeding",
+      syncWantsCompleted: "Want sources synced",
+      title: "Title",
+      trackerCancel: "Cancel",
+      trackerConfigMteam: "M-Team config",
+      trackerConfigNexusphp: "NexusPHP config",
+      trackerDryRun: "Dry-run preview",
+      trackerProbe: "Site probe",
+      trackerValidate: "Validate tracker",
+      tv: "TV",
+      type: "Type",
+      typeHelp: "The first required field. After selecting it, only fields for that tracker type are shown below.",
+      typeRequired: "Type is required",
+      typeSelected: "Type selected",
+      unknown: "Unknown",
+      unknownSize: "Unknown size",
+      unsaved: "Unsaved",
+      validateForm: "Validate form",
+      viewCandidates: "View candidates",
+      waitingType: "Waiting for type",
+      wantRoutingHelp: "Map movie, TV, and anime wants to qB categories. Empty fields use the backend fallback.",
+      wantCandidateSubtitle: "Preferred candidates stay first; lower-match candidates are dimmed but can still be forced into qB.",
+      wantResources: "Wanted resources",
+      wantsReadFailed: "Failed to read Want List",
+      yes: "Yes",
+      no: "No",
+      doubanUser: "Douban user",
+      chooseTypeFirst: "Choose a type first. After that, only fields for the selected tracker type are shown.",
+      matchingPreference: "Matches preferences",
+      processing: "Processing",
+      selectedCandidate: "Candidate selected",
+      thisPageYamlSaved: "This page YAML saved",
+      thisPageYamlPreviewReady: "This page YAML preview is ready",
+    },
   },
 };
 
-const settingsPanels = {
+const settingsPanelsByLanguage = {
+  CN: {
   downloader: {
     title: "下载器",
-    fields: [
-      ["qBittorrent 目标", "target", "text", "选择下载器目标。会写入 downloader.target。"],
-      ["默认分类", "default_category", "text", "默认加入的 qBittorrent 分类。"],
-      ["凭据文件", "secret_ref", "optional-text", "本地 qB 凭据文件路径，不保存明文。"],
-    ],
-  },
+      fields: [
+        ["qBittorrent 目标", "target", "text", "选择下载器目标。会写入 downloader.target。"],
+        ["默认分类", "default_category", "text", "默认加入的 qBittorrent 分类。"],
+        ["凭据文件", "secret_ref", "optional-text", "本地 qB 凭据文件路径，不保存明文。"],
+      ],
+    },
   discovery: {
     title: "发现策略",
     fields: [
@@ -208,6 +535,67 @@ const settingsPanels = {
       ["排除关键词", "excluded_keywords", "csv", "排除关键词，例如 CAM、TC 或 Hardcoded。"],
     ],
   },
+  },
+  EN: {
+    downloader: {
+      title: "Downloader",
+      fields: [
+        ["qBittorrent target", "target", "text", "Select the downloader target. Writes downloader.target."],
+        ["Default category", "default_category", "text", "Default qBittorrent category for new tasks."],
+        ["Credential file", "secret_ref", "optional-text", "Local qB credential file path. Plain secrets are not saved here."],
+      ],
+    },
+    discovery: {
+      title: "Discovery",
+      fields: [
+        ["Discount labels", "discounts", "csv", "Candidate discount filters, for example free or 2xfree."],
+        ["Minimum free minutes left", "min_left_time_minutes", "number", "Skip automatic enqueue when the free window is shorter than this."],
+        ["Minimum seeders", "min_seeders", "optional-number", "Skip automatic enqueue below this seeder count; empty means no limit."],
+        ["Minimum leechers", "min_leechers", "number", "Skip automatic enqueue below this demand count."],
+        ["Target seeder/leecher ratio", "target_seed_leecher_ratio", "number", "Controls demand pressure; no absolute seeder cap is used."],
+        ["Allow non-free", "allow_non_free", "boolean", "Allow normal candidates into scoring."],
+        ["Maximum size GB", "max_size_gb", "optional-number", "Hard candidate size cap; empty means no limit."],
+        ["Maximum active downloads", "max_active_downloads", "optional-number", "Above this, candidates are added paused."],
+        ["Maximum remaining download GB", "max_total_amount_left_gb", "optional-number", "Above this remaining-download total, candidates are added paused."],
+      ],
+    },
+    cleanup: {
+      title: "Cleanup",
+      fields: [
+        ["Cold after days", "cold_after_days", "number", "Treat torrents as cold after this many days without useful upload."],
+        ["Minimum upload delta GB", "min_upload_delta_gb", "number", "Only cleanup candidates below this upload delta."],
+        ["Protect HR", "protect_hr", "boolean", "Protect HR-risk torrents by default."],
+        ["Protect manual marks", "protect_manual", "boolean", "Protect manually marked torrents by default."],
+        ["Protect media library", "protect_media_library", "boolean", "Protect media-library torrents by default."],
+        ["Delete after no-upload hours", "delete_after_no_upload_hours", "number", "Zero-upload observation window."],
+        ["Pause before delete hours", "pause_before_delete_hours", "number", "Hours to pause before delete observation."],
+      ],
+    },
+    intent: {
+      title: "Acquisition",
+      fields: [
+        ["Confirmation threshold", "confirmation_threshold", "number", "Above this threshold, candidates can enter confirmation."],
+        ["Auto-enqueue threshold", "auto_enqueue_threshold", "number", "Above this threshold, candidates can auto-enqueue."],
+        ["Ambiguity gap", "ambiguity_gap", "number", "Treat close-scored candidates as ambiguous below this score gap."],
+        ["Default resolution", "default_resolution", "optional-text", "Default resolution preference."],
+        ["Series search mode", "series_search_mode", "select:season|episode", "Search TV/anime by full season or by individual episode."],
+        ["Preferred languages", "preferred_languages", "csv", "Comma-separated language preferences."],
+        ["Inbox file", "inbox_ref", "text", "Local intent inbox JSONL path."],
+      ],
+    },
+    search: {
+      title: "Torrent Filters",
+      fields: [
+        ["Site priority", "site_priority", "map", "Use site=priority, for example mteam=10. Affects search ranking only and never saves secrets."],
+        ["Max results per site", "max_results_per_site", "number", "Maximum retained search results per site."],
+        ["Prefer free", "prefer_free", "boolean", "Prefer free/freeleech releases in search ranking."],
+        ["Reject HR by default", "reject_hr_by_default", "boolean", "Reject HR-risk releases by default."],
+        ["Required keywords", "required_keywords", "csv", "Keywords that must appear in result titles, for example Remux."],
+        ["Preferred keywords", "preferred_keywords", "csv", "Scoring keywords, for example 2160p, HDR, or Dolby Vision."],
+        ["Excluded keywords", "excluded_keywords", "csv", "Keywords to reject, for example CAM, TC, or Hardcoded."],
+      ],
+    },
+  },
 };
 
 const navigationSections = [
@@ -234,6 +622,22 @@ const sectionGroupBySection = {
   advanced: "advanced",
 };
 
+function activeCopy() {
+  return copy[state.language] || copy.CN;
+}
+
+function uiText(key) {
+  return activeCopy().ui?.[key] || copy.CN.ui?.[key] || key;
+}
+
+function currentSettingsPanels() {
+  return settingsPanelsByLanguage[state.language] || settingsPanelsByLanguage.CN;
+}
+
+function settingsPanelSpec(section) {
+  return currentSettingsPanels()[section] || settingsPanelsByLanguage.CN[section];
+}
+
 addTrackerButton.addEventListener("click", () => {
   state.trackers.unshift({
     id: newClientId(),
@@ -249,9 +653,9 @@ addTrackerButton.addEventListener("click", () => {
     saved: false,
     collapsed: false,
     status: [
-      { level: "warning", message: "类型必填" },
-      { level: "warning", message: "站点名称必填" },
-      { level: "info", message: "尚未保存" },
+      { level: "warning", message: uiText("typeRequired") },
+      { level: "warning", message: uiText("siteNameRequired") },
+      { level: "info", message: uiText("notSaved") },
     ],
   });
   renderSection();
@@ -352,8 +756,8 @@ async function loadConfig() {
     saved: true,
     collapsed: true,
     status: tracker.has_api_key
-      ? [{ level: "ok", message: "API key 文件已存在" }]
-      : [{ level: "info", message: "尚未检查" }],
+      ? [{ level: "ok", message: uiText("apiKeyExists") }]
+      : [{ level: "info", message: uiText("notChecked") }],
   }));
   renderSection();
 }
@@ -366,7 +770,7 @@ async function loadOverview() {
       fetch("/api/pools"),
     ]);
     if (!healthResponse.ok || !stateResponse.ok || !poolsResponse.ok) {
-      throw new Error("状态读取失败");
+      throw new Error(uiText("readingStatus"));
     }
     state.overview = {
       health: await healthResponse.json(),
@@ -388,7 +792,7 @@ async function loadWants() {
   try {
     const response = await fetch("/api/wants");
     if (!response.ok) {
-      throw new Error("想看列表读取失败");
+      throw new Error(uiText("wantsReadFailed"));
     }
     const payload = await response.json();
     state.wants = {
@@ -418,7 +822,9 @@ function renderSection() {
   const groupKey = sectionGroupBySection[state.currentSection] || "operations";
   sectionGroupLabel.textContent = copy[state.language].groups[groupKey];
   trackerList.setAttribute("aria-label", copy[state.language].nav[state.currentSection] || "Content");
-  configPathLabel.textContent = state.configPath ? `配置文件: ${state.configPath}` : "配置文件: 尚未加载";
+  configPathLabel.textContent = state.configPath
+    ? `${uiText("configPathLoadedPrefix")}${state.configPath}`
+    : uiText("configPathMissing");
   if (state.currentSection === "overview") {
     title.textContent = copy[state.language].overviewTitle;
     subtitle.textContent = copy[state.language].overviewSubtitle;
@@ -461,11 +867,11 @@ function renderOverviewPanel() {
   panel.className = "overview-grid";
   const { health, stateSummary, pools, error } = state.overview;
   if (error) {
-    panel.append(renderMetricCard("状态读取", "失败", error, "warning"));
+    panel.append(renderMetricCard(uiText("readingStatus"), uiText("failed"), error, "warning"));
     return panel;
   }
   if (!health || !stateSummary || !pools) {
-    panel.append(renderMetricCard("状态读取", "加载中", "正在读取本地只读 API。", "info"));
+    panel.append(renderMetricCard(uiText("readingStatus"), uiText("loading"), uiText("localApiLoading"), "info"));
     return panel;
   }
 
@@ -474,23 +880,23 @@ function renderOverviewPanel() {
   const budgetPools = pools.budget_pools || [];
   panel.append(
     renderMetricCard(
-      "心跳",
+      uiText("heartbeat"),
       formatHealthStatus(health.status),
       health.heartbeat_exists
-        ? `${health.age_minutes ?? "?"} 分钟前 · 第 ${health.heartbeat?.cycle ?? "?"} 轮`
-        : "心跳文件不存在",
+        ? `${health.age_minutes ?? "?"} ${uiText("minutesAgoCycle")} ${health.heartbeat?.cycle ?? "?"}`
+        : uiText("heartbeatMissing"),
       health.status === "ok" ? "ok" : "warning",
     ),
   );
   panel.append(
-    renderMetricCard("候选种子", stateSummary.candidates?.total ?? 0, formatStateCounts(candidateStates), "info"),
+    renderMetricCard(uiText("candidateTorrentsCount"), stateSummary.candidates?.total ?? 0, formatStateCounts(candidateStates), "info"),
   );
-  panel.append(renderMetricCard("获取意图", stateSummary.intents?.total ?? 0, formatStateCounts(intentStates), "info"));
+  panel.append(renderMetricCard(uiText("resourceIntents"), stateSummary.intents?.total ?? 0, formatStateCounts(intentStates), "info"));
   panel.append(
     renderMetricCard(
-      "容量池",
+      uiText("budgetPools"),
       budgetPools.length,
-      budgetPools.map((pool) => `${pool.name}: ${pool.max_size_tib} TiB`).join(" · ") || "未配置容量池",
+      budgetPools.map((pool) => `${pool.name}: ${pool.max_size_tib} TiB`).join(" · ") || uiText("noPools"),
       "info",
     ),
   );
@@ -503,32 +909,35 @@ function renderMetricCard(label, value, detail, level) {
   card.innerHTML = `
     <div class="metric-label">${escapeHtml(label)}</div>
     <div class="metric-value">${escapeHtml(value)}</div>
-    <div class="status-item ${escapeAttribute(level)}">${escapeHtml(detail || "无数据")}</div>
+    <div class="status-item ${escapeAttribute(level)}">${escapeHtml(detail || uiText("noData"))}</div>
   `;
   return card;
 }
 
 function formatHealthStatus(status) {
   const labels = {
-    ok: "正常",
-    stale: "过期",
-    missing_heartbeat: "缺失",
+    ok: uiText("heartbeatOk"),
+    stale: uiText("heartbeatStale"),
+    missing_heartbeat: uiText("heartbeatMissingStatus"),
   };
-  return labels[status] || status || "未知";
+  return labels[status] || status || uiText("unknown");
 }
 
 function formatStateCounts(counts) {
   const entries = Object.entries(counts);
   if (entries.length === 0) {
-    return "暂无状态记录";
+    return uiText("noStateRecords");
   }
   const labels = {
-    accepted: "已接受",
-    scored: "已评分",
-    enqueued: "已入队",
-    confirmation_required: "待确认",
-    rejected: "已拒绝",
-    failed: "失败",
+    accepted: uiText("statusAccepted"),
+    scored: uiText("statusScored"),
+    enqueued: uiText("statusEnqueued"),
+    confirmation_required: uiText("statusConfirmationRequired"),
+    rejected: uiText("statusRejected"),
+    failed: uiText("statusFailed"),
+    deleted: uiText("statusDeleted"),
+    downloading: uiText("statusDownloading"),
+    seeding: uiText("statusSeeding"),
   };
   return entries.map(([name, count]) => `${labels[name] || name}: ${count}`).join(" · ");
 }
@@ -540,30 +949,30 @@ function renderWantsPanel() {
     <div class="wants-toolbar">
       <div class="want-filters">
         <label class="field compact-field">
-          <span>来源</span>
+          <span>${escapeHtml(uiText("provider"))}</span>
           <select data-want-filter="source">
             ${renderWantSourceOptions()}
           </select>
         </label>
         <label class="field compact-field">
-          <span>类型</span>
+          <span>${escapeHtml(uiText("mediaType"))}</span>
           <select data-want-filter="media_type">
-            <option value="all">全部</option>
-            <option value="movie">电影</option>
-            <option value="tv">电视剧</option>
-            <option value="anime">动漫</option>
+            <option value="all">${escapeHtml(uiText("all"))}</option>
+            <option value="movie">${escapeHtml(uiText("movie"))}</option>
+            <option value="tv">${escapeHtml(uiText("tv"))}</option>
+            <option value="anime">${escapeHtml(uiText("anime"))}</option>
           </select>
         </label>
       </div>
       <div class="tracker-actions-group">
-        <button class="secondary-button" type="button" data-want-action="search" aria-label="搜索当前筛选">搜索</button>
-        <button class="primary-button" type="button" data-want-action="config-open" aria-label="配置想看来源">来源配置</button>
+        <button class="secondary-button" type="button" data-want-action="search" aria-label="${escapeAttribute(uiText("searchCurrentFilter"))}">${escapeHtml(uiText("search"))}</button>
+        <button class="primary-button" type="button" data-want-action="config-open" aria-label="${escapeAttribute(uiText("sourceConfigTitle"))}">${escapeHtml(uiText("sourceConfig"))}</button>
       </div>
     </div>
     <div class="status-list" data-want-status></div>
     ${renderWantConfigModal()}
     ${renderWantCandidateModal()}
-    <div class="section-title">想看资源</div>
+    <div class="section-title">${escapeHtml(uiText("wantResources"))}</div>
   `;
   panel.querySelector('[data-want-filter="source"]').value = state.wants.filters.source;
   panel.querySelector('[data-want-filter="media_type"]').value = state.wants.filters.media_type;
@@ -620,7 +1029,7 @@ function renderWantsPanel() {
 }
 
 function renderWantSourceOptions() {
-  const options = ['<option value="all">全部</option>'];
+  const options = [`<option value="all">${escapeHtml(uiText("all"))}</option>`];
   const seen = new Set();
   state.wants.items.forEach((item) => {
     const keys = item.source_keys || [item.source];
@@ -652,16 +1061,16 @@ function renderWantConfigModal() {
     <div class="modal-backdrop hidden" data-want-config-modal>
       <div class="modal-panel">
         <div class="modal-header">
-          <div class="section-title">想看来源配置</div>
-          <button class="icon-button" type="button" data-want-action="config-close" aria-label="关闭">×</button>
+          <div class="section-title">${escapeHtml(uiText("sourceConfigTitle"))}</div>
+          <button class="icon-button" type="button" data-want-action="config-close" aria-label="${escapeAttribute(uiText("close"))}">×</button>
         </div>
         <div class="want-source-list" data-want-source-list>
           ${wantLists.map((source, index) => renderWantSourceConfigRow(source, index)).join("")}
         </div>
         <div class="tracker-actions-group">
-          <button class="secondary-button" type="button" data-want-action="config-add">新增来源</button>
-          <button class="secondary-button" type="button" data-want-action="config-preview">预览</button>
-          <button class="primary-button" type="button" data-want-action="config-save">保存</button>
+          <button class="secondary-button" type="button" data-want-action="config-add">${escapeHtml(uiText("addSource"))}</button>
+          <button class="secondary-button" type="button" data-want-action="config-preview">${escapeHtml(uiText("preview"))}</button>
+          <button class="primary-button" type="button" data-want-action="config-save">${escapeHtml(uiText("save"))}</button>
         </div>
         <div class="status-list" data-want-config-status></div>
       </div>
@@ -674,11 +1083,11 @@ function renderWantCandidateModal() {
     <div class="modal-backdrop hidden" data-want-candidate-modal>
       <div class="modal-panel candidate-modal">
         <div class="modal-header">
-          <div>
-            <div class="section-title" data-want-candidate-title>候选种子</div>
-            <div class="muted-line">符合偏好的候选排在前面；低匹配候选会灰显，但仍可手动强制加入 qB。</div>
+            <div>
+            <div class="section-title" data-want-candidate-title>${escapeHtml(uiText("candidateTorrents"))}</div>
+            <div class="muted-line">${escapeHtml(uiText("wantCandidateSubtitle"))}</div>
           </div>
-          <button class="icon-button" type="button" data-want-candidate-action="close" aria-label="关闭候选种子">×</button>
+          <button class="icon-button" type="button" data-want-candidate-action="close" aria-label="${escapeAttribute(uiText("closeCandidates"))}">×</button>
         </div>
         <div class="status-list" data-want-candidate-status></div>
         <div class="candidate-list" data-want-candidate-list></div>
@@ -714,7 +1123,7 @@ function renderWantSourceConfigRow(source, index) {
   return `
     <div class="want-source-row" data-want-source-row="${index}">
       <label class="field">
-        <span>来源</span>
+        <span>${escapeHtml(uiText("provider"))}</span>
         <select data-want-source-field="provider">
           <option value="douban" ${provider === "douban" ? "selected" : ""}>Douban</option>
           <option value="imdb" ${provider === "imdb" ? "selected" : ""}>IMDb</option>
@@ -725,45 +1134,45 @@ function renderWantSourceConfigRow(source, index) {
         <input data-want-source-field="id" value="${escapeHtml(source.id || "")}" />
       </label>
       <label class="field">
-        <span>名称</span>
+        <span>${escapeHtml(uiText("name"))}</span>
         <input data-want-source-field="label" value="${escapeHtml(source.label || "")}" />
       </label>
       <label class="field">
-        <span>启用</span>
+        <span>${escapeHtml(uiText("enabled"))}</span>
         <select data-want-source-field="enabled">
-          <option value="true" ${source.enabled !== false ? "selected" : ""}>是</option>
-          <option value="false" ${source.enabled === false ? "selected" : ""}>否</option>
+          <option value="true" ${source.enabled !== false ? "selected" : ""}>${escapeHtml(uiText("yes"))}</option>
+          <option value="false" ${source.enabled === false ? "selected" : ""}>${escapeHtml(uiText("no"))}</option>
         </select>
       </label>
       <div class="provider-fields ${provider === "douban" ? "" : "hidden"}" data-provider-fields="douban">
         <label class="field">
-          <span>Douban 用户</span>
+          <span>${escapeHtml(uiText("doubanUser"))}</span>
           <input data-want-source-field="user_name" value="${escapeHtml(source.user_name || "")}" />
         </label>
         <label class="field">
-          <span>导出文件</span>
+          <span>${escapeHtml(uiText("exportFile"))}</span>
           <input data-want-source-field="export_ref" value="${escapeHtml(provider === "douban" ? source.export_ref || "" : "")}" />
         </label>
         <label class="field">
-          <span>页数</span>
+          <span>${escapeHtml(uiText("pages"))}</span>
           <input data-want-source-field="max_pages" type="number" min="1" value="${escapeHtml(provider === "douban" ? source.max_pages || 1 : 1)}" />
         </label>
       </div>
       <div class="provider-fields ${provider === "imdb" ? "" : "hidden"}" data-provider-fields="imdb">
         <label class="field wide">
-          <span>IMDb watchlist URL</span>
+          <span>${escapeHtml(uiText("imdbWatchlistUrl"))}</span>
           <input data-want-source-field="watchlist_url" value="${escapeHtml(source.watchlist_url || "")}" />
         </label>
         <label class="field">
-          <span>导出文件</span>
+          <span>${escapeHtml(uiText("exportFile"))}</span>
           <input data-want-source-field="export_ref" value="${escapeHtml(provider === "imdb" ? source.export_ref || "" : "")}" />
         </label>
         <label class="field">
-          <span>页数</span>
+          <span>${escapeHtml(uiText("pages"))}</span>
           <input data-want-source-field="max_pages" type="number" min="1" value="${escapeHtml(provider === "imdb" ? source.max_pages || 1 : 1)}" />
         </label>
       </div>
-      <button class="secondary-button" type="button" data-want-action="config-remove" data-row-index="${index}">移除</button>
+      <button class="secondary-button" type="button" data-want-action="config-remove" data-row-index="${index}">${escapeHtml(uiText("remove"))}</button>
     </div>
   `;
 }
@@ -773,7 +1182,7 @@ function renderWantTable() {
   wrapper.className = "want-table-wrap";
   const items = filteredWantItems();
   if (state.wants.loading) {
-    wrapper.innerHTML = '<div class="empty-state">加载中</div>';
+    wrapper.innerHTML = `<div class="empty-state">${escapeHtml(uiText("loading"))}</div>`;
     return wrapper;
   }
   if (state.wants.error) {
@@ -781,7 +1190,7 @@ function renderWantTable() {
     return wrapper;
   }
   if (items.length === 0) {
-    wrapper.innerHTML = '<div class="empty-state">暂无想看资源</div>';
+    wrapper.innerHTML = `<div class="empty-state">${escapeHtml(uiText("noWants"))}</div>`;
     return wrapper;
   }
   wrapper.innerHTML = `
@@ -789,11 +1198,11 @@ function renderWantTable() {
       <table class="want-table">
         <thead>
           <tr>
-            <th>标题</th>
-            <th>类型</th>
-            <th>来源</th>
-            <th>添加时间</th>
-            <th>状态</th>
+            <th>${escapeHtml(uiText("title"))}</th>
+            <th>${escapeHtml(uiText("mediaType"))}</th>
+            <th>${escapeHtml(uiText("provider"))}</th>
+            <th>${escapeHtml(uiText("addedAt"))}</th>
+            <th>${escapeHtml(uiText("status"))}</th>
           </tr>
         </thead>
         <tbody>
@@ -822,7 +1231,7 @@ function filteredWantItems() {
 
 function renderWantRow(item) {
   return `
-    <tr class="want-row" data-want-id="${escapeAttribute(item.intent_id)}" role="button" tabindex="0" aria-label="查看 ${escapeAttribute(item.title || item.raw_text)} 的候选种子">
+    <tr class="want-row" data-want-id="${escapeAttribute(item.intent_id)}" role="button" tabindex="0" aria-label="${escapeAttribute(uiText("viewCandidates"))} ${escapeAttribute(item.title || item.raw_text)}">
       <td>
         <strong>${escapeHtml(item.title || item.raw_text)}</strong>
         <div class="muted-line">${escapeHtml(item.raw_text || "")}</div>
@@ -832,7 +1241,7 @@ function renderWantRow(item) {
       <td>${escapeHtml(formatDateTime(item.added_at))}</td>
       <td>
         <span class="badge ${item.status === "queued" ? "ok" : ""}">${escapeHtml(item.status_label || item.state)}</span>
-        <span class="inline-action">查看候选</span>
+        <span class="inline-action">${escapeHtml(uiText("viewCandidates"))}</span>
       </td>
     </tr>
   `;
@@ -840,7 +1249,7 @@ function renderWantRow(item) {
 
 function renderWantCard(item) {
   return `
-    <article class="want-card" data-want-id="${escapeAttribute(item.intent_id)}" role="button" tabindex="0" aria-label="查看 ${escapeAttribute(item.title || item.raw_text)} 的候选种子">
+    <article class="want-card" data-want-id="${escapeAttribute(item.intent_id)}" role="button" tabindex="0" aria-label="${escapeAttribute(uiText("viewCandidates"))} ${escapeAttribute(item.title || item.raw_text)}">
       <div class="want-card-header">
         <strong>${escapeHtml(item.title || item.raw_text)}</strong>
         <span class="badge ${item.status === "queued" ? "ok" : ""}">${escapeHtml(item.status_label || item.state)}</span>
@@ -852,7 +1261,7 @@ function renderWantCard(item) {
         <span>${escapeHtml(formatDateTime(item.added_at))}</span>
       </div>
       <div class="want-card-footer">
-        <span class="inline-action">查看候选</span>
+        <span class="inline-action">${escapeHtml(uiText("viewCandidates"))}</span>
       </div>
     </article>
   `;
@@ -865,16 +1274,16 @@ async function openWantCandidates(panel, intentId, message = "") {
   const status = modal.querySelector("[data-want-candidate-status]");
   modal.dataset.intentId = intentId;
   modal.classList.remove("hidden");
-  title.textContent = "候选种子";
+  title.textContent = uiText("candidateTorrents");
   status.innerHTML = message ? `<div class="status-item ok">${escapeHtml(message)}</div>` : "";
-  list.innerHTML = '<div class="empty-state">正在读取候选</div>';
+  list.innerHTML = `<div class="empty-state">${escapeHtml(uiText("loadingCandidates"))}</div>`;
   try {
     const response = await fetch(`/api/wants/${encodeURIComponent(intentId)}/candidates`);
     const payload = await response.json();
     if (!response.ok) {
-      throw new Error(payload.error || `请求失败：${response.status}`);
+      throw new Error(payload.error || `${uiText("requestFailedPrefix")}: ${response.status}`);
     }
-    title.textContent = payload.intent?.title || "候选种子";
+    title.textContent = payload.intent?.title || uiText("candidateTorrents");
     list.innerHTML = renderWantCandidateList(payload.items || []);
   } catch (error) {
     list.innerHTML = `<div class="status-item warning">${escapeHtml(error.message)}</div>`;
@@ -883,14 +1292,14 @@ async function openWantCandidates(panel, intentId, message = "") {
 
 function renderWantCandidateList(items) {
   if (items.length === 0) {
-    return '<div class="empty-state">还没有候选。先点“搜索”。</div>';
+    return `<div class="empty-state">${escapeHtml(uiText("noCandidates"))}</div>`;
   }
   const matching = items.filter((item) => item.matches_requirements);
   const lower = items.filter((item) => !item.matches_requirements);
   return `
-    ${matching.length ? '<div class="candidate-group-title">符合偏好</div>' : ""}
+    ${matching.length ? `<div class="candidate-group-title">${escapeHtml(uiText("matchingPreference"))}</div>` : ""}
     ${matching.map(renderWantCandidateCard).join("")}
-    ${lower.length ? '<div class="candidate-group-title muted">低匹配，可强制</div>' : ""}
+    ${lower.length ? `<div class="candidate-group-title muted">${escapeHtml(uiText("lowerMatch"))}</div>` : ""}
     ${lower.map(renderWantCandidateCard).join("")}
   `;
 }
@@ -898,14 +1307,14 @@ function renderWantCandidateList(items) {
 function renderWantCandidateCard(item) {
   const tags = [...(item.official_tags || []), ...(item.inferred_tags || [])];
   const uniqueTags = Array.from(new Set(tags));
-  const actionLabel = item.matches_requirements ? "加入 qB" : "强制加入 qB";
-  const previewLabel = item.matches_requirements ? "预览入队" : "预览强制入队";
+  const actionLabel = item.matches_requirements ? uiText("enqueueQb") : uiText("forceEnqueueQb");
+  const previewLabel = item.matches_requirements ? uiText("previewEnqueue") : uiText("previewForceEnqueue");
   return `
     <article class="candidate-card ${item.matches_requirements ? "" : "dimmed"} ${item.selected ? "selected" : ""}">
       <div class="candidate-card-head">
         <div>
           <strong>${escapeHtml(item.title)}</strong>
-          <div class="muted-line">${escapeHtml(item.site)} · ${escapeHtml(formatCandidateSize(item))} · ${escapeHtml(item.seeders)} 做种 / ${escapeHtml(item.leechers)} 下载</div>
+          <div class="muted-line">${escapeHtml(item.site)} · ${escapeHtml(formatCandidateSize(item))} · ${escapeHtml(item.seeders)} ${escapeHtml(uiText("seeders"))} / ${escapeHtml(item.leechers)} ${escapeHtml(uiText("leechers"))}</div>
         </div>
         <div class="candidate-score">
           <span>${escapeHtml(item.score)}</span>
@@ -913,13 +1322,13 @@ function renderWantCandidateCard(item) {
         </div>
       </div>
       <div class="candidate-tags">
-        ${uniqueTags.map((tag) => `<span class="badge">${escapeHtml(tag)}</span>`).join("") || '<span class="badge">无标签</span>'}
+        ${uniqueTags.map((tag) => `<span class="badge">${escapeHtml(tag)}</span>`).join("") || `<span class="badge">${escapeHtml(uiText("noTags"))}</span>`}
       </div>
       ${renderCandidateNotes(item)}
       <div class="tracker-actions-group candidate-actions">
-        <button class="secondary-button" type="button" data-want-candidate-action="select" data-release-id="${escapeAttribute(item.release_id)}">选择候选</button>
-        <button class="secondary-button" type="button" data-want-candidate-action="preview" data-release-id="${escapeAttribute(item.release_id)}">${previewLabel}</button>
-        <button class="${item.matches_requirements ? "primary-button" : "secondary-button"}" type="button" data-want-candidate-action="enqueue" data-release-id="${escapeAttribute(item.release_id)}">${actionLabel}</button>
+        <button class="secondary-button" type="button" data-want-candidate-action="select" data-release-id="${escapeAttribute(item.release_id)}">${escapeHtml(uiText("selectCandidate"))}</button>
+        <button class="secondary-button" type="button" data-want-candidate-action="preview" data-release-id="${escapeAttribute(item.release_id)}">${escapeHtml(previewLabel)}</button>
+        <button class="${item.matches_requirements ? "primary-button" : "secondary-button"}" type="button" data-want-candidate-action="enqueue" data-release-id="${escapeAttribute(item.release_id)}">${escapeHtml(actionLabel)}</button>
       </div>
     </article>
   `;
@@ -943,7 +1352,7 @@ function formatCandidateSize(item) {
   if (typeof item.size_gb === "number") {
     return `${item.size_gb.toFixed(item.size_gb >= 10 ? 1 : 2)} GB`;
   }
-  return "未知体积";
+  return uiText("unknownSize");
 }
 
 async function handleWantCandidateAction(panel, action, button) {
@@ -958,7 +1367,7 @@ async function handleWantCandidateAction(panel, action, button) {
     return;
   }
   if (action === "enqueue") {
-    const ok = window.confirm("确认把这个候选加入 qB 下载队列？这会向 qB 发送添加任务。");
+    const ok = window.confirm(uiText("confirmEnqueue"));
     if (!ok) {
       return;
     }
@@ -974,7 +1383,7 @@ async function handleWantCandidateAction(panel, action, button) {
       : { release_id: releaseId, execute: action === "enqueue" };
   try {
     setModalBusy(modal, true);
-    status.innerHTML = '<div class="status-item info">正在处理</div>';
+    status.innerHTML = `<div class="status-item info">${escapeHtml(uiText("processing"))}</div>`;
     const response = await fetch(endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -982,10 +1391,10 @@ async function handleWantCandidateAction(panel, action, button) {
     });
     const payload = await response.json();
     if (!response.ok) {
-      throw new Error(payload.error || `请求失败：${response.status}`);
+      throw new Error(payload.error || `${uiText("requestFailedPrefix")}: ${response.status}`);
     }
     await loadWants();
-    const message = payload.status?.[0]?.message || (action === "select" ? "候选已选择" : "操作完成");
+    const message = payload.status?.[0]?.message || (action === "select" ? uiText("selectedCandidate") : uiText("operationComplete"));
     await openWantCandidates(panel, intentId, message);
   } catch (error) {
     status.innerHTML = `<div class="status-item warning">${escapeHtml(error.message)}</div>`;
@@ -1047,13 +1456,13 @@ async function searchFilteredWants(panel) {
     });
     const payload = await response.json();
     if (!response.ok) {
-      throw new Error(payload.status?.[0]?.message || `请求失败：${response.status}`);
+      throw new Error(payload.status?.[0]?.message || `${uiText("requestFailedPrefix")}: ${response.status}`);
     }
     await loadWants();
     renderSection();
     const refreshedStatus = document.querySelector("[data-want-status]");
     if (refreshedStatus) {
-      refreshedStatus.innerHTML = `<div class="status-item ok">${escapeHtml(payload.status?.[0]?.message || "搜索已完成")}</div>`;
+      refreshedStatus.innerHTML = `<div class="status-item ok">${escapeHtml(payload.status?.[0]?.message || uiText("searchCompleted"))}</div>`;
     }
   } catch (error) {
     status.innerHTML = `<div class="status-item warning">${escapeHtml(error.message)}</div>`;
@@ -1066,10 +1475,10 @@ async function syncConfiguredWants(panel) {
     const response = await fetch("/api/wants/sync", { method: "POST" });
     const payload = await response.json();
     if (!response.ok) {
-      throw new Error(payload.status?.[0]?.message || `请求失败：${response.status}`);
+      throw new Error(payload.status?.[0]?.message || `${uiText("requestFailedPrefix")}: ${response.status}`);
     }
     if (status) {
-      status.innerHTML = `<div class="status-item ok">${escapeHtml(payload.status?.[0]?.message || "想看来源已同步")}</div>`;
+      status.innerHTML = `<div class="status-item ok">${escapeHtml(payload.status?.[0]?.message || uiText("syncWantsCompleted"))}</div>`;
     }
     return payload;
   } catch (error) {
@@ -1089,7 +1498,7 @@ function addWantSourceConfigRow(panel) {
       {
         provider: "douban",
         id: `douban-${index + 1}`,
-        label: `来源${index + 1}`,
+        label: `${uiText("provider")}${index + 1}`,
         enabled: true,
         max_pages: 1,
       },
@@ -1148,7 +1557,7 @@ async function submitWantSourceConfig(panel, endpoint) {
     });
     const payload = await response.json();
     if (!response.ok) {
-      throw new Error(payload.status?.[0]?.message || `请求失败：${response.status}`);
+      throw new Error(payload.status?.[0]?.message || `${uiText("requestFailedPrefix")}: ${response.status}`);
     }
     status.innerHTML = `
       <div class="status-item ok">${escapeHtml(payload.status?.[0]?.message || "ok")}</div>
@@ -1163,12 +1572,12 @@ async function submitWantSourceConfig(panel, endpoint) {
 
 function formatMediaType(value) {
   const labels = {
-    movie: "电影",
-    tv: "电视剧",
-    anime: "动漫",
-    unknown: "未知",
+    movie: uiText("movie"),
+    tv: uiText("tv"),
+    anime: uiText("anime"),
+    unknown: uiText("unknown"),
   };
-  return labels[value] || value || "未知";
+  return labels[value] || value || uiText("unknown");
 }
 
 function formatDateTime(value) {
@@ -1204,9 +1613,9 @@ function renderTrackerCard(tracker) {
   header.setAttribute("aria-expanded", String(!tracker.collapsed));
   header.innerHTML = `
     <div class="tracker-title">
-      <strong>${escapeHtml(tracker.name || "新站点")}</strong>
-      ${tracker.saved ? "" : '<span class="badge warn">未保存</span>'}
-      ${tracker.type ? `<span class="badge">${escapeHtml(tracker.type)}</span>` : '<span class="badge">等待类型</span>'}
+      <strong>${escapeHtml(tracker.name || uiText("newSite"))}</strong>
+      ${tracker.saved ? "" : `<span class="badge warn">${escapeHtml(uiText("unsaved"))}</span>`}
+      ${tracker.type ? `<span class="badge">${escapeHtml(tracker.type)}</span>` : `<span class="badge">${escapeHtml(uiText("waitingType"))}</span>`}
     </div>
   `;
   header.addEventListener("click", () => {
@@ -1221,7 +1630,7 @@ function renderTrackerCard(tracker) {
   const collapse = document.createElement("button");
   collapse.className = "icon-button";
   collapse.type = "button";
-  collapse.setAttribute("aria-label", tracker.collapsed ? "展开站点" : "折叠站点");
+  collapse.setAttribute("aria-label", tracker.collapsed ? uiText("expandTracker") : uiText("collapseTracker"));
   collapse.textContent = tracker.collapsed ? "⌄" : "⌃";
   collapse.addEventListener("click", (event) => {
     event.stopPropagation();
@@ -1239,16 +1648,11 @@ function renderTrackerCard(tracker) {
     } else {
       const placeholder = document.createElement("div");
       placeholder.className = "placeholder";
-      placeholder.textContent = "先选择类型。选完类型后，只显示这个类型需要继续配置的选项。";
+      placeholder.textContent = uiText("chooseTypeFirst");
       body.append(placeholder);
     }
     body.append(renderTrackerDetailFooter(tracker));
     card.append(body);
-  } else {
-    const summary = document.createElement("div");
-    summary.className = "tracker-body";
-    summary.textContent = summarizeTracker(tracker);
-    card.append(summary);
   }
 
   return card;
@@ -1262,18 +1666,18 @@ function toggleTrackerCard(tracker) {
 function renderBaseFields(tracker) {
   const wrapper = document.createElement("div");
   wrapper.innerHTML = `
-    <div class="section-title">基础</div>
+    <div class="section-title">${escapeHtml(uiText("basics"))}</div>
     <div class="field-grid">
       <label class="field">
-        <span>类型 ${help("第一个必填项。选择后，下方才显示该类型需要继续配置的字段。")}</span>
+        <span>${escapeHtml(uiText("type"))} ${help(uiText("typeHelp"))}</span>
         <select data-field="type">
-          <option value="">选择类型...</option>
+          <option value="">${escapeHtml(uiText("selectType"))}</option>
           <option value="mteam">M-Team</option>
           <option value="nexusphp">NexusPHP</option>
         </select>
       </label>
       <label class="field">
-        <span>站点名称 ${help("第二个必填项。用于配置引用、日志、站点优先级和搜索结果。")}</span>
+        <span>${escapeHtml(uiText("siteName"))} ${help(uiText("siteNameHelp"))}</span>
         <input data-field="name" placeholder="mt" value="${escapeAttribute(tracker.name)}" />
       </label>
     </div>
@@ -1283,12 +1687,12 @@ function renderBaseFields(tracker) {
 }
 
 function renderTypeSpecificFields(tracker) {
-  const configTitle = tracker.type === "mteam" ? "M-Team 配置" : "NexusPHP 配置";
+  const configTitle = tracker.type === "mteam" ? uiText("trackerConfigMteam") : uiText("trackerConfigNexusphp");
   const wrapper = document.createElement("div");
   wrapper.innerHTML = `
     <div class="tracker-detail-grid">
       <div>
-        <div class="section-title">${configTitle}</div>
+        <div class="section-title">${escapeHtml(configTitle)}</div>
         ${renderDiscoveryFields(tracker)}
       </div>
       ${renderStatusPanel(tracker)}
@@ -1303,7 +1707,7 @@ function renderDiscoveryFields(tracker) {
     return `
       <div class="field-grid">
         <label class="field">
-          <span>发现方式 ${help("M-Team 支持 RSS 或 API。先选这里，再出现对应的认证和地址字段。")}</span>
+          <span>${escapeHtml(uiText("discoveryMode"))} ${help(uiText("discoveryModeHelp"))}</span>
           <select data-field="discovery_mode">
             <option value="rss">rss</option>
             <option value="api">api</option>
@@ -1324,11 +1728,11 @@ function renderDiscoveryFields(tracker) {
 function renderRssDiscoveryFields(tracker) {
   return `
     <label class="field wide">
-      <span>RSS URL ${help("RSS 发现方式需要填写订阅地址。选择 API 时不会要求这个字段。")}</span>
+      <span>RSS URL ${help(uiText("rssUrlHelp"))}</span>
       <input data-field="rss_url" value="${escapeAttribute(tracker.rss_url)}" />
     </label>
     <label class="field">
-      <span>Cookie 文件 ${help("可选。只保存本地 cookie secret 文件路径，不保存明文。")}</span>
+      <span>${escapeHtml(uiText("cookieFile"))} ${help(uiText("cookieFileHelp"))}</span>
       <input data-field="cookie_ref" value="${escapeAttribute(tracker.cookie_ref)}" />
     </label>
   `;
@@ -1337,15 +1741,15 @@ function renderRssDiscoveryFields(tracker) {
 function renderApiDiscoveryFields(tracker) {
   return `
     <label class="field">
-      <span>API key 文件 ${help("API 发现方式需要。这里只保存本地 secret 文件路径，例如 local/secrets/mt_api_key。")}</span>
+      <span>${escapeHtml(uiText("apiKeyFile"))} ${help(uiText("apiKeyFileHelp"))}</span>
       <input data-field="api_key_ref" value="${escapeAttribute(tracker.api_key_ref)}" />
     </label>
     <label class="field">
-      <span>API key 明文 ${help("可选填写。保存时写入 API key 文件指向的本地文件，保存后不回显明文。")}</span>
+      <span>${escapeHtml(uiText("apiKeyValue"))} ${help(uiText("apiKeyValueHelp"))}</span>
       <input data-field="api_key_value" value="${escapeAttribute(tracker.api_key_value)}" />
     </label>
     <label class="field">
-      <span>Auth header ${help("API 请求使用的认证 header。M-Team 默认是 x-api-key。")}</span>
+      <span>Auth header ${help(uiText("authHeaderHelp"))}</span>
       <input data-field="auth_header" value="${escapeAttribute(tracker.auth_header)}" />
     </label>
   `;
@@ -1356,13 +1760,13 @@ function renderTrackerDetailFooter(tracker) {
   footer.className = "tracker-actions";
   footer.innerHTML = `
     <div class="tracker-actions-group">
-      <button class="secondary-button" type="button" data-action="validate" aria-label="验证此站点">验证此站点</button>
-      <button class="secondary-button" type="button" data-action="site-probe" aria-label="站点探测">站点探测</button>
-      <button class="secondary-button" type="button" data-action="dry-run" aria-label="试运行预览">试运行预览</button>
+      <button class="secondary-button" type="button" data-action="validate" aria-label="${escapeAttribute(uiText("trackerValidate"))}">${escapeHtml(uiText("trackerValidate"))}</button>
+      <button class="secondary-button" type="button" data-action="site-probe" aria-label="${escapeAttribute(uiText("trackerProbe"))}">${escapeHtml(uiText("trackerProbe"))}</button>
+      <button class="secondary-button" type="button" data-action="dry-run" aria-label="${escapeAttribute(uiText("trackerDryRun"))}">${escapeHtml(uiText("trackerDryRun"))}</button>
     </div>
     <div class="tracker-actions-group">
-      <button class="secondary-button" type="button" data-action="cancel">取消</button>
-      <button class="primary-button" type="button" data-action="save">保存</button>
+      <button class="secondary-button" type="button" data-action="cancel">${escapeHtml(uiText("trackerCancel"))}</button>
+      <button class="primary-button" type="button" data-action="save">${escapeHtml(uiText("save"))}</button>
     </div>
   `;
   footer.addEventListener("click", (event) => {
@@ -1395,14 +1799,14 @@ async function handleTrackerAction(tracker, action) {
     const payload = await response.json();
     tracker.status = payload.status || tracker.status;
     if (!response.ok && !payload.status) {
-      tracker.status = [{ level: "warning", message: `请求失败：${response.status}` }];
+      tracker.status = [{ level: "warning", message: `${uiText("requestFailedPrefix")}: ${response.status}` }];
     }
     if (action === "save" && response.ok) {
       tracker.saved = true;
       tracker.api_key_value = "";
     }
   } catch (error) {
-    tracker.status = [{ level: "warning", message: `请求失败：${error.message}` }];
+    tracker.status = [{ level: "warning", message: `${uiText("requestFailedPrefix")}: ${error.message}` }];
   }
   renderSection();
 }
@@ -1410,12 +1814,12 @@ async function handleTrackerAction(tracker, action) {
 function renderStatusPanel(tracker) {
   return `
     <div class="status-panel">
-      <h3>状态</h3>
+      <h3>${escapeHtml(uiText("status"))}</h3>
       <div class="status-list">
         ${tracker.status
           .map(
             (item) =>
-              `<div class="status-item ${escapeAttribute(item.level)}">${escapeHtml(item.message)}</div>`,
+              `<div class="status-item ${escapeAttribute(item.level)}">${escapeHtml(formatStatusMessage(item.message))}</div>`,
           )
           .join("")}
       </div>
@@ -1431,8 +1835,8 @@ function bindFields(root, tracker) {
       tracker[field.dataset.field] = field.value;
       if (field.dataset.field === "type" || field.dataset.field === "discovery_mode") {
         tracker.status = [
-          { level: field.value ? "info" : "warning", message: field.value ? "类型已选择" : "类型必填" },
-          { level: tracker.name ? "info" : "warning", message: tracker.name ? "站点名称已填写" : "站点名称必填" },
+          { level: field.value ? "info" : "warning", message: field.value ? uiText("typeSelected") : uiText("typeRequired") },
+          { level: tracker.name ? "info" : "warning", message: tracker.name ? uiText("siteNameFilled") : uiText("siteNameRequired") },
         ];
         renderSection();
       }
@@ -1454,11 +1858,6 @@ function toDraftPayload(tracker) {
   };
 }
 
-function summarizeTracker(tracker) {
-  const status = tracker.status.map((item) => item.message).join(" · ");
-  return status || "尚未检查";
-}
-
 function escapeHtml(value) {
   return String(value)
     .replaceAll("&", "&amp;")
@@ -1471,7 +1870,27 @@ function escapeAttribute(value) {
 }
 
 function help(text) {
-  return `<button class="help" type="button" data-help="${escapeAttribute(text)}" aria-label="字段说明">?</button>`;
+  return `<button class="help" type="button" data-help="${escapeAttribute(text)}" aria-label="${escapeAttribute(uiText("fieldHelp"))}">?</button>`;
+}
+
+function formatStatusMessage(message) {
+  const translations = {
+    "API key 文件已存在": "apiKeyExists",
+    "API key file exists": "apiKeyExists",
+    "尚未检查": "notChecked",
+    "Not checked": "notChecked",
+    "类型已选择": "typeSelected",
+    "Type selected": "typeSelected",
+    "类型必填": "typeRequired",
+    "Type is required": "typeRequired",
+    "站点名称已填写": "siteNameFilled",
+    "Site name filled": "siteNameFilled",
+    "站点名称必填": "siteNameRequired",
+    "Site name is required": "siteNameRequired",
+    "尚未保存": "notSaved",
+    "Not saved": "notSaved",
+  };
+  return translations[message] ? uiText(translations[message]) : message;
 }
 
 function newClientId() {
@@ -1544,7 +1963,7 @@ function renderConfigFilePanel() {
   const page = document.createElement("div");
   page.className = "settings-panel config-file-panel";
   const sectionButtons = navigationSections
-    .filter((section) => settingsPanels[section])
+    .filter((section) => settingsPanelSpec(section))
     .map(
       (section) =>
         `<button class="secondary-button" type="button" data-config-jump="${escapeAttribute(section)}">${escapeHtml(copy[state.language].nav[section])}</button>`,
@@ -1553,16 +1972,16 @@ function renderConfigFilePanel() {
   page.innerHTML = `
     <div class="settings-panel-header">
       <div>
-        <div class="section-title">配置文件</div>
-        <p>当前仍保持一个物理 YAML 文件，避免 CLI、Docker 和 Unraid 部署同时迁移。各配置页会显示并保存自己的 YAML 区块。</p>
+        <div class="section-title">${escapeHtml(uiText("configFileTitle"))}</div>
+        <p>${escapeHtml(uiText("configFileDescription"))}</p>
       </div>
-      <span class="badge">${escapeHtml(state.configPath || "配置未加载")}</span>
+      <span class="badge">${escapeHtml(state.configPath || uiText("configNotLoaded"))}</span>
     </div>
     <div class="config-section-jumps">${sectionButtons}</div>
     <div class="section-yaml-editor">
-      <div class="section-title">完整配置预览</div>
-      <p>这里是归一化后的只读预览。需要修改时，进入对应配置页编辑“本页 YAML”。</p>
-      <pre class="diff-preview">${escapeHtml(state.configYaml || "配置尚未加载。")}</pre>
+      <div class="section-title">${escapeHtml(uiText("fullConfigPreview"))}</div>
+      <p>${escapeHtml(uiText("fullConfigPreviewDescription"))}</p>
+      <pre class="diff-preview">${escapeHtml(state.configYaml || uiText("configYamlNotLoaded"))}</pre>
     </div>
   `;
   page.addEventListener("click", (event) => {
@@ -1576,17 +1995,139 @@ function renderConfigFilePanel() {
 
 function renderSectionYamlEditor(section) {
   const yamlText = state.sectionYamls[section] || `${section}: {}\n`;
+  const description = uiText("sectionYamlDescription")
+    .replace("{path}", state.configPath || uiText("currentConfigFile"))
+    .replace("{section}", section);
   return `
     <div class="section-yaml-editor">
-      <div class="section-title">本页 YAML</div>
-      <p>对应 ${escapeHtml(state.configPath || "当前配置文件")} 中的 <code>${escapeHtml(section)}:</code> 区块。可以保留顶层区块名，也可以只填写区块内容。</p>
+      <div class="section-title">${escapeHtml(uiText("sectionYamlTitle"))}</div>
+      <p>${escapeHtml(description)}</p>
       <textarea class="section-yaml-textarea" data-section-yaml spellcheck="false">${escapeHtml(yamlText)}</textarea>
     </div>
   `;
 }
 
+function renderDownloaderStructuredEditor(sectionData) {
+  const budgetPools = Array.isArray(sectionData.budget_pools) ? sectionData.budget_pools : [];
+  const categoryPolicies = Array.isArray(sectionData.category_policies) ? sectionData.category_policies : [];
+  const policyNames = categoryPolicies.map((policy) => policy.name).filter(Boolean);
+  const poolNames = budgetPools.map((pool) => pool.name).filter(Boolean);
+  return `
+    <div class="structured-editor" data-downloader-structured-editor>
+      <div class="structured-section">
+        <div class="structured-section-head">
+          <div>
+            <div class="section-title">${escapeHtml(uiText("mediaCategoryMap"))}</div>
+            <p>${escapeHtml(uiText("wantRoutingHelp"))}</p>
+          </div>
+        </div>
+        <datalist id="downloader-category-policy-options">
+          ${policyNames.map((name) => `<option value="${escapeAttribute(name)}"></option>`).join("")}
+        </datalist>
+        <div class="field-grid compact">
+          ${renderMediaCategoryMapField("movie", sectionData.media_category_map?.movie)}
+          ${renderMediaCategoryMapField("tv", sectionData.media_category_map?.tv)}
+          ${renderMediaCategoryMapField("anime", sectionData.media_category_map?.anime)}
+        </div>
+      </div>
+      <div class="structured-section">
+        <div class="structured-section-head">
+          <div class="section-title">${escapeHtml(uiText("budgetPools"))}</div>
+          <button class="secondary-button" type="button" data-structured-action="add-budget-pool">${escapeHtml(uiText("addBudgetPool"))}</button>
+        </div>
+        <div class="structured-list" data-budget-pool-list>
+          ${budgetPools.map((pool, index) => renderBudgetPoolRow(pool, index)).join("")}
+        </div>
+      </div>
+      <div class="structured-section">
+        <div class="structured-section-head">
+          <div class="section-title">${escapeHtml(uiText("categoryPolicies"))}</div>
+          <button class="secondary-button" type="button" data-structured-action="add-category-policy">${escapeHtml(uiText("addCategoryPolicy"))}</button>
+        </div>
+        <datalist id="downloader-budget-pool-options">
+          ${poolNames.map((name) => `<option value="${escapeAttribute(name)}"></option>`).join("")}
+        </datalist>
+        <div class="structured-list" data-category-policy-list>
+          ${categoryPolicies.map((policy, index) => renderCategoryPolicyRow(policy, index)).join("")}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderMediaCategoryMapField(mediaType, value) {
+  return `
+    <label class="field">
+      <span>${escapeHtml(uiText(mediaType))}</span>
+      <input
+        data-media-category-map-field="${escapeAttribute(mediaType)}"
+        list="downloader-category-policy-options"
+        value="${escapeAttribute(value || "")}"
+      />
+    </label>
+  `;
+}
+
+function renderBudgetPoolRow(pool = {}, index = 0) {
+  return `
+    <div class="structured-row" data-budget-pool-row data-row-index="${index}">
+      <label class="field">
+        <span>${escapeHtml(uiText("budgetPoolName"))}</span>
+        <input data-budget-pool-field="name" value="${escapeAttribute(pool.name || "")}" />
+      </label>
+      <label class="field">
+        <span>${escapeHtml(uiText("maxSizeTib"))}</span>
+        <input data-budget-pool-field="max_size_tib" type="number" step="0.1" min="0" value="${escapeAttribute(pool.max_size_tib ?? "")}" />
+      </label>
+      <button class="secondary-button row-remove-button" type="button" data-structured-action="remove-budget-pool">${escapeHtml(uiText("remove"))}</button>
+    </div>
+  `;
+}
+
+function renderCategoryPolicyRow(policy = {}, index = 0) {
+  const mode = policy.mode || "add_only";
+  const deleteEnabled = policy.delete_enabled === true;
+  return `
+    <div class="structured-row category-policy-row" data-category-policy-row data-row-index="${index}">
+      <label class="field">
+        <span>${escapeHtml(uiText("categoryPolicyName"))}</span>
+        <input data-category-policy-field="name" value="${escapeAttribute(policy.name || "")}" />
+      </label>
+      <label class="field">
+        <span>${escapeHtml(uiText("mode"))}</span>
+        <select data-category-policy-field="mode">
+          <option value="add_only" ${mode === "add_only" ? "selected" : ""}>${escapeHtml(uiText("modeAddOnly"))}</option>
+          <option value="mutable" ${mode === "mutable" ? "selected" : ""}>${escapeHtml(uiText("modeMutable"))}</option>
+        </select>
+      </label>
+      <label class="field">
+        <span>${escapeHtml(uiText("budgetPools"))}</span>
+        <input data-category-policy-field="budget_pool" list="downloader-budget-pool-options" value="${escapeAttribute(policy.budget_pool || "")}" />
+      </label>
+      <label class="field">
+        <span>${escapeHtml(uiText("deleteEnabled"))}</span>
+        <select data-category-policy-field="delete_enabled">
+          <option value="false" ${deleteEnabled ? "" : "selected"}>${escapeHtml(uiText("no"))}</option>
+          <option value="true" ${deleteEnabled ? "selected" : ""}>${escapeHtml(uiText("yes"))}</option>
+        </select>
+      </label>
+      <label class="field">
+        <span>${escapeHtml(uiText("overBudgetBehavior"))}</span>
+        <select data-category-policy-field="over_budget_behavior">
+          <option value="add_paused" selected>${escapeHtml(uiText("overBudgetAddPaused"))}</option>
+        </select>
+      </label>
+      <label class="field">
+        <span>${escapeHtml(uiText("tags"))}</span>
+        <input data-category-policy-field="tags" value="${escapeAttribute((policy.tags || []).join(", "))}" />
+      </label>
+      <button class="secondary-button row-remove-button" type="button" data-structured-action="remove-category-policy">${escapeHtml(uiText("remove"))}</button>
+    </div>
+  `;
+}
+
 function renderSettingsPanel(section) {
-  const spec = settingsPanels[section];
+  const spec = settingsPanelSpec(section);
   const page = document.createElement("div");
   page.className = "settings-panel";
   const sectionData = state.configSections[section] || {};
@@ -1604,29 +2145,34 @@ function renderSettingsPanel(section) {
     <div class="settings-panel-header">
       <div>
         <div class="section-title">${escapeHtml(spec.title)}</div>
-        <p>可以用表单编辑常用项，也可以直接编辑本页 YAML 区块。保存前会先做 schema 校验。</p>
+        <p>${escapeHtml(uiText("settingsDescription"))}</p>
       </div>
-      <span class="badge">来自 YAML</span>
+      <span class="badge">${escapeHtml(uiText("fromYaml"))}</span>
     </div>
     <div class="field-grid">${fields}</div>
+    ${section === "downloader" ? renderDownloaderStructuredEditor(sectionData) : ""}
     ${renderSectionYamlEditor(section)}
     <div class="tracker-actions sticky-actions">
       <div class="tracker-actions-group">
-        <button class="secondary-button" type="button" data-setting-action="validate">验证表单</button>
-        <button class="secondary-button" type="button" data-setting-action="preview">预览表单改动</button>
-        <button class="secondary-button" type="button" data-setting-action="yaml-preview">预览本页 YAML</button>
-        <button class="secondary-button" type="button" data-setting-action="yaml-save">保存本页 YAML</button>
+        <button class="secondary-button" type="button" data-setting-action="validate">${escapeHtml(uiText("validateForm"))}</button>
+        <button class="secondary-button" type="button" data-setting-action="preview">${escapeHtml(uiText("previewFormChanges"))}</button>
+        <button class="secondary-button" type="button" data-setting-action="yaml-preview">${escapeHtml(uiText("previewThisPageYaml"))}</button>
+        <button class="secondary-button" type="button" data-setting-action="yaml-save">${escapeHtml(uiText("saveThisPageYaml"))}</button>
       </div>
-      <button class="primary-button" type="button" data-setting-action="save">保存表单</button>
+      <button class="primary-button" type="button" data-setting-action="save">${escapeHtml(uiText("saveForm"))}</button>
     </div>
     <div class="status-panel settings-status" data-setting-status>
-      <h3>状态</h3>
+      <h3>${escapeHtml(uiText("status"))}</h3>
       <div class="status-list">
-        <div class="status-item info">表单可编辑，尚未写入 YAML。</div>
+        <div class="status-item info">${escapeHtml(uiText("formEditable"))}</div>
       </div>
     </div>
   `;
   page.addEventListener("click", (event) => {
+    const structuredAction = event.target?.closest?.("[data-structured-action]")?.dataset?.structuredAction;
+    if (structuredAction && handleDownloaderStructuredAction(page, structuredAction, event.target)) {
+      return;
+    }
     const action = event.target?.closest?.("[data-setting-action]")?.dataset?.settingAction;
     if (action) {
       updateSettingsPanelStatus(page, section, action);
@@ -1635,6 +2181,35 @@ function renderSettingsPanel(section) {
   page.addEventListener("input", () => resetSettingsPanelPreview(page));
   page.addEventListener("change", () => resetSettingsPanelPreview(page));
   return page;
+}
+
+function handleDownloaderStructuredAction(page, action, target) {
+  if (!page.querySelector("[data-downloader-structured-editor]")) {
+    return false;
+  }
+  if (action === "add-budget-pool") {
+    const list = page.querySelector("[data-budget-pool-list]");
+    list?.insertAdjacentHTML("beforeend", renderBudgetPoolRow({}, list.children.length));
+    resetSettingsPanelPreview(page);
+    return true;
+  }
+  if (action === "remove-budget-pool") {
+    target.closest("[data-budget-pool-row]")?.remove();
+    resetSettingsPanelPreview(page);
+    return true;
+  }
+  if (action === "add-category-policy") {
+    const list = page.querySelector("[data-category-policy-list]");
+    list?.insertAdjacentHTML("beforeend", renderCategoryPolicyRow({ tags: ["seed-agent"] }, list.children.length));
+    resetSettingsPanelPreview(page);
+    return true;
+  }
+  if (action === "remove-category-policy") {
+    target.closest("[data-category-policy-row]")?.remove();
+    resetSettingsPanelPreview(page);
+    return true;
+  }
+  return false;
 }
 
 function updateSettingsPanelStatus(page, section, action) {
@@ -1659,9 +2234,9 @@ function updateSettingsPanelStatus(page, section, action) {
     return;
   }
   const messages = {
-    validate: `${settingsPanels[section].title}：表单格式通过。`,
-    preview: `${settingsPanels[section].title}：表单预览已准备。`,
-    save: `${settingsPanels[section].title}：表单已保存在当前页面状态。`,
+    validate: `${settingsPanelSpec(section).title}: ${uiText("formValid")}`,
+    preview: `${settingsPanelSpec(section).title}: ${uiText("formPreviewReady")}`,
+    save: `${settingsPanelSpec(section).title}: ${uiText("formSavedPageState")}`,
   };
   page.querySelector("[data-setting-status] .status-list").innerHTML = `
     <div class="status-item ok">${escapeHtml(messages[action])}</div>
@@ -1715,7 +2290,55 @@ function readSettingsPanelData(page, section) {
       coerceSettingValue(field.value, field.dataset.settingType),
     );
   });
+  if (section === "downloader") {
+    readDownloaderStructuredData(page, data);
+  }
   return data;
+}
+
+function readDownloaderStructuredData(page, data) {
+  const mediaCategoryMap = {};
+  page.querySelectorAll("[data-media-category-map-field]").forEach((field) => {
+    const value = field.value.trim();
+    if (value) {
+      mediaCategoryMap[field.dataset.mediaCategoryMapField] = value;
+    }
+  });
+  data.media_category_map = mediaCategoryMap;
+
+  const budgetPools = [];
+  page.querySelectorAll("[data-budget-pool-row]").forEach((row) => {
+    const name = row.querySelector('[data-budget-pool-field="name"]')?.value.trim() || "";
+    const maxSize = row.querySelector('[data-budget-pool-field="max_size_tib"]')?.value.trim() || "";
+    if (!name && !maxSize) {
+      return;
+    }
+    budgetPools.push({
+      name,
+      max_size_tib: Number(maxSize),
+    });
+  });
+  data.budget_pools = budgetPools;
+
+  const categoryPolicies = [];
+  page.querySelectorAll("[data-category-policy-row]").forEach((row) => {
+    const name = row.querySelector('[data-category-policy-field="name"]')?.value.trim() || "";
+    const budgetPool = row.querySelector('[data-category-policy-field="budget_pool"]')?.value.trim() || "";
+    const mode = row.querySelector('[data-category-policy-field="mode"]')?.value || "add_only";
+    const tags = row.querySelector('[data-category-policy-field="tags"]')?.value || "";
+    if (!name && !budgetPool) {
+      return;
+    }
+    categoryPolicies.push({
+      name,
+      mode,
+      budget_pool: budgetPool,
+      delete_enabled: row.querySelector('[data-category-policy-field="delete_enabled"]')?.value === "true",
+      over_budget_behavior: row.querySelector('[data-category-policy-field="over_budget_behavior"]')?.value || "add_paused",
+      tags: tags.split(",").map((item) => item.trim()).filter(Boolean),
+    });
+  });
+  data.category_policies = categoryPolicies;
 }
 
 function coerceSettingValue(value, type) {
@@ -1777,7 +2400,7 @@ function parseMapValue(value) {
         rawValue.trim() === "" ||
         !Number.isFinite(numericValue)
       ) {
-        throw new Error(`无效映射项：${item}。请使用 site=priority，例如 demo=10。`);
+        throw new Error(`${uiText("invalidMapPrefix")}: ${item}. ${uiText("invalidMapSuffix")}`);
       }
       result[key] = numericValue;
     });
@@ -1788,7 +2411,7 @@ function resetSettingsPanelPreview(page) {
   page.dataset.previewConfirmed = "false";
   const saveButton = page.querySelector('[data-setting-action="save"]');
   if (saveButton) {
-    saveButton.textContent = "保存表单";
+    saveButton.textContent = uiText("saveForm");
   }
 }
 
@@ -1832,7 +2455,7 @@ async function submitSettingsPanelYaml(page, section, endpoint, persist) {
     });
     const payload = await response.json();
     if (!response.ok) {
-      throw new Error(payload.status?.[0]?.message || `请求失败：${response.status}`);
+      throw new Error(payload.status?.[0]?.message || `${uiText("requestFailedPrefix")}: ${response.status}`);
     }
     if (persist) {
       applyReturnedConfigState(payload, section, page);
@@ -1840,9 +2463,9 @@ async function submitSettingsPanelYaml(page, section, endpoint, persist) {
     page.dataset.previewConfirmed = "false";
     const saveButton = page.querySelector('[data-setting-action="save"]');
     if (saveButton) {
-      saveButton.textContent = "保存表单";
+      saveButton.textContent = uiText("saveForm");
     }
-    const message = persist ? "本页 YAML 已保存" : "本页 YAML 预览已准备";
+    const message = persist ? uiText("thisPageYamlSaved") : uiText("thisPageYamlPreviewReady");
     const diff = payload.diff ? `<pre class="diff-preview">${escapeHtml(payload.diff)}</pre>` : "";
     page.querySelector("[data-setting-status] .status-list").innerHTML = `
       <div class="status-item ok">${escapeHtml(message)}</div>
@@ -1866,16 +2489,16 @@ async function previewSettingsPanelSave(page, section) {
     });
     const payload = await response.json();
     if (!response.ok) {
-      throw new Error(payload.status?.[0]?.message || `请求失败：${response.status}`);
+      throw new Error(payload.status?.[0]?.message || `${uiText("requestFailedPrefix")}: ${response.status}`);
     }
     page.dataset.previewConfirmed = "true";
     const saveButton = page.querySelector('[data-setting-action="save"]');
     if (saveButton) {
-      saveButton.textContent = "确认保存表单";
+      saveButton.textContent = uiText("confirmSaveForm");
     }
     page.querySelector("[data-setting-status] .status-list").innerHTML = `
-      <div class="status-item ok">保存确认</div>
-      <pre class="diff-preview">${escapeHtml(payload.diff || "没有实际配置变化。")}</pre>
+      <div class="status-item ok">${escapeHtml(uiText("saveConfirmation"))}</div>
+      <pre class="diff-preview">${escapeHtml(payload.diff || uiText("cleanupNoConfigChanges"))}</pre>
     `;
   } catch (error) {
     page.dataset.previewConfirmed = "false";
@@ -1899,16 +2522,16 @@ async function saveSettingsPanel(page, section) {
     });
     const payload = await response.json();
     if (!response.ok) {
-      throw new Error(payload.status?.[0]?.message || `请求失败：${response.status}`);
+      throw new Error(payload.status?.[0]?.message || `${uiText("requestFailedPrefix")}: ${response.status}`);
     }
     applyReturnedConfigState(payload, section, page);
     page.dataset.previewConfirmed = "false";
     const saveButton = page.querySelector('[data-setting-action="save"]');
     if (saveButton) {
-      saveButton.textContent = "保存表单";
+      saveButton.textContent = uiText("saveForm");
     }
     page.querySelector("[data-setting-status] .status-list").innerHTML = `
-      <div class="status-item ok">配置已保存</div>
+      <div class="status-item ok">${escapeHtml(uiText("configSaved"))}</div>
     `;
   } catch (error) {
     page.querySelector("[data-setting-status] .status-list").innerHTML = `

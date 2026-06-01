@@ -102,6 +102,10 @@ by completion period, and unfinished work is ordered by current priority.
   - Downloader, discovery, cleanup, acquisition decision, and torrent-filter
     settings can be loaded from YAML and saved through schema validation and
     diff preview.
+  - Downloader settings now include visual editors for qB category policies,
+    budget pools, and Want List movie/TV/anime routing via
+    `downloader.media_category_map`, so these common operations no longer
+    require hand-editing YAML.
   - Each settings page exposes its own editable top-level YAML block while the
     runtime still uses one physical config file for Docker, CLI, and Unraid
     compatibility.

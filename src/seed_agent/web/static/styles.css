@@ -439,6 +439,59 @@ body.dark .secondary-button {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.structured-editor {
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 18px;
+  margin-top: 4px;
+  padding-top: 16px;
+}
+
+.structured-section {
+  display: grid;
+  gap: 10px;
+}
+
+.structured-section-head {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.structured-section-head .section-title {
+  margin-bottom: 0;
+}
+
+.structured-section-head p {
+  color: var(--muted);
+  font-size: 13px;
+  margin: 4px 0 0;
+}
+
+.structured-list {
+  display: grid;
+  gap: 10px;
+}
+
+.structured-row {
+  align-items: end;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
+  padding: 12px;
+}
+
+.category-policy-row {
+  grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
+}
+
+.row-remove-button {
+  align-self: end;
+}
+
 .field {
   color: var(--muted);
   display: grid;
@@ -931,6 +984,8 @@ body.dark .secondary-button {
   .overview-grid,
   .tracker-detail-grid,
   .wants-toolbar,
+  .structured-row,
+  .category-policy-row,
   .want-source-row,
   .want-source-row .field.wide,
   .field-grid.compact,
@@ -953,8 +1008,10 @@ body.dark .secondary-button {
   }
 
   .settings-panel-header,
+  .structured-section-head,
   .want-card-header,
   .candidate-card-head {
+    align-items: stretch;
     flex-direction: column;
   }
 
@@ -1013,8 +1070,8 @@ body.dark .secondary-button {
   }
 
   .help {
-    height: 24px;
-    width: 24px;
+    height: 32px;
+    width: 32px;
   }
 
   .want-table-wrap {
@@ -1047,6 +1104,16 @@ body.dark .secondary-button {
 
   .want-source-row {
     padding: 10px;
+  }
+
+  .structured-row {
+    padding: 10px;
+  }
+
+  .sticky-actions {
+    position: static;
+    box-shadow: none;
+    margin: 16px 0 0;
   }
 }
 

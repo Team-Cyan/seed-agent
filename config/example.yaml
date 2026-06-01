@@ -92,6 +92,13 @@ downloader:
   type: qbittorrent
   target: unraid-qb
   default_category: seed
+  # Optional Want List routing. Values must reference names in category_policies.
+  # Empty or omitted values keep the legacy fallback:
+  # movie -> movie when present, tv/anime -> tv when present, otherwise default_category.
+  media_category_map:
+    movie: movie
+    tv: tv
+    anime: tv
   category_policies:
     - name: seed
       mode: mutable

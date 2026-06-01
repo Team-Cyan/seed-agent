@@ -268,12 +268,33 @@ class ScoringConfig(BaseModel):
 class DownloaderConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
+    VALID_MEDIA_CATEGORY_KEYS: ClassVar[set[str]] = {"movie", "tv", "anime"}
+
     type: Literal["qbittorrent"]
     target: str
     default_category: str
     category_policies: list[CategoryPolicyConfig] = Field(default_factory=list)
     budget_pools: list[BudgetPoolConfig] = Field(default_factory=list)
+    media_category_map: dict[str, str] = Field(default_factory=dict)
     secret_ref: str | None = None
+
+    @field_validator("media_category_map", mode="before")
+    @classmethod
+    def normalize_media_category_map(cls, value: Any) -> dict[str, str]:
+        if value is None:
+            return {}
+        if not isinstance(value, dict):
+            raise ValueError("media_category_map must be a mapping")
+        normalized: dict[str, str] = {}
+        for raw_key, raw_category in value.items():
+            key = str(raw_key).strip().lower()
+            if key not in cls.VALID_MEDIA_CATEGORY_KEYS:
+                allowed = ", ".join(sorted(cls.VALID_MEDIA_CATEGORY_KEYS))
+                raise ValueError(f"media_category_map key must be one of: {allowed}")
+            if raw_category in {None, ""}:
+                continue
+            normalized[key] = str(raw_category).strip()
+        return normalized
 
     @model_validator(mode="after")
     def validate_category_policy_links(self) -> DownloaderConfig:
@@ -285,6 +306,12 @@ class DownloaderConfig(BaseModel):
             raise ValueError("budget pool names must be unique")
         if self.default_category not in set(policy_names):
             raise ValueError("default_category must match a configured category policy")
+        known_policies = set(policy_names)
+        for media_type, category in self.media_category_map.items():
+            if category not in known_policies:
+                raise ValueError(
+                    f"media_category_map {media_type} references unknown category {category}"
+                )
         known_pools = set(pool_names)
         for policy in self.category_policies:
             if policy.budget_pool not in known_pools:

@@ -94,6 +94,14 @@ def test_tracker_header_row_toggles_collapse() -> None:
     assert "cursor: pointer" in styles
 
 
+def test_collapsed_tracker_cards_do_not_render_status_body() -> None:
+    script = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
+
+    assert "summarizeTracker" not in script
+    assert "summary.textContent = summarizeTracker(tracker)" not in script
+    assert "if (!tracker.collapsed)" in script
+
+
 def test_api_key_input_is_plain_text_for_visibility() -> None:
     script = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
 
@@ -130,6 +138,10 @@ def test_non_tracker_sections_render_config_panels() -> None:
     assert "watchlist_url" in script
     assert "series_search_mode" in script
     assert "select:season|episode" in script
+    assert "renderDownloaderStructuredEditor" in script
+    assert "data-media-category-map-field" in script
+    assert "data-category-policy-row" in script
+    assert "data-budget-pool-row" in script
     assert "removeprefix" not in script
     assert "renderWantsPanel" in script
     assert 'fetch("/api/wants"' in script
@@ -140,6 +152,27 @@ def test_non_tracker_sections_render_config_panels() -> None:
     assert "map" in script
     assert "配置文件" in script
     assert "Raw YAML preview" not in script
+
+
+def test_downloader_page_exposes_visual_category_and_budget_editors() -> None:
+    script = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
+    styles = (STATIC_ROOT / "styles.css").read_text(encoding="utf-8")
+
+    assert "readDownloaderStructuredData" in script
+    assert "handleDownloaderStructuredAction" in script
+    assert 'data-structured-action="add-budget-pool"' in script
+    assert 'data-structured-action="add-category-policy"' in script
+    assert 'data-budget-pool-field="max_size_tib"' in script
+    assert 'data-category-policy-field="budget_pool"' in script
+    assert 'data-category-policy-field="delete_enabled"' in script
+    assert "renderMediaCategoryMapField" in script
+    assert 'renderMediaCategoryMapField("movie"' in script
+    assert 'renderMediaCategoryMapField("tv"' in script
+    assert 'renderMediaCategoryMapField("anime"' in script
+    assert "Want type routing" in script
+    assert "想看类型路由" in script
+    assert ".structured-editor" in styles
+    assert ".structured-row" in styles
 
 
 def test_each_config_page_exposes_section_yaml_editor() -> None:
@@ -164,6 +197,46 @@ def test_settings_pages_use_sticky_action_bar() -> None:
     assert "sticky-actions" in script
     assert ".sticky-actions" in styles
     assert "position: sticky" in styles
+
+
+def test_mobile_settings_actions_are_not_sticky() -> None:
+    styles = (STATIC_ROOT / "styles.css").read_text(encoding="utf-8")
+
+    assert "@media (max-width: 700px)" in styles
+    assert ".sticky-actions {\n    position: static;" in styles
+    assert "box-shadow: none;" in styles
+
+
+def test_english_mode_covers_dynamic_config_and_tracker_copy() -> None:
+    script = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
+
+    assert "settingsPanelsByLanguage" in script
+    assert "Default category" in script
+    assert "Config file is not loaded" in script
+    assert "Full config preview" in script
+    assert "Edit common options with the form" in script
+    assert "Save form" in script
+    assert "This page YAML" in script
+    assert "API key file exists" in script
+    assert "Choose a type first" in script
+
+
+def test_want_media_and_state_labels_are_translated() -> None:
+    script = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
+
+    assert 'tv: "电视剧"' in script
+    assert 'tv: "TV"' in script
+    assert 'statusDeleted: "已删除"' in script
+    assert 'statusDeleted: "Deleted"' in script
+    assert 'deleted: uiText("statusDeleted")' in script
+    assert 'downloading: uiText("statusDownloading")' in script
+    assert 'seeding: uiText("statusSeeding")' in script
+
+
+def test_mobile_help_controls_remain_tappable() -> None:
+    styles = (STATIC_ROOT / "styles.css").read_text(encoding="utf-8")
+
+    assert ".help {\n    height: 32px;\n    width: 32px;" in styles
 
 
 def test_navigation_uses_user_facing_acquisition_and_torrent_filter_terms() -> None:

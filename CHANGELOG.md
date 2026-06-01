@@ -4,6 +4,23 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.7.0 - 2026-06-01
+
+### Added
+
+- Added configurable Want List media routing through
+  `downloader.media_category_map`, so movie, TV, and anime wants can target
+  different qB categories instead of relying only on legacy fallback names.
+- Added visual Web UI editors for downloader budget pools, qB category
+  policies, and Want List media-type routing, reducing the need to hand-edit
+  downloader YAML for common setup.
+
+### Changed
+
+- Refined the Web UI configuration surface with broader Chinese/English dynamic
+  copy coverage, collapsed tracker cards that hide status details until opened,
+  and mobile settings actions that no longer occupy fixed viewport space.
+
 ## 0.6.1 - 2026-05-31
 
 ### Fixed
