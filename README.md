@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/assets/seed-agent-logo.svg" alt="seed-agent" width="520">
+</p>
+
 # seed-agent
 
 `seed-agent` is a Docker-first self-hosted PT automation app for NAS and homelab deployments.

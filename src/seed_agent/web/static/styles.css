@@ -89,9 +89,19 @@ button {
 }
 
 .brand {
+  align-items: center;
+  display: flex;
+  gap: 10px;
   font-size: 18px;
   font-weight: 700;
   margin-bottom: 24px;
+}
+
+.brand-icon {
+  border-radius: 8px;
+  flex: 0 0 auto;
+  height: 32px;
+  width: 32px;
 }
 
 .nav-list {

@@ -58,6 +58,7 @@ jobs:
           labels: |
             org.opencontainers.image.title=seed-agent
             org.opencontainers.image.description=Docker-first PT automation for NAS and homelab qBittorrent operations
+            org.opencontainers.image.icon=https://raw.githubusercontent.com/Team-Cyan/seed-agent/main/docs/assets/seed-agent-icon.png
             org.opencontainers.image.version=${{ steps.release.outputs.version }}
 
       - name: Build and push image

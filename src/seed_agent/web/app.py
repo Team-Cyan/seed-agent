@@ -1065,6 +1065,10 @@ def _content_type_for(path: Path) -> str:
         return "text/css; charset=utf-8"
     if path.suffix == ".js":
         return "text/javascript; charset=utf-8"
+    if path.suffix == ".svg":
+        return "image/svg+xml"
+    if path.suffix == ".png":
+        return "image/png"
     return "application/octet-stream"
 
 

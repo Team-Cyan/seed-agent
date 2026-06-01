@@ -4,6 +4,19 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.8.1 - 2026-06-01
+
+### Added
+
+- Added project logo and icon assets, wired them into the README, Web UI
+  favicon/sidebar branding, Docker image metadata, Compose example, and Unraid
+  DockerMan template.
+
+### Fixed
+
+- Web static serving now returns browser-renderable MIME types for SVG and PNG
+  image assets.
+
 ## 0.8.0 - 2026-06-01
 
 ### Added
