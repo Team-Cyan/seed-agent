@@ -134,6 +134,10 @@ by completion period, and unfinished work is ordered by current priority.
     row/card affordances, keyboard-accessible candidate opening, sticky modal
     headers, backdrop/Escape modal close behavior, and stronger lower-match
     candidate styling that stays actionable.
+  - Web UI and deployment packaging now include seed-agent logo/icon assets,
+    favicon/sidebar branding, README branding, OCI image icon metadata, Compose
+    labels, Unraid DockerMan icon wiring, and static MIME handling for SVG/PNG
+    assets.
   - Web UI Want List search is dry-run/search-only; it does not enqueue or
     download unless the separate intent enqueue path is explicitly executed.
 
