@@ -186,6 +186,7 @@ const copy = {
       provider: "来源",
       readingStatus: "状态读取",
       remove: "移除",
+      refreshWants: "刷新列表",
       requestFailedPrefix: "请求失败",
       resourceIntents: "获取意图",
       rssUrlHelp: "RSS 发现方式需要填写订阅地址。选择 API 时不会要求这个字段。",
@@ -196,6 +197,7 @@ const copy = {
       search: "搜索",
       searchCompleted: "搜索已完成",
       searchCurrentFilter: "搜索当前筛选",
+      searchTorrentsCurrentFilter: "搜索种子",
       sectionYamlDescription: "对应 {path} 中的 {section}: 区块。可以保留顶层区块名，也可以只填写区块内容。",
       sectionYamlTitle: "本页 YAML",
       seeders: "做种",
@@ -404,6 +406,7 @@ const copy = {
       provider: "Source",
       readingStatus: "Status read",
       remove: "Remove",
+      refreshWants: "Refresh list",
       requestFailedPrefix: "Request failed",
       resourceIntents: "Resource intents",
       rssUrlHelp: "RSS discovery needs a feed URL. This field is not required in API mode.",
@@ -414,6 +417,7 @@ const copy = {
       search: "Search",
       searchCompleted: "Search completed",
       searchCurrentFilter: "Search current filters",
+      searchTorrentsCurrentFilter: "Search torrents",
       sectionYamlDescription: "Maps to the {section}: block in {path}. You can keep the top-level section name or enter only the section body.",
       sectionYamlTitle: "This page YAML",
       seeders: "seeders",
@@ -965,7 +969,8 @@ function renderWantsPanel() {
         </label>
       </div>
       <div class="tracker-actions-group">
-        <button class="secondary-button" type="button" data-want-action="search" aria-label="${escapeAttribute(uiText("searchCurrentFilter"))}">${escapeHtml(uiText("search"))}</button>
+        <button class="secondary-button" type="button" data-want-action="sync" aria-label="${escapeAttribute(uiText("refreshWants"))}">${escapeHtml(uiText("refreshWants"))}</button>
+        <button class="secondary-button" type="button" data-want-action="search" aria-label="${escapeAttribute(uiText("searchTorrentsCurrentFilter"))}">${escapeHtml(uiText("searchTorrentsCurrentFilter"))}</button>
         <button class="primary-button" type="button" data-want-action="config-open" aria-label="${escapeAttribute(uiText("sourceConfigTitle"))}">${escapeHtml(uiText("sourceConfig"))}</button>
       </div>
     </div>
@@ -1404,6 +1409,10 @@ async function handleWantCandidateAction(panel, action, button) {
 }
 
 async function handleWantAction(panel, action, event) {
+  if (action === "sync") {
+    await refreshWants(panel);
+    return;
+  }
   if (action === "search") {
     await searchFilteredWants(panel);
     return;
@@ -1443,6 +1452,19 @@ async function handleWantAction(panel, action, event) {
       await loadWants();
       renderSection();
     }
+  }
+}
+
+async function refreshWants(panel) {
+  const payload = await syncConfiguredWants(panel);
+  if (!payload) {
+    return;
+  }
+  await loadWants();
+  renderSection();
+  const refreshedStatus = document.querySelector("[data-want-status]");
+  if (refreshedStatus) {
+    refreshedStatus.innerHTML = `<div class="status-item ok">${escapeHtml(payload.status?.[0]?.message || uiText("syncWantsCompleted"))}</div>`;
   }
 }
 

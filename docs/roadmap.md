@@ -117,6 +117,9 @@ by completion period, and unfinished work is ordered by current priority.
   - Want List page shows canonical Douban/IMDb wants with source/type filters,
     source evidence summaries, media type, added time, mobile card layout, and
     search/download queue status.
+  - Want List toolbar now exposes separate manual actions for refreshing
+    configured Douban/IMDb sources and for triggering torrent search against the
+    current filters.
   - Want List rows open a candidate review modal. Matching releases stay first
     with score, size, seeder/leecher counts, M-Team tags, inferred quality tags,
     and reasons; lower-match releases stay visible but dimmed for operator

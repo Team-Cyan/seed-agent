@@ -4,6 +4,14 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.8.0 - 2026-06-01
+
+### Added
+
+- Added explicit Want List toolbar actions for refreshing configured
+  Douban/IMDb sources and for manually triggering torrent search against the
+  current source/type filters.
+
 ## 0.7.0 - 2026-06-01
 
 ### Added

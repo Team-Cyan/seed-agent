@@ -154,6 +154,18 @@ def test_non_tracker_sections_render_config_panels() -> None:
     assert "Raw YAML preview" not in script
 
 
+def test_want_list_toolbar_exposes_manual_refresh_and_seed_search() -> None:
+    script = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
+
+    assert 'data-want-action="sync"' in script
+    assert 'data-want-action="search"' in script
+    assert "refreshWants" in script
+    assert "searchTorrentsCurrentFilter" in script
+    assert 'if (action === "sync")' in script
+    assert "await syncConfiguredWants(panel);" in script
+    assert "await loadWants();" in script
+
+
 def test_downloader_page_exposes_visual_category_and_budget_editors() -> None:
     script = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
     styles = (STATIC_ROOT / "styles.css").read_text(encoding="utf-8")

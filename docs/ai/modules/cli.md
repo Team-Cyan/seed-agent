@@ -29,6 +29,9 @@ Expose the operator-facing command surface and safe summaries.
   search-only dry runs, reviewing saved release candidates, selecting a release,
   and explicitly enqueueing the selected release through the same intent enqueue
   path,
+- the Web UI Want List toolbar separates source refresh from torrent search:
+  refresh syncs configured Douban/IMDb sources into local intent state, while
+  search runs the non-mutating torrent search for the current filters,
 - intent enqueue routes resource downloads by media type through
   `downloader.media_category_map` when configured. Without an explicit map,
   movie requests use `movie` when present, show/episode/anime requests use
