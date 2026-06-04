@@ -42,8 +42,11 @@ class QbittorrentClient:
         )
         self._ensure_success(response, "qBittorrent login")
         body = response.text.strip()
-        if not body.startswith("Ok"):
-            raise QbittorrentError(f"qBittorrent login failed: unexpected response body: {body!r}")
+        if body.startswith("Ok"):
+            return
+        if response.status_code == 204 and response.headers.get("set-cookie"):
+            return
+        raise QbittorrentError(f"qBittorrent login failed: unexpected response body: {body!r}")
 
     def _ensure_success(self, response: httpx.Response, action: str) -> None:
         if 200 <= response.status_code < 300:

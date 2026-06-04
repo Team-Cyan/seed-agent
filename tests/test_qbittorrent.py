@@ -148,6 +148,24 @@ async def test_list_torrents_converts_rows_into_managed_torrents() -> None:
 
 @pytest.mark.asyncio
 @respx.mock
+async def test_list_torrents_accepts_empty_204_login_with_session_cookie() -> None:
+    login_route = respx.post("https://qb.example/api/v2/auth/login").mock(
+        return_value=httpx.Response(204, headers={"set-cookie": "SID=abc123; Path=/"})
+    )
+    torrents_route = respx.get("https://qb.example/api/v2/torrents/info").mock(
+        return_value=httpx.Response(200, json=[])
+    )
+    client = QbittorrentClient("https://qb.example", "alice", "secret")
+
+    torrents = await client.list_torrents(category="seed")
+
+    assert torrents == []
+    assert login_route.called
+    assert torrents_route.called
+
+
+@pytest.mark.asyncio
+@respx.mock
 async def test_list_torrents_treats_negative_completion_time_as_unknown() -> None:
     respx.post("https://qb.example/api/v2/auth/login").mock(
         return_value=httpx.Response(200, text="Ok.")

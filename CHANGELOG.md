@@ -4,6 +4,14 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.8.2 - 2026-06-04
+
+### Fixed
+
+- qBittorrent login now accepts the `204 No Content` success response with a
+  session cookie returned by qBittorrent 5.2.1, preventing Unraid scheduler
+  restart loops caused by misclassified successful logins.
+
 ## 0.8.1 - 2026-06-01
 
 ### Added
