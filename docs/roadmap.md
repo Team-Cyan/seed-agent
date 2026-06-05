@@ -53,8 +53,9 @@ by completion period, and unfinished work is ordered by current priority.
     with qB runtime outcomes.
   - Currently uploading managed torrents are protected from stale no-upload
     cleanup.
-  - Mutable seed cleanup pauses/deletes cold or no-upload torrents only when the
-    configured budget pool is over budget.
+  - Mutable seed cleanup pauses/deletes incomplete cold or zero-upload torrents
+    only when the configured budget pool is over budget; completed seeds remain
+    available for upload.
   - Missing-from-qB reconciliation marks disappeared hashes as locally deleted
     and revives stale deleted evidence when hashes reappear.
 

@@ -60,10 +60,11 @@ Keep the file gitignored. Do not add tracker URLs, cookies, or other unrelated s
 
 Dry-run is the default behavior for mutating actions. Use it first to inspect what would happen before anything touches qBittorrent.
 
-Cleanup is capacity-driven for mutable seed categories. Cold or zero-upload
-torrents are retained while the configured budget pool is under its limit; prune
-only pauses or deletes them automatically when space reclamation is actually
-needed. Add-only media categories remain protected from cleanup mutations.
+Cleanup is capacity-driven for mutable seed categories. Completed seeds remain
+available for upload. Cold incomplete or zero-upload torrents are retained while
+the configured budget pool is under its limit; prune only pauses or deletes them
+automatically when space reclamation is actually needed. Add-only media
+categories remain protected from cleanup mutations.
 
 ```bash
 uv run seed-agent discover --config config/example.yaml
@@ -98,14 +99,15 @@ uv run seed-agent schedule-run --config config/example.yaml --execute \
 ```
 
 `--prune` reuses the same conservative cleanup policy as the standalone
-`prune` command: only mutable managed categories are eligible, and cold torrents
-are paused before they can be deleted in a later pass.
+`prune` command: only mutable managed categories are eligible, completed seeds
+remain available for upload, and cold incomplete torrents are paused before they
+can be deleted in a later pass.
 
 When `schedule-run --prune` is used, the scheduler interval also becomes the
-free-window safety horizon for managed torrents. A torrent with persisted
-`free_window_expires_at` that cannot survive until the next scheduled check is
-paused before the paid period; already-paused torrents still follow the normal
-pause-before-delete delay.
+free-window safety horizon for incomplete managed downloads. A torrent with
+persisted `free_window_expires_at` that cannot survive until the next scheduled
+check is paused before the paid period; completed seeds remain available for
+upload.
 
 For unattended runs, prefer adding free-window safety flags:
 

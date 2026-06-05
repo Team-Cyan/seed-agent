@@ -4,6 +4,14 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.8.3 - 2026-06-05
+
+### Fixed
+
+- Completed managed seeds now remain available for upload during automated
+  cleanup instead of being paused or deleted because they are cold, have no
+  recent upload, or have an expiring free window.
+
 ## 0.8.2 - 2026-06-04
 
 ### Fixed

@@ -176,6 +176,21 @@ def _managed_torrent(**overrides: object) -> ManagedTorrent:
     return ManagedTorrent(**data)
 
 
+def _managed_incomplete_torrent(**overrides: object) -> ManagedTorrent:
+    data: dict[str, object] = {
+        "state": "downloading",
+        "uploaded_bytes": 512 * 1024 * 1024,
+        "downloaded_bytes": 5 * 1024 * 1024 * 1024,
+        "completed_at": None,
+        "metadata": {
+            "amount_left_bytes": 5 * 1024 * 1024 * 1024,
+            "recent_upload_gb": 0.2,
+        },
+    }
+    data.update(overrides)
+    return _managed_torrent(**data)
+
+
 def _config_file(tmp_path: Path, secret_ref: str | None = None) -> Path:
     secret_line = "null" if secret_ref is None else secret_ref
     path = tmp_path / "config.yaml"
@@ -978,7 +993,7 @@ def test_enqueue_dry_run_uses_default_category_policy(
     assert "passkey" not in result.output
 
 
-def test_prune_execute_updates_state_to_paused_for_cold_managed_torrent(
+def test_prune_execute_updates_state_to_paused_for_cold_incomplete_torrent(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from seed_agent import cli
@@ -1005,7 +1020,7 @@ def test_prune_execute_updates_state_to_paused_for_cold_managed_torrent(
         async def list_torrents(
             self, category: str | None = None, tags: set[str] | None = None
         ) -> list[ManagedTorrent]:
-            return [_managed_torrent(hash="abcd1234", size_bytes=11 * 1024**4)]
+            return [_managed_incomplete_torrent(hash="abcd1234", size_bytes=11 * 1024**4)]
 
         async def pause(self, hash: str) -> None:
             self.calls.append(("pause", hash, None))
@@ -1029,7 +1044,7 @@ def test_prune_execute_updates_state_to_paused_for_cold_managed_torrent(
     assert row["state"] == LifecycleState.PAUSED.value
 
 
-def test_prune_execute_updates_state_to_deleted_for_old_paused_torrent(
+def test_prune_execute_updates_state_to_deleted_for_old_paused_incomplete_torrent(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from seed_agent import cli
@@ -1061,7 +1076,12 @@ def test_prune_execute_updates_state_to_deleted_for_old_paused_torrent(
                     hash="abcd1234",
                     state="pausedUP",
                     size_bytes=11 * 1024**4,
-                    metadata={"paused_at": datetime.now(UTC) - timedelta(days=10)},
+                    completed_at=None,
+                    metadata={
+                        "amount_left_bytes": 5 * 1024**3,
+                        "recent_upload_gb": 0.2,
+                        "paused_at": datetime.now(UTC) - timedelta(days=10),
+                    },
                 )
             ]
 
@@ -1120,7 +1140,12 @@ def test_prune_execute_uses_persisted_pause_timestamp_for_delete(
                     hash="abcd1234",
                     state="pausedUP",
                     size_bytes=11 * 1024**4,
-                    metadata={},
+                    completed_at=None,
+                    downloaded_bytes=5 * 1024**3,
+                    metadata={
+                        "amount_left_bytes": 5 * 1024**3,
+                        "recent_upload_gb": 0.2,
+                    },
                 )
             ]
 
@@ -1228,7 +1253,7 @@ def test_prune_dry_run_previews_live_torrents_without_mutation(
         async def list_torrents(
             self, category: str | None = None, tags: set[str] | None = None
         ) -> list[ManagedTorrent]:
-            return [_managed_torrent(hash="abcd1234", size_bytes=11 * 1024**4)]
+            return [_managed_incomplete_torrent(hash="abcd1234", size_bytes=11 * 1024**4)]
 
         async def pause(self, hash: str) -> None:
             self.calls.append(("pause", hash, None))
@@ -1426,7 +1451,12 @@ def test_prune_dry_run_keeps_recently_uploaded_torrent_from_runtime_snapshot(
                 _managed_torrent(
                     hash="abcd1234",
                     uploaded_bytes=15 * 1024**3,
-                    metadata={"upspeed_bps": 0, "dlspeed_bps": 0},
+                    completed_at=None,
+                    metadata={
+                        "amount_left_bytes": 1 * 1024**3,
+                        "upspeed_bps": 0,
+                        "dlspeed_bps": 0,
+                    },
                 )
             ]
 
@@ -2054,8 +2084,8 @@ def test_prune_execute_failure_persists_prior_state_and_audit(
             self, category: str | None = None, tags: set[str] | None = None
         ) -> list[ManagedTorrent]:
             return [
-                _managed_torrent(hash="first", size_bytes=6 * 1024**4),
-                _managed_torrent(hash="second", size_bytes=6 * 1024**4),
+                _managed_incomplete_torrent(hash="first", size_bytes=6 * 1024**4),
+                _managed_incomplete_torrent(hash="second", size_bytes=6 * 1024**4),
             ]
 
         async def pause(self, hash: str) -> None:

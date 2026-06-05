@@ -41,6 +41,21 @@ def _torrent(**overrides: object) -> ManagedTorrent:
     return ManagedTorrent(**data)
 
 
+def _incomplete_torrent(**overrides: object) -> ManagedTorrent:
+    data: dict[str, object] = {
+        "state": "downloading",
+        "uploaded_bytes": 2 * 1024**3,
+        "downloaded_bytes": 5 * 1024**3,
+        "completed_at": None,
+        "metadata": {
+            "amount_left_bytes": 5 * 1024**3,
+            "recent_upload_gb": 0.2,
+        },
+    }
+    data.update(overrides)
+    return _torrent(**data)
+
+
 def _policy(**overrides: object) -> CategoryPolicyConfig:
     data: dict[str, object] = {
         "name": "seed",
@@ -93,13 +108,13 @@ async def test_dry_run_prune_does_not_call_downloader() -> None:
 
 
 @pytest.mark.asyncio
-async def test_execute_prune_pauses_cold_managed_torrent() -> None:
+async def test_execute_prune_pauses_cold_incomplete_managed_torrent() -> None:
     from seed_agent.actions.qb import prune_cold_torrents
 
     downloader = DummyDownloader()
 
     decisions = await prune_cold_torrents(
-        [_torrent()],
+        [_incomplete_torrent()],
         downloader,
         _cleanup(),
         _policy(),
@@ -163,9 +178,12 @@ async def test_prune_orders_mutable_torrents_by_eviction_rank() -> None:
             _torrent(
                 hash="drop",
                 size_bytes=400 * 1024**3,
-                uploaded_bytes=2 * 1024**3,
+                state="downloading",
+                uploaded_bytes=0,
+                downloaded_bytes=5 * 1024**3,
+                completed_at=None,
                 metadata={
-                    "recent_upload_gb": 0.2,
+                    "amount_left_bytes": 5 * 1024**3,
                     "no_upload_since_at": datetime.now(UTC) - timedelta(hours=30),
                 },
             ),
@@ -219,7 +237,7 @@ async def test_execute_batch_failure_carries_prior_cleanup_decisions() -> None:
 
     with pytest.raises(MutationBatchError) as raised:
         await prune_cold_torrents(
-            [_torrent(hash="first"), _torrent(hash="second")],
+            [_incomplete_torrent(hash="first"), _incomplete_torrent(hash="second")],
             downloader,
             _cleanup(),
             _policy(),
@@ -249,7 +267,7 @@ async def test_prune_keeps_cold_torrent_when_pool_is_not_over_budget() -> None:
     downloader = DummyDownloader()
 
     decisions = await prune_cold_torrents(
-        [_torrent()],
+        [_incomplete_torrent()],
         downloader,
         _cleanup(),
         _policy(),

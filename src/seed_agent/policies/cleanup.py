@@ -52,16 +52,23 @@ def classify_cleanup(
             protected=True,
         )
 
-    free_window_decision = _free_window_decision(torrent, cleanup, metadata)
-    if free_window_decision is not None:
-        return free_window_decision
-
     if _is_currently_uploading(metadata):
         return CleanupDecision(
             action="keep",
             reason=_reason("currently uploading; retain managed torrent"),
             managed=True,
         )
+
+    if _is_completed_seed(torrent):
+        return CleanupDecision(
+            action="keep",
+            reason=_reason("completed seed retained for upload"),
+            managed=True,
+        )
+
+    free_window_decision = _free_window_decision(torrent, cleanup, metadata)
+    if free_window_decision is not None:
+        return free_window_decision
 
     no_upload_decision = _no_upload_observation_decision(
         torrent,

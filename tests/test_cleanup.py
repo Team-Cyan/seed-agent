@@ -90,7 +90,7 @@ def test_cold_managed_torrent_with_insufficient_recent_upload_enters_observation
     )
 
     assert decision.action == "keep"
-    assert "observation" in decision.reason or "no upload" in decision.reason
+    assert "completed seed" in decision.reason
 
 
 @pytest.mark.parametrize(
@@ -113,7 +113,7 @@ def test_cold_managed_torrent_with_meaningful_recent_upload_is_kept(
     )
 
     assert decision.action == "keep"
-    assert "recent upload" in decision.reason.lower()
+    assert "completed seed" in decision.reason
 
 
 def test_currently_uploading_torrent_is_kept_even_with_stale_no_upload_marker() -> None:
@@ -139,7 +139,7 @@ def test_currently_uploading_torrent_is_kept_even_with_stale_no_upload_marker() 
     assert "currently uploading" in decision.reason
 
 
-def test_managed_torrent_pauses_when_free_window_cannot_survive_next_check() -> None:
+def test_completed_seed_is_kept_when_free_window_cannot_survive_next_check() -> None:
     from seed_agent.policies.cleanup import classify_cleanup
 
     now = datetime.now(UTC)
@@ -156,8 +156,8 @@ def test_managed_torrent_pauses_when_free_window_cannot_survive_next_check() -> 
         managed_tags={"seed-agent", "pt-auto"},
     )
 
-    assert decision.action == "pause"
-    assert "free window" in decision.reason
+    assert decision.action == "keep"
+    assert "completed seed" in decision.reason
 
 
 def test_managed_torrent_keeps_when_free_window_survives_next_check() -> None:
@@ -178,7 +178,7 @@ def test_managed_torrent_keeps_when_free_window_survives_next_check() -> None:
     )
 
     assert decision.action == "keep"
-    assert "recent activity" in decision.reason
+    assert "completed seed" in decision.reason
 
 
 @pytest.mark.parametrize(
@@ -207,7 +207,7 @@ def test_protects_hr_manual_and_media_library_when_configured(
     assert reason_fragment in decision.reason.lower()
 
 
-def test_deletes_stopped_managed_torrent_only_after_pause_delay_without_recent_upload() -> None:
+def test_keeps_stopped_completed_seed_after_pause_delay() -> None:
     from seed_agent.policies.cleanup import classify_cleanup
 
     now = datetime.now(UTC)
@@ -223,8 +223,8 @@ def test_deletes_stopped_managed_torrent_only_after_pause_delay_without_recent_u
         space_reclamation_required=True,
     )
 
-    assert decision.action == "delete"
-    assert "paused" in decision.reason
+    assert decision.action == "keep"
+    assert "completed seed" in decision.reason
 
 
 def test_keeps_stopped_managed_torrent_when_space_reclamation_is_not_required() -> None:
@@ -243,7 +243,7 @@ def test_keeps_stopped_managed_torrent_when_space_reclamation_is_not_required() 
     )
 
     assert decision.action == "keep"
-    assert "space reclamation not required" in decision.reason
+    assert "completed seed" in decision.reason
 
 
 def test_keeps_active_seed_while_no_upload_observation_window_is_young() -> None:
@@ -266,10 +266,10 @@ def test_keeps_active_seed_while_no_upload_observation_window_is_young() -> None
     )
 
     assert decision.action == "keep"
-    assert "no upload" in decision.reason
+    assert "completed seed" in decision.reason
 
 
-def test_deletes_active_seed_after_no_upload_observation_window() -> None:
+def test_keeps_active_seed_after_no_upload_observation_window() -> None:
     from seed_agent.policies.cleanup import classify_cleanup
 
     now = datetime.now(UTC)
@@ -289,8 +289,31 @@ def test_deletes_active_seed_after_no_upload_observation_window() -> None:
         space_reclamation_required=True,
     )
 
-    assert decision.action == "delete"
-    assert "no upload" in decision.reason
+    assert decision.action == "keep"
+    assert "completed seed" in decision.reason
+
+
+def test_keeps_cold_completed_seed_when_space_reclamation_is_required() -> None:
+    from seed_agent.policies.cleanup import classify_cleanup
+
+    now = datetime.now(UTC)
+    decision = classify_cleanup(
+        _torrent(
+            state="stalledUP",
+            last_activity_at=now - timedelta(days=10),
+            metadata={
+                "amount_left_bytes": 0,
+                "recent_upload_gb": 0.0,
+            },
+        ),
+        _cleanup(),
+        managed_category="pt-auto",
+        managed_tags={"seed-agent", "pt-auto"},
+        space_reclamation_required=True,
+    )
+
+    assert decision.action == "keep"
+    assert "completed seed" in decision.reason
 
 
 def test_deletes_incomplete_zero_upload_torrent_after_observation_window() -> None:

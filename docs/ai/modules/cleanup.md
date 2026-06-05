@@ -2,7 +2,8 @@
 
 ## Purpose
 
-Decide when managed torrents should be paused or deleted under the balanced safety policy.
+Decide when managed torrents should be retained, paused, or deleted under the
+balanced safety policy.
 
 ## Primary Files
 
@@ -21,8 +22,9 @@ Decide when managed torrents should be paused or deleted under the balanced safe
 - observe zero-total-upload managed torrents from qB `added_at` for
   `cleanup.delete_after_no_upload_hours` before deleting them, including
   incomplete downloads that consumed space but never uploaded,
-- observe completed active seeds with no recent upload for
-  `cleanup.delete_after_no_upload_hours` before deleting them,
+- keep completed seeds available for upload; automated cleanup should not pause
+  or delete a completed seed simply because it is cold, has no recent upload, or
+  has a free-window expiry,
 - keep currently uploading managed torrents even if a stale no-upload marker is
   present,
 - require pause-before-delete timing,
@@ -35,10 +37,10 @@ Decide when managed torrents should be paused or deleted under the balanced safe
   collecting live runtime evidence over pausing everything. Pausing can hide
   whether a torrent is still contributing upload.
 - For upload-farming seed pools, a 24-hour zero-upload observation window is too
-  slow. The default is now 2 hours: if a managed torrent has total uploaded
-  bytes of zero for at least `cleanup.delete_after_no_upload_hours`, prune may
-  preview deletion even when the torrent is still incomplete, but only when the
-  mutable category's budget pool is over budget and space reclamation is needed.
+  slow. The default is now 2 hours: if a managed incomplete torrent has total
+  uploaded bytes of zero for at least `cleanup.delete_after_no_upload_hours`,
+  prune may preview deletion, but only when the mutable category's budget pool
+  is over budget and space reclamation is needed.
 - Always inspect prune preview counts before execute mode. The useful summary is
   action counts, total size/downloaded/left for deletes, state distribution, and
   a sample of names/reasons. Do not execute a broad cleanup from counts alone if
