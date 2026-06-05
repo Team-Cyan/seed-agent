@@ -9,6 +9,15 @@ Own qBittorrent integration for enqueue, review, and cleanup-safe downloader act
 - `src/seed_agent/downloaders/qbittorrent.py`
 - `src/seed_agent/actions/qb.py`
 - `src/seed_agent/cli.py`
+- `docs/specs/qbittorrent-web-api-contract.md`
+
+## Official Reference
+
+- qBittorrent WebUI API 5.0+: <https://github.com/qbittorrent/qBittorrent/wiki/WebUI-API-%28qBittorrent-5.0%29>
+
+`seed-agent` only targets the latest qBittorrent WebUI API. Do not add legacy
+qBittorrent API compatibility unless the project explicitly changes that
+support policy.
 
 ## Current Responsibilities
 
