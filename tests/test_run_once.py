@@ -565,6 +565,83 @@ def test_run_once_skips_previously_enqueued_candidate(tmp_path: Path, monkeypatc
     assert payload["enqueued"] == 0
 
 
+def test_run_once_links_existing_live_torrent_before_enqueue(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from seed_agent import cli
+    from seed_agent.models import ManagedTorrent
+
+    monkeypatch.chdir(tmp_path)
+
+    config_path = _config_file(tmp_path)
+    config = _config(secret_ref="local/secrets/qb.yaml")
+    candidate = _candidate(size_bytes=123456789)
+    live_hash = "ad4cd6aa5a69c100ad876b3751d49d1589da8fd4"
+
+    async def fake_discover_candidates(config: SeedAgentConfig):
+        return [candidate]
+
+    def fake_score_candidates(candidates, discovery_config, scoring_config):
+        return [_scored(candidate=candidate)]
+
+    class FakeDownloader:
+        def __init__(self) -> None:
+            self.add_calls = 0
+
+        async def add_url(
+            self, url: str, category: str, tags: list[str], *, paused: bool = False
+        ) -> str | None:
+            self.add_calls += 1
+            raise AssertionError("existing live torrent must be linked before add_url")
+
+        async def list_torrents(self, category: str | None = None, tags: set[str] | None = None):
+            return [
+                ManagedTorrent(
+                    hash=live_hash,
+                    name=candidate.title,
+                    category="seed",
+                    tags={"seed-agent", "seed", "site:demo-free"},
+                    state="downloading",
+                    size_bytes=candidate.size_bytes,
+                    uploaded_bytes=0,
+                    downloaded_bytes=1024,
+                    added_at=datetime.now(UTC),
+                    metadata={"amount_left_bytes": candidate.size_bytes - 1024},
+                )
+            ]
+
+        async def pause(self, hash: str) -> None:
+            return None
+
+        async def delete(self, hash: str, delete_files: bool) -> None:
+            return None
+
+    downloader = FakeDownloader()
+
+    monkeypatch.setattr(cli, "load_config", lambda path: config)
+    monkeypatch.setattr(cli, "discover_candidates", fake_discover_candidates)
+    monkeypatch.setattr(cli, "score_candidates", fake_score_candidates)
+    monkeypatch.setattr(cli, "build_downloader", lambda loaded: downloader)
+
+    result = CliRunner().invoke(
+        cli.app,
+        ["run-once", "--config", str(config_path), "--execute"],
+    )
+
+    assert result.exit_code == 0
+    payload = _json_output(result)
+    assert payload["accepted"] == 0
+    assert payload["skipped_existing"] == 1
+    assert payload["enqueued"] == 0
+    assert downloader.add_calls == 0
+
+    store = StateStore(tmp_path / ".seed-agent" / "state.db")
+    row = store.get_candidate(candidate.stable_id)
+    assert row is not None
+    assert row["state"] == LifecycleState.DOWNLOADING.value
+    assert row["torrent_hash"] == live_hash
+
+
 def test_run_once_rejects_candidate_below_execute_free_window(tmp_path: Path, monkeypatch) -> None:
     from seed_agent import cli
 

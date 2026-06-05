@@ -215,6 +215,11 @@ def enqueue(
     downloader, live_torrents, paused, pool_usage, missing_reconciled = _enqueue_runtime_context(
         loaded, store=store, execute=execute
     )
+    skipped_existing = 0
+    scored, skipped_live_existing = _link_existing_live_torrent_candidates(
+        store, scored, live_torrents
+    )
+    skipped_existing += skipped_live_existing
     batch_error = None
     enqueue_batches = _enqueue_candidate_batches(scored, loaded, live_torrents, pool_usage)
     paused = any(batch_paused for _, batch_paused, _ in enqueue_batches)
@@ -240,6 +245,7 @@ def enqueue(
         "discovered": len(candidates),
         "scored": len(scored),
         "accepted": sum(1 for item in scored if item.accepted),
+        "skipped_existing": skipped_existing,
         "enqueued": sum(1 for item in decisions if item.action == "qb.enqueue"),
         "scores": [_score_summary(item) for item in scored],
         "decisions": [_decision_summary(item) for item in decisions],
@@ -923,6 +929,10 @@ def _run_once_payload(
     downloader, live_torrents, paused, pool_usage, missing_reconciled = _enqueue_runtime_context(
         loaded, store=store, execute=execute
     )
+    scored, skipped_live_existing = _link_existing_live_torrent_candidates(
+        store, scored, live_torrents
+    )
+    skipped_existing += skipped_live_existing
     batch_error = None
     enqueue_batches = _enqueue_candidate_batches(scored, loaded, live_torrents, pool_usage)
     paused = any(batch_paused for _, batch_paused, _ in enqueue_batches)
@@ -1003,6 +1013,59 @@ def _candidate_already_active(store: StateStore, candidate_id: str) -> bool:
         return False
     state = str(row["state"])
     return STATE_PRIORITY.get(state, -1) >= STATE_PRIORITY[LifecycleState.ENQUEUED.value]
+
+
+def _link_existing_live_torrent_candidates(
+    store: StateStore,
+    scored: list[ScoreBreakdown],
+    torrents: list[ManagedTorrent],
+) -> tuple[list[ScoreBreakdown], int]:
+    live_by_identity: dict[tuple[str, int], ManagedTorrent] = {}
+    for torrent in torrents:
+        if not torrent.hash:
+            continue
+        identity = _live_torrent_identity(torrent)
+        if identity is not None:
+            live_by_identity[identity] = torrent
+    if not live_by_identity:
+        return scored, 0
+
+    filtered: list[ScoreBreakdown] = []
+    skipped = 0
+    for item in scored:
+        torrent = live_by_identity.get(_candidate_live_identity(item.candidate))
+        if item.accepted and torrent is not None:
+            store.upsert_candidate(
+                item.candidate_id,
+                item.candidate.title,
+                item.candidate.site,
+                _lifecycle_state_from_torrent(torrent),
+                score=item.score,
+                torrent_hash=torrent.hash,
+                free_window_expires_at=_candidate_free_window_expires_at(item.candidate),
+                **_candidate_snapshot_kwargs(
+                    item.candidate,
+                    score_reasons=list(item.reasons),
+                ),
+            )
+            skipped += 1
+            continue
+        filtered.append(item)
+    return filtered, skipped
+
+
+def _candidate_live_identity(candidate: TorrentCandidate) -> tuple[str, int]:
+    return (_normalize_torrent_title(candidate.title), int(candidate.size_bytes))
+
+
+def _live_torrent_identity(torrent: ManagedTorrent) -> tuple[str, int] | None:
+    if torrent.size_bytes <= 0:
+        return None
+    return (_normalize_torrent_title(torrent.name), int(torrent.size_bytes))
+
+
+def _normalize_torrent_title(title: str) -> str:
+    return " ".join(title.strip().casefold().split())
 
 
 def _apply_free_window_safety(

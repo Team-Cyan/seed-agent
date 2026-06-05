@@ -4,6 +4,15 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.8.4 - 2026-06-05
+
+### Fixed
+
+- Linked accepted candidates to matching live qBittorrent torrents before
+  enqueue planning, preventing scheduler restart loops when qB already contains
+  the torrent but local candidate state has not yet been associated with its
+  hash.
+
 ## 0.8.3 - 2026-06-05
 
 ### Fixed
