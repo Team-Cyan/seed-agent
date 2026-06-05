@@ -60,8 +60,6 @@ The image name must stay lowercase for registry compatibility.
 ```bash
 uv run pytest -q
 uv run ruff check .
-docker compose --env-file deploy/seed-agent.env.example -f deploy/docker-compose.example.yml config
-docker build -t seed-agent:local .
 ```
 
 6. Tag and push:
