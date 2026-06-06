@@ -4,6 +4,20 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.8.5 - 2026-06-06
+
+### Fixed
+
+- Web UI Want List refresh and torrent search actions now show immediate
+  in-progress feedback and disable duplicate refresh/search clicks while the
+  request is running.
+- Web UI Want List rows now display only the source date while the API keeps
+  the full available timestamp and precision metadata.
+- `schedule-run` now refreshes configured Want List sources and runs the
+  resource intent search/rank cycle every scheduler cycle by default. The
+  scheduled resource loop stays non-mutating unless `--intent-execute` is
+  explicitly set.
+
 ## 0.8.4 - 2026-06-05
 
 ### Fixed

@@ -11,7 +11,7 @@ Keep these files on the same version before tagging a release:
 - `pyproject.toml`
 - `src/seed_agent/__init__.py`
 
-The current release line is `0.8.4`.
+The current release line is `0.8.5`.
 
 ## Version Bump Policy
 

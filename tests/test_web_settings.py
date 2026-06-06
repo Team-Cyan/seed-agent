@@ -248,6 +248,7 @@ def test_http_wants_lists_canonical_source_rows_without_manual_add(tmp_path: Pat
     assert initial["items"][0]["source_label"] == "豆瓣-我 +1"
     assert initial["items"][0]["media_type"] == "anime"
     assert initial["items"][0]["added_at"].startswith("2025-01-02")
+    assert initial["items"][0]["added_at_precision"] == "date"
     assert initial["total"] == 1
     assert manual_payload["error"] == "not found"
 

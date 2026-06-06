@@ -197,6 +197,7 @@ const copy = {
       search: "搜索",
       searchCompleted: "搜索已完成",
       searchCurrentFilter: "搜索当前筛选",
+      searchingWants: "正在搜索种子",
       searchTorrentsCurrentFilter: "搜索种子",
       sectionYamlDescription: "对应 {path} 中的 {section}: 区块。可以保留顶层区块名，也可以只填写区块内容。",
       sectionYamlTitle: "本页 YAML",
@@ -224,6 +225,7 @@ const copy = {
       statusScored: "已评分",
       statusSeeding: "做种中",
       syncWantsCompleted: "想看来源已同步",
+      syncingWants: "正在刷新想看列表",
       title: "标题",
       trackerCancel: "取消",
       trackerConfigMteam: "M-Team 配置",
@@ -417,6 +419,7 @@ const copy = {
       search: "Search",
       searchCompleted: "Search completed",
       searchCurrentFilter: "Search current filters",
+      searchingWants: "Searching torrents",
       searchTorrentsCurrentFilter: "Search torrents",
       sectionYamlDescription: "Maps to the {section}: block in {path}. You can keep the top-level section name or enter only the section body.",
       sectionYamlTitle: "This page YAML",
@@ -444,6 +447,7 @@ const copy = {
       statusScored: "Scored",
       statusSeeding: "Seeding",
       syncWantsCompleted: "Want sources synced",
+      syncingWants: "Refreshing Want List",
       title: "Title",
       trackerCancel: "Cancel",
       trackerConfigMteam: "M-Team config",
@@ -1243,7 +1247,7 @@ function renderWantRow(item) {
       </td>
       <td>${escapeHtml(formatMediaType(item.media_type))}</td>
       <td>${escapeHtml(item.source_label || item.source)}</td>
-      <td>${escapeHtml(formatDateTime(item.added_at))}</td>
+      <td>${escapeHtml(formatDate(item.added_at))}</td>
       <td>
         <span class="badge ${item.status === "queued" ? "ok" : ""}">${escapeHtml(item.status_label || item.state)}</span>
         <span class="inline-action">${escapeHtml(uiText("viewCandidates"))}</span>
@@ -1263,7 +1267,7 @@ function renderWantCard(item) {
       <div class="want-card-meta">
         <span>${escapeHtml(formatMediaType(item.media_type))}</span>
         <span>${escapeHtml(item.source_label || item.source)}</span>
-        <span>${escapeHtml(formatDateTime(item.added_at))}</span>
+        <span>${escapeHtml(formatDate(item.added_at))}</span>
       </div>
       <div class="want-card-footer">
         <span class="inline-action">${escapeHtml(uiText("viewCandidates"))}</span>
@@ -1410,11 +1414,11 @@ async function handleWantCandidateAction(panel, action, button) {
 
 async function handleWantAction(panel, action, event) {
   if (action === "sync") {
-    await refreshWants(panel);
+    await refreshWants(panel, event);
     return;
   }
   if (action === "search") {
-    await searchFilteredWants(panel);
+    await searchFilteredWants(panel, event);
     return;
   }
   if (action === "config-open") {
@@ -1455,21 +1459,34 @@ async function handleWantAction(panel, action, event) {
   }
 }
 
-async function refreshWants(panel) {
-  const payload = await syncConfiguredWants(panel);
-  if (!payload) {
-    return;
+async function refreshWants(panel, button) {
+  const status = panel.querySelector("[data-want-status]");
+  setWantActionBusy(panel, button, true);
+  if (status) {
+    status.innerHTML = `<div class="status-item info">${escapeHtml(uiText("syncingWants"))}</div>`;
   }
-  await loadWants();
-  renderSection();
-  const refreshedStatus = document.querySelector("[data-want-status]");
-  if (refreshedStatus) {
-    refreshedStatus.innerHTML = `<div class="status-item ok">${escapeHtml(payload.status?.[0]?.message || uiText("syncWantsCompleted"))}</div>`;
+  try {
+    const payload = await syncConfiguredWants(panel);
+    if (!payload) {
+      return;
+    }
+    await loadWants();
+    renderSection();
+    const refreshedStatus = document.querySelector("[data-want-status]");
+    if (refreshedStatus) {
+      refreshedStatus.innerHTML = `<div class="status-item ok">${escapeHtml(payload.status?.[0]?.message || uiText("syncWantsCompleted"))}</div>`;
+    }
+  } finally {
+    setWantActionBusy(panel, button, false);
   }
 }
 
-async function searchFilteredWants(panel) {
+async function searchFilteredWants(panel, button) {
   const status = panel.querySelector("[data-want-status]");
+  setWantActionBusy(panel, button, true);
+  if (status) {
+    status.innerHTML = `<div class="status-item info">${escapeHtml(uiText("searchingWants"))}</div>`;
+  }
   try {
     const response = await fetch("/api/wants/search", {
       method: "POST",
@@ -1488,11 +1505,16 @@ async function searchFilteredWants(panel) {
     }
   } catch (error) {
     status.innerHTML = `<div class="status-item warning">${escapeHtml(error.message)}</div>`;
+  } finally {
+    setWantActionBusy(panel, button, false);
   }
 }
 
 async function syncConfiguredWants(panel) {
   const status = panel.querySelector("[data-want-config-status]") || panel.querySelector("[data-want-status]");
+  if (status) {
+    status.innerHTML = `<div class="status-item info">${escapeHtml(uiText("syncingWants"))}</div>`;
+  }
   try {
     const response = await fetch("/api/wants/sync", { method: "POST" });
     const payload = await response.json();
@@ -1508,6 +1530,17 @@ async function syncConfiguredWants(panel) {
       status.innerHTML = `<div class="status-item warning">${escapeHtml(error.message)}</div>`;
     }
     return null;
+  }
+}
+
+function setWantActionBusy(panel, button, busy) {
+  panel.querySelectorAll('[data-want-action="sync"], [data-want-action="search"]').forEach((item) => {
+    item.disabled = busy;
+    item.setAttribute("aria-busy", busy ? "true" : "false");
+  });
+  if (button) {
+    button.disabled = busy;
+    button.setAttribute("aria-busy", busy ? "true" : "false");
   }
 }
 
@@ -1602,11 +1635,22 @@ function formatMediaType(value) {
   return labels[value] || value || uiText("unknown");
 }
 
-function formatDateTime(value) {
+function formatDateTime(value, precision = "datetime") {
   if (!value) {
     return "";
   }
-  return String(value).replace("T", " ").replace("+00:00", " UTC");
+  const text = String(value);
+  if (precision === "date") {
+    return text.split("T")[0].split(" ")[0];
+  }
+  return text.replace("T", " ").replace("+00:00", " UTC");
+}
+
+function formatDate(value) {
+  if (!value) {
+    return "";
+  }
+  return String(value).split("T")[0].split(" ")[0];
 }
 
 function renderTrackerSection() {

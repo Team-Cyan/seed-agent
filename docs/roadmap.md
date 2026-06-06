@@ -141,6 +141,10 @@ by completion period, and unfinished work is ordered by current priority.
     assets.
   - Web UI Want List search is dry-run/search-only; it does not enqueue or
     download unless the separate intent enqueue path is explicitly executed.
+  - Want List refresh/search actions show immediate in-progress feedback in the
+    Web UI, and `schedule-run` now refreshes configured Want List sources and
+    searches/ranks resource candidates every cycle by default while keeping the
+    scheduled resource loop dry-run unless `--intent-execute` is explicitly set.
 
 - Next P0 - Verify and harden Want List in the live Unraid preview
   - Rebuild the Unraid DockerMan container from the updated template and confirm

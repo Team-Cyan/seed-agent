@@ -166,6 +166,32 @@ def test_want_list_toolbar_exposes_manual_refresh_and_seed_search() -> None:
     assert "await loadWants();" in script
 
 
+def test_want_list_actions_show_immediate_busy_feedback() -> None:
+    script = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
+
+    assert "syncingWants" in script
+    assert "searchingWants" in script
+    assert "setWantActionBusy(panel, button, true)" in script
+    assert "setWantActionBusy(panel, button, false)" in script
+    assert 'item.setAttribute("aria-busy", busy ? "true" : "false")' in script
+    assert (
+        "`<div class=\"status-item info\">${escapeHtml(uiText(\"syncingWants\"))}</div>`"
+        in script
+    )
+    assert (
+        "`<div class=\"status-item info\">${escapeHtml(uiText(\"searchingWants\"))}</div>`"
+        in script
+    )
+
+
+def test_want_list_added_at_displays_date_only() -> None:
+    script = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
+
+    assert "formatDate(item.added_at)" in script
+    assert "function formatDate(value)" in script
+    assert 'return String(value).split("T")[0].split(" ")[0];' in script
+
+
 def test_downloader_page_exposes_visual_category_and_budget_editors() -> None:
     script = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
     styles = (STATIC_ROOT / "styles.css").read_text(encoding="utf-8")

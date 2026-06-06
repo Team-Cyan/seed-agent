@@ -46,6 +46,11 @@ Expose the operator-facing command surface and safe summaries.
   single physical runtime config file,
 - configured source-event ingestion during `intent-run-once`, including Douban
   wanted-list and IMDb watchlist/list events,
+- `schedule-run` runs the resource intent loop every cycle by default, so
+  configured Want List sources are refreshed and searched without requiring the
+  operator to click the Web UI buttons. This scheduled resource loop remains a
+  dry-run unless `--intent-execute` is explicitly set, and it can be disabled
+  with `--no-intent`,
 - free-window safety previewing for freeleech-sensitive workflows,
 - optional per-cycle cleanup through `run-once --prune` and `schedule-run --prune`,
 - stronger prune previews that include live torrent identity, linked candidate
@@ -73,6 +78,8 @@ Expose the operator-facing command surface and safe summaries.
   window is unknown or too short for the configured safety threshold,
 - keep optional scheduled pruning explicit through `--prune` so cleanup is never
   silently bundled into a long-running deployment,
+- keep scheduled Want List search non-mutating by default; automatic resource
+  qB enqueue requires explicit `--intent-execute`,
 - expose cleanup preview details before execute-mode mutation,
 - pass the scheduler interval into per-cycle pruning so persisted free-window
   expiries can be evaluated against the next scheduled check,

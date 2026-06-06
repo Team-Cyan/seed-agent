@@ -493,70 +493,10 @@ def intent_run_once(
     config: Annotated[Path, typer.Option("--config")] = DEFAULT_CONFIG,
     execute: Annotated[bool, typer.Option("--execute")] = False,
 ) -> None:
-    loaded = load_config(config)
-    store = StateStore(_state_path(loaded))
-    providers = _build_search_providers(loaded)
-    inbox_path = _resolve_path(loaded.intent.inbox_ref, loaded.config_dir)
-    default_policy = _default_category_policy(loaded)
-
-    def policy_resolver(intent: ResourceIntent) -> CategoryPolicyConfig:
-        return _intent_category_policy(loaded, intent)
-
-    downloader, live_torrents, paused, pool_usage, missing_reconciled = _enqueue_runtime_context(
-        loaded, store=store, execute=execute
-    )
-    batch_error = None
-    pause_reasons = _enqueue_pause_reasons(loaded, live_torrents, pool_usage)
-    try:
-        release_resolver = _build_release_download_resolver(loaded)
-        result = _run(
-            run_intent_once(
-                inbox_path=inbox_path,
-                store=store,
-                providers=providers,
-                intent_config=loaded.intent,
-                search_config=loaded.search,
-                downloader=downloader,
-                policy=default_policy,
-                execute=execute,
-                paused=paused,
-                pool_usage=pool_usage,
-                pause_reasons=pause_reasons,
-                source_events=_read_configured_source_events(loaded),
-                release_resolver=release_resolver,
-                policy_resolver=policy_resolver,
-            )
-        )
-        decisions = result.decisions
-    except MutationBatchError as exc:
-        result = None
-        decisions = exc.decisions
-        batch_error = exc
-    _write_audit_decisions(loaded, decisions)
-    payload = {
-        "command": "intent-run-once",
-        "config": str(config),
-        "execute": execute,
-        "ingested": len(result.ingested) if result is not None else 0,
-        "searched": len(result.searched) if result is not None else 0,
-        "ranked": len(result.ranked) if result is not None else 0,
-        "enqueue_candidates": len(result.enqueue_selected) if result is not None else 0,
-        "decisions": [_decision_summary(item) for item in decisions],
-        "runtime_activity": _runtime_activity_summary(live_torrents),
-        "missing_from_qb_reconciled": missing_reconciled,
-    }
-    if pool_usage is not None:
-        payload["default_pool_usage"] = _pool_usage_item_summary(pool_usage)
-        payload["enqueue_paused_by_pool_policy"] = paused
-    if pause_reasons:
-        payload["enqueue_paused_reasons"] = pause_reasons
-    if result is not None:
-        payload["intents"] = [_intent_summary(intent) for intent in result.searched]
-        payload["selected"] = [_ranked_release_summary(item) for item in result.enqueue_selected]
-    if batch_error is not None:
-        payload["error"] = str(batch_error)
+    payload = _intent_run_once_payload(config, execute=execute)
     _print_json(payload)
-    _raise_if_batch_failed(batch_error)
+    if "error" in payload:
+        raise typer.Exit(code=1)
 
 
 @app.command()
@@ -749,6 +689,11 @@ def schedule_run(
         bool, typer.Option("--require-known-free-window/--allow-unknown-free-window")
     ] = True,
     prune: Annotated[bool, typer.Option("--prune/--no-prune")] = False,
+    intent: Annotated[bool, typer.Option("--intent/--no-intent")] = True,
+    intent_execute: Annotated[
+        bool,
+        typer.Option("--intent-execute/--intent-dry-run"),
+    ] = False,
     heartbeat_file: Annotated[Path | None, typer.Option("--heartbeat-file")] = None,
     max_cycles: Annotated[int | None, typer.Option("--max-cycles")] = None,
 ) -> None:
@@ -788,6 +733,13 @@ def schedule_run(
         payload["min_free_window_minutes"] = min_free_window_minutes
         payload["require_known_free_window"] = require_known_free_window if execute else False
         payload["prune_enabled"] = prune
+        payload["intent_enabled"] = intent
+        payload["intent_execute"] = intent_execute
+        if intent:
+            intent_payload = _intent_run_once_payload(config, execute=intent_execute)
+            payload["intent"] = intent_payload
+            if "error" in intent_payload:
+                payload["error"] = f"intent: {intent_payload['error']}"
         if heartbeat_file is not None:
             _write_heartbeat(
                 heartbeat_file,
@@ -993,6 +945,72 @@ def _run_once_payload(
     return payload
 
 
+def _intent_run_once_payload(config_path: Path, *, execute: bool) -> dict[str, Any]:
+    loaded = load_config(config_path)
+    store = StateStore(_state_path(loaded))
+    providers = _build_search_providers(loaded)
+    inbox_path = _resolve_path(loaded.intent.inbox_ref, loaded.config_dir)
+    default_policy = _default_category_policy(loaded)
+
+    def policy_resolver(intent: ResourceIntent) -> CategoryPolicyConfig:
+        return _intent_category_policy(loaded, intent)
+
+    downloader, live_torrents, paused, pool_usage, missing_reconciled = _enqueue_runtime_context(
+        loaded, store=store, execute=execute
+    )
+    batch_error = None
+    pause_reasons = _enqueue_pause_reasons(loaded, live_torrents, pool_usage)
+    try:
+        release_resolver = _build_release_download_resolver(loaded)
+        result = _run(
+            run_intent_once(
+                inbox_path=inbox_path,
+                store=store,
+                providers=providers,
+                intent_config=loaded.intent,
+                search_config=loaded.search,
+                downloader=downloader,
+                policy=default_policy,
+                execute=execute,
+                paused=paused,
+                pool_usage=pool_usage,
+                pause_reasons=pause_reasons,
+                source_events=_read_configured_source_events(loaded),
+                release_resolver=release_resolver,
+                policy_resolver=policy_resolver,
+            )
+        )
+        decisions = result.decisions
+    except MutationBatchError as exc:
+        result = None
+        decisions = exc.decisions
+        batch_error = exc
+    _write_audit_decisions(loaded, decisions)
+    payload = {
+        "command": "intent-run-once",
+        "config": str(config_path),
+        "execute": execute,
+        "ingested": len(result.ingested) if result is not None else 0,
+        "searched": len(result.searched) if result is not None else 0,
+        "ranked": len(result.ranked) if result is not None else 0,
+        "enqueue_candidates": len(result.enqueue_selected) if result is not None else 0,
+        "decisions": [_decision_summary(item) for item in decisions],
+        "runtime_activity": _runtime_activity_summary(live_torrents),
+        "missing_from_qb_reconciled": missing_reconciled,
+    }
+    if pool_usage is not None:
+        payload["default_pool_usage"] = _pool_usage_item_summary(pool_usage)
+        payload["enqueue_paused_by_pool_policy"] = paused
+    if pause_reasons:
+        payload["enqueue_paused_reasons"] = pause_reasons
+    if result is not None:
+        payload["intents"] = [_intent_summary(intent) for intent in result.searched]
+        payload["selected"] = [_ranked_release_summary(item) for item in result.enqueue_selected]
+    if batch_error is not None:
+        payload["error"] = str(batch_error)
+    return payload
+
+
 def _filter_existing_enqueue_candidates(
     store: StateStore,
     scored: list[ScoreBreakdown],
@@ -1142,6 +1160,7 @@ def _write_heartbeat(
         "phase": payload.get("phase"),
         "accepted": payload.get("accepted"),
         "enqueued": payload.get("enqueued"),
+        "intent": _intent_payload_summary(payload.get("intent")),
         "error": payload.get("error"),
     }
     heartbeat_file.write_text(
@@ -1365,6 +1384,8 @@ def _schedule_log_summary(payload: dict[str, Any]) -> dict[str, Any]:
         "min_free_window_minutes",
         "require_known_free_window",
         "prune_enabled",
+        "intent_enabled",
+        "intent_execute",
         "heartbeat_file",
         "discovered",
         "scored",
@@ -1388,7 +1409,24 @@ def _schedule_log_summary(payload: dict[str, Any]) -> dict[str, Any]:
             "preview_count": len(prune_payload.get("preview") or []),
             "pool_usage": prune_payload.get("pool_usage"),
         }
+    intent_summary = _intent_payload_summary(payload.get("intent"))
+    if intent_summary is not None:
+        summary["intent"] = intent_summary
     return summary
+
+
+def _intent_payload_summary(payload: object) -> dict[str, Any] | None:
+    if not isinstance(payload, dict):
+        return None
+    return {
+        "command": payload.get("command"),
+        "execute": payload.get("execute"),
+        "ingested": payload.get("ingested"),
+        "searched": payload.get("searched"),
+        "ranked": payload.get("ranked"),
+        "enqueue_candidates": payload.get("enqueue_candidates"),
+        "decisions_count": len(payload.get("decisions") or []),
+    }
 
 
 def _candidate_summary(candidate: TorrentCandidate) -> dict[str, Any]:

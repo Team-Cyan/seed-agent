@@ -718,7 +718,11 @@ def _want_item(
     state = str(row.get("state") or normalized.get("state") or "")
     selected_release_id = row.get("selected_release_id")
     releases = int(release_count.get("release_count") or 0)
-    source_label, source_keys, added_at = _want_source_summary(source, metadata, evidence or [])
+    source_label, source_keys, added_at, added_at_precision = _want_source_summary(
+        source,
+        metadata,
+        evidence or [],
+    )
     return {
         "intent_id": row.get("intent_id") or normalized.get("intent_id"),
         "title": row.get("title") or normalized.get("title") or row.get("raw_text") or "",
@@ -729,6 +733,12 @@ def _want_item(
         "source_label": source_label,
         "source_keys": source_keys,
         "added_at": added_at or normalized.get("requested_at") or row.get("created_at"),
+        "added_at_precision": added_at_precision
+        or _want_timestamp_precision(
+            normalized.get("requested_at") or row.get("created_at"),
+            source=source,
+            metadata=metadata,
+        ),
         "state": state,
         "status": _want_download_status(state, releases, bool(selected_release_id)),
         "status_label": _want_download_status_label(state, releases, bool(selected_release_id)),
@@ -917,11 +927,18 @@ def _want_source_summary(
     source: str,
     metadata: dict[str, Any],
     evidence: list[dict[str, Any]],
-) -> tuple[str, list[str], str | None]:
+) -> tuple[str, list[str], str | None, str | None]:
     if not evidence:
-        return _want_source_label(source, metadata), [_want_source_key(source, metadata)], None
+        return (
+            _want_source_label(source, metadata),
+            [_want_source_key(source, metadata)],
+            None,
+            None,
+        )
     labels: list[str] = []
     keys: list[str] = []
+    first_requested_at: str | None = None
+    first_precision: str | None = None
     for item in evidence:
         item_metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
         label = item.get("source_label") or _want_source_label(
@@ -929,13 +946,46 @@ def _want_source_summary(
             item_metadata,
         )
         key = _want_source_key(str(item.get("source") or ""), item_metadata)
+        requested_at = str(item.get("requested_at") or "") or None
         if label not in labels:
             labels.append(str(label))
         if key not in keys:
             keys.append(key)
+        if first_requested_at is None and requested_at is not None:
+            first_requested_at = requested_at
+            first_precision = _want_timestamp_precision(
+                requested_at,
+                source=str(item.get("source") or ""),
+                metadata=item_metadata,
+            )
     first = labels[0] if labels else _want_source_label(source, metadata)
     suffix = f" +{len(labels) - 1}" if len(labels) > 1 else ""
-    return f"{first}{suffix}", keys, str(evidence[0].get("requested_at") or "") or None
+    return f"{first}{suffix}", keys, first_requested_at, first_precision
+
+
+def _want_timestamp_precision(
+    value: Any,
+    *,
+    source: str,
+    metadata: dict[str, Any],
+) -> str | None:
+    explicit = metadata.get("requested_at_precision") or metadata.get("added_at_precision")
+    if explicit in {"date", "datetime"}:
+        return str(explicit)
+    text = str(value or "")
+    if not text:
+        return None
+    if len(text) == 10 and text[4] == "-" and text[7] == "-":
+        return "date"
+    source_is_date_only = source in {
+        IntentSource.DOUBAN_WANTED.value,
+        IntentSource.IMDB_WATCHLIST.value,
+    }
+    if source_is_date_only and (
+        "T00:00:00" in text or " 00:00:00" in text
+    ):
+        return "date"
+    return "datetime"
 
 
 def _want_source_key(source: str, metadata: dict[str, Any]) -> str:

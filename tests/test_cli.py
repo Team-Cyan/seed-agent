@@ -406,7 +406,27 @@ def test_schedule_run_executes_single_cycle_and_emits_schedule_metadata(
             },
         }
 
+    intent_seen: list[tuple[Path, bool]] = []
+
+    def fake_intent_run_once_payload(
+        config_path_value: Path,
+        *,
+        execute: bool,
+    ) -> dict[str, object]:
+        intent_seen.append((config_path_value, execute))
+        return {
+            "command": "intent-run-once",
+            "config": str(config_path_value),
+            "execute": execute,
+            "ingested": 2,
+            "searched": 2,
+            "ranked": 2,
+            "enqueue_candidates": 1,
+            "decisions": [{"action": "intent.search"}],
+        }
+
     monkeypatch.setattr(cli, "_run_once_payload", fake_run_once_payload)
+    monkeypatch.setattr(cli, "_intent_run_once_payload", fake_intent_run_once_payload)
     monkeypatch.setattr(cli.time, "sleep", lambda seconds: None)
 
     result = CliRunner().invoke(
@@ -434,6 +454,8 @@ def test_schedule_run_executes_single_cycle_and_emits_schedule_metadata(
     assert payload["interval_minutes"] == 15
     assert payload["min_free_window_minutes"] == 180
     assert payload["require_known_free_window"] is True
+    assert payload["intent_enabled"] is True
+    assert payload["intent_execute"] is False
     assert payload["heartbeat_file"] == str(heartbeat_path)
     assert payload["scores_count"] == 1
     assert payload["decisions_count"] == 1
@@ -447,7 +469,17 @@ def test_schedule_run_executes_single_cycle_and_emits_schedule_metadata(
         "preview_count": 1,
         "pool_usage": {"downloads": {"size_tib": 1.2}},
     }
+    assert payload["intent"] == {
+        "command": "intent-run-once",
+        "execute": False,
+        "ingested": 2,
+        "searched": 2,
+        "ranked": 2,
+        "enqueue_candidates": 1,
+        "decisions_count": 1,
+    }
     assert seen == [(config_path, True, 180, True)]
+    assert intent_seen == [(config_path, False)]
     assert startup_heartbeats == [
         {
             "accepted": None,
@@ -458,6 +490,7 @@ def test_schedule_run_executes_single_cycle_and_emits_schedule_metadata(
             "error": None,
             "execute": True,
             "interval_minutes": 15,
+            "intent": None,
             "phase": "running",
             "updated_at": startup_heartbeats[0]["updated_at"],
             "version": __version__,
@@ -469,6 +502,135 @@ def test_schedule_run_executes_single_cycle_and_emits_schedule_metadata(
     assert heartbeat["phase"] is None
     assert heartbeat["accepted"] == 1
     assert heartbeat["enqueued"] == 1
+    assert heartbeat["intent"]["searched"] == 2
+
+
+def test_schedule_run_can_skip_intent_cycle(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from seed_agent import cli
+
+    config_path = _config_file(tmp_path)
+    intent_called = False
+
+    def fake_run_once_payload(
+        config_path_value: Path,
+        *,
+        execute: bool,
+        min_free_window_minutes: int | None,
+        require_known_free_window: bool,
+        prune: bool,
+        prune_free_window_min_remaining_minutes: int | None = None,
+    ) -> dict[str, object]:
+        return {
+            "command": "run-once",
+            "config": str(config_path_value),
+            "execute": execute,
+            "discovered": 0,
+            "scored": 0,
+            "accepted": 0,
+            "enqueued": 0,
+            "scores": [],
+            "decisions": [],
+        }
+
+    def fake_intent_run_once_payload(
+        config_path_value: Path,
+        *,
+        execute: bool,
+    ) -> dict[str, object]:
+        nonlocal intent_called
+        intent_called = True
+        return {"command": "intent-run-once", "execute": execute}
+
+    monkeypatch.setattr(cli, "_run_once_payload", fake_run_once_payload)
+    monkeypatch.setattr(cli, "_intent_run_once_payload", fake_intent_run_once_payload)
+
+    result = CliRunner().invoke(
+        cli.app,
+        [
+            "schedule-run",
+            "--config",
+            str(config_path),
+            "--no-intent",
+            "--max-cycles",
+            "1",
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = _json_output(result)
+    assert payload["intent_enabled"] is False
+    assert "intent" not in payload
+    assert intent_called is False
+
+
+def test_schedule_run_can_execute_intent_cycle_when_explicit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from seed_agent import cli
+
+    config_path = _config_file(tmp_path)
+    seen_execute: list[bool] = []
+
+    def fake_run_once_payload(
+        config_path_value: Path,
+        *,
+        execute: bool,
+        min_free_window_minutes: int | None,
+        require_known_free_window: bool,
+        prune: bool,
+        prune_free_window_min_remaining_minutes: int | None = None,
+    ) -> dict[str, object]:
+        return {
+            "command": "run-once",
+            "config": str(config_path_value),
+            "execute": execute,
+            "discovered": 0,
+            "scored": 0,
+            "accepted": 0,
+            "enqueued": 0,
+            "scores": [],
+            "decisions": [],
+        }
+
+    def fake_intent_run_once_payload(
+        config_path_value: Path,
+        *,
+        execute: bool,
+    ) -> dict[str, object]:
+        seen_execute.append(execute)
+        return {
+            "command": "intent-run-once",
+            "config": str(config_path_value),
+            "execute": execute,
+            "ingested": 0,
+            "searched": 0,
+            "ranked": 0,
+            "enqueue_candidates": 0,
+            "decisions": [],
+        }
+
+    monkeypatch.setattr(cli, "_run_once_payload", fake_run_once_payload)
+    monkeypatch.setattr(cli, "_intent_run_once_payload", fake_intent_run_once_payload)
+
+    result = CliRunner().invoke(
+        cli.app,
+        [
+            "schedule-run",
+            "--config",
+            str(config_path),
+            "--intent-execute",
+            "--max-cycles",
+            "1",
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = _json_output(result)
+    assert payload["intent_execute"] is True
+    assert payload["intent"]["execute"] is True
+    assert seen_execute == [True]
 
 
 def test_schedule_run_can_prune_each_cycle(
