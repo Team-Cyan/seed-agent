@@ -4,6 +4,14 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.8.6 - 2026-06-07
+
+### Fixed
+
+- M-Team deferred download-token timeouts now reject only the affected candidate
+  instead of crashing `schedule-run`, preventing restart loops when
+  `genDlToken` is temporarily unreachable.
+
 ## 0.8.5 - 2026-06-06
 
 ### Fixed

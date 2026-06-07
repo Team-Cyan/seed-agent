@@ -119,10 +119,19 @@ async def resolve_deferred_download_urls(
             resolved.append(_reject_unresolved_download_url(item, "missing mteam api key"))
             continue
 
-        resolved_candidate = await resolve_deferred_download_url(
-            candidate,
-            api_key=api_key,
-        )
+        try:
+            resolved_candidate = await resolve_deferred_download_url(
+                candidate,
+                api_key=api_key,
+            )
+        except Exception as exc:
+            resolved.append(
+                _reject_unresolved_download_url(
+                    item,
+                    f"download_url unavailable from mteam api: {_error_summary(exc)}",
+                )
+            )
+            continue
         if resolved_candidate is None:
             resolved.append(
                 _reject_unresolved_download_url(item, "download_url unavailable from mteam api")
@@ -140,6 +149,10 @@ def _reject_unresolved_download_url(item: ScoreBreakdown, reason: str) -> ScoreB
             "reasons": [*item.reasons, reason],
         }
     )
+
+
+def _error_summary(exc: Exception) -> str:
+    return type(exc).__name__
 
 
 def daily_report(
