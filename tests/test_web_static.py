@@ -403,5 +403,23 @@ def test_javascript_renders_readonly_overview_panel() -> None:
     assert 'fetch("/api/state/summary")' in script
     assert 'fetch("/api/pools")' in script
     assert "renderOverviewPanel" in script
+    assert "renderStateChips" in script
+    assert "renderBudgetPoolList" in script
+    assert "renderAttentionList" in script
+    assert "dashboardAttention" in script
     assert "metric-card" in script
-    assert ".overview-grid" in styles
+    assert ".overview-dashboard" in styles
+    assert ".overview-summary-strip" in styles
+    assert ".overview-detail-grid" in styles
+    assert ".overview-chip" in styles
+
+
+def test_mobile_dashboard_uses_compact_single_column_layout() -> None:
+    styles = (STATIC_ROOT / "styles.css").read_text(encoding="utf-8")
+
+    assert "@media (max-width: 900px)" in styles
+    assert ".overview-hero {\n    grid-template-columns: 1fr;" in styles
+    assert ".overview-detail-grid {\n    grid-template-columns: 1fr;" in styles
+    assert "@media (max-width: 700px)" in styles
+    assert ".overview-dashboard {\n    gap: 10px;" in styles
+    assert ".metric-card.primary .metric-value {\n    font-size: 28px;" in styles

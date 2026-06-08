@@ -1,6 +1,6 @@
 FROM python:3.14-slim
 
-ARG VERSION=0.8.6
+ARG VERSION=0.8.7
 ARG REVISION=unknown
 ARG BUILD_DATE=unknown
 
@@ -8,7 +8,7 @@ LABEL org.opencontainers.image.title="seed-agent" \
     org.opencontainers.image.description="Docker-first PT automation for NAS and homelab qBittorrent operations" \
     org.opencontainers.image.url="https://github.com/Team-Cyan/seed-agent" \
     org.opencontainers.image.source="https://github.com/Team-Cyan/seed-agent" \
-    org.opencontainers.image.icon="https://raw.githubusercontent.com/Team-Cyan/seed-agent/main/docs/assets/seed-agent-icon.png" \
+    org.opencontainers.image.icon="https://raw.githubusercontent.com/Team-Cyan/seed-agent/main/docs/assets/seed-agent-icon-transparent.png" \
     org.opencontainers.image.version="${VERSION}" \
     org.opencontainers.image.revision="${REVISION}" \
     org.opencontainers.image.created="${BUILD_DATE}"

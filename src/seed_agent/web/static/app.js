@@ -112,6 +112,7 @@ const copy = {
       categoryPolicies: "qB 分类策略",
       categoryPolicyName: "qB 分类名称",
       cleanupNoConfigChanges: "没有实际配置变化。",
+      configuredPools: "已配置容量池",
       close: "关闭",
       closeCandidates: "关闭候选种子",
       collapseTracker: "折叠站点",
@@ -169,6 +170,7 @@ const copy = {
       name: "名称",
       newSite: "新站点",
       noCandidates: "还没有候选。先点“搜索”。",
+      noDashboardAttention: "当前没有需要特别处理的状态。",
       noData: "无数据",
       noPools: "未配置容量池",
       noStateRecords: "暂无状态记录",
@@ -212,6 +214,7 @@ const copy = {
       sourceConfig: "来源配置",
       sourceConfigTitle: "想看来源配置",
       status: "状态",
+      dashboardAttention: "需要关注",
       tags: "标签",
       overBudgetBehavior: "超预算处理",
       overBudgetAddPaused: "暂停添加",
@@ -250,6 +253,10 @@ const copy = {
       wantsReadFailed: "想看列表读取失败",
       yes: "是",
       no: "否",
+      attentionHeartbeat: "心跳不是正常状态，请检查 schedule-run 或容器状态。",
+      attentionCandidateFailures: "候选种子里存在失败或待确认记录。",
+      attentionIntentFailures: "获取意图里存在失败或待确认记录。",
+      attentionNoPools: "还没有配置容量池，dashboard 无法展示容量边界。",
       doubanUser: "Douban 用户",
       chooseTypeFirst: "先选择类型。选完类型后，只显示这个类型需要继续配置的选项。",
       matchingPreference: "符合偏好",
@@ -334,6 +341,7 @@ const copy = {
       categoryPolicies: "qB category policies",
       categoryPolicyName: "qB category name",
       cleanupNoConfigChanges: "No actual config changes.",
+      configuredPools: "Configured pools",
       close: "Close",
       closeCandidates: "Close candidate torrents",
       collapseTracker: "Collapse tracker",
@@ -391,6 +399,7 @@ const copy = {
       name: "Name",
       newSite: "New tracker",
       noCandidates: "No candidates yet. Run Search first.",
+      noDashboardAttention: "No status needs attention right now.",
       noData: "No data",
       noPools: "No budget pools configured",
       noStateRecords: "No state records yet",
@@ -434,6 +443,7 @@ const copy = {
       sourceConfig: "Source config",
       sourceConfigTitle: "Want source config",
       status: "Status",
+      dashboardAttention: "Needs attention",
       tags: "Tags",
       overBudgetBehavior: "Over budget",
       overBudgetAddPaused: "Add paused",
@@ -472,6 +482,10 @@ const copy = {
       wantsReadFailed: "Failed to read Want List",
       yes: "Yes",
       no: "No",
+      attentionHeartbeat: "Heartbeat is not OK. Check schedule-run or container status.",
+      attentionCandidateFailures: "Candidate torrents include failed or confirmation-required records.",
+      attentionIntentFailures: "Resource intents include failed or confirmation-required records.",
+      attentionNoPools: "No budget pools are configured, so the dashboard cannot show capacity boundaries.",
       doubanUser: "Douban user",
       chooseTypeFirst: "Choose a type first. After that, only fields for the selected tracker type are shown.",
       matchingPreference: "Matches preferences",
@@ -872,7 +886,7 @@ function renderSection() {
 
 function renderOverviewPanel() {
   const panel = document.createElement("section");
-  panel.className = "overview-grid";
+  panel.className = "overview-dashboard";
   const { health, stateSummary, pools, error } = state.overview;
   if (error) {
     panel.append(renderMetricCard(uiText("readingStatus"), uiText("failed"), error, "warning"));
@@ -886,29 +900,137 @@ function renderOverviewPanel() {
   const candidateStates = stateSummary.candidates?.by_state || {};
   const intentStates = stateSummary.intents?.by_state || {};
   const budgetPools = pools.budget_pools || [];
-  panel.append(
-    renderMetricCard(
-      uiText("heartbeat"),
-      formatHealthStatus(health.status),
-      health.heartbeat_exists
-        ? `${health.age_minutes ?? "?"} ${uiText("minutesAgoCycle")} ${health.heartbeat?.cycle ?? "?"}`
-        : uiText("heartbeatMissing"),
-      health.status === "ok" ? "ok" : "warning",
-    ),
+
+  const hero = document.createElement("div");
+  hero.className = "overview-hero";
+  const heartbeatCard = renderMetricCard(
+    uiText("heartbeat"),
+    formatHealthStatus(health.status),
+    health.heartbeat_exists
+      ? `${health.age_minutes ?? "?"} ${uiText("minutesAgoCycle")} ${health.heartbeat?.cycle ?? "?"}`
+      : uiText("heartbeatMissing"),
+    health.status === "ok" ? "ok" : "warning",
   );
-  panel.append(
+  heartbeatCard.classList.add("primary");
+  hero.append(heartbeatCard);
+
+  const summaryStrip = document.createElement("div");
+  summaryStrip.className = "overview-summary-strip";
+  summaryStrip.append(
     renderMetricCard(uiText("candidateTorrentsCount"), stateSummary.candidates?.total ?? 0, formatStateCounts(candidateStates), "info"),
   );
-  panel.append(renderMetricCard(uiText("resourceIntents"), stateSummary.intents?.total ?? 0, formatStateCounts(intentStates), "info"));
-  panel.append(
-    renderMetricCard(
-      uiText("budgetPools"),
-      budgetPools.length,
-      budgetPools.map((pool) => `${pool.name}: ${pool.max_size_tib} TiB`).join(" · ") || uiText("noPools"),
-      "info",
-    ),
-  );
+  summaryStrip.append(renderMetricCard(uiText("resourceIntents"), stateSummary.intents?.total ?? 0, formatStateCounts(intentStates), "info"));
+  summaryStrip.append(renderMetricCard(uiText("budgetPools"), budgetPools.length, uiText("configuredPools"), "info"));
+  hero.append(summaryStrip);
+  panel.append(hero);
+
+  const detailGrid = document.createElement("div");
+  detailGrid.className = "overview-detail-grid";
+  detailGrid.innerHTML = `
+    <article class="overview-detail-panel">
+      <div class="section-title">${escapeHtml(uiText("budgetPools"))}</div>
+      ${renderBudgetPoolList(budgetPools)}
+    </article>
+    <article class="overview-detail-panel">
+      <div class="section-title">${escapeHtml(uiText("dashboardAttention"))}</div>
+      ${renderAttentionList(health, candidateStates, intentStates, budgetPools)}
+    </article>
+    <article class="overview-detail-panel wide">
+      <div class="section-title">${escapeHtml(uiText("status"))}</div>
+      <div class="overview-state-groups">
+        <div>
+          <div class="metric-label">${escapeHtml(uiText("candidateTorrentsCount"))}</div>
+          ${renderStateChips(candidateStates)}
+        </div>
+        <div>
+          <div class="metric-label">${escapeHtml(uiText("resourceIntents"))}</div>
+          ${renderStateChips(intentStates)}
+        </div>
+      </div>
+    </article>
+  `;
+  panel.append(detailGrid);
   return panel;
+}
+
+function renderBudgetPoolList(budgetPools) {
+  if (budgetPools.length === 0) {
+    return `<div class="status-item info">${escapeHtml(uiText("noPools"))}</div>`;
+  }
+  return `
+    <div class="overview-list">
+      ${budgetPools
+        .map(
+          (pool) => `
+            <div class="overview-pool-row">
+              <strong>${escapeHtml(pool.name || uiText("unknown"))}</strong>
+              <span>${escapeHtml(pool.max_size_tib ?? "?")} TiB</span>
+            </div>
+          `,
+        )
+        .join("")}
+    </div>
+  `;
+}
+
+function renderAttentionList(health, candidateStates, intentStates, budgetPools) {
+  const items = [];
+  if (health.status !== "ok") {
+    items.push(uiText("attentionHeartbeat"));
+  }
+  if ((candidateStates.failed || 0) > 0 || (candidateStates.confirmation_required || 0) > 0) {
+    items.push(uiText("attentionCandidateFailures"));
+  }
+  if ((intentStates.failed || 0) > 0 || (intentStates.confirmation_required || 0) > 0) {
+    items.push(uiText("attentionIntentFailures"));
+  }
+  if (budgetPools.length === 0) {
+    items.push(uiText("attentionNoPools"));
+  }
+  if (items.length === 0) {
+    return `<div class="status-item ok">${escapeHtml(uiText("noDashboardAttention"))}</div>`;
+  }
+  return `
+    <div class="attention-list">
+      ${items.map((item) => `<div class="status-item warning">${escapeHtml(item)}</div>`).join("")}
+    </div>
+  `;
+}
+
+function renderStateChips(counts) {
+  const entries = Object.entries(counts);
+  if (entries.length === 0) {
+    return `<div class="status-item info">${escapeHtml(uiText("noStateRecords"))}</div>`;
+  }
+  const labels = stateCountLabels();
+  return `
+    <div class="overview-chip-list">
+      ${entries
+        .map(
+          ([name, count]) => `
+            <span class="overview-chip">
+              <span>${escapeHtml(labels[name] || name)}</span>
+              <strong>${escapeHtml(count)}</strong>
+            </span>
+          `,
+        )
+        .join("")}
+    </div>
+  `;
+}
+
+function stateCountLabels() {
+  return {
+    accepted: uiText("statusAccepted"),
+    scored: uiText("statusScored"),
+    enqueued: uiText("statusEnqueued"),
+    confirmation_required: uiText("statusConfirmationRequired"),
+    rejected: uiText("statusRejected"),
+    failed: uiText("statusFailed"),
+    deleted: uiText("statusDeleted"),
+    downloading: uiText("statusDownloading"),
+    seeding: uiText("statusSeeding"),
+  };
 }
 
 function renderMetricCard(label, value, detail, level) {

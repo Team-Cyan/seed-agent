@@ -4,6 +4,27 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.8.7 - 2026-06-08
+
+### Added
+
+- Added dedicated PNG assets for the README header, GitHub social preview, and
+  repository icon use cases.
+
+### Changed
+
+- Updated Docker, Compose, and Unraid icon references to a transparent icon URL
+  with a new filename to avoid stale DockerMan icon caches.
+- Refined Web UI static styling and interaction feedback for current settings
+  surfaces.
+
+### Fixed
+
+- Removed the icon's outer background and shadow so Unraid and Web UI icon
+  surfaces render with a clean transparent background.
+- Reworked the README header image to avoid GitHub SVG font-spacing and
+  clipping issues.
+
 ## 0.8.6 - 2026-06-07
 
 ### Fixed

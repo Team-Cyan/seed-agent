@@ -7,11 +7,8 @@
       <stop offset="0.52" stop-color="#2dd4bf"/>
       <stop offset="1" stop-color="#60a5fa"/>
     </linearGradient>
-    <filter id="soft-shadow" x="-20%" y="-20%" width="140%" height="140%">
-      <feDropShadow dx="0" dy="14" stdDeviation="18" flood-color="#020617" flood-opacity="0.28"/>
-    </filter>
   </defs>
-  <path d="M76 24h104c28.7 0 52 23.3 52 52v104c0 28.7-23.3 52-52 52H76c-28.7 0-52-23.3-52-52V76c0-28.7 23.3-52 52-52Z" fill="url(#seed-agent-gradient)" filter="url(#soft-shadow)"/>
+  <path d="M76 24h104c28.7 0 52 23.3 52 52v104c0 28.7-23.3 52-52 52H76c-28.7 0-52-23.3-52-52V76c0-28.7 23.3-52 52-52Z" fill="url(#seed-agent-gradient)"/>
   <path d="M85 72h86c7.2 0 13 5.8 13 13v86c0 7.2-5.8 13-13 13H85c-7.2 0-13-5.8-13-13V85c0-7.2 5.8-13 13-13Zm13 25v62h60V97H98Z" fill="#08111f" fill-rule="evenodd"/>
   <circle cx="128" cy="128" r="20" fill="#08111f"/>
   <circle cx="128" cy="85" r="11" fill="#08111f"/>

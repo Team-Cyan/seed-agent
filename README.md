@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/seed-agent-logo.svg" alt="seed-agent" width="520">
+  <img src="docs/assets/seed-agent-logo.png" alt="seed-agent" width="520">
 </p>
 
 # seed-agent

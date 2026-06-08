@@ -7,7 +7,7 @@ services:
     container_name: seed-agent
     restart: unless-stopped
     labels:
-      org.opencontainers.image.icon: https://raw.githubusercontent.com/Team-Cyan/seed-agent/main/docs/assets/seed-agent-icon.png
+      org.opencontainers.image.icon: https://raw.githubusercontent.com/Team-Cyan/seed-agent/main/docs/assets/seed-agent-icon-transparent.png
     environment:
       SEED_AGENT_MODE: schedule-run
       SEED_AGENT_CONFIG: /app/config/config.yaml
