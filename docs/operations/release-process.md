@@ -46,6 +46,21 @@ Version tags such as `v0.1.3` also publish:
 
 The image name must stay lowercase for registry compatibility.
 
+## Archival Release Branches
+
+Keep normal development on `main`.
+
+For each minor release line, create an archival branch named
+`release/<major>.<minor>` such as `release/0.8`. This branch is a historical
+pointer for that minor line, not a working branch.
+
+- Point the branch at the latest known patch commit for that minor line.
+- Do not develop routine fixes or features on archival release branches.
+- When a newer minor line starts, treat the previous minor branch as immutable
+  unless there is an explicit decision to correct the archive pointer.
+- Tags remain the release artifact triggers; archival branches are only for
+  repository history navigation.
+
 ## Release Checklist
 
 1. Classify the change as docs-only, codefix/operational fix, or feature.
