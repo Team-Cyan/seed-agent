@@ -1102,6 +1102,34 @@ def test_http_tracker_save_writes_config_and_secret(tmp_path: Path) -> None:
     ) == "secret-token"
 
 
+def test_http_tracker_save_rejects_secret_ref_outside_local_secrets(tmp_path: Path) -> None:
+    config_path = _write_minimal_config(tmp_path)
+    outside_ref = f"../{tmp_path.name}-outside.api-key"
+    outside_path = tmp_path.parent / f"{tmp_path.name}-outside.api-key"
+    before = config_path.read_text(encoding="utf-8")
+
+    with _running_server(config_path) as base_url:
+        payload = _request_json(
+            base_url,
+            "POST",
+            "/api/trackers",
+            {
+                "type": "mteam",
+                "name": "mt",
+                "enabled": True,
+                "rss_url": "https://rss.example/feed",
+                "discovery_mode": "api",
+                "api_key_ref": outside_ref,
+                "api_key_value": "secret-token",
+            },
+            expected_status=400,
+        )
+
+    assert "local/secrets" in payload["status"][0]["message"]
+    assert config_path.read_text(encoding="utf-8") == before
+    assert not outside_path.exists()
+
+
 def test_http_tracker_save_generates_api_key_ref_when_secret_value_is_provided(
     tmp_path: Path,
 ) -> None:

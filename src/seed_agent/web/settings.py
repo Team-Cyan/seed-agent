@@ -18,6 +18,7 @@ CONFIG_SECTION_NAMES = {
     "search",
     "sources",
 }
+LOCAL_SECRETS_DIR = Path("local/secrets")
 
 
 class TrackerDraft(BaseModel):
@@ -198,11 +199,19 @@ def build_tracker_status(draft: TrackerDraft, root: Path) -> list[dict[str, str]
     if draft.discovery_mode == "rss" and not draft.rss_url.strip():
         status.append({"level": "warning", "message": "rss_url is recommended for rss discovery"})
     if draft.api_key_ref:
-        secret_path = _resolve_repo_path(draft.api_key_ref, root)
-        if secret_path.exists():
-            status.append({"level": "ok", "message": "API key file exists"})
+        try:
+            secret_path = (
+                _resolve_secret_write_path(draft.api_key_ref, root)
+                if draft.api_key_value is not None
+                else _resolve_repo_path(draft.api_key_ref, root)
+            )
+        except ValueError as exc:
+            status.append({"level": "warning", "message": str(exc)})
         else:
-            status.append({"level": "warning", "message": "API key file is missing"})
+            if secret_path.exists():
+                status.append({"level": "ok", "message": "API key file exists"})
+            else:
+                status.append({"level": "warning", "message": "API key file is missing"})
     return status
 
 
@@ -248,7 +257,7 @@ def _write_secret_value(
     if not secret_ref or secret_value is None:
         return
     root = _repo_root_for_config(config_path)
-    secret_path = _resolve_repo_path(secret_ref, root)
+    secret_path = _resolve_secret_write_path(secret_ref, root)
     secret_path.parent.mkdir(parents=True, exist_ok=True)
     secret_path.write_text(secret_value, encoding="utf-8")
 
@@ -265,6 +274,17 @@ def _resolve_repo_path(path_value: str, root: Path) -> Path:
     if path.is_absolute():
         return path
     return root / path
+
+
+def _resolve_secret_write_path(path_value: str, root: Path) -> Path:
+    path = Path(path_value)
+    if path.is_absolute():
+        raise ValueError("API key file must be saved under local/secrets")
+    resolved = (root / path).resolve()
+    secrets_root = (root / LOCAL_SECRETS_DIR).resolve()
+    if resolved == secrets_root or not resolved.is_relative_to(secrets_root):
+        raise ValueError("API key file must be saved under local/secrets")
+    return resolved
 
 
 def _generated_api_key_ref(draft: TrackerDraft) -> str | None:

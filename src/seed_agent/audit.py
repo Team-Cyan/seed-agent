@@ -10,6 +10,8 @@ from seed_agent.models import Decision, safe_url_identity
 REDACTED = "<redacted>"
 
 SENSITIVE_QUERY_KEYS = {
+    "api_key",
+    "apikey",
     "passkey",
     "password",
     "passphrase",
@@ -27,6 +29,7 @@ SENSITIVE_QUERY_KEYS = {
     "secure",
     "signature",
     "sign",
+    "x-api-key",
     "hash",
 }
 SENSITIVE_TOKEN_KEYS = {"pass", "token", "secret", "auth", "cookie"}

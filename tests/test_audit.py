@@ -74,6 +74,27 @@ def test_redact_payload_masks_nested_strings_and_dict_values() -> None:
     }
 
 
+def test_redact_payload_masks_api_key_fields_and_assignments() -> None:
+    payload = {
+        "api_key": "secret-api-key",
+        "nested": {
+            "apikey": "secret-compact-key",
+            "message": "api_key=secret-inline-key auth_header=x-api-key",
+            "url": "https://tracker.example/api?api_key=secret-query-key&id=42",
+        },
+    }
+
+    redacted = redact_payload(payload)
+    redacted_text = str(redacted)
+
+    assert "secret-api-key" not in redacted_text
+    assert "secret-compact-key" not in redacted_text
+    assert "secret-inline-key" not in redacted_text
+    assert "secret-query-key" not in redacted_text
+    assert "auth_header=x-api-key" in redacted_text
+    assert "id=42" in redacted_text
+
+
 def test_audit_logger_writes_redacted_jsonl(tmp_path: Path) -> None:
     path = tmp_path / "logs" / "audit.jsonl"
     decision = Decision(

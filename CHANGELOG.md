@@ -4,6 +4,15 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.8.8 - 2026-06-09
+
+### Fixed
+
+- Restricted Web UI tracker API key writes to `local/secrets/` so a submitted
+  secret reference cannot write outside the project secret directory.
+- Extended audit and URL redaction to cover API key field/query names such as
+  `api_key`, `apikey`, and `x-api-key`.
+
 ## 0.8.7 - 2026-06-08
 
 ### Added
