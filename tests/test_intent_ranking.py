@@ -198,6 +198,24 @@ def test_rank_releases_applies_configured_keyword_preferences() -> None:
     assert "required keyword missing: Remux" in ranked[1].risks
 
 
+def test_rank_releases_scores_mixed_chinese_english_title_by_best_alias() -> None:
+    ranked = rank_releases(
+        _intent(
+            title="家政服务 The Housemaid",
+            raw_text="家政服务 The Housemaid 2025",
+            year=2025,
+            resolution=None,
+        ),
+        [_release(title="The Housemaid 2025 1080p BluRay")],
+        _intent_config(default_resolution=None),
+        _search_config(),
+    )
+
+    assert ranked[0].score >= 88
+    assert "title tokens matched" in ranked[0].reasons
+    assert "weak title match" not in ranked[0].risks
+
+
 def test_rank_releases_defaults_episode_intents_to_season_pack_matching() -> None:
     ranked = rank_releases(
         _intent(

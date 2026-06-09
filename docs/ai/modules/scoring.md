@@ -71,6 +71,11 @@ Score discovered torrents or ranked releases using explicit policy weights and e
 - For TV/anime resource intents, `intent.series_search_mode=season` treats
   SxxEyy requests as season-pack searches and does not penalize missing episode
   tokens. Use `episode` when the operator wants one episode at a time.
+- Want List titles can arrive as mixed Chinese and English aliases, such as a
+  Douban Chinese title followed by an English title. Intent release ranking
+  scores title match against the full title and script-specific aliases, then
+  uses the best title score so an English tracker result is not unfairly
+  penalized by the Chinese title token.
 
 ## Verification
 

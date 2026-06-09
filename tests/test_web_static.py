@@ -305,6 +305,9 @@ def test_want_list_has_mobile_card_layout() -> None:
     styles = (STATIC_ROOT / "styles.css").read_text(encoding="utf-8")
 
     assert "renderWantCard" in script
+    assert "formatBestCandidateScore" in script
+    assert "best_candidate_score" in script
+    assert "最高分" in script
     assert "want-table-desktop" in script
     assert "want-card-list" in script
     assert 'role="button" tabindex="0"' in script
@@ -312,6 +315,7 @@ def test_want_list_has_mobile_card_layout() -> None:
     assert 'event.key !== "Enter" && event.key !== " "' in script
     assert ".want-card-list" in styles
     assert ".want-card" in styles
+    assert ".want-score-pill" in styles
     assert ".inline-action" in styles
 
 
@@ -340,6 +344,7 @@ def test_mobile_ui_uses_touch_sized_controls_and_modal_actions() -> None:
     assert "touch-action: manipulation" in styles
     assert "min-height: 44px" in styles
     assert "grid-template-columns: minmax(0, 1fr) 44px 44px" in styles
+    assert ".section-eyebrow {\n    display: none;" in styles
     assert ".candidate-actions button:last-child" in styles
     assert "max-height: calc(100vh - 16px)" in styles
     assert "position: sticky" in styles

@@ -575,6 +575,72 @@ intent:
     assert "required keyword missing: Remux" in candidates_payload["items"][1]["risks"]
 
 
+def test_http_wants_payload_includes_best_candidate_score(tmp_path: Path) -> None:
+    config_path = _write_minimal_config(tmp_path)
+    store = StateStore(tmp_path / ".seed-agent" / "state.db")
+    intent = ResourceIntent(
+        intent_id="douban_wanted:housemaid",
+        source=IntentSource.DOUBAN_WANTED,
+        raw_text="家政服务 The Housemaid 2025",
+        kind=IntentKind.MOVIE,
+        title="家政服务 The Housemaid",
+        year=2025,
+        requested_at=datetime(2026, 6, 6, tzinfo=UTC),
+        state=IntentState.CONFIRMATION_REQUIRED,
+    )
+    store.upsert_intent(intent)
+    store.save_ranked_releases(
+        [
+            RankedRelease(
+                intent_id=intent.intent_id,
+                release=ReleaseCandidate(
+                    release_id="mt:https://kp.m-team.cc/detail/low",
+                    site="mt",
+                    title="The Housemaid 2025 1080p WEB-DL",
+                    source_url="https://kp.m-team.cc/detail/low",
+                    download_url="mteam-api://torrent/low",
+                    size_bytes=8 * 1024**3,
+                    seeders=5,
+                    leechers=1,
+                    discount=Discount.NORMAL,
+                ),
+                score=8,
+                confidence=0.08,
+                accepted=False,
+                confirmation_required=True,
+                reasons=[],
+                risks=["weak title match"],
+            ),
+            RankedRelease(
+                intent_id=intent.intent_id,
+                release=ReleaseCandidate(
+                    release_id="mt:https://kp.m-team.cc/detail/high",
+                    site="mt",
+                    title="The Housemaid 2025 2160p BluRay Remux",
+                    source_url="https://kp.m-team.cc/detail/high",
+                    download_url="mteam-api://torrent/high",
+                    size_bytes=42 * 1024**3,
+                    seeders=10,
+                    leechers=3,
+                    discount=Discount.FREE,
+                ),
+                score=86,
+                confidence=0.86,
+                accepted=True,
+                confirmation_required=False,
+                reasons=["title tokens matched"],
+                risks=[],
+            ),
+        ]
+    )
+
+    with _running_server(config_path) as base_url:
+        payload = _request_json(base_url, "GET", "/api/wants")
+
+    assert payload["items"][0]["release_count"] == 2
+    assert payload["items"][0]["best_candidate_score"] == 86
+
+
 def test_http_want_enqueue_preview_can_select_lower_match_release(
     tmp_path: Path,
 ) -> None:

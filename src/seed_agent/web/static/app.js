@@ -160,6 +160,7 @@ const copy = {
       localApiLoading: "正在读取本地只读 API。",
       lowerMatch: "低匹配，可强制",
       maxSizeTib: "容量上限 TiB",
+      bestCandidateScore: "最高分",
       mediaCategoryMap: "想看类型路由",
       mediaType: "类型",
       mode: "模式",
@@ -389,6 +390,7 @@ const copy = {
       localApiLoading: "Reading the local read-only API.",
       lowerMatch: "Lower match, force allowed",
       maxSizeTib: "Size limit TiB",
+      bestCandidateScore: "Best score",
       mediaCategoryMap: "Want type routing",
       mediaType: "Type",
       mode: "Mode",
@@ -1361,6 +1363,7 @@ function filteredWantItems() {
 }
 
 function renderWantRow(item) {
+  const bestScore = formatBestCandidateScore(item);
   return `
     <tr class="want-row" data-want-id="${escapeAttribute(item.intent_id)}" role="button" tabindex="0" aria-label="${escapeAttribute(uiText("viewCandidates"))} ${escapeAttribute(item.title || item.raw_text)}">
       <td>
@@ -1372,6 +1375,7 @@ function renderWantRow(item) {
       <td>${escapeHtml(formatDate(item.added_at))}</td>
       <td>
         <span class="badge ${item.status === "queued" ? "ok" : ""}">${escapeHtml(item.status_label || item.state)}</span>
+        ${bestScore ? `<span class="want-score-pill">${escapeHtml(bestScore)}</span>` : ""}
         <span class="inline-action">${escapeHtml(uiText("viewCandidates"))}</span>
       </td>
     </tr>
@@ -1379,11 +1383,15 @@ function renderWantRow(item) {
 }
 
 function renderWantCard(item) {
+  const bestScore = formatBestCandidateScore(item);
   return `
     <article class="want-card" data-want-id="${escapeAttribute(item.intent_id)}" role="button" tabindex="0" aria-label="${escapeAttribute(uiText("viewCandidates"))} ${escapeAttribute(item.title || item.raw_text)}">
       <div class="want-card-header">
         <strong>${escapeHtml(item.title || item.raw_text)}</strong>
-        <span class="badge ${item.status === "queued" ? "ok" : ""}">${escapeHtml(item.status_label || item.state)}</span>
+        <div class="want-card-status">
+          <span class="badge ${item.status === "queued" ? "ok" : ""}">${escapeHtml(item.status_label || item.state)}</span>
+          ${bestScore ? `<span class="want-score-pill">${escapeHtml(bestScore)}</span>` : ""}
+        </div>
       </div>
       <div class="muted-line">${escapeHtml(item.raw_text || "")}</div>
       <div class="want-card-meta">
@@ -1396,6 +1404,13 @@ function renderWantCard(item) {
       </div>
     </article>
   `;
+}
+
+function formatBestCandidateScore(item) {
+  if (item.best_candidate_score === null || item.best_candidate_score === undefined) {
+    return "";
+  }
+  return `${uiText("bestCandidateScore")} ${item.best_candidate_score}`;
 }
 
 async function openWantCandidates(panel, intentId, message = "") {

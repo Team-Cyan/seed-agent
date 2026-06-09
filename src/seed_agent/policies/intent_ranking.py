@@ -6,6 +6,8 @@ from seed_agent.config import IntentConfig, SearchConfig
 from seed_agent.models import Discount, RankedRelease, ReleaseCandidate, ResourceIntent
 
 TOKEN_RE = re.compile(r"[a-z0-9]+|[\u4e00-\u9fff]+", re.IGNORECASE)
+LATIN_TOKEN_RE = re.compile(r"[a-z0-9]+", re.IGNORECASE)
+CJK_TOKEN_RE = re.compile(r"[\u4e00-\u9fff]+")
 
 
 def rank_releases(
@@ -151,12 +153,30 @@ def _rank_one(
 
 
 def _title_score(intent_title: str, release_title: str) -> int:
-    intent_tokens = _tokens(intent_title)
-    if not intent_tokens:
+    title_variants = _title_token_variants(intent_title)
+    if not title_variants:
         return 0
     release_tokens = _tokens(release_title)
+    return max(
+        _title_token_score(intent_tokens, release_tokens)
+        for intent_tokens in title_variants
+    )
+
+
+def _title_token_score(intent_tokens: set[str], release_tokens: set[str]) -> int:
     matched = len(intent_tokens.intersection(release_tokens))
     return round(45 * (matched / len(intent_tokens)))
+
+
+def _title_token_variants(title: str) -> list[set[str]]:
+    full_tokens = _tokens(title)
+    variants = [full_tokens] if full_tokens else []
+    latin_tokens = {match.group(0).lower() for match in LATIN_TOKEN_RE.finditer(title)}
+    cjk_tokens = {match.group(0).lower() for match in CJK_TOKEN_RE.finditer(title)}
+    for token_set in (latin_tokens, cjk_tokens):
+        if token_set and token_set not in variants:
+            variants.append(token_set)
+    return variants
 
 
 def _has_season(title: str, season: int) -> bool:

@@ -691,6 +691,7 @@ def _intent_release_counts(conn: sqlite3.Connection) -> dict[str, dict[str, Any]
         SELECT
             intent_id,
             COUNT(*) AS release_count,
+            MAX(score) AS best_candidate_score,
             MAX(accepted) AS has_accepted,
             MAX(confirmation_required) AS has_confirmation_required
         FROM release_candidates
@@ -700,6 +701,9 @@ def _intent_release_counts(conn: sqlite3.Connection) -> dict[str, dict[str, Any]
     return {
         str(row["intent_id"]): {
             "release_count": int(row["release_count"] or 0),
+            "best_candidate_score": int(row["best_candidate_score"])
+            if row["best_candidate_score"] is not None
+            else None,
             "has_accepted": bool(row["has_accepted"]),
             "has_confirmation_required": bool(row["has_confirmation_required"]),
         }
@@ -742,6 +746,7 @@ def _want_item(
         "state": state,
         "status": _want_download_status(state, releases, bool(selected_release_id)),
         "status_label": _want_download_status_label(state, releases, bool(selected_release_id)),
+        "best_candidate_score": release_count.get("best_candidate_score"),
         "selected_release_id": selected_release_id,
         "release_count": releases,
         "updated_at": row.get("updated_at"),

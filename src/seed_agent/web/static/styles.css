@@ -944,6 +944,14 @@ body.dark .secondary-button {
   justify-content: space-between;
 }
 
+.want-card-status {
+  align-items: flex-end;
+  display: grid;
+  flex: none;
+  gap: 6px;
+  justify-items: end;
+}
+
 .want-card-meta {
   color: var(--muted);
   display: flex;
@@ -963,6 +971,18 @@ body.dark .secondary-button {
   font-size: 12px;
   font-weight: 800;
   margin-top: 6px;
+}
+
+.want-score-pill {
+  background: var(--accent-soft);
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--line));
+  border-radius: 999px;
+  color: var(--accent);
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 800;
+  margin-top: 6px;
+  padding: 4px 8px;
 }
 
 .candidate-modal {
@@ -1123,7 +1143,6 @@ body.dark .secondary-button {
 
   .settings-panel-header,
   .structured-section-head,
-  .want-card-header,
   .candidate-card-head {
     align-items: stretch;
     flex-direction: column;
@@ -1155,6 +1174,10 @@ body.dark .secondary-button {
 
   .page-header {
     gap: 12px;
+  }
+
+  .section-eyebrow {
+    display: none;
   }
 
   .header-actions {
@@ -1209,6 +1232,18 @@ body.dark .secondary-button {
     align-items: flex-start;
     flex-direction: column;
     gap: 4px;
+  }
+
+  .want-card-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .want-card-status {
+    align-items: flex-start;
+    display: flex;
+    flex-wrap: wrap;
+    justify-items: start;
   }
 
   .help {

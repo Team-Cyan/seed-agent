@@ -4,6 +4,20 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.8.9 - 2026-06-09
+
+### Added
+
+- Web UI Want List rows now show the best saved candidate score directly in
+  the list and mobile cards, making low-value items easier to skip.
+
+### Fixed
+
+- Improved mobile Web UI header spacing by hiding the tiny section group label
+  on narrow screens.
+- Improved Want List release ranking for mixed Chinese/English titles by
+  scoring title aliases separately and using the best title match.
+
 ## 0.8.8 - 2026-06-09
 
 ### Fixed
