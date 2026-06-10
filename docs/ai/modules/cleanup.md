@@ -24,7 +24,13 @@ balanced safety policy.
   incomplete downloads that consumed space but never uploaded,
 - keep completed seeds available for upload; automated cleanup should not pause
   or delete a completed seed simply because it is cold, has no recent upload, or
-  has a free-window expiry,
+  has a free-window expiry, unless the operator explicitly enables completed
+  low-upload cleanup,
+- when `cleanup.delete_completed_low_upload_after_hours` is set, completed
+  mutable-category seeds can be deleted without requiring an over-budget pool if
+  their no-upload observation window has exceeded that delay and their total
+  upload remains below `cleanup.completed_low_upload_min_gb` or their ratio is
+  below `cleanup.completed_low_upload_min_ratio`,
 - keep currently uploading managed torrents even if a stale no-upload marker is
   present,
 - require pause-before-delete timing,

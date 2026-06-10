@@ -60,6 +60,9 @@ def classify_cleanup(
         )
 
     if _is_completed_seed(torrent):
+        low_upload_decision = _completed_low_upload_decision(torrent, cleanup, metadata)
+        if low_upload_decision is not None:
+            return low_upload_decision
         return CleanupDecision(
             action="keep",
             reason=_reason("completed seed retained for upload"),
@@ -251,6 +254,64 @@ def _zero_total_upload_decision(
         reason=_reason(
             f"zero total upload for {no_upload_age.days}d {no_upload_age.seconds // 3600}h "
             f"< delete delay {cleanup.delete_after_no_upload_hours}h"
+        ),
+        managed=True,
+    )
+
+
+def _completed_low_upload_decision(
+    torrent: ManagedTorrent,
+    cleanup: CleanupConfig,
+    metadata: dict[str, object],
+) -> CleanupDecision | None:
+    threshold_hours = cleanup.delete_completed_low_upload_after_hours
+    if threshold_hours is None:
+        return None
+
+    no_upload_since_at = _no_upload_since_at(metadata)
+    if no_upload_since_at is None:
+        return CleanupDecision(
+            action="keep",
+            reason=_reason("completed low-upload observation window just started"),
+            managed=True,
+        )
+
+    no_upload_age = _utcnow() - no_upload_since_at
+    delete_delay = timedelta(hours=threshold_hours)
+    if no_upload_age < delete_delay:
+        return CleanupDecision(
+            action="keep",
+            reason=_reason(
+                "completed low-upload observation "
+                f"{no_upload_age.days}d {no_upload_age.seconds // 3600}h "
+                f"< delete delay {threshold_hours}h"
+            ),
+            managed=True,
+        )
+
+    downloaded_bytes = max(torrent.downloaded_bytes, 1)
+    uploaded_gb = torrent.uploaded_bytes / 1024**3
+    ratio = torrent.uploaded_bytes / downloaded_bytes
+    low_total_upload = (
+        torrent.uploaded_bytes <= 0
+        or (
+            cleanup.completed_low_upload_min_gb > 0
+            and uploaded_gb < cleanup.completed_low_upload_min_gb
+        )
+        or (
+            cleanup.completed_low_upload_min_ratio > 0
+            and ratio < cleanup.completed_low_upload_min_ratio
+        )
+    )
+    if not low_total_upload:
+        return None
+
+    return CleanupDecision(
+        action="delete",
+        reason=_reason(
+            "completed low-upload seed "
+            f"{uploaded_gb:.2f} GiB uploaded, ratio {ratio:.4f}, "
+            f"no upload for {no_upload_age.days}d {no_upload_age.seconds // 3600}h"
         ),
         managed=True,
     )

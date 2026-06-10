@@ -4,6 +4,20 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.8.10 - 2026-06-10
+
+### Changed
+
+- Added an explicit completed low-upload cleanup policy for mutable seed pools,
+  allowing demand-first operators to prune completed seeds that stop uploading
+  after an observation window.
+
+### Fixed
+
+- qBittorrent enqueue now accepts `Ok` add responses without a trailing period.
+- qBittorrent enqueue failures now include a redacted response-body excerpt so
+  live add failures can be diagnosed without exposing tracker tokens.
+
 ## 0.8.9 - 2026-06-09
 
 ### Added

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -116,17 +117,33 @@ class QbittorrentClient:
 
 def _extract_add_hash(response: httpx.Response) -> str | None:
     body = response.text.strip()
-    if not body or body == "Ok.":
+    if not body or body.startswith("Ok"):
         return None
     if _looks_like_info_hash(body):
         return body
-    raise QbittorrentError("qBittorrent add torrent failed: unexpected response body")
+    raise QbittorrentError(
+        "qBittorrent add torrent failed: "
+        f"unexpected response body: {_safe_response_excerpt(body)}"
+    )
 
 
 def _looks_like_info_hash(value: str) -> bool:
     if len(value) != 40:
         return False
     return all(character in "0123456789abcdefABCDEF" for character in value)
+
+
+_SENSITIVE_RESPONSE_PARAM_RE = re.compile(
+    r"(?i)(passkey|token|apikey|api_key|auth|sid|session)=([^&\s'\"<>]+)"
+)
+
+
+def _safe_response_excerpt(value: str, *, limit: int = 300) -> str:
+    compact = " ".join(value.strip().split())
+    redacted = _SENSITIVE_RESPONSE_PARAM_RE.sub(r"\1=<redacted>", compact)
+    if len(redacted) > limit:
+        redacted = redacted[: limit - 3] + "..."
+    return repr(redacted)
 
 
 def _torrent_from_row(row: dict[str, Any]) -> ManagedTorrent:

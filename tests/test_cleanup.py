@@ -293,6 +293,90 @@ def test_keeps_active_seed_after_no_upload_observation_window() -> None:
     assert "completed seed" in decision.reason
 
 
+def test_deletes_completed_seed_with_low_upload_when_policy_enabled() -> None:
+    from seed_agent.policies.cleanup import classify_cleanup
+
+    now = datetime.now(UTC)
+    decision = classify_cleanup(
+        _torrent(
+            state="stalledUP",
+            uploaded_bytes=int(0.2 * 1024**3),
+            downloaded_bytes=50 * 1024**3,
+            last_activity_at=now - timedelta(days=4),
+            metadata={
+                "amount_left_bytes": 0,
+                "no_upload_since_at": now - timedelta(hours=80),
+            },
+        ),
+        _cleanup(
+            delete_completed_low_upload_after_hours=72,
+            completed_low_upload_min_ratio=0.02,
+            completed_low_upload_min_gb=1,
+        ),
+        managed_category="pt-auto",
+        managed_tags={"seed-agent", "pt-auto"},
+    )
+
+    assert decision.action == "delete"
+    assert "completed low-upload seed" in decision.reason
+
+
+def test_keeps_completed_seed_with_low_upload_before_policy_window() -> None:
+    from seed_agent.policies.cleanup import classify_cleanup
+
+    now = datetime.now(UTC)
+    decision = classify_cleanup(
+        _torrent(
+            state="stalledUP",
+            uploaded_bytes=0,
+            downloaded_bytes=50 * 1024**3,
+            last_activity_at=now - timedelta(days=4),
+            metadata={
+                "amount_left_bytes": 0,
+                "no_upload_since_at": now - timedelta(hours=6),
+            },
+        ),
+        _cleanup(
+            delete_completed_low_upload_after_hours=72,
+            completed_low_upload_min_ratio=0.02,
+            completed_low_upload_min_gb=1,
+        ),
+        managed_category="pt-auto",
+        managed_tags={"seed-agent", "pt-auto"},
+    )
+
+    assert decision.action == "keep"
+    assert "completed low-upload observation" in decision.reason
+
+
+def test_keeps_completed_seed_with_enough_total_upload_when_policy_enabled() -> None:
+    from seed_agent.policies.cleanup import classify_cleanup
+
+    now = datetime.now(UTC)
+    decision = classify_cleanup(
+        _torrent(
+            state="stalledUP",
+            uploaded_bytes=2 * 1024**3,
+            downloaded_bytes=50 * 1024**3,
+            last_activity_at=now - timedelta(days=4),
+            metadata={
+                "amount_left_bytes": 0,
+                "no_upload_since_at": now - timedelta(hours=80),
+            },
+        ),
+        _cleanup(
+            delete_completed_low_upload_after_hours=72,
+            completed_low_upload_min_ratio=0.02,
+            completed_low_upload_min_gb=1,
+        ),
+        managed_category="pt-auto",
+        managed_tags={"seed-agent", "pt-auto"},
+    )
+
+    assert decision.action == "keep"
+    assert "completed seed" in decision.reason
+
+
 def test_keeps_cold_completed_seed_when_space_reclamation_is_required() -> None:
     from seed_agent.policies.cleanup import classify_cleanup
 

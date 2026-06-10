@@ -49,6 +49,9 @@ by completion period, and unfinished work is ordered by current priority.
   - `completion_on <= 0` is treated as unknown completion time.
   - Zero-total-upload managed torrents can be observed and pruned after the
     configured no-upload window.
+  - Completed mutable-category seeds can be pruned by an explicit low-upload
+    retention policy when operator strategy values demand quality over keeping
+    every completed seed.
   - `review`, `daily-report`, and prune previews join enqueue-time evidence
     with qB runtime outcomes.
   - Currently uploading managed torrents are protected from stale no-upload

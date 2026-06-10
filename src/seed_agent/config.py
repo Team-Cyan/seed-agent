@@ -358,6 +358,9 @@ class CleanupConfig(BaseModel):
     protect_media_library: bool
     pause_before_delete_hours: int
     delete_after_no_upload_hours: int = 2
+    delete_completed_low_upload_after_hours: int | None = None
+    completed_low_upload_min_ratio: float = 0.0
+    completed_low_upload_min_gb: float = 0.0
 
     @model_validator(mode="after")
     def validate_pause_before_delete_hours(self) -> CleanupConfig:
@@ -365,6 +368,15 @@ class CleanupConfig(BaseModel):
             raise ValueError("pause_before_delete_hours must be >= 1")
         if self.delete_after_no_upload_hours < 1:
             raise ValueError("delete_after_no_upload_hours must be >= 1")
+        if (
+            self.delete_completed_low_upload_after_hours is not None
+            and self.delete_completed_low_upload_after_hours < 1
+        ):
+            raise ValueError("delete_completed_low_upload_after_hours must be >= 1")
+        if self.completed_low_upload_min_ratio < 0:
+            raise ValueError("completed_low_upload_min_ratio must be >= 0")
+        if self.completed_low_upload_min_gb < 0:
+            raise ValueError("completed_low_upload_min_gb must be >= 0")
         return self
 
 

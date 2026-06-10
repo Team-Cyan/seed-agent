@@ -65,6 +65,26 @@ async def test_add_url_can_request_paused_state() -> None:
 
 @pytest.mark.asyncio
 @respx.mock
+async def test_add_url_accepts_ok_without_trailing_period() -> None:
+    respx.post("https://qb.example/api/v2/auth/login").mock(
+        return_value=httpx.Response(200, text="Ok.")
+    )
+    respx.post("https://qb.example/api/v2/torrents/add").mock(
+        return_value=httpx.Response(200, text="Ok")
+    )
+    client = QbittorrentClient("https://qb.example", "alice", "secret")
+
+    result = await client.add_url(
+        "https://tracker.example/download.php?id=42",
+        category="pt-auto",
+        tags=["seed-agent", "pt-auto"],
+    )
+
+    assert result is None
+
+
+@pytest.mark.asyncio
+@respx.mock
 async def test_add_url_fails_on_failure_body() -> None:
     respx.post("https://qb.example/api/v2/auth/login").mock(
         return_value=httpx.Response(200, text="Ok.")
@@ -83,8 +103,41 @@ async def test_add_url_fails_on_failure_body() -> None:
 
     message = str(exc_info.value)
     assert "add torrent failed" in message
+    assert "response body: 'Fails.'" in message
     assert "download.php?id=42" not in message
     assert "passkey=secret" not in message
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_add_url_redacts_sensitive_response_body() -> None:
+    respx.post("https://qb.example/api/v2/auth/login").mock(
+        return_value=httpx.Response(200, text="Ok.")
+    )
+    respx.post("https://qb.example/api/v2/torrents/add").mock(
+        return_value=httpx.Response(
+            200,
+            text=(
+                "failed for https://tracker.example/download.php?"
+                "id=42&passkey=secret&token=secret-token"
+            ),
+        )
+    )
+    client = QbittorrentClient("https://qb.example", "alice", "secret")
+
+    with pytest.raises(QbittorrentError) as exc_info:
+        await client.add_url(
+            "https://tracker.example/download.php?id=42&passkey=secret",
+            category="pt-auto",
+            tags=["seed-agent"],
+        )
+
+    message = str(exc_info.value)
+    assert "response body:" in message
+    assert "passkey=<redacted>" in message
+    assert "token=<redacted>" in message
+    assert "passkey=secret" not in message
+    assert "token=secret-token" not in message
 
 
 @pytest.mark.asyncio
