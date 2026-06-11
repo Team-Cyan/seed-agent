@@ -4,6 +4,13 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.8.14 - 2026-06-11
+
+### Fixed
+
+- M-Team intent search now stops gracefully on non-zero search API responses
+  instead of crashing the scheduler cycle and triggering a container restart.
+
 ## 0.8.13 - 2026-06-11
 
 ### Fixed

@@ -13,6 +13,7 @@ from seed_agent.models import (
 )
 from seed_agent.sites.mteam import (
     MTeamApiDiscoveryOptions,
+    MTeamApiResponseError,
     fetch_api_candidates,
     resolve_deferred_download_url,
 )
@@ -55,13 +56,16 @@ class MTeamSearchProvider:
         releases: list[ReleaseCandidate] = []
         seen_release_ids: set[str] = set()
         for options in option_sequence:
-            candidates = await self.fetch_candidates(
-                site=self.site,
-                api_key=self.api_key,
-                api_key_header=self.api_key_header,
-                cookie=self.cookie,
-                options=options,
-            )
+            try:
+                candidates = await self.fetch_candidates(
+                    site=self.site,
+                    api_key=self.api_key,
+                    api_key_header=self.api_key_header,
+                    cookie=self.cookie,
+                    options=options,
+                )
+            except MTeamApiResponseError:
+                break
             for candidate in candidates:
                 release = _release_from_candidate(candidate)
                 if release.release_id in seen_release_ids:

@@ -25,6 +25,8 @@ Implemented today:
   candidates during execute-mode enqueue
 - non-zero M-Team search API responses are surfaced as discovery warnings
   rather than being treated as empty search results
+- intent search stops gracefully on non-zero M-Team search responses so
+  scheduled Want List polling does not crash on transient tracker throttling
 - M-Team API-backed resource intent search, using the same search endpoint while
   keeping download-token resolution deferred until execute-mode intent enqueue
 - ID-first intent search through native M-Team `douban` and `imdb` filters when
