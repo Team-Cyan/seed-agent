@@ -1,6 +1,6 @@
 FROM python:3.14-slim
 
-ARG VERSION=0.8.14
+ARG VERSION=0.8.15
 ARG REVISION=unknown
 ARG BUILD_DATE=unknown
 

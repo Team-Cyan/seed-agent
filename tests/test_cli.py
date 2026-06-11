@@ -633,6 +633,54 @@ def test_schedule_run_can_execute_intent_cycle_when_explicit(
     assert seen_execute == [True]
 
 
+def test_intent_run_once_reports_source_warnings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from seed_agent import cli
+
+    monkeypatch.chdir(tmp_path)
+
+    config_path = _config_file(tmp_path, secret_ref=None)
+    config = _config(secret_ref=None)
+
+    class FakeIntentResult:
+        ingested = []
+        searched = []
+        ranked = []
+        enqueue_selected = []
+        decisions = []
+
+    async def fake_run_intent_once(**kwargs):
+        assert kwargs["source_events"] == []
+        return FakeIntentResult()
+
+    def fail_read_configured_source_events(loaded):
+        raise RuntimeError("douban 403")
+
+    class FakeDownloader:
+        async def list_torrents(
+            self, category: str | None = None, tags: set[str] | None = None
+        ) -> list[ManagedTorrent]:
+            return []
+
+    monkeypatch.setattr(cli, "load_config", lambda path: config)
+    monkeypatch.setattr(cli, "_read_configured_source_events", fail_read_configured_source_events)
+    monkeypatch.setattr(cli, "run_intent_once", fake_run_intent_once)
+    monkeypatch.setattr(cli, "_maybe_build_downloader", lambda loaded: FakeDownloader())
+
+    result = CliRunner().invoke(cli.app, ["intent-run-once", "--config", str(config_path)])
+
+    assert result.exit_code == 0
+    payload = _json_output(result)
+    assert payload["source_warnings"] == [
+        {
+            "source": "configured_sources",
+            "error_type": "RuntimeError",
+            "message": "douban 403",
+        }
+    ]
+
+
 def test_schedule_run_can_prune_each_cycle(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

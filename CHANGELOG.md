@@ -4,6 +4,14 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.8.15 - 2026-06-11
+
+### Fixed
+
+- Configured Want List source refresh failures now appear as
+  `source_warnings` instead of crashing scheduler cycles, so temporary Douban
+  or IMDb fetch errors do not restart the container.
+
 ## 0.8.14 - 2026-06-11
 
 ### Fixed

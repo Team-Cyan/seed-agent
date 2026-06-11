@@ -968,6 +968,18 @@ def _intent_run_once_payload(config_path: Path, *, execute: bool) -> dict[str, A
     )
     batch_error = None
     pause_reasons = _enqueue_pause_reasons(loaded, live_torrents, pool_usage)
+    source_warnings: list[dict[str, str]] = []
+    try:
+        source_events = _read_configured_source_events(loaded)
+    except Exception as exc:
+        source_events = []
+        source_warnings.append(
+            {
+                "source": "configured_sources",
+                "error_type": type(exc).__name__,
+                "message": _runtime_error_summary(exc),
+            }
+        )
     try:
         release_resolver = _build_release_download_resolver(loaded)
         result = _run(
@@ -983,7 +995,7 @@ def _intent_run_once_payload(config_path: Path, *, execute: bool) -> dict[str, A
                 paused=paused,
                 pool_usage=pool_usage,
                 pause_reasons=pause_reasons,
-                source_events=_read_configured_source_events(loaded),
+                source_events=source_events,
                 release_resolver=release_resolver,
                 policy_resolver=policy_resolver,
             )
@@ -1014,6 +1026,8 @@ def _intent_run_once_payload(config_path: Path, *, execute: bool) -> dict[str, A
     if result is not None:
         payload["intents"] = [_intent_summary(intent) for intent in result.searched]
         payload["selected"] = [_ranked_release_summary(item) for item in result.enqueue_selected]
+    if source_warnings:
+        payload["source_warnings"] = source_warnings
     if batch_error is not None:
         payload["error"] = str(batch_error)
     return payload
@@ -1378,6 +1392,13 @@ def _attach_discovery_warnings(payload: dict[str, Any]) -> None:
         payload["discovery_warnings"] = warnings
 
 
+def _runtime_error_summary(exc: Exception) -> str:
+    text = str(exc).replace("\n", " ").strip()
+    if not text:
+        return type(exc).__name__
+    return text[:500]
+
+
 def _print_json(payload: dict[str, Any]) -> None:
     typer.echo(json.dumps(redact_payload(payload), ensure_ascii=False, sort_keys=True))
 
@@ -1433,7 +1454,7 @@ def _schedule_log_summary(payload: dict[str, Any]) -> dict[str, Any]:
 def _intent_payload_summary(payload: object) -> dict[str, Any] | None:
     if not isinstance(payload, dict):
         return None
-    return {
+    summary = {
         "command": payload.get("command"),
         "execute": payload.get("execute"),
         "ingested": payload.get("ingested"),
@@ -1442,6 +1463,9 @@ def _intent_payload_summary(payload: object) -> dict[str, Any] | None:
         "enqueue_candidates": payload.get("enqueue_candidates"),
         "decisions_count": len(payload.get("decisions") or []),
     }
+    if payload.get("source_warnings"):
+        summary["source_warnings"] = payload.get("source_warnings")
+    return summary
 
 
 def _candidate_summary(candidate: TorrentCandidate) -> dict[str, Any]:

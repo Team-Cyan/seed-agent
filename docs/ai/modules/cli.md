@@ -59,6 +59,9 @@ Expose the operator-facing command surface and safe summaries.
   report how many known active torrents were reconciled as missing from qB,
 - discovery-backed command payloads include `discovery_warnings` when an
   enabled site fails at runtime while other sites or flows continue,
+- `intent-run-once` payloads include `source_warnings` when configured Want
+  List source refresh fails while the intent cycle continues with no new source
+  events,
 - heartbeat reporting and healthcheck probes for long-running deployments.
 
 ## Expectations
@@ -85,6 +88,8 @@ Expose the operator-facing command surface and safe summaries.
   silently bundled into a long-running deployment,
 - keep scheduled Want List search non-mutating by default; automatic resource
   qB enqueue requires explicit `--intent-execute`,
+- keep configured Want List source refresh failures fail-soft so Douban/IMDb
+  availability issues do not restart long-running scheduler containers,
 - expose cleanup preview details before execute-mode mutation,
 - pass the scheduler interval into per-cycle pruning so persisted free-window
   expiries can be evaluated against the next scheduled check,
