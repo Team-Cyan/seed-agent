@@ -22,6 +22,14 @@ DownloadUrlFetcher = Callable[[str], Awaitable[str | None]]
 DEFERRED_DOWNLOAD_URL_PREFIX = "mteam-api://torrent/"
 
 
+class MTeamApiResponseError(RuntimeError):
+    def __init__(self, *, endpoint: str, code: str, message: str) -> None:
+        self.endpoint = endpoint
+        self.code = code
+        self.message = message
+        super().__init__(f"{endpoint} failed: code={code} message={message}")
+
+
 class MTeamApiDiscoveryOptions(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
@@ -138,8 +146,18 @@ class MTeamApiClient:
         response.raise_for_status()
 
         payload = response.json()
-        if not isinstance(payload, dict) or str(payload.get("code")) != "0":
-            return []
+        if not isinstance(payload, dict):
+            raise MTeamApiResponseError(
+                endpoint="torrent/search",
+                code="invalid_response",
+                message="expected object response",
+            )
+        if str(payload.get("code")) != "0":
+            raise MTeamApiResponseError(
+                endpoint="torrent/search",
+                code=str(payload.get("code")),
+                message=str(payload.get("message") or ""),
+            )
 
         rows = _extract_search_rows(payload)
         for row in rows:

@@ -182,6 +182,34 @@ async def test_discover_candidates_keeps_going_when_one_site_fails(monkeypatch) 
     assert calls == ["demo-bad", "demo-good"]
     assert len(candidates) == 1
     assert candidates[0].site == "demo-good"
+    assert pt_actions.get_last_discovery_warnings() == [
+        {
+            "site": "demo-bad",
+            "error_type": "RuntimeError",
+            "message": "boom",
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_discover_candidates_clears_runtime_warnings_on_success(monkeypatch) -> None:
+    from seed_agent.actions import pt as pt_actions
+
+    async def fail_fetch_rss_candidates(*args, **kwargs):
+        raise RuntimeError("temporary")
+
+    monkeypatch.setattr(pt_actions, "fetch_rss_candidates", fail_fetch_rss_candidates)
+
+    await pt_actions.discover_candidates(_config())
+    assert pt_actions.get_last_discovery_warnings()
+
+    async def good_fetch_rss_candidates(*args, **kwargs):
+        return [_candidate()]
+
+    monkeypatch.setattr(pt_actions, "fetch_rss_candidates", good_fetch_rss_candidates)
+
+    await pt_actions.discover_candidates(_config())
+    assert pt_actions.get_last_discovery_warnings() == []
 
 
 @pytest.mark.asyncio

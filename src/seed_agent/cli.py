@@ -25,6 +25,7 @@ from seed_agent.actions.intent import (
 from seed_agent.actions.pt import (
     SiteDiscoveryConfigError,
     discover_candidates,
+    get_last_discovery_warnings,
     resolve_deferred_download_urls,
     score_candidates,
 )
@@ -104,6 +105,7 @@ def discover(
         "discovered": len(candidates),
         "candidates": [_candidate_summary(candidate) for candidate in candidates],
     }
+    _attach_discovery_warnings(payload)
     _print_json(payload)
 
 
@@ -167,6 +169,7 @@ def site_probe(
         "config": str(config),
         "sites": summary_by_site,
     }
+    _attach_discovery_warnings(payload)
     _print_json(payload)
 
 
@@ -186,6 +189,7 @@ def score(
         "rejected": sum(1 for item in scored if not item.accepted),
         "scores": [_score_summary(item) for item in scored],
     }
+    _attach_discovery_warnings(payload)
     _print_json(payload)
 
 
@@ -259,6 +263,7 @@ def enqueue(
         payload["enqueue_paused_reasons"] = pause_reasons
     if batch_error is not None:
         payload["error"] = str(batch_error)
+    _attach_discovery_warnings(payload)
     _print_json(payload)
     _raise_if_batch_failed(batch_error)
 
@@ -580,6 +585,7 @@ def daily_report_command(
             for torrent in managed_torrents
         ],
     }
+    _attach_discovery_warnings(payload)
     _print_json(payload)
 
 
@@ -612,6 +618,7 @@ def strategy_report_command(
         ),
         "managed_torrents": managed_summaries,
     }
+    _attach_discovery_warnings(payload)
     _print_json(payload)
 
 
@@ -942,6 +949,7 @@ def _run_once_payload(
         payload["prune"] = prune_payload
         if "error" in prune_payload:
             payload["error"] = f"prune: {prune_payload['error']}"
+    _attach_discovery_warnings(payload)
     return payload
 
 
@@ -1364,6 +1372,12 @@ def _discover_candidates(config: SeedAgentConfig) -> list[TorrentCandidate]:
         raise typer.BadParameter(str(exc)) from exc
 
 
+def _attach_discovery_warnings(payload: dict[str, Any]) -> None:
+    warnings = get_last_discovery_warnings()
+    if warnings:
+        payload["discovery_warnings"] = warnings
+
+
 def _print_json(payload: dict[str, Any]) -> None:
     typer.echo(json.dumps(redact_payload(payload), ensure_ascii=False, sort_keys=True))
 
@@ -1394,6 +1408,7 @@ def _schedule_log_summary(payload: dict[str, Any]) -> dict[str, Any]:
         "enqueue_paused_by_pool_policy",
         "default_pool_usage",
         "runtime_activity",
+        "discovery_warnings",
         "error",
     ]
     summary = {key: payload[key] for key in summary_keys if key in payload}

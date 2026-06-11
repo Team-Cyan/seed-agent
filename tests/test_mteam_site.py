@@ -13,6 +13,7 @@ from seed_agent.models import TorrentCandidate
 from seed_agent.sites.mteam import (
     MTeamApiClient,
     MTeamApiDiscoveryOptions,
+    MTeamApiResponseError,
     _merge_detail,
     enrich_candidates,
     extract_torrent_id,
@@ -181,6 +182,25 @@ async def test_discover_torrents_omits_mode_when_unset() -> None:
     payload = json.loads(search_route.calls[0].request.content.decode("utf-8"))
     assert "mode" not in payload
     assert payload["sortField"] == "TIMES_COMPLETED"
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_mteam_api_client_raises_for_nonzero_search_response() -> None:
+    respx.post("https://api.m-team.cc/api/torrent/search").mock(
+        return_value=httpx.Response(
+            200,
+            json={"code": "1", "message": "請求過於頻繁", "data": None},
+        )
+    )
+
+    client = MTeamApiClient(api_key="secret-api-key")
+
+    with pytest.raises(MTeamApiResponseError) as exc_info:
+        await client.discover_torrents(site="mt", options=MTeamApiDiscoveryOptions())
+
+    assert exc_info.value.code == "1"
+    assert exc_info.value.message == "請求過於頻繁"
 
 
 @pytest.mark.asyncio

@@ -2135,6 +2135,53 @@ def test_run_once_dry_run_reports_runtime_activity_and_default_pool_usage(
     assert payload["enqueue_paused_by_pool_policy"] is False
 
 
+def test_run_once_reports_discovery_warnings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from seed_agent import cli
+
+    monkeypatch.chdir(tmp_path)
+
+    config_path = _config_file(tmp_path, secret_ref=None)
+    config = _config(secret_ref=None)
+
+    async def fake_discover_candidates(config: SeedAgentConfig):
+        return []
+
+    class FakeDownloader:
+        async def list_torrents(
+            self, category: str | None = None, tags: set[str] | None = None
+        ) -> list[ManagedTorrent]:
+            return []
+
+    monkeypatch.setattr(cli, "load_config", lambda path: config)
+    monkeypatch.setattr(cli, "discover_candidates", fake_discover_candidates)
+    monkeypatch.setattr(
+        cli,
+        "get_last_discovery_warnings",
+        lambda: [
+            {
+                "site": "mt",
+                "error_type": "MTeamApiResponseError",
+                "message": "torrent/search failed: code=1 message=請求過於頻繁",
+            }
+        ],
+    )
+    monkeypatch.setattr(cli, "_maybe_build_downloader", lambda loaded: FakeDownloader())
+
+    result = CliRunner().invoke(cli.app, ["run-once", "--config", str(config_path)])
+
+    assert result.exit_code == 0
+    payload = _json_output(result)
+    assert payload["discovery_warnings"] == [
+        {
+            "site": "mt",
+            "error_type": "MTeamApiResponseError",
+            "message": "torrent/search failed: code=1 message=請求過於頻繁",
+        }
+    ]
+
+
 def test_enqueue_dry_run_reports_runtime_activity_and_default_pool_usage(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

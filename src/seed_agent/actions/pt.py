@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Iterable, Sequence
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
@@ -23,7 +24,22 @@ class SiteDiscoveryConfigError(RuntimeError):
     pass
 
 
+@dataclass(frozen=True)
+class SiteDiscoveryWarning:
+    site: str
+    error_type: str
+    message: str
+
+
+_LAST_DISCOVERY_WARNINGS: tuple[SiteDiscoveryWarning, ...] = ()
+
+
+def get_last_discovery_warnings() -> list[dict[str, str]]:
+    return [asdict(warning) for warning in _LAST_DISCOVERY_WARNINGS]
+
+
 async def discover_candidates(config: SeedAgentConfig) -> list[TorrentCandidate]:
+    global _LAST_DISCOVERY_WARNINGS
     tasks = [
         _discover_site_candidates(site, config.config_dir, config.discovery)
         for site in config.enabled_sites
@@ -31,14 +47,31 @@ async def discover_candidates(config: SeedAgentConfig) -> list[TorrentCandidate]
     results = await asyncio.gather(*tasks, return_exceptions=True) if tasks else []
 
     candidates: list[TorrentCandidate] = []
-    for result in results:
+    warnings: list[SiteDiscoveryWarning] = []
+    for site, result in zip(config.enabled_sites, results, strict=False):
         if isinstance(result, SiteDiscoveryConfigError):
+            _LAST_DISCOVERY_WARNINGS = tuple(warnings)
             raise result
         if isinstance(result, Exception):
+            warnings.append(
+                SiteDiscoveryWarning(
+                    site=site.name,
+                    error_type=type(result).__name__,
+                    message=_runtime_error_summary(result),
+                )
+            )
             continue
         candidates.extend(result)
 
+    _LAST_DISCOVERY_WARNINGS = tuple(warnings)
     return candidates
+
+
+def _runtime_error_summary(exc: Exception) -> str:
+    text = str(exc).replace("\n", " ").strip()
+    if not text:
+        return type(exc).__name__
+    return text[:500]
 
 
 async def _discover_site_candidates(

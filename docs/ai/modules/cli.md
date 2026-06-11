@@ -57,6 +57,8 @@ Expose the operator-facing command surface and safe summaries.
   state, action, reason, and whether delete actions remove files,
 - `review`, `daily-report`, `prune`, `run-once`, and scheduler-backed runs
   report how many known active torrents were reconciled as missing from qB,
+- discovery-backed command payloads include `discovery_warnings` when an
+  enabled site fails at runtime while other sites or flows continue,
 - heartbeat reporting and healthcheck probes for long-running deployments.
 
 ## Expectations
@@ -66,6 +68,9 @@ Expose the operator-facing command surface and safe summaries.
 - preserve stable command names unless intentionally versioned,
 - keep `run-once` and `schedule-run` payload shapes aligned enough for external
   schedulers and log collectors,
+- keep site discovery warnings visible in both full JSON payloads and
+  `schedule-run` summaries so transient tracker errors are diagnosable without
+  forcing a container restart,
 - keep enqueue-like commands aligned on runtime gate reporting so paused-add
   decisions expose both `enqueue_paused_by_pool_policy` and
   `enqueue_paused_reasons`,

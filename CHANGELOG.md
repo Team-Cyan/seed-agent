@@ -4,6 +4,14 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.8.13 - 2026-06-11
+
+### Fixed
+
+- M-Team API search now reports non-zero API responses as discovery warnings
+  instead of silently treating them as zero candidates, so scheduler logs show
+  rate limits and tracker-side errors without forcing a container restart.
+
 ## 0.8.12 - 2026-06-11
 
 ### Added
