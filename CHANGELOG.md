@@ -4,6 +4,17 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.8.11 - 2026-06-11
+
+### Added
+
+- M-Team API discovery can now scan multiple browse modes from one site config
+  with `api_discovery.modes`, while deduplicating torrents found in more than
+  one mode.
+- Docker entrypoint and deployment templates now expose
+  `SEED_AGENT_INTENT_EXECUTE` so unattended schedulers can explicitly enqueue
+  accepted Want List matches.
+
 ## 0.8.10 - 2026-06-10
 
 ### Changed

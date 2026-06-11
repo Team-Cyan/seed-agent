@@ -377,6 +377,7 @@ def test_mteam_site_accepts_api_discovery_mode() -> None:
             "discovery_mode": "api",
             "api_discovery": {
                 "mode": "adult",
+                "modes": ["normal", "adult"],
                 "page_number": 2,
                 "only_free": True,
                 "discount": "_2X_FREE",
@@ -409,6 +410,7 @@ def test_mteam_site_accepts_api_discovery_mode() -> None:
     assert site.discovery_mode == "api"
     assert site.api_discovery is not None
     assert site.api_discovery.sort_field == "downloads"
+    assert site.api_discovery.modes == ["normal", "adult"]
     assert site.api_discovery.page_number == 2
     assert site.api_discovery.max_pages == 3
     assert site.api_discovery.categories == [410, 429]
@@ -442,6 +444,35 @@ def test_mteam_api_discovery_rejects_invalid_openapi_filter_limits() -> None:
     ]
 
     with pytest.raises(ValidationError):
+        SeedAgentConfig(**data)
+
+
+def test_mteam_api_discovery_rejects_duplicate_modes() -> None:
+    data = _valid_config_data("local/secrets/qb.yaml")
+    data["sites"] = [
+        {
+            "name": "mt",
+            "type": "mteam",
+            "enabled": True,
+            "rss_url": "https://rss.m-team.cc/api/rss/fetch?dl=1",
+            "api_key_ref": "local/secrets/mt.api-key",
+            "discovery_mode": "api",
+            "api_discovery": {
+                "mode": "adult",
+                "modes": ["normal", "normal"],
+                "only_free": True,
+                "sort_field": "downloads",
+                "sort_order": "desc",
+                "page_size": 100,
+                "min_seeders": 0,
+                "max_seeders": 200,
+                "min_leechers": 0,
+                "min_times_completed": 0,
+            },
+        }
+    ]
+
+    with pytest.raises(ValidationError, match="modes"):
         SeedAgentConfig(**data)
 
 

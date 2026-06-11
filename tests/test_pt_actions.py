@@ -390,6 +390,103 @@ cleanup:
 
 
 @pytest.mark.asyncio
+async def test_discover_candidates_expands_mteam_api_modes_and_deduplicates(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from seed_agent.actions import pt as pt_actions
+    from seed_agent.config import load_config
+
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    secret_path = tmp_path / "local" / "secrets" / "mt.api-key"
+    secret_path.parent.mkdir(parents=True)
+    secret_path.write_text("secret-api-key\n", encoding="utf-8")
+
+    config_path = config_dir / "example.yaml"
+    config_path.write_text(
+        """
+mode: balanced
+sites:
+  - name: mt
+    type: mteam
+    enabled: true
+    rss_url: https://rss.m-team.cc/api/rss/fetch?dl=1
+    api_key_ref: local/secrets/mt.api-key
+    discovery_mode: api
+    api_discovery:
+      mode: adult
+      modes: [normal, adult]
+      only_free: true
+      sort_field: leechers
+      sort_order: desc
+      page_size: 50
+      min_seeders: null
+      max_seeders: 0
+      min_leechers: null
+      min_times_completed: 0
+discovery:
+  discounts: ["free", "2xfree"]
+  min_left_time_minutes: 120
+  min_leechers: 30
+  min_seeders: 1
+  target_seed_leecher_ratio: 4
+  allow_hr: false
+scoring:
+  min_score_to_enqueue: 70
+  weights:
+    discount: 30
+    leechers: 25
+    seeders: 15
+    left_time: 15
+    size: 10
+    site_history: 5
+downloader:
+  type: qbittorrent
+  target: unraid-qb
+  default_category: seed
+  category_policies:
+    - name: seed
+      mode: mutable
+      budget_pool: downloads
+      delete_enabled: true
+      over_budget_behavior: add_paused
+      tags: ["seed-agent", "seed"]
+  budget_pools:
+    - name: downloads
+      max_size_tib: 10
+  secret_ref: null
+cleanup:
+  cold_after_days: 7
+  min_upload_delta_gb: 1
+  protect_hr: true
+  protect_manual: true
+  protect_media_library: true
+  pause_before_delete_hours: 24
+""",
+        encoding="utf-8",
+    )
+
+    seen_modes: list[str] = []
+
+    async def fake_fetch_api_candidates(*, site: str, api_key: str, options, cookie=None):
+        seen_modes.append(options.mode)
+        shared = _candidate(site=site, source_url="https://kp.m-team.cc/detail/1")
+        if options.mode == "normal":
+            return [shared, _candidate(site=site, source_url="https://kp.m-team.cc/detail/2")]
+        return [shared]
+
+    monkeypatch.setattr(pt_actions, "fetch_mteam_api_candidates", fake_fetch_api_candidates)
+
+    candidates = await pt_actions.discover_candidates(load_config(config_path))
+
+    assert seen_modes == ["normal", "adult"]
+    assert [candidate.stable_id for candidate in candidates] == [
+        "mt:https://kp.m-team.cc/detail/1",
+        "mt:https://kp.m-team.cc/detail/2",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_discover_candidates_errors_when_mteam_api_secret_is_missing(
     tmp_path: Path, monkeypatch
 ) -> None:

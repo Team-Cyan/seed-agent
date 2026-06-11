@@ -8,24 +8,37 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator,
 
 from seed_agent.models import Discount
 
+MTeamDiscoveryMode = Literal[
+    "normal",
+    "adult",
+    "movie",
+    "music",
+    "tvshow",
+    "waterfall",
+    "rss",
+    "rankings",
+]
+
 
 class MTeamApiDiscoveryConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
-    mode: Literal["normal", "adult", "movie", "music", "tvshow", "waterfall", "rss", "rankings"] = (
-        "adult"
-    )
+    mode: MTeamDiscoveryMode = "adult"
+    modes: list[MTeamDiscoveryMode] = Field(default_factory=list)
     page_number: int = 1
     only_free: bool = True
-    discount: Literal[
-        "NORMAL",
-        "PERCENT_70",
-        "PERCENT_50",
-        "FREE",
-        "_2X_FREE",
-        "_2X",
-        "_2X_PERCENT_50",
-    ] | None = None
+    discount: (
+        Literal[
+            "NORMAL",
+            "PERCENT_70",
+            "PERCENT_50",
+            "FREE",
+            "_2X_FREE",
+            "_2X",
+            "_2X_PERCENT_50",
+        ]
+        | None
+    ) = None
     sort_field: Literal[
         "created_date",
         "createdDate",
@@ -68,9 +81,9 @@ class MTeamApiDiscoveryConfig(BaseModel):
     hot: bool | None = None
     upload_date_start: str | None = None
     upload_date_end: str | None = None
-    dmm_field: (
-        Literal["kid", "director", "series", "maker", "label", "product_number"] | None
-    ) = None
+    dmm_field: Literal["kid", "director", "series", "maker", "label", "product_number"] | None = (
+        None
+    )
     dmm_keyword: str | None = None
     min_seeders: int | None = 0
     max_seeders: int | None = 200
@@ -118,11 +131,10 @@ class MTeamApiDiscoveryConfig(BaseModel):
             raise ValueError("min_leechers must be >= 0")
         if self.min_times_completed < 0:
             raise ValueError("min_times_completed must be >= 0")
+        if len(set(self.modes)) != len(self.modes):
+            raise ValueError("modes must not contain duplicates")
         min_seeders = self.min_seeders or 0
-        if (
-            self.max_seeders not in {None, 0}
-            and self.max_seeders < min_seeders
-        ):
+        if self.max_seeders not in {None, 0} and self.max_seeders < min_seeders:
             raise ValueError("max_seeders must be >= min_seeders")
         return self
 

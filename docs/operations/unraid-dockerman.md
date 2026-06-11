@@ -77,6 +77,7 @@ Recommended user-visible defaults:
 - `SEED_AGENT_HEARTBEAT_FILE=/workspace/runtime/state/schedule-heartbeat.json`
 - `SEED_AGENT_EXECUTE=true`
 - `SEED_AGENT_REQUIRE_KNOWN_FREE_WINDOW=true`
+- `SEED_AGENT_INTENT_EXECUTE=false`
 - `SEED_AGENT_STARTUP_STATUS=true`
 - `SEED_AGENT_WEB_ENABLED=true`
 - `SEED_AGENT_WEB_HOST=0.0.0.0`

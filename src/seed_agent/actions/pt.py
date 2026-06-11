@@ -57,13 +57,22 @@ async def _discover_site_candidates(
         api_kwargs = {}
         if site.auth_header != "x-api-key":
             api_kwargs["api_key_header"] = site.auth_header
-        return await fetch_mteam_api_candidates(
-            site=site.name,
-            api_key=api_key,
-            cookie=cookie,
-            options=_mteam_api_options(site.api_discovery, discovery_config),
-            **api_kwargs,
-        )
+        candidates: list[TorrentCandidate] = []
+        seen_ids: set[str] = set()
+        for options in _mteam_api_options_list(site.api_discovery, discovery_config):
+            page_candidates = await fetch_mteam_api_candidates(
+                site=site.name,
+                api_key=api_key,
+                cookie=cookie,
+                options=options,
+                **api_kwargs,
+            )
+            for candidate in page_candidates:
+                if candidate.stable_id in seen_ids:
+                    continue
+                candidates.append(candidate)
+                seen_ids.add(candidate.stable_id)
+        return candidates
 
     return await fetch_rss_candidates(
         site.rss_url,
@@ -79,11 +88,28 @@ def _mteam_api_options(
     discovery_config: DiscoveryConfig | None,
 ) -> MTeamApiDiscoveryOptions:
     data = api_discovery.model_dump()
+    data.pop("modes", None)
     if data.get("min_seeders") is None:
         data["min_seeders"] = discovery_config.min_seeders if discovery_config else 0
     if data.get("min_leechers") is None:
         data["min_leechers"] = discovery_config.min_leechers if discovery_config else 0
     return MTeamApiDiscoveryOptions.model_validate(data)
+
+
+def _mteam_api_options_list(
+    api_discovery,
+    discovery_config: DiscoveryConfig | None,
+) -> list[MTeamApiDiscoveryOptions]:
+    modes = list(getattr(api_discovery, "modes", []) or [])
+    if not modes:
+        return [_mteam_api_options(api_discovery, discovery_config)]
+    return [
+        _mteam_api_options(
+            api_discovery.model_copy(update={"mode": mode}),
+            discovery_config,
+        )
+        for mode in modes
+    ]
 
 
 def score_candidates(

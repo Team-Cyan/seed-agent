@@ -30,6 +30,8 @@ HEARTBEAT_FILE="${SEED_AGENT_HEARTBEAT_FILE:-}"
 MAX_STALENESS_MINUTES="${SEED_AGENT_MAX_STALENESS_MINUTES:-}"
 MAX_CYCLES="${SEED_AGENT_MAX_CYCLES:-}"
 PRUNE="${SEED_AGENT_PRUNE:-false}"
+INTENT="${SEED_AGENT_INTENT:-}"
+INTENT_EXECUTE="${SEED_AGENT_INTENT_EXECUTE:-false}"
 STARTUP_STATUS="${SEED_AGENT_STARTUP_STATUS:-true}"
 WEB_ENABLED="${SEED_AGENT_WEB_ENABLED:-false}"
 WEB_HOST="${SEED_AGENT_WEB_HOST:-0.0.0.0}"
@@ -65,6 +67,16 @@ if [ "$MODE" = "schedule-run" ]; then
   fi
   if [ "$PRUNE" = "true" ]; then
     set -- "$@" --prune
+  fi
+  if [ -n "$INTENT" ]; then
+    if [ "$INTENT" = "true" ]; then
+      set -- "$@" --intent
+    else
+      set -- "$@" --no-intent
+    fi
+  fi
+  if [ "$INTENT_EXECUTE" = "true" ]; then
+    set -- "$@" --intent-execute
   fi
 fi
 
