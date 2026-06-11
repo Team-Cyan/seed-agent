@@ -23,7 +23,7 @@ MTeamDiscoveryMode = Literal[
 class MTeamApiDiscoveryConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
-    mode: MTeamDiscoveryMode = "adult"
+    mode: MTeamDiscoveryMode | None = "adult"
     modes: list[MTeamDiscoveryMode] = Field(default_factory=list)
     page_number: int = 1
     only_free: bool = True

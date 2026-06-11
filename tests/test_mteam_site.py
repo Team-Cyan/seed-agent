@@ -150,6 +150,39 @@ async def test_mteam_api_client_discovers_free_candidates_with_sorting() -> None
     }
 
 
+@respx.mock
+@pytest.mark.asyncio
+async def test_discover_torrents_omits_mode_when_unset() -> None:
+    search_route = respx.post("https://api.m-team.cc/api/torrent/search").mock(
+        return_value=httpx.Response(
+            200,
+            json={"code": "0", "data": {"data": []}},
+        )
+    )
+
+    client = MTeamApiClient(api_key="secret-api-key")
+    candidates = await client.discover_torrents(
+        site="mt",
+        options=MTeamApiDiscoveryOptions(
+            mode=None,
+            only_free=True,
+            sort_field="downloads",
+            sort_order="desc",
+            page_size=50,
+            min_seeders=0,
+            max_seeders=200,
+            min_leechers=0,
+            min_times_completed=0,
+        ),
+    )
+
+    assert candidates == []
+    assert search_route.called
+    payload = json.loads(search_route.calls[0].request.content.decode("utf-8"))
+    assert "mode" not in payload
+    assert payload["sortField"] == "TIMES_COMPLETED"
+
+
 @pytest.mark.asyncio
 @respx.mock
 async def test_mteam_api_client_uses_custom_api_key_header() -> None:

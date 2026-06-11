@@ -4,6 +4,14 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.8.12 - 2026-06-11
+
+### Added
+
+- M-Team API discovery can now omit `mode` by setting `api_discovery.mode: null`,
+  allowing a broad tracker search sorted by downloads or other configured
+  fields.
+
 ## 0.8.11 - 2026-06-11
 
 ### Added

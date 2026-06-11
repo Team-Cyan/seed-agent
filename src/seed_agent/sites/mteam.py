@@ -25,7 +25,7 @@ DEFERRED_DOWNLOAD_URL_PREFIX = "mteam-api://torrent/"
 class MTeamApiDiscoveryOptions(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
-    mode: str = "adult"
+    mode: str | None = "adult"
     page_number: int = 1
     only_free: bool = True
     discount: str | None = None
@@ -622,13 +622,13 @@ def _api_row_containers(row: dict[str, Any]) -> list[dict[str, Any]]:
 
 def _search_payload(options: MTeamApiDiscoveryOptions) -> dict[str, Any]:
     payload: dict[str, Any] = {
-        "mode": options.mode,
         "visible": options.visible,
         "pageNumber": options.page_number,
         "pageSize": options.page_size,
         "sortDirection": options.sort_order.upper(),
         "sortField": _api_sort_field(options.sort_field),
     }
+    _put_optional(payload, "mode", options.mode)
     _put_optional(payload, "lastId", options.last_id)
     _put_optional(payload, "keyword", options.keyword)
     _put_optional_list(payload, "categories", options.categories)
