@@ -30,7 +30,10 @@ balanced safety policy.
   mutable-category seeds can be deleted without requiring an over-budget pool if
   their no-upload observation window has exceeded that delay and their total
   upload remains below `cleanup.completed_low_upload_min_gb` or their ratio is
-  below `cleanup.completed_low_upload_min_ratio`,
+  below `cleanup.completed_low_upload_min_ratio`. Scheduled conservative prune
+  can opt into requiring space reclamation for this completed low-upload rule,
+  so low-demand completed seeds are kept when there is no better candidate
+  waiting for capacity,
 - keep currently uploading managed torrents even if a stale no-upload marker is
   present,
 - require pause-before-delete timing,
@@ -47,6 +50,10 @@ balanced safety policy.
   uploaded bytes of zero for at least `cleanup.delete_after_no_upload_hours`,
   prune may preview deletion, but only when the mutable category's budget pool
   is over budget and space reclamation is needed.
+- Capacity-pressure prune is the aggressive mode. It is triggered by enqueue
+  planning when accepted candidates would be paused by runtime gates, forces
+  space reclamation for mutable delete-enabled categories, and then lets the
+  caller refresh qB runtime state before enqueueing.
 - Always inspect prune preview counts before execute mode. The useful summary is
   action counts, total size/downloaded/left for deletes, state distribution, and
   a sample of names/reasons. Do not execute a broad cleanup from counts alone if

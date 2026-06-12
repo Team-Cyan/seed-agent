@@ -123,6 +123,8 @@ async def prune_cold_torrents(
     *,
     pool_usage: PoolUsage | None = None,
     free_window_min_remaining_minutes: int | None = None,
+    force_space_reclamation: bool = False,
+    completed_low_upload_requires_reclamation: bool = False,
 ) -> list[Decision]:
     if policy.mode != "mutable" or not policy.delete_enabled:
         return [
@@ -148,6 +150,9 @@ async def prune_cold_torrents(
 
     decisions: list[Decision] = []
     tags = set(policy.tags)
+    space_reclamation_required = force_space_reclamation or bool(
+        pool_usage and pool_usage.over_budget
+    )
 
     for torrent in rank_eviction_candidates(list(torrents)):
         if free_window_min_remaining_minutes is not None:
@@ -159,7 +164,10 @@ async def prune_cold_torrents(
             cleanup,
             policy.name,
             tags,
-            space_reclamation_required=bool(pool_usage and pool_usage.over_budget),
+            space_reclamation_required=space_reclamation_required,
+            completed_low_upload_requires_reclamation=(
+                completed_low_upload_requires_reclamation
+            ),
         )
         decision = _decision_for_cleanup(
             torrent,
@@ -167,6 +175,11 @@ async def prune_cold_torrents(
             policy,
             execute,
             pool_usage=pool_usage,
+            space_reclamation_required=space_reclamation_required,
+            force_space_reclamation=force_space_reclamation,
+            completed_low_upload_requires_reclamation=(
+                completed_low_upload_requires_reclamation
+            ),
         )
 
         if not execute:
@@ -186,6 +199,11 @@ async def prune_cold_torrents(
                     execute,
                     exc,
                     pool_usage=pool_usage,
+                    space_reclamation_required=space_reclamation_required,
+                    force_space_reclamation=force_space_reclamation,
+                    completed_low_upload_requires_reclamation=(
+                        completed_low_upload_requires_reclamation
+                    ),
                 )
             )
             raise MutationBatchError("qBittorrent cleanup batch failed", decisions) from exc
@@ -201,6 +219,9 @@ def _decision_for_cleanup(
     execute: bool,
     *,
     pool_usage: PoolUsage | None = None,
+    space_reclamation_required: bool = False,
+    force_space_reclamation: bool = False,
+    completed_low_upload_requires_reclamation: bool = False,
 ) -> Decision:
     action = f"qb.cleanup.{classification.action}"
     reason = f"cleanup {classification.action}: {classification.reason}"
@@ -215,6 +236,11 @@ def _decision_for_cleanup(
             "cleanup_action": classification.action,
             "managed": classification.managed,
             "protected": classification.protected,
+            "space_reclamation_required": space_reclamation_required,
+            "force_space_reclamation": force_space_reclamation,
+            "completed_low_upload_requires_reclamation": (
+                completed_low_upload_requires_reclamation
+            ),
             **_policy_state(policy),
             **_pool_usage_state(pool_usage),
         },
@@ -229,6 +255,9 @@ def _failed_cleanup_decision(
     exc: Exception,
     *,
     pool_usage: PoolUsage | None = None,
+    space_reclamation_required: bool = False,
+    force_space_reclamation: bool = False,
+    completed_low_upload_requires_reclamation: bool = False,
 ) -> Decision:
     error = _error_summary(exc)
     return Decision(
@@ -243,6 +272,11 @@ def _failed_cleanup_decision(
             "managed": classification.managed,
             "protected": classification.protected,
             "error": error,
+            "space_reclamation_required": space_reclamation_required,
+            "force_space_reclamation": force_space_reclamation,
+            "completed_low_upload_requires_reclamation": (
+                completed_low_upload_requires_reclamation
+            ),
             **_policy_state(policy),
             **_pool_usage_state(pool_usage),
         },

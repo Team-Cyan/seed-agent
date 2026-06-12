@@ -17,6 +17,7 @@ def _cleanup() -> CleanupConfig:
         protect_manual=True,
         protect_media_library=True,
         pause_before_delete_hours=24,
+        delete_after_no_upload_hours=2,
     )
 
 
@@ -282,3 +283,73 @@ async def test_prune_keeps_cold_torrent_when_pool_is_not_over_budget() -> None:
     assert downloader.calls == []
     assert decisions[0].action == "qb.cleanup.keep"
     assert "space reclamation not required" in decisions[0].reason
+
+
+@pytest.mark.asyncio
+async def test_force_space_reclamation_pauses_cold_torrent_when_pool_is_not_over_budget() -> None:
+    from seed_agent.actions.qb import prune_cold_torrents
+
+    downloader = DummyDownloader()
+
+    decisions = await prune_cold_torrents(
+        [_incomplete_torrent()],
+        downloader,
+        _cleanup(),
+        _policy(),
+        execute=True,
+        pool_usage=PoolUsage(
+            pool_name="downloads",
+            size_bytes=8 * 1024**4,
+            max_size_bytes=10 * 1024**4,
+        ),
+        force_space_reclamation=True,
+    )
+
+    assert downloader.calls == [("pause", "abcd1234", None)]
+    assert decisions[0].action == "qb.cleanup.pause"
+    assert decisions[0].new_state["force_space_reclamation"] is True
+    assert decisions[0].new_state["space_reclamation_required"] is True
+
+
+@pytest.mark.asyncio
+async def test_completed_low_upload_requires_reclamation_keeps_under_budget_seed() -> None:
+    from seed_agent.actions.qb import prune_cold_torrents
+
+    downloader = DummyDownloader()
+    now = datetime.now(UTC)
+
+    decisions = await prune_cold_torrents(
+        [
+            _torrent(
+                state="stalledUP",
+                uploaded_bytes=int(0.2 * 1024**3),
+                downloaded_bytes=50 * 1024**3,
+                metadata={
+                    "amount_left_bytes": 0,
+                    "no_upload_since_at": now - timedelta(hours=80),
+                },
+            )
+        ],
+        downloader,
+        CleanupConfig(
+            **{
+                **_cleanup().model_dump(),
+                "delete_completed_low_upload_after_hours": 72,
+                "completed_low_upload_min_ratio": 0.02,
+                "completed_low_upload_min_gb": 1,
+            }
+        ),
+        _policy(),
+        execute=True,
+        pool_usage=PoolUsage(
+            pool_name="downloads",
+            size_bytes=8 * 1024**4,
+            max_size_bytes=10 * 1024**4,
+        ),
+        completed_low_upload_requires_reclamation=True,
+    )
+
+    assert downloader.calls == []
+    assert decisions[0].action == "qb.cleanup.keep"
+    assert "space reclamation not required" in decisions[0].reason
+    assert decisions[0].new_state["completed_low_upload_requires_reclamation"] is True

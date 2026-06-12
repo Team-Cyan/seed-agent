@@ -34,6 +34,7 @@ def classify_cleanup(
     managed_tags: set[str],
     *,
     space_reclamation_required: bool = False,
+    completed_low_upload_requires_reclamation: bool = False,
 ) -> CleanupDecision:
     if not _is_managed(torrent, managed_category, managed_tags):
         return CleanupDecision(
@@ -60,7 +61,13 @@ def classify_cleanup(
         )
 
     if _is_completed_seed(torrent):
-        low_upload_decision = _completed_low_upload_decision(torrent, cleanup, metadata)
+        low_upload_decision = _completed_low_upload_decision(
+            torrent,
+            cleanup,
+            metadata,
+            space_reclamation_required=space_reclamation_required,
+            requires_reclamation=completed_low_upload_requires_reclamation,
+        )
         if low_upload_decision is not None:
             return low_upload_decision
         return CleanupDecision(
@@ -263,6 +270,9 @@ def _completed_low_upload_decision(
     torrent: ManagedTorrent,
     cleanup: CleanupConfig,
     metadata: dict[str, object],
+    *,
+    space_reclamation_required: bool,
+    requires_reclamation: bool,
 ) -> CleanupDecision | None:
     threshold_hours = cleanup.delete_completed_low_upload_after_hours
     if threshold_hours is None:
@@ -305,6 +315,15 @@ def _completed_low_upload_decision(
     )
     if not low_total_upload:
         return None
+
+    if requires_reclamation and not space_reclamation_required:
+        return CleanupDecision(
+            action="keep",
+            reason=_reason(
+                "completed low-upload seed retained; space reclamation not required"
+            ),
+            managed=True,
+        )
 
     return CleanupDecision(
         action="delete",

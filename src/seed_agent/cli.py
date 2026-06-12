@@ -725,14 +725,39 @@ def schedule_run(
                     "error": None,
                 },
             )
-        payload = _run_once_payload(
-            config,
-            execute=execute,
-            min_free_window_minutes=min_free_window_minutes,
-            require_known_free_window=require_known_free_window if execute else False,
-            prune=prune,
-            prune_free_window_min_remaining_minutes=interval_minutes if prune else None,
-        )
+        prune_payload: dict[str, Any] | None = None
+        if prune:
+            prune_payload = _prune_payload(
+                config,
+                execute=execute,
+                free_window_min_remaining_minutes=interval_minutes,
+                completed_low_upload_requires_reclamation=True,
+            )
+            if "error" in prune_payload:
+                payload = {
+                    "command": "schedule-run",
+                    "config": str(config),
+                    "execute": execute,
+                    "error": f"prune: {prune_payload['error']}",
+                    "prune": prune_payload,
+                }
+            else:
+                payload = {}
+        else:
+            payload = {}
+
+        if "error" not in payload:
+            payload = _run_once_payload(
+                config,
+                execute=execute,
+                min_free_window_minutes=min_free_window_minutes,
+                require_known_free_window=require_known_free_window if execute else False,
+                prune=False,
+                capacity_prune=prune,
+            )
+            if prune_payload is not None:
+                payload["prune"] = prune_payload
+
         payload["command"] = "schedule-run"
         payload["cycle"] = cycle
         payload["interval_minutes"] = interval_minutes
@@ -742,7 +767,7 @@ def schedule_run(
         payload["prune_enabled"] = prune
         payload["intent_enabled"] = intent
         payload["intent_execute"] = intent_execute
-        if intent:
+        if intent and "error" not in payload:
             intent_payload = _intent_run_once_payload(config, execute=intent_execute)
             payload["intent"] = intent_payload
             if "error" in intent_payload:
@@ -769,6 +794,8 @@ def _prune_payload(
     *,
     execute: bool,
     free_window_min_remaining_minutes: int | None = None,
+    force_space_reclamation: bool = False,
+    completed_low_upload_requires_reclamation: bool = False,
 ) -> dict[str, Any]:
     loaded = load_config(config_path)
     store = StateStore(_state_path(loaded))
@@ -811,6 +838,10 @@ def _prune_payload(
                         execute,
                         pool_usage=_pool_usage_for_policy(loaded, all_torrents, policy),
                         free_window_min_remaining_minutes=free_window_min_remaining_minutes,
+                        force_space_reclamation=force_space_reclamation,
+                        completed_low_upload_requires_reclamation=(
+                            completed_low_upload_requires_reclamation
+                        ),
                     )
                 )
             )
@@ -825,6 +856,10 @@ def _prune_payload(
         "command": "prune",
         "config": str(config_path),
         "execute": execute,
+        "force_space_reclamation": force_space_reclamation,
+        "completed_low_upload_requires_reclamation": (
+            completed_low_upload_requires_reclamation
+        ),
         "managed_count": len(torrents),
         "missing_from_qb_reconciled": missing_reconciled,
         "pool_usage": _pool_usage_summary(loaded, all_torrents),
@@ -844,6 +879,7 @@ def _run_once_payload(
     require_known_free_window: bool,
     prune: bool,
     prune_free_window_min_remaining_minutes: int | None = None,
+    capacity_prune: bool = False,
 ) -> dict[str, Any]:
     loaded = load_config(config_path)
     store = StateStore(_state_path(loaded))
@@ -896,19 +932,50 @@ def _run_once_payload(
     enqueue_batches = _enqueue_candidate_batches(scored, loaded, live_torrents, pool_usage)
     paused = any(batch_paused for _, batch_paused, _ in enqueue_batches)
     pause_reasons = _batch_pause_reasons(enqueue_batches)
-    try:
-        decisions = _run(
-            _enqueue_candidate_batches_action(
-                enqueue_batches,
-                downloader,
-                default_policy,
-                execute,
-                pool_usage=pool_usage,
-            )
+    capacity_prune_payload: dict[str, Any] | None = None
+    capacity_prune_error: str | None = None
+    accepted_waiting = any(item.accepted for item in scored)
+    if capacity_prune and accepted_waiting and paused:
+        capacity_prune_payload = _prune_payload(
+            config_path,
+            execute=execute,
+            force_space_reclamation=True,
+            completed_low_upload_requires_reclamation=False,
         )
-    except MutationBatchError as exc:
-        decisions = exc.decisions
-        batch_error = exc
+        if "error" in capacity_prune_payload:
+            capacity_prune_error = f"capacity_prune: {capacity_prune_payload['error']}"
+        else:
+            (
+                downloader,
+                live_torrents,
+                paused,
+                pool_usage,
+                refreshed_missing_reconciled,
+            ) = _enqueue_runtime_context(loaded, store=store, execute=execute)
+            missing_reconciled += refreshed_missing_reconciled
+            scored, refreshed_skipped_existing = _link_existing_live_torrent_candidates(
+                store, scored, live_torrents
+            )
+            skipped_existing += refreshed_skipped_existing
+            enqueue_batches = _enqueue_candidate_batches(scored, loaded, live_torrents, pool_usage)
+            paused = any(batch_paused for _, batch_paused, _ in enqueue_batches)
+            pause_reasons = _batch_pause_reasons(enqueue_batches)
+    if capacity_prune_error is not None:
+        decisions = []
+    else:
+        try:
+            decisions = _run(
+                _enqueue_candidate_batches_action(
+                    enqueue_batches,
+                    downloader,
+                    default_policy,
+                    execute,
+                    pool_usage=pool_usage,
+                )
+            )
+        except MutationBatchError as exc:
+            decisions = exc.decisions
+            batch_error = exc
     _write_audit_decisions(loaded, decisions)
 
     if execute:
@@ -940,6 +1007,10 @@ def _run_once_payload(
         payload["require_known_free_window"] = True
     if batch_error is not None:
         payload["error"] = str(batch_error)
+    if capacity_prune_payload is not None:
+        payload["capacity_prune"] = capacity_prune_payload
+    if capacity_prune_error is not None:
+        payload["error"] = capacity_prune_error
     if prune:
         prune_payload = _prune_payload(
             config_path,
@@ -1435,20 +1506,32 @@ def _schedule_log_summary(payload: dict[str, Any]) -> dict[str, Any]:
     summary = {key: payload[key] for key in summary_keys if key in payload}
     summary["scores_count"] = len(payload.get("scores") or [])
     summary["decisions_count"] = len(payload.get("decisions") or [])
-    prune_payload = payload.get("prune")
-    if isinstance(prune_payload, dict):
-        summary["prune"] = {
-            "command": prune_payload.get("command"),
-            "execute": prune_payload.get("execute"),
-            "managed_count": prune_payload.get("managed_count"),
-            "decisions_count": len(prune_payload.get("decisions") or []),
-            "preview_count": len(prune_payload.get("preview") or []),
-            "pool_usage": prune_payload.get("pool_usage"),
-        }
+    for key in ("prune", "capacity_prune"):
+        prune_payload = payload.get(key)
+        prune_summary = _prune_payload_summary(prune_payload)
+        if prune_summary is not None:
+            summary[key] = prune_summary
     intent_summary = _intent_payload_summary(payload.get("intent"))
     if intent_summary is not None:
         summary["intent"] = intent_summary
     return summary
+
+
+def _prune_payload_summary(payload: object) -> dict[str, Any] | None:
+    if not isinstance(payload, dict):
+        return None
+    return {
+        "command": payload.get("command"),
+        "execute": payload.get("execute"),
+        "force_space_reclamation": payload.get("force_space_reclamation"),
+        "completed_low_upload_requires_reclamation": payload.get(
+            "completed_low_upload_requires_reclamation"
+        ),
+        "managed_count": payload.get("managed_count"),
+        "decisions_count": len(payload.get("decisions") or []),
+        "preview_count": len(payload.get("preview") or []),
+        "pool_usage": payload.get("pool_usage"),
+    }
 
 
 def _intent_payload_summary(payload: object) -> dict[str, Any] | None:

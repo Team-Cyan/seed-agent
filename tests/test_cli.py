@@ -376,7 +376,10 @@ def test_schedule_run_executes_single_cycle_and_emits_schedule_metadata(
         require_known_free_window: bool,
         prune: bool,
         prune_free_window_min_remaining_minutes: int | None = None,
+        capacity_prune: bool = False,
     ) -> dict[str, object]:
+        assert prune is False
+        assert capacity_prune is False
         startup_heartbeats.append(json.loads(heartbeat_path.read_text(encoding="utf-8")))
         seen.append(
             (
@@ -396,14 +399,6 @@ def test_schedule_run_executes_single_cycle_and_emits_schedule_metadata(
             "enqueued": 1,
             "scores": [{"candidate_id": "large-detail"}],
             "decisions": [{"action": "qb.enqueue"}],
-            "prune": {
-                "command": "prune",
-                "execute": execute,
-                "managed_count": 3,
-                "decisions": [{"action": "qb.cleanup.keep"}],
-                "preview": [{"candidate_evidence": {"title": "large-detail"}}],
-                "pool_usage": {"downloads": {"size_tib": 1.2}},
-            },
         }
 
     intent_seen: list[tuple[Path, bool]] = []
@@ -461,14 +456,7 @@ def test_schedule_run_executes_single_cycle_and_emits_schedule_metadata(
     assert payload["decisions_count"] == 1
     assert "scores" not in payload
     assert "decisions" not in payload
-    assert payload["prune"] == {
-        "command": "prune",
-        "execute": True,
-        "managed_count": 3,
-        "decisions_count": 1,
-        "preview_count": 1,
-        "pool_usage": {"downloads": {"size_tib": 1.2}},
-    }
+    assert "prune" not in payload
     assert payload["intent"] == {
         "command": "intent-run-once",
         "execute": False,
@@ -521,7 +509,10 @@ def test_schedule_run_can_skip_intent_cycle(
         require_known_free_window: bool,
         prune: bool,
         prune_free_window_min_remaining_minutes: int | None = None,
+        capacity_prune: bool = False,
     ) -> dict[str, object]:
+        assert prune is False
+        assert capacity_prune is False
         return {
             "command": "run-once",
             "config": str(config_path_value),
@@ -581,7 +572,10 @@ def test_schedule_run_can_execute_intent_cycle_when_explicit(
         require_known_free_window: bool,
         prune: bool,
         prune_free_window_min_remaining_minutes: int | None = None,
+        capacity_prune: bool = False,
     ) -> dict[str, object]:
+        assert prune is False
+        assert capacity_prune is False
         return {
             "command": "run-once",
             "config": str(config_path_value),
@@ -687,7 +681,32 @@ def test_schedule_run_can_prune_each_cycle(
     from seed_agent import cli
 
     config_path = _config_file(tmp_path)
-    seen: list[bool] = []
+    seen: list[tuple[str, object]] = []
+
+    def fake_prune_payload(
+        config_path_value: Path,
+        *,
+        execute: bool,
+        free_window_min_remaining_minutes: int | None = None,
+        force_space_reclamation: bool = False,
+        completed_low_upload_requires_reclamation: bool = False,
+    ) -> dict[str, object]:
+        seen.append(("prune", free_window_min_remaining_minutes))
+        assert force_space_reclamation is False
+        assert completed_low_upload_requires_reclamation is True
+        return {
+            "command": "prune",
+            "config": str(config_path_value),
+            "execute": execute,
+            "force_space_reclamation": force_space_reclamation,
+            "completed_low_upload_requires_reclamation": (
+                completed_low_upload_requires_reclamation
+            ),
+            "managed_count": 1,
+            "pool_usage": {},
+            "decisions": [],
+            "preview": [],
+        }
 
     def fake_run_once_payload(
         config_path_value: Path,
@@ -697,8 +716,9 @@ def test_schedule_run_can_prune_each_cycle(
         require_known_free_window: bool,
         prune: bool,
         prune_free_window_min_remaining_minutes: int | None = None,
+        capacity_prune: bool = False,
     ) -> dict[str, object]:
-        seen.append(prune)
+        seen.append(("run_once", (prune, capacity_prune)))
         return {
             "command": "run-once",
             "config": str(config_path_value),
@@ -709,10 +729,28 @@ def test_schedule_run_can_prune_each_cycle(
             "enqueued": 0,
             "scores": [],
             "decisions": [],
-            "prune": {"command": "prune", "managed_count": 1, "decisions": []},
         }
 
+    def fake_intent_run_once_payload(
+        config_path_value: Path,
+        *,
+        execute: bool,
+    ) -> dict[str, object]:
+        seen.append(("intent", execute))
+        return {
+            "command": "intent-run-once",
+            "config": str(config_path_value),
+            "execute": execute,
+            "ingested": 0,
+            "searched": 0,
+            "ranked": 0,
+            "enqueue_candidates": 0,
+            "decisions": [],
+        }
+
+    monkeypatch.setattr(cli, "_prune_payload", fake_prune_payload)
     monkeypatch.setattr(cli, "_run_once_payload", fake_run_once_payload)
+    monkeypatch.setattr(cli, "_intent_run_once_payload", fake_intent_run_once_payload)
 
     result = CliRunner().invoke(
         cli.app,
@@ -728,7 +766,7 @@ def test_schedule_run_can_prune_each_cycle(
 
     assert result.exit_code == 0
     payload = _json_output(result)
-    assert seen == [True]
+    assert seen == [("prune", 60), ("run_once", (False, True)), ("intent", False)]
     assert payload["prune"]["command"] == "prune"
 
 
@@ -745,8 +783,12 @@ def test_schedule_run_prune_uses_interval_as_free_window_horizon(
         *,
         execute: bool,
         free_window_min_remaining_minutes: int | None,
+        force_space_reclamation: bool = False,
+        completed_low_upload_requires_reclamation: bool = False,
     ) -> dict[str, object]:
         seen.append(free_window_min_remaining_minutes)
+        assert force_space_reclamation is False
+        assert completed_low_upload_requires_reclamation is True
         return {
             "command": "prune",
             "config": str(config_path_value),

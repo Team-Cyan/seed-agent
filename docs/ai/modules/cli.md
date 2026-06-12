@@ -52,7 +52,14 @@ Expose the operator-facing command surface and safe summaries.
   dry-run unless `--intent-execute` is explicitly set, and it can be disabled
   with `--no-intent`,
 - free-window safety previewing for freeleech-sensitive workflows,
-- optional per-cycle cleanup through `run-once --prune` and `schedule-run --prune`,
+- optional cleanup through `run-once --prune` and scheduled cleanup through
+  `schedule-run --prune`. Standalone `run-once --prune` keeps the historical
+  post-enqueue cleanup behavior; scheduled cycles run conservative prune before
+  PT discovery/enqueue, then run the resource intent loop last,
+- scheduled PT enqueue can run one capacity-pressure prune when accepted
+  candidates would otherwise be added paused by runtime gates. That pass uses
+  forced space reclamation, refreshes qB state afterward, and recomputes enqueue
+  batches before adding,
 - stronger prune previews that include live torrent identity, linked candidate
   state, action, reason, and whether delete actions remove files,
 - `review`, `daily-report`, `prune`, `run-once`, and scheduler-backed runs
@@ -85,7 +92,8 @@ Expose the operator-facing command surface and safe summaries.
 - preview and enforce risky free-window decisions consistently when the free
   window is unknown or too short for the configured safety threshold,
 - keep optional scheduled pruning explicit through `--prune` so cleanup is never
-  silently bundled into a long-running deployment,
+  silently bundled into a long-running deployment. When enabled, schedule order
+  must remain conservative prune, PT add, then Want List source refresh/search,
 - keep scheduled Want List search non-mutating by default; automatic resource
   qB enqueue requires explicit `--intent-execute`,
 - keep configured Want List source refresh failures fail-soft so Douban/IMDb
@@ -93,6 +101,9 @@ Expose the operator-facing command surface and safe summaries.
 - expose cleanup preview details before execute-mode mutation,
 - pass the scheduler interval into per-cycle pruning so persisted free-window
   expiries can be evaluated against the next scheduled check,
+- keep schedule's first prune conservative: completed low-upload seeds should
+  require space reclamation there. The aggressive pass belongs to enqueue-time
+  capacity pressure only, when better accepted candidates are waiting,
 - keep long-running deployment liveness inspectable through structured
   heartbeat output instead of opaque shell wrappers.
 - keep web UI actions safe by default: tracker-local validation, site probe,

@@ -856,6 +856,153 @@ def test_run_once_dry_run_uses_raw_amount_left_for_runtime_gate(
     ]
 
 
+def test_run_once_capacity_prune_refreshes_runtime_before_enqueue(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from seed_agent import cli
+    from seed_agent.models import ManagedTorrent
+
+    monkeypatch.chdir(tmp_path)
+
+    config_path = _config_file(
+        tmp_path,
+        secret_ref="local/secrets/qb.yaml",
+        discovery_extra="  max_total_amount_left_gb: 1.0\n",
+    )
+    config = _config(
+        secret_ref="local/secrets/qb.yaml",
+        discovery_overrides={"max_total_amount_left_gb": 1.0},
+    )
+
+    async def fake_discover_candidates(config: SeedAgentConfig):
+        return [_candidate(size_bytes=int(0.5 * 1024**3))]
+
+    def fake_score_candidates(candidates, discovery_config, scoring_config):
+        return [_scored(candidate=candidates[0])]
+
+    enqueue_calls: list[tuple[bool, list[str] | None]] = []
+
+    async def fake_enqueue_candidates(
+        scored,
+        downloader,
+        policy,
+        execute,
+        *,
+        paused=False,
+        pool_usage=None,
+        pause_reasons=None,
+    ):
+        enqueue_calls.append((paused, pause_reasons))
+        return [
+            Decision(
+                action="qb.enqueue",
+                target_id=scored[0].candidate_id,
+                execute=False,
+                reason="dry run decision",
+            )
+        ]
+
+    class FakeDownloader:
+        def __init__(self) -> None:
+            self.list_calls = 0
+
+        async def list_torrents(self, category: str | None = None, tags: set[str] | None = None):
+            self.list_calls += 1
+            if self.list_calls == 1:
+                return [
+                    ManagedTorrent(
+                        hash="seed-active",
+                        name="Managed Torrent",
+                        category="seed",
+                        tags={"seed-agent", "seed"},
+                        state="stalledDL",
+                        size_bytes=10 * 1024**3,
+                        uploaded_bytes=0,
+                        downloaded_bytes=1,
+                        added_at=datetime.now(UTC),
+                        last_activity_at=datetime.now(UTC),
+                        metadata={
+                            "dlspeed_bps": 0,
+                            "amount_left_bytes": int(1.0004 * 1024**3),
+                        },
+                    )
+                ]
+            return []
+
+        async def pause(self, hash: str) -> None:
+            return None
+
+        async def delete(self, hash: str, delete_files: bool) -> None:
+            return None
+
+        async def add_url(
+            self, url: str, category: str, tags: list[str], *, paused: bool = False
+        ) -> str | None:
+            return None
+
+    prune_calls: list[dict[str, object]] = []
+
+    def fake_prune_payload(
+        config_path_value: Path,
+        *,
+        execute: bool,
+        free_window_min_remaining_minutes: int | None = None,
+        force_space_reclamation: bool = False,
+        completed_low_upload_requires_reclamation: bool = False,
+    ) -> dict[str, object]:
+        prune_calls.append(
+            {
+                "execute": execute,
+                "force_space_reclamation": force_space_reclamation,
+                "completed_low_upload_requires_reclamation": (
+                    completed_low_upload_requires_reclamation
+                ),
+            }
+        )
+        return {
+            "command": "prune",
+            "config": str(config_path_value),
+            "execute": execute,
+            "force_space_reclamation": force_space_reclamation,
+            "completed_low_upload_requires_reclamation": (
+                completed_low_upload_requires_reclamation
+            ),
+            "managed_count": 1,
+            "pool_usage": {},
+            "decisions": [{"action": "qb.cleanup.delete"}],
+            "preview": [],
+        }
+
+    downloader = FakeDownloader()
+    monkeypatch.setattr(cli, "load_config", lambda path: config)
+    monkeypatch.setattr(cli, "discover_candidates", fake_discover_candidates)
+    monkeypatch.setattr(cli, "score_candidates", fake_score_candidates)
+    monkeypatch.setattr(cli, "enqueue_candidates", fake_enqueue_candidates)
+    monkeypatch.setattr(cli, "_maybe_build_downloader", lambda loaded: downloader)
+    monkeypatch.setattr(cli, "_prune_payload", fake_prune_payload)
+
+    payload = cli._run_once_payload(
+        config_path,
+        execute=False,
+        min_free_window_minutes=None,
+        require_known_free_window=False,
+        prune=False,
+        capacity_prune=True,
+    )
+
+    assert prune_calls == [
+        {
+            "execute": False,
+            "force_space_reclamation": True,
+            "completed_low_upload_requires_reclamation": False,
+        }
+    ]
+    assert enqueue_calls == [(False, [])]
+    assert payload["enqueue_paused_by_pool_policy"] is False
+    assert "enqueue_paused_reasons" not in payload
+    assert payload["capacity_prune"]["force_space_reclamation"] is True
+
+
 def test_run_once_dry_run_ignores_zero_progress_stopped_queue_for_runtime_gate(
     tmp_path: Path, monkeypatch
 ) -> None:

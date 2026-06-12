@@ -4,6 +4,22 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.8.16 - 2026-06-12
+
+### Changed
+
+- `schedule-run --prune` now runs conservative cleanup before PT discovery and
+  enqueue, then runs the Want List intent loop last.
+- When accepted PT candidates would be paused by runtime capacity gates,
+  scheduled enqueue runs one aggressive mutable-pool cleanup pass, refreshes qB
+  runtime state, and recomputes enqueue batches before adding.
+
+### Fixed
+
+- Scheduled conservative cleanup now keeps completed low-upload seeds unless
+  space reclamation is actually needed, while preserving the explicit
+  low-upload deletion behavior for normal prune callers.
+
 ## 0.8.15 - 2026-06-11
 
 ### Fixed
