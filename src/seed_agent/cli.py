@@ -760,7 +760,7 @@ def schedule_run(
             payload["heartbeat_file"] = str(heartbeat_file)
         _print_json(_schedule_log_summary(payload))
 
-        if "error" in payload:
+        if "error" in payload and max_cycles is not None:
             raise typer.Exit(code=1)
         if max_cycles is not None and cycle >= max_cycles:
             return

@@ -4,6 +4,15 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.9.2 - 2026-06-13
+
+### Fixed
+
+- qBittorrent add responses with `pending_count > 0` and no failures are now
+  treated as accepted instead of failed, matching the live qB response shape.
+- `schedule-run` no longer exits the long-running Docker process after a
+  recoverable cycle error; one-shot `--max-cycles` runs still fail fast.
+
 ## 0.9.1 - 2026-06-13
 
 ### Fixed

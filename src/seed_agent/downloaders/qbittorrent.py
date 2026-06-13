@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -121,10 +122,46 @@ def _extract_add_hash(response: httpx.Response) -> str | None:
         return None
     if _looks_like_info_hash(body):
         return body
+    json_result = _extract_json_add_result(body)
+    if json_result is not _UNRECOGNIZED_ADD_RESULT:
+        return json_result
     raise QbittorrentError(
         "qBittorrent add torrent failed: "
         f"unexpected response body: {_safe_response_excerpt(body)}"
     )
+
+
+_UNRECOGNIZED_ADD_RESULT = object()
+
+
+def _extract_json_add_result(body: str) -> str | None | object:
+    try:
+        payload = json.loads(body)
+    except json.JSONDecodeError:
+        return _UNRECOGNIZED_ADD_RESULT
+    if not isinstance(payload, dict):
+        return _UNRECOGNIZED_ADD_RESULT
+
+    added_torrent_ids = payload.get("added_torrent_ids")
+    if isinstance(added_torrent_ids, list):
+        for torrent_id in added_torrent_ids:
+            if isinstance(torrent_id, str) and _looks_like_info_hash(torrent_id):
+                return torrent_id
+
+    failure_count = _optional_int(payload.get("failure_count"))
+    pending_count = _optional_int(payload.get("pending_count"))
+    success_count = _optional_int(payload.get("success_count"))
+    if failure_count == 0 and ((pending_count or 0) > 0 or (success_count or 0) > 0):
+        return None
+    return _UNRECOGNIZED_ADD_RESULT
+
+
+def _optional_int(value: object) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    return None
 
 
 def _looks_like_info_hash(value: str) -> bool:

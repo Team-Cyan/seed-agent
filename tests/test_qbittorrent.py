@@ -85,6 +85,34 @@ async def test_add_url_accepts_ok_without_trailing_period() -> None:
 
 @pytest.mark.asyncio
 @respx.mock
+async def test_add_url_accepts_pending_json_response() -> None:
+    respx.post("https://qb.example/api/v2/auth/login").mock(
+        return_value=httpx.Response(200, text="Ok.")
+    )
+    respx.post("https://qb.example/api/v2/torrents/add").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "added_torrent_ids": [],
+                "failure_count": 0,
+                "pending_count": 1,
+                "success_count": 0,
+            },
+        )
+    )
+    client = QbittorrentClient("https://qb.example", "alice", "secret")
+
+    result = await client.add_url(
+        "https://tracker.example/download.php?id=42",
+        category="pt-auto",
+        tags=["seed-agent", "pt-auto"],
+    )
+
+    assert result is None
+
+
+@pytest.mark.asyncio
+@respx.mock
 async def test_add_url_fails_on_failure_body() -> None:
     respx.post("https://qb.example/api/v2/auth/login").mock(
         return_value=httpx.Response(200, text="Ok.")

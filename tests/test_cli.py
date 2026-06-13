@@ -627,6 +627,53 @@ def test_schedule_run_can_execute_intent_cycle_when_explicit(
     assert seen_execute == [True]
 
 
+def test_schedule_run_daemon_keeps_running_after_cycle_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from seed_agent import cli
+
+    config_path = _config_file(tmp_path)
+    heartbeat_path = tmp_path / "state" / "heartbeat.json"
+
+    class StopSchedule(Exception):
+        pass
+
+    def fake_run_once_payload(
+        config_path_value: Path,
+        *,
+        execute: bool,
+        min_free_window_minutes: int | None,
+        require_known_free_window: bool,
+        prune: bool,
+        prune_free_window_min_remaining_minutes: int | None = None,
+        capacity_prune: bool = False,
+    ) -> dict[str, object]:
+        return {
+            "command": "run-once",
+            "config": str(config_path_value),
+            "execute": execute,
+            "error": "qBittorrent enqueue batch failed",
+            "discovered": 1,
+            "scored": 1,
+            "accepted": 1,
+            "enqueued": 0,
+        }
+
+    monkeypatch.setattr(cli, "_run_once_payload", fake_run_once_payload)
+    monkeypatch.setattr(cli.time, "sleep", lambda seconds: (_ for _ in ()).throw(StopSchedule))
+
+    with pytest.raises(StopSchedule):
+        cli.schedule_run(
+            config=config_path,
+            heartbeat_file=heartbeat_path,
+            max_cycles=None,
+        )
+
+    heartbeat = json.loads(heartbeat_path.read_text(encoding="utf-8"))
+    assert heartbeat["error"] == "qBittorrent enqueue batch failed"
+    assert heartbeat["cycle"] == 1
+
+
 def test_intent_run_once_reports_source_warnings(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
