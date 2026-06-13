@@ -26,9 +26,9 @@ This document captures the durable handoff state from the initial `seed-agent` p
 - `docs/specs/2026-04-20-seed-agent-design.md`: full product and architecture spec covering discovery, scoring, qBittorrent execution, lifecycle state, cleanup, audit records, intent sources, roadmap, config design, modules, structured actions, tests, and open decisions.
 - `docs/specs/2026-04-24-mteam-api-driven-discovery.md`: follow-up spec for making M-Team discovery API-driven with `api_key_ref` while retaining RSS as a fallback and reusable adapter path.
 - `docs/plans/2026-04-20-phase-1-pt-upload-loop.md`: executable Phase 1 implementation plan for the PT upload strategy loop, including package bootstrap, config/models, audit, RSS discovery, scoring, SQLite state, qBittorrent executor, safe dry-run actions, cleanup policy, CLI, docs, and verification.
-- `docs/plans/2026-04-22-phase-2-resource-intent-loop.md`: executable Phase 2 implementation plan for resource intents, search, ranking, confirmation, and enqueue reuse.
+- `docs/plans/2026-04-22-phase-2-resource-intent-loop.md`: historical Phase 2 implementation plan for resource intents, search, ranking, confirmation, and enqueue reuse.
 - `docs/operations/phase-1-usage.md`: operator-facing Phase 1 usage guide for config setup, dry-run review, execution, and audit inspection.
-- `docs/operations/phase-2-usage.md`: operator-facing Phase 2 usage guide for local inbox setup, intent commands, confirmation, enqueue, run-once, audit, and integration source boundaries.
+- `docs/operations/phase-2-usage.md`: operator-facing Phase 2 usage guide for local inbox setup, intent commands, rejection, enqueue, run-once, audit, and integration source boundaries.
 
 ## Core Decisions
 
@@ -37,7 +37,7 @@ This document captures the durable handoff state from the initial `seed-agent` p
 - Treat the first interface as documentation, configuration, CLI/dry-run output, and audit records rather than a custom UI.
 - Keep internal operations API-ready from the start so Telegram, WeChat bridge, Douban, local HTTP API, or optional UI surfaces can be added later without rewriting the policy engine.
 - Phase 1 focuses on PT upload strategy: fetch free/hot candidates, score them, enqueue strong candidates, and clean up cold managed torrents.
-- Phase 2 focuses on resource intent: accept Telegram, WeChat bridge, and Douban wanted-list intents, search resources, rank candidates, and require confirmation when ambiguity is high.
+- Phase 2 focuses on resource intent: accept Telegram, WeChat bridge, and Douban wanted-list intents, search resources, rank candidates, and require operator review when ambiguity is high.
 - qBittorrent is the first downloader implementation, but downloader operations should go through an abstraction to keep Transmission or other clients possible later.
 - Cleanup should default to a conservative/balanced mode: pause before delete, delete only managed torrents, protect torrents with meaningful recent upload, and keep explainable audit records.
 - Phase 1 implementation will use SQLite for local lifecycle state at `.seed-agent/state.db` and append-only JSONL audit records at `.seed-agent/audit.jsonl`.
@@ -53,7 +53,7 @@ This document captures the durable handoff state from the initial `seed-agent` p
 - Current Phase 2 plan: `docs/plans/2026-04-22-phase-2-resource-intent-loop.md`.
 - Phase 1 is implemented as a CLI-first Python package under `src/seed_agent/`.
 - The implemented Phase 1 command surface is `discover`, `score`, `enqueue`, `review`, `prune`, `daily-report`, and `run-once`.
-- The implemented Phase 2 intent command surface is `intent-add`, `intent-inbox`, `intent-search`, `intent-rank`, `intent-review`, `intent-confirm`, `intent-reject`, `intent-enqueue`, and `intent-run-once`.
+- The implemented Phase 2 intent command surface is `intent-add`, `intent-inbox`, `intent-search`, `intent-rank`, `intent-review`, `intent-reject`, `intent-enqueue`, and `intent-run-once`.
 - Mutating downloader operations still default to dry-run. Use `--execute` only after reviewing printed decisions and audit output.
 - First safe verification command: `uv run seed-agent run-once --config config/example.yaml`.
 - First execute command after review: `uv run seed-agent run-once --config config/example.yaml --execute`.
@@ -139,12 +139,12 @@ Latest verification:
 
 - `uv run pytest -q` passed with 160 tests.
 - `uv run ruff check .` passed.
-- `uv run seed-agent --help` shows `intent-add`, `intent-inbox`, `intent-search`, `intent-rank`, `intent-review`, `intent-confirm`, `intent-reject`, `intent-enqueue`, and `intent-run-once`.
+- `uv run seed-agent --help` shows `intent-add`, `intent-inbox`, `intent-search`, `intent-rank`, `intent-review`, `intent-reject`, `intent-enqueue`, and `intent-run-once`.
 - `uv run seed-agent intent-add "Inception 2010 1080p" --config config/example.yaml` writes a local normalized intent without downloader mutation.
 - `uv run seed-agent intent-run-once --config config/example.yaml` is an empty dry-run when the configured inbox is absent.
 - Docs gate: `rg "intent-run-once|confirmation_required|local/inbox|phase-2" README.md docs/operations`.
 - Focused CLI verification: `uv run pytest tests/test_intent_cli.py tests/test_intent_search_cli.py -q`.
-- Focused confirmation verification: `uv run pytest tests/test_intent_confirmation.py tests/test_intent_cli.py -q`.
+- Focused rejection verification: `uv run pytest tests/test_intent_reject.py tests/test_intent_cli.py -q`.
 - Focused enqueue verification: `uv run pytest tests/test_intent_enqueue.py tests/test_intent_cli.py tests/test_cli.py -q`.
 - Focused source verification: `uv run pytest tests/test_intent_sources.py tests/test_intent_actions.py tests/test_intent_cli.py -q`.
 - Focused run-once verification: `uv run pytest tests/test_intent_run_once.py tests/test_run_once.py tests/test_cli.py tests/test_intent_cli.py -q`.

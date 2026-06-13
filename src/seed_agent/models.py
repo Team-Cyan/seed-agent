@@ -80,7 +80,6 @@ class IntentState(StrEnum):
     NORMALIZED = "normalized"
     SEARCHED = "searched"
     CONFIRMATION_REQUIRED = "confirmation_required"
-    CONFIRMED = "confirmed"
     REJECTED = "rejected"
     ENQUEUED = "enqueued"
     FAILED = "failed"
@@ -249,6 +248,5 @@ class Decision(BaseModel):
     old_state: dict[str, Any] = Field(default_factory=dict)
     new_state: dict[str, Any] = Field(default_factory=dict)
     confirmation_required: bool = False
-    confirmation_received: bool = False
     rollback: str | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

@@ -1,4 +1,5 @@
 import json
+import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -101,21 +102,48 @@ def test_state_store_updates_intent_state_without_losing_normalized_payload(
     intent = _intent(metadata={"parser": "deterministic"})
     store.upsert_intent(intent)
 
-    updated = store.update_intent_state(intent.intent_id, IntentState.CONFIRMED)
+    updated = store.update_intent_state(intent.intent_id, IntentState.SEARCHED)
     row = store.get_intent(intent.intent_id)
 
     assert updated is True
     assert row is not None
-    assert row["state"] == IntentState.CONFIRMED.value
+    assert row["state"] == IntentState.SEARCHED.value
     normalized = json.loads(row["normalized_json"])
     assert normalized["metadata"] == {"parser": "deterministic"}
-    assert normalized["state"] == IntentState.CONFIRMED.value
+    assert normalized["state"] == IntentState.SEARCHED.value
 
 
 def test_state_store_update_missing_intent_returns_false(tmp_path: Path) -> None:
     store = StateStore(tmp_path / "state.sqlite3")
 
-    assert store.update_intent_state("missing", IntentState.CONFIRMED) is False
+    assert store.update_intent_state("missing", IntentState.SEARCHED) is False
+
+
+def test_state_store_migrates_legacy_confirmed_intents(tmp_path: Path) -> None:
+    path = tmp_path / "state.sqlite3"
+    store = StateStore(path)
+    intent = _intent(state=IntentState.CONFIRMATION_REQUIRED)
+    store.upsert_intent(intent, selected_release_id="demo:https://tracker.example/details.php?id=42")
+    legacy_payload = intent.model_dump(mode="json")
+    legacy_payload["state"] = "confirmed"
+
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            """
+            UPDATE intents
+            SET state = ?, normalized_json = ?
+            WHERE intent_id = ?
+            """,
+            ("confirmed", json.dumps(legacy_payload), intent.intent_id),
+        )
+
+    migrated = StateStore(path).get_intent(intent.intent_id)
+
+    assert migrated is not None
+    assert migrated["state"] == IntentState.CONFIRMATION_REQUIRED.value
+    assert migrated["selected_release_id"] == "demo:https://tracker.example/details.php?id=42"
+    normalized = json.loads(migrated["normalized_json"])
+    assert normalized["state"] == IntentState.CONFIRMATION_REQUIRED.value
 
 
 def test_state_store_saves_ranked_releases_ordered_by_score(tmp_path: Path) -> None:

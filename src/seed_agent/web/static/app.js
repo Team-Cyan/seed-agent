@@ -182,8 +182,6 @@ const copy = {
       operationComplete: "操作完成",
       pages: "页数",
       preview: "预览",
-      previewEnqueue: "预览入队",
-      previewForceEnqueue: "预览强制入队",
       previewFormChanges: "预览表单改动",
       previewThisPageYaml: "预览本页 YAML",
       provider: "来源",
@@ -205,7 +203,6 @@ const copy = {
       sectionYamlDescription: "对应 {path} 中的 {section}: 区块。可以保留顶层区块名，也可以只填写区块内容。",
       sectionYamlTitle: "本页 YAML",
       seeders: "做种",
-      selectCandidate: "选择候选",
       selectType: "选择类型...",
       settingsDescription: "可以用表单编辑常用项，也可以直接编辑本页 YAML 区块。保存前会先做 schema 校验。",
       siteName: "站点名称",
@@ -220,7 +217,7 @@ const copy = {
       overBudgetBehavior: "超预算处理",
       overBudgetAddPaused: "暂停添加",
       statusAccepted: "已接受",
-      statusConfirmationRequired: "待确认",
+      statusConfirmationRequired: "待复核",
       statusDeleted: "已删除",
       statusDownloading: "下载中",
       statusEnqueued: "已入队",
@@ -255,14 +252,13 @@ const copy = {
       yes: "是",
       no: "否",
       attentionHeartbeat: "心跳不是正常状态，请检查 schedule-run 或容器状态。",
-      attentionCandidateFailures: "候选种子里存在失败或待确认记录。",
-      attentionIntentFailures: "获取意图里存在失败或待确认记录。",
+      attentionCandidateFailures: "候选种子里存在失败或待复核记录。",
+      attentionIntentFailures: "获取意图里存在失败或待复核记录。",
       attentionNoPools: "还没有配置容量池，dashboard 无法展示容量边界。",
       doubanUser: "Douban 用户",
       chooseTypeFirst: "先选择类型。选完类型后，只显示这个类型需要继续配置的选项。",
       matchingPreference: "符合偏好",
       processing: "正在处理",
-      selectedCandidate: "候选已选择",
       thisPageYamlSaved: "本页 YAML 已保存",
       thisPageYamlPreviewReady: "本页 YAML 预览已准备",
     },
@@ -412,8 +408,6 @@ const copy = {
       operationComplete: "Operation completed",
       pages: "Pages",
       preview: "Preview",
-      previewEnqueue: "Preview enqueue",
-      previewForceEnqueue: "Preview forced enqueue",
       previewFormChanges: "Preview form changes",
       previewThisPageYaml: "Preview this page YAML",
       provider: "Source",
@@ -435,7 +429,6 @@ const copy = {
       sectionYamlDescription: "Maps to the {section}: block in {path}. You can keep the top-level section name or enter only the section body.",
       sectionYamlTitle: "This page YAML",
       seeders: "seeders",
-      selectCandidate: "Select candidate",
       selectType: "Select type...",
       settingsDescription: "Edit common options with the form, or edit this page YAML directly. Saves run schema validation first.",
       siteName: "Site name",
@@ -450,7 +443,7 @@ const copy = {
       overBudgetBehavior: "Over budget",
       overBudgetAddPaused: "Add paused",
       statusAccepted: "Accepted",
-      statusConfirmationRequired: "Needs confirmation",
+      statusConfirmationRequired: "Needs review",
       statusDeleted: "Deleted",
       statusDownloading: "Downloading",
       statusEnqueued: "Queued",
@@ -485,14 +478,13 @@ const copy = {
       yes: "Yes",
       no: "No",
       attentionHeartbeat: "Heartbeat is not OK. Check schedule-run or container status.",
-      attentionCandidateFailures: "Candidate torrents include failed or confirmation-required records.",
-      attentionIntentFailures: "Resource intents include failed or confirmation-required records.",
+      attentionCandidateFailures: "Candidate torrents include failed or review-required records.",
+      attentionIntentFailures: "Resource intents include failed or review-required records.",
       attentionNoPools: "No budget pools are configured, so the dashboard cannot show capacity boundaries.",
       doubanUser: "Douban user",
       chooseTypeFirst: "Choose a type first. After that, only fields for the selected tracker type are shown.",
       matchingPreference: "Matches preferences",
       processing: "Processing",
-      selectedCandidate: "Candidate selected",
       thisPageYamlSaved: "This page YAML saved",
       thisPageYamlPreviewReady: "This page YAML preview is ready",
     },
@@ -538,7 +530,7 @@ const settingsPanelsByLanguage = {
   intent: {
     title: "获取决策",
     fields: [
-      ["确认阈值", "confirmation_threshold", "number", "高于此阈值可进入确认流程。"],
+      ["复核阈值", "confirmation_threshold", "number", "低于自动入队阈值或有风险时进入人工复核。"],
       ["自动入队阈值", "auto_enqueue_threshold", "number", "高于此阈值可自动入队。"],
       ["模糊分差", "ambiguity_gap", "number", "候选分差低于此值时视为模糊。"],
       ["默认清晰度", "default_resolution", "optional-text", "默认解析度偏好。"],
@@ -598,7 +590,7 @@ const settingsPanelsByLanguage = {
     intent: {
       title: "Acquisition",
       fields: [
-        ["Confirmation threshold", "confirmation_threshold", "number", "Above this threshold, candidates can enter confirmation."],
+        ["Review threshold", "confirmation_threshold", "number", "Below the auto-enqueue threshold or with risks, candidates require review."],
         ["Auto-enqueue threshold", "auto_enqueue_threshold", "number", "Above this threshold, candidates can auto-enqueue."],
         ["Ambiguity gap", "ambiguity_gap", "number", "Treat close-scored candidates as ambiguous below this score gap."],
         ["Default resolution", "default_resolution", "optional-text", "Default resolution preference."],
@@ -1454,7 +1446,6 @@ function renderWantCandidateCard(item) {
   const tags = [...(item.official_tags || []), ...(item.inferred_tags || [])];
   const uniqueTags = Array.from(new Set(tags));
   const actionLabel = item.matches_requirements ? uiText("enqueueQb") : uiText("forceEnqueueQb");
-  const previewLabel = item.matches_requirements ? uiText("previewEnqueue") : uiText("previewForceEnqueue");
   return `
     <article class="candidate-card ${item.matches_requirements ? "" : "dimmed"} ${item.selected ? "selected" : ""}">
       <div class="candidate-card-head">
@@ -1472,8 +1463,6 @@ function renderWantCandidateCard(item) {
       </div>
       ${renderCandidateNotes(item)}
       <div class="tracker-actions-group candidate-actions">
-        <button class="secondary-button" type="button" data-want-candidate-action="select" data-release-id="${escapeAttribute(item.release_id)}">${escapeHtml(uiText("selectCandidate"))}</button>
-        <button class="secondary-button" type="button" data-want-candidate-action="preview" data-release-id="${escapeAttribute(item.release_id)}">${escapeHtml(previewLabel)}</button>
         <button class="${item.matches_requirements ? "primary-button" : "secondary-button"}" type="button" data-want-candidate-action="enqueue" data-release-id="${escapeAttribute(item.release_id)}">${escapeHtml(actionLabel)}</button>
       </div>
     </article>
@@ -1512,21 +1501,13 @@ async function handleWantCandidateAction(panel, action, button) {
   if (!intentId || !releaseId) {
     return;
   }
-  if (action === "enqueue") {
-    const ok = window.confirm(uiText("confirmEnqueue"));
-    if (!ok) {
-      return;
-    }
+  const ok = window.confirm(uiText("confirmEnqueue"));
+  if (!ok) {
+    return;
   }
   const status = modal.querySelector("[data-want-candidate-status]");
-  const endpoint =
-    action === "select"
-      ? `/api/wants/${encodeURIComponent(intentId)}/confirm`
-      : `/api/wants/${encodeURIComponent(intentId)}/enqueue`;
-  const body =
-    action === "select"
-      ? { release_id: releaseId }
-      : { release_id: releaseId, execute: action === "enqueue" };
+  const endpoint = `/api/wants/${encodeURIComponent(intentId)}/enqueue`;
+  const body = { release_id: releaseId, execute: true };
   try {
     setModalBusy(modal, true);
     status.innerHTML = `<div class="status-item info">${escapeHtml(uiText("processing"))}</div>`;
@@ -1537,16 +1518,28 @@ async function handleWantCandidateAction(panel, action, button) {
     });
     const payload = await response.json();
     if (!response.ok) {
-      throw new Error(payload.error || `${uiText("requestFailedPrefix")}: ${response.status}`);
+      throw new Error(formatWantCandidateError(payload, response.status));
     }
     await loadWants();
-    const message = payload.status?.[0]?.message || (action === "select" ? uiText("selectedCandidate") : uiText("operationComplete"));
+    const message = payload.status?.[0]?.message || uiText("operationComplete");
     await openWantCandidates(panel, intentId, message);
   } catch (error) {
     status.innerHTML = `<div class="status-item warning">${escapeHtml(error.message)}</div>`;
   } finally {
     setModalBusy(modal, false);
   }
+}
+
+function formatWantCandidateError(payload, statusCode) {
+  const statusMessage = payload?.status?.find?.((item) => item?.message)?.message;
+  const failedDecision = payload?.decisions?.find?.((item) => item?.action?.endsWith?.(".failed"));
+  if (statusMessage) {
+    return statusMessage;
+  }
+  if (failedDecision?.reason) {
+    return failedDecision.reason;
+  }
+  return payload?.error || `${uiText("requestFailedPrefix")}: ${statusCode}`;
 }
 
 async function handleWantAction(panel, action, event) {

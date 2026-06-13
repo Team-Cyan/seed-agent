@@ -1122,6 +1122,7 @@ class StateStore:
             )
             self._migrate_candidates(conn)
             self._migrate_release_candidates(conn)
+            self._migrate_confirmed_intents(conn)
             self._migrate_torrent_runtime(conn)
 
     def _connect(self, *, row_factory: Any | None = None) -> sqlite3.Connection:
@@ -1188,6 +1189,39 @@ class StateStore:
               ON release_candidates(intent_id);
             """
         )
+
+    def _migrate_confirmed_intents(self, conn: sqlite3.Connection) -> None:
+        rows = conn.execute(
+            """
+            SELECT intent_id, normalized_json
+            FROM intents
+            WHERE state = ?
+            """,
+            ("confirmed",),
+        ).fetchall()
+        if not rows:
+            return
+        now = _utc_now()
+        for intent_id, normalized_json in rows:
+            try:
+                normalized = json.loads(str(normalized_json))
+            except json.JSONDecodeError:
+                normalized = {}
+            if isinstance(normalized, dict):
+                normalized["state"] = IntentState.CONFIRMATION_REQUIRED.value
+            conn.execute(
+                """
+                UPDATE intents
+                SET state = ?, normalized_json = ?, updated_at = ?
+                WHERE intent_id = ?
+                """,
+                (
+                    IntentState.CONFIRMATION_REQUIRED.value,
+                    _json_dumps(normalized),
+                    now,
+                    intent_id,
+                ),
+            )
 
     def _migrate_candidates(self, conn: sqlite3.Connection) -> None:
         columns = {row[1] for row in conn.execute("PRAGMA table_info(candidates)").fetchall()}

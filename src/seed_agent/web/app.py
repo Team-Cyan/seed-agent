@@ -11,7 +11,6 @@ from typing import Any
 from urllib.parse import unquote, urlparse
 
 from seed_agent.actions.intent import (
-    confirm_intent,
     enqueue_intent,
     ingest_events,
     rank_intent,
@@ -194,11 +193,6 @@ def make_handler(config_path: Path) -> type[BaseHTTPRequestHandler]:
                 return
             if self.path == "/api/wants/sync":
                 self._send_json(_sync_wants_payload(resolved_config_path, root))
-                return
-            want_confirm_id = _want_subresource_intent_id(self.path, "confirm")
-            if want_confirm_id is not None:
-                payload, status = _confirm_want_payload(self._read_json(), root, want_confirm_id)
-                self._send_json(payload, status=status)
                 return
             want_enqueue_id = _want_subresource_intent_id(self.path, "enqueue")
             if want_enqueue_id is not None:
@@ -523,31 +517,6 @@ def _want_candidates_payload(root: Path, intent_id: str) -> tuple[dict[str, Any]
     }, HTTPStatus.OK
 
 
-def _confirm_want_payload(
-    body: dict[str, Any],
-    root: Path,
-    intent_id: str,
-) -> tuple[dict[str, Any], HTTPStatus]:
-    release_id = str(body.get("release_id") or "").strip()
-    if not release_id:
-        return {"error": "release_id is required"}, HTTPStatus.BAD_REQUEST
-    store = StateStore(_state_db_path(root))
-    try:
-        intent, ranked, decision = confirm_intent(intent_id, release_id, store)
-    except ValueError as exc:
-        return {"error": str(exc)}, HTTPStatus.BAD_REQUEST
-    return {
-        "intent": _want_item(
-            store.get_intent(intent.intent_id) or {},
-            {"release_count": len(store.list_release_candidates(intent.intent_id))},
-            store.list_intent_source_evidence(intent.intent_id),
-        ),
-        "selected": _want_candidate_item(ranked, ranked.release.release_id),
-        "decision": _decision_summary_payload(decision),
-        "status": [{"level": "ok", "message": "候选已选择"}],
-    }, HTTPStatus.OK
-
-
 def _enqueue_want_payload(
     body: dict[str, Any],
     config_path: Path,
@@ -567,14 +536,13 @@ def _enqueue_want_payload(
     )
 
     release_id = str(body.get("release_id") or "").strip()
-    execute = body.get("execute") is True
+    if not release_id:
+        return {"error": "release_id is required"}, HTTPStatus.BAD_REQUEST
+    execute = True
     store = StateStore(_state_db_path(root))
     config = load_config(config_path)
     decisions = []
     try:
-        if release_id:
-            _, _, confirm_decision = confirm_intent(intent_id, release_id, store)
-            decisions.append(confirm_decision)
         default_policy = _default_category_policy(config)
         downloader, live_torrents, paused, pool_usage, missing_reconciled = (
             _enqueue_runtime_context(
@@ -597,6 +565,7 @@ def _enqueue_want_payload(
                 pause_reasons=pause_reasons,
                 release_resolver=release_resolver,
                 policy_resolver=lambda intent: _intent_category_policy(config, intent),
+                release_id=release_id,
             )
         )
         decisions.extend(enqueue_decisions)
@@ -606,10 +575,21 @@ def _enqueue_want_payload(
     except MutationBatchError as exc:
         decisions.extend(exc.decisions)
         _write_audit_decisions(config, decisions)
+        failed_reasons = [
+            item.reason for item in decisions if item.action.endswith(".failed")
+        ]
+        message = failed_reasons[-1] if failed_reasons else str(exc)
         return {
             "error": str(exc),
             "execute": execute,
+            "enqueued": sum(1 for item in decisions if item.action == "qb.enqueue"),
             "decisions": [_decision_summary_payload(item) for item in decisions],
+            "status": [
+                {
+                    "level": "warning",
+                    "message": message,
+                }
+            ],
         }, HTTPStatus.BAD_REQUEST
 
     payload: dict[str, Any] = {

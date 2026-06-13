@@ -306,24 +306,6 @@ def rank_intent(
     return intent, ranked, _rank_decision(intent, ranked, next_state)
 
 
-def confirm_intent(
-    intent_id: str,
-    release_id: str,
-    store: StateStore,
-) -> tuple[ResourceIntent, RankedRelease, Decision]:
-    intent = _load_intent(store, intent_id)
-    ranked = _find_ranked_release(store.list_release_candidates(intent.intent_id), release_id)
-    if ranked is None:
-        raise ValueError(f"unknown release for intent: {release_id}")
-    store.update_intent_state(
-        intent.intent_id,
-        IntentState.CONFIRMED,
-        selected_release_id=ranked.release.release_id,
-    )
-    updated = intent.model_copy(update={"state": IntentState.CONFIRMED})
-    return updated, ranked, _confirm_decision(intent, ranked)
-
-
 def reject_intent(intent_id: str, store: StateStore) -> tuple[ResourceIntent, Decision]:
     intent = _load_intent(store, intent_id)
     store.update_intent_state(intent.intent_id, IntentState.REJECTED)
@@ -343,12 +325,13 @@ async def enqueue_intent(
     pause_reasons: list[str] | None = None,
     release_resolver: ReleaseDownloadResolver | None = None,
     policy_resolver: IntentPolicyResolver | None = None,
+    release_id: str | None = None,
 ) -> tuple[ResourceIntent, RankedRelease, list[Decision]]:
-    intent, selected_release_id = _load_intent_with_selected(store, intent_id)
+    intent, _ = _load_intent_with_selected(store, intent_id)
     selected_policy = policy_resolver(intent) if policy_resolver is not None else policy
     ranked = _enqueueable_release(
         intent,
-        selected_release_id,
+        release_id,
         store.list_release_candidates(intent.intent_id),
     )
     if execute and (release_resolver is not None or _requires_download_resolution(ranked.release)):
@@ -553,19 +536,19 @@ def _find_ranked_release(rows: list[dict[str, Any]], release_id: str) -> RankedR
 
 def _enqueueable_release(
     intent: ResourceIntent,
-    selected_release_id: str | None,
+    release_id: str | None,
     rows: list[dict[str, Any]],
 ) -> RankedRelease:
     ranked = _stored_ranked(rows)
     if intent.state == IntentState.REJECTED:
         raise ValueError(f"intent is rejected: {intent.intent_id}")
-    if selected_release_id is not None:
+    if release_id is not None:
         selected = next(
-            (item for item in ranked if item.release.release_id == selected_release_id),
+            (item for item in ranked if item.release.release_id == release_id),
             None,
         )
         if selected is None:
-            raise ValueError(f"selected release is missing: {selected_release_id}")
+            raise ValueError(f"unknown release for intent: {release_id}")
         return selected
     for item in ranked:
         if item.accepted and not item.confirmation_required:
@@ -653,26 +636,6 @@ def _rank_decision(
     )
 
 
-def _confirm_decision(intent: ResourceIntent, ranked: RankedRelease) -> Decision:
-    return Decision(
-        action="intent.confirm",
-        target_id=intent.intent_id,
-        execute=True,
-        reason="intent release confirmed",
-        old_state={"state": intent.state.value},
-        new_state={
-            "state": IntentState.CONFIRMED.value,
-            "selected_release_id": ranked.release.release_id,
-            "release_title": ranked.release.title,
-            "site": ranked.release.site,
-            "score": ranked.score,
-            "confidence": ranked.confidence,
-        },
-        confirmation_required=False,
-        confirmation_received=True,
-    )
-
-
 def _reject_decision(intent: ResourceIntent) -> Decision:
     return Decision(
         action="intent.reject",
@@ -682,5 +645,4 @@ def _reject_decision(intent: ResourceIntent) -> Decision:
         old_state={"state": intent.state.value},
         new_state={"state": IntentState.REJECTED.value},
         confirmation_required=False,
-        confirmation_received=True,
     )

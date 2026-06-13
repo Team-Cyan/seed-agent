@@ -67,7 +67,10 @@ Score discovered torrents or ranked releases using explicit policy weights and e
 - Keep quality wishes such as Remux, BluRay, 2160p, HDR, or Dolby Vision in
   `search.required_keywords` / `search.preferred_keywords` /
   `search.excluded_keywords` so users can compose profiles without adding a
-  hardcoded `profile` enum.
+  hardcoded `profile` enum. Intent ranking still interprets those wishes by
+  media class: movie/show/anime are scored separately, and Remux is movie-only
+  as a hard requirement because TV and anime releases usually do not have Remux
+  candidates.
 - For TV/anime resource intents, `intent.series_search_mode=season` treats
   SxxEyy requests as season-pack searches and does not penalize missing episode
   tokens. Use `episode` when the operator wants one episode at a time.

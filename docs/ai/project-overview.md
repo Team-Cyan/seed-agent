@@ -38,7 +38,8 @@ The current architecture has two shipped loops:
    - merge repeated wants by reliable external ID aliases,
    - search candidate releases,
    - rank releases,
-   - confirm or reject ambiguous choices,
+   - reject unwanted choices,
+   - enqueue an explicit candidate for ambiguous choices,
    - enqueue the chosen result through the same downloader path.
 
 ## Core Runtime Surfaces

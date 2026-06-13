@@ -329,7 +329,12 @@ def test_want_list_exposes_candidate_review_drawer() -> None:
     assert "data-want-candidate-modal" in script
     assert "/api/wants/${encodeURIComponent(intentId)}/candidates" in script
     assert "强制加入 qB" in script
-    assert "预览强制入队" in script
+    assert "预览强制入队" not in script
+    assert "选择候选" not in script
+    assert 'data-want-candidate-action="select"' not in script
+    assert 'data-want-candidate-action="preview"' not in script
+    assert 'data-want-candidate-action="enqueue"' in script
+    assert "formatWantCandidateError" in script
     assert "低匹配" in script
     assert "closeOpenModal" in script
     assert "setModalBusy" in script

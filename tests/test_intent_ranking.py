@@ -198,6 +198,60 @@ def test_rank_releases_applies_configured_keyword_preferences() -> None:
     assert "required keyword missing: Remux" in ranked[1].risks
 
 
+def test_rank_releases_keeps_remux_required_for_movies_only() -> None:
+    ranked = rank_releases(
+        _intent(resolution=None),
+        [_release(title="Inception 2010 2160p WEB-DL HDR")],
+        _intent_config(default_resolution="2160p"),
+        _search_config(required_keywords=["Remux"], preferred_keywords=["HDR"]),
+    )
+
+    assert "required keyword missing: Remux" in ranked[0].risks
+    assert ranked[0].score < 82
+
+
+def test_rank_releases_does_not_require_remux_for_shows() -> None:
+    ranked = rank_releases(
+        _intent(
+            kind=IntentKind.SHOW,
+            title="Spider Noir",
+            raw_text="Spider Noir 2026 S01 2160p",
+            year=2026,
+            season=1,
+            resolution="2160p",
+            metadata={"media_type": "tv"},
+        ),
+        [_release(title="Spider-Noir 2026 S01 2160p WEB-DL HDR", seeders=701, leechers=3)],
+        _intent_config(default_resolution="2160p"),
+        _search_config(required_keywords=["Remux"], preferred_keywords=["HDR"]),
+    )
+
+    assert "required keyword missing: Remux" not in ranked[0].risks
+    assert any(reason == "show quality keyword skipped: Remux" for reason in ranked[0].reasons)
+    assert ranked[0].score >= 82
+
+
+def test_rank_releases_does_not_require_remux_for_anime() -> None:
+    ranked = rank_releases(
+        _intent(
+            kind=IntentKind.SHOW,
+            title="Frieren",
+            raw_text="Frieren 2023 S01 1080p",
+            year=2023,
+            season=1,
+            resolution="1080p",
+            metadata={"media_type": "anime"},
+        ),
+        [_release(title="Frieren 2023 S01 1080p WEB-DL", seeders=80, leechers=4)],
+        _intent_config(default_resolution="1080p"),
+        _search_config(required_keywords=["Remux"]),
+    )
+
+    assert "required keyword missing: Remux" not in ranked[0].risks
+    assert any(reason == "anime quality keyword skipped: Remux" for reason in ranked[0].reasons)
+    assert ranked[0].score >= 82
+
+
 def test_rank_releases_scores_mixed_chinese_english_title_by_best_alias() -> None:
     ranked = rank_releases(
         _intent(

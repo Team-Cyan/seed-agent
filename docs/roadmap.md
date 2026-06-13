@@ -121,6 +121,9 @@ by completion period, and unfinished work is ordered by current priority.
   - Want List page shows canonical Douban/IMDb wants with source/type filters,
     source evidence summaries, media type, added time, mobile card layout, and
     search/download queue status.
+  - Want List release ranking interprets quality requirements by media type:
+    movie, TV, and anime intents are scored separately, with Remux treated as a
+    movie-only hard requirement.
   - Want List toolbar now exposes separate manual actions for refreshing
     configured Douban/IMDb sources and for triggering torrent search against the
     current filters.
@@ -128,9 +131,10 @@ by completion period, and unfinished work is ordered by current priority.
     with score, size, seeder/leecher counts, M-Team tags, inferred quality tags,
     and reasons; lower-match releases stay visible but dimmed for operator
     override.
-  - Candidate review supports explicit selection, dry-run enqueue preview, and
-    user-confirmed qB enqueue/forced enqueue. Search remains non-mutating, and
-    M-Team download tokens are still resolved only for execute-mode enqueue.
+  - Candidate review supports a single deliberate qB enqueue action per
+    candidate, with lower-match releases still available for forced enqueue.
+    Search remains non-mutating, and M-Team download tokens are still resolved
+    only for execute-mode enqueue.
   - Settings pages include mobile section switching and sticky draft/preview/save
     actions inspired by the reference repo UI patterns, without adopting a
     dashboard-first product shape.
@@ -188,7 +192,7 @@ by completion period, and unfinished work is ordered by current priority.
 
 - Next P1 - Reporting and feedback loop
   - Turn tracker/account signals, downloader telemetry, historical outcomes,
-    and user confirmations into real `site_history_score` inputs.
+    and operator choices into real `site_history_score` inputs.
   - Add read-only dashboard surfaces for audit, cleanup decisions, and intent
     queues.
 

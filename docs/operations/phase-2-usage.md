@@ -1,6 +1,7 @@
 # Phase 2 Usage
 
-This guide covers the resource intent loop: local inbox ingestion, search, ranking, confirmation, and enqueue reuse.
+This guide covers the resource intent loop: local inbox ingestion, search,
+ranking, rejection, explicit candidate selection, and enqueue reuse.
 
 ## Config Setup
 
@@ -32,7 +33,7 @@ releases remain visible and dimmed so an operator can force a download when
 waiting for Remux/Blu-ray/4K is not worth it. qB enqueue still requires an
 explicit button click and browser confirmation; search itself never enqueues.
 
-For a Remux-first Douban/IMDb-to-M-Team intent flow:
+For a movie Remux-first Douban/IMDb-to-M-Team intent flow:
 
 ```yaml
 sites:
@@ -75,7 +76,10 @@ sources:
 
 `required_keywords` are ranking requirements for M-Team API-backed intent
 search: missing required terms push a candidate into the lower-match review
-group instead of hiding it. `preferred_keywords` add ranking credit when present.
+group instead of hiding it. Ranking interprets these requirements by media type:
+movie, TV, and anime intents are scored separately, and `Remux` is treated as a
+movie-only hard requirement because TV and anime candidates usually do not have
+Remux releases. `preferred_keywords` add ranking credit when present.
 `excluded_keywords` penalize matching search results and mark them as not meeting
 the operator preference.
 
@@ -106,15 +110,10 @@ uv run seed-agent intent-rank <intent-id> --config config/example.yaml
 uv run seed-agent intent-review --config config/example.yaml
 ```
 
-`intent-review` shows intents that are normalized, searched, or waiting for confirmation, with top candidates and `confirmation_required` status.
+`intent-review` shows intents that are normalized, searched, or waiting for
+operator selection, with top candidates and `confirmation_required` status.
 
-## Confirmation Flow
-
-When a ranked release is ambiguous or risky, confirm the selected release before enqueue:
-
-```bash
-uv run seed-agent intent-confirm <intent-id> <release-id> --config config/example.yaml
-```
+## Reject Flow
 
 To stop working on an intent:
 
@@ -122,7 +121,8 @@ To stop working on an intent:
 uv run seed-agent intent-reject <intent-id> --config config/example.yaml
 ```
 
-Confirmation and rejection only mutate local SQLite state and write audit records. They do not call qBittorrent.
+Rejection only mutates local SQLite state and writes audit records. It does not
+call qBittorrent.
 
 ## Enqueue Flow
 
@@ -132,13 +132,17 @@ Dry-run enqueue first:
 uv run seed-agent intent-enqueue <intent-id> --config config/example.yaml
 ```
 
-Execute only after the selected release and output decision look correct:
+Execute only after the selected release and output decision look correct. Use
+`--release-id` to enqueue an ambiguous or lower-ranked candidate explicitly:
 
 ```bash
 uv run seed-agent intent-enqueue <intent-id> --config config/example.yaml --execute
+uv run seed-agent intent-enqueue <intent-id> --release-id <release-id> --config config/example.yaml --execute
 ```
 
-`intent-enqueue` uses confirmed releases, or a high-confidence ranked release that does not require confirmation.
+`intent-enqueue` uses a high-confidence ranked release by default. When
+`--release-id` is provided, that release is selected for this enqueue attempt
+and stored as the final selected release only after a successful execute.
 
 ## Combined Run-Once
 
@@ -163,10 +167,17 @@ sqlite3 .seed-agent/state.db '.tables'
 sqlite3 .seed-agent/state.db 'select state, count(*) from intents group by state;'
 sqlite3 .seed-agent/state.db 'select intent_id, title, score, confidence, confirmation_required from release_candidates order by created_at desc limit 10;'
 tail -n 20 .seed-agent/audit.jsonl
-rg '"action":"intent\\.(ingest|search|rank|confirm|reject)"|"action":"qb\\.enqueue"' .seed-agent/audit.jsonl
+rg '"action":"intent\\.(ingest|search|rank|reject)"|"action":"qb\\.enqueue"' .seed-agent/audit.jsonl
 ```
 
 Audit output is redacted before printing and writing, including passkeys, tokens, cookies, and password-like fields.
+
+If a deployment has old rows from the removed confirm flow, run the post-deploy
+cleanup SQL once:
+
+```bash
+sqlite3 .seed-agent/state.db < docs/operations/post-deploy-cleanup.sql
+```
 
 ## Integration Sources
 

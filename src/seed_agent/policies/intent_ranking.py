@@ -3,11 +3,12 @@ from __future__ import annotations
 import re
 
 from seed_agent.config import IntentConfig, SearchConfig
-from seed_agent.models import Discount, RankedRelease, ReleaseCandidate, ResourceIntent
+from seed_agent.models import Discount, IntentKind, RankedRelease, ReleaseCandidate, ResourceIntent
 
 TOKEN_RE = re.compile(r"[a-z0-9]+|[\u4e00-\u9fff]+", re.IGNORECASE)
 LATIN_TOKEN_RE = re.compile(r"[a-z0-9]+", re.IGNORECASE)
 CJK_TOKEN_RE = re.compile(r"[\u4e00-\u9fff]+")
+MOVIE_ONLY_QUALITY_KEYWORDS = {"remux"}
 
 
 def rank_releases(
@@ -60,6 +61,7 @@ def _rank_one(
     score = 0
     reasons: list[str] = []
     risks: list[str] = []
+    media_class = _intent_media_class(intent)
 
     title_score = _title_score(intent.title, release.title)
     score += title_score
@@ -98,6 +100,9 @@ def _rank_one(
             risks.append("resolution missing")
 
     for keyword in search_config.required_keywords:
+        if _is_movie_only_quality_keyword(keyword) and media_class != "movie":
+            reasons.append(f"{media_class} quality keyword skipped: {keyword}")
+            continue
         if _keyword_in_title(keyword, release.title):
             score += 8
             reasons.append(f"required keyword matched: {keyword}")
@@ -195,11 +200,43 @@ def _requires_episode_match(intent: ResourceIntent, intent_config: IntentConfig)
     return intent_config.series_search_mode == "episode" or intent.season is None
 
 
+def _intent_media_class(intent: ResourceIntent) -> str:
+    metadata_type = _normalize_media_type(
+        intent.metadata.get("media_type") or intent.metadata.get("kind")
+    )
+    if metadata_type is not None:
+        return metadata_type
+    if intent.kind == IntentKind.MOVIE:
+        return "movie"
+    if intent.kind in {IntentKind.SHOW, IntentKind.EPISODE}:
+        return "show"
+    return "movie"
+
+
+def _normalize_media_type(value: object) -> str | None:
+    normalized = str(value or "").strip().lower()
+    if normalized in {"anime", "animation", "动画"}:
+        return "anime"
+    if normalized in {"show", "tv", "episode", "series", "电视剧", "剧集"}:
+        return "show"
+    if normalized in {"movie", "film", "电影"}:
+        return "movie"
+    return None
+
+
+def _is_movie_only_quality_keyword(keyword: str) -> bool:
+    return _normalize_keyword(keyword) in MOVIE_ONLY_QUALITY_KEYWORDS
+
+
 def _tokens(value: str) -> set[str]:
     return {match.group(0).lower() for match in TOKEN_RE.finditer(value)}
 
 
 def _keyword_in_title(keyword: str, title: str) -> bool:
-    normalized_keyword = " ".join(keyword.lower().split())
+    normalized_keyword = _normalize_keyword(keyword)
     normalized_title = " ".join(title.lower().replace(".", " ").replace("_", " ").split())
     return normalized_keyword in normalized_title
+
+
+def _normalize_keyword(keyword: str) -> str:
+    return " ".join(keyword.lower().split())

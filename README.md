@@ -41,7 +41,7 @@ Today `seed-agent` focuses on two loops:
 2. Resource intent loop
    - ingest user intents,
    - search releases,
-   - rank and confirm choices,
+   - rank choices and surface low-match candidates for review,
    - enqueue through the same downloader path.
 
 The default deployment shape for self-hosted use is a Docker container running
@@ -57,7 +57,7 @@ The default deployment shape for self-hosted use is a Docker container running
 | NexusPHP-style RSS | Supported | RSS remains useful for fallback flows and non-M-Team sites. |
 | M-Team RSS | Supported | Available as fallback and compatibility path. |
 | M-Team API discovery/search | Supported | Preferred authenticated path when `api_key_ref` is configured, including intent search with Douban/IMDb ID lookup, broad keyword fallback, M-Team tag capture, and execute-time deferred download-token resolution. |
-| Resource intent loop | Supported | Local intent add, inbox/Douban/IMDb Want List ingestion, search, ranking, confirmation, and enqueue are implemented. |
+| Resource intent loop | Supported | Local intent add, inbox/Douban/IMDb Want List ingestion, search, ranking, rejection, explicit candidate enqueue, and default dry-run CLI enqueue are implemented. |
 | Want List | Supported | Web UI page shows canonical Douban/IMDb wants with source/type filters, mobile cards, added time, merged source evidence, release/search status, and candidate review with explicit qB actions. |
 | Web Settings UI | WIP | Local configuration UI exists for grouped safe settings edits with schema validation, diff previews, per-section YAML editing, visual downloader category/budget routing, sticky save actions, mobile navigation, read-only status, and Want List. |
 | Read-only dashboard/API | Partial | State summary, heartbeat health, budget pools, and Want List are exposed; richer audit/cleanup dashboards remain planned. |
@@ -72,7 +72,7 @@ dashboard or multi-downloader expansion.
 
 Medium-term work should validate extensibility with Transmission and a second
 non-M-Team API provider, then turn tracker/account signals, downloader telemetry,
-historical outcomes, and user confirmations into real scoring feedback.
+historical outcomes, and operator choices into real scoring feedback.
 
 ## Source Adapter Status
 

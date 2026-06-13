@@ -4,6 +4,23 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.9.0 - 2026-06-13
+
+### Changed
+
+- Simplified Want List candidate review to a single explicit qB enqueue action
+  per candidate, removing the old Web select and enqueue-preview buttons.
+- Removed the legacy intent confirm flow from the CLI, Web API, intent state
+  enum, and audit decisions. Ambiguous candidates can now be enqueued directly
+  with `intent-enqueue --release-id`.
+- Intent ranking now treats movie, TV, and anime quality preferences
+  separately, keeping Remux as a movie-only hard requirement.
+
+### Added
+
+- Added one-time post-deploy SQLite cleanup SQL for deployments that still have
+  old `confirmed` intent rows.
+
 ## 0.8.16 - 2026-06-12
 
 ### Changed

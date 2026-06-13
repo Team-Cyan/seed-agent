@@ -291,7 +291,7 @@ def test_intent_enqueue_dry_run_reports_pause_reasons_when_runtime_gate_exceeded
     assert "paused_by_policy=active downloads 1 > max 0" in payload["decisions"][0]["reason"]
 
 
-def test_intent_enqueue_execute_uses_confirmed_release_and_updates_state(
+def test_intent_enqueue_execute_can_select_release_id_and_updates_state(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -305,15 +305,18 @@ def test_intent_enqueue_execute_uses_confirmed_release_and_updates_state(
     intent, _ = add_intent("Inception 2010 1080p", store)
     ranked = _ranked(intent.intent_id, confirmation_required=True)
     store.save_ranked_releases([ranked])
-    store.update_intent_state(
-        intent.intent_id,
-        IntentState.CONFIRMED,
-        selected_release_id=ranked.release.release_id,
-    )
 
     result = CliRunner().invoke(
         cli.app,
-        ["intent-enqueue", intent.intent_id, "--config", str(config_path), "--execute"],
+        [
+            "intent-enqueue",
+            intent.intent_id,
+            "--config",
+            str(config_path),
+            "--release-id",
+            ranked.release.release_id,
+            "--execute",
+        ],
     )
 
     assert result.exit_code == 0
@@ -333,6 +336,31 @@ def test_intent_enqueue_execute_uses_confirmed_release_and_updates_state(
     assert row["selected_release_id"] == ranked.release.release_id
     audit = (tmp_path / ".seed-agent" / "audit.jsonl").read_text(encoding="utf-8")
     assert "qb.enqueue" in audit
+
+
+def test_intent_enqueue_rejects_unknown_release_id(tmp_path: Path, monkeypatch) -> None:
+    from seed_agent import cli
+
+    monkeypatch.chdir(tmp_path)
+    config_path = _write_config(tmp_path)
+    store = StateStore(tmp_path / ".seed-agent" / "state.db")
+    intent, _ = add_intent("Inception 2010 1080p", store)
+    store.save_ranked_releases([_ranked(intent.intent_id)])
+
+    result = CliRunner().invoke(
+        cli.app,
+        [
+            "intent-enqueue",
+            intent.intent_id,
+            "--config",
+            str(config_path),
+            "--release-id",
+            "missing",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "unknown release for intent: missing" in result.output
 
 
 def test_intent_enqueue_routes_movie_intent_to_movie_category(

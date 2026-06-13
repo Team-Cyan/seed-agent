@@ -69,7 +69,7 @@ flowchart TB
 | PT discovery | NexusPHP-style RSS, M-Team RSS fallback, M-Team API discovery with native filters and deferred download-token resolution. |
 | Seed strategy | Free/2x-free filtering, leecher/seeder scoring, size scoring, runtime enqueue gates, budget-pool pause behavior, review, prune, stale-state reconciliation. |
 | Strategy reporting | `strategy-report`, joined enqueue-time evidence, qB runtime enrichment, no-upload observation, missing-from-qB reconciliation. |
-| Resource intents | CLI add, JSONL inbox, Douban wanted ingestion, IMDb watchlist/list ingestion, deterministic parsing, RSS search, M-Team API search, ranking, confirmation/rejection, enqueue. |
+| Resource intents | CLI add, JSONL inbox, Douban wanted ingestion, IMDb watchlist/list ingestion, deterministic parsing, RSS search, M-Team API search, ranking, rejection, explicit candidate enqueue. |
 | Want List | Web UI page backed by canonical intent state, Douban/IMDb source labels, source/type filters, merged source evidence, media type, added time, search/queue status, and candidate review. |
 | M-Team intent search | Native Douban/IMDb ID search first, title/year fallback search, generic required/preferred/excluded keyword preferences after fetch, Remux-first configs, captured M-Team tags, and configurable TV/anime `series_search_mode` for season-pack or episode search. |
 | Web UI | Local settings UI, tracker config, read-only status, budget-pool summary, safe section saves with schema validation and diff preview, search/acquisition settings, Douban/IMDb Want List source configuration, and explicit candidate-level qB enqueue actions. |
@@ -80,7 +80,7 @@ flowchart TB
 - `src/seed_agent/cli.py`: CLI command surface and runtime assembly.
 - `src/seed_agent/config.py`: Pydantic config schema and safe defaults.
 - `src/seed_agent/actions/pt.py`: PT discovery, scoring, and M-Team API option assembly.
-- `src/seed_agent/actions/intent.py`: intent ingestion, search, ranking, confirmation, and enqueue.
+- `src/seed_agent/actions/intent.py`: intent ingestion, search, ranking, rejection, and enqueue.
 - `src/seed_agent/sites/mteam.py`: M-Team API/RSS integration and token resolution.
 - `src/seed_agent/search/mteam.py`: M-Team intent search provider.
 - `src/seed_agent/sources/douban.py`: Douban wanted ingestion.

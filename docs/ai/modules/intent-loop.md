@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Convert human requests into search/rank/confirm/enqueue workflows.
+Convert human requests into search/rank/reject/enqueue workflows.
 
 ## Primary Files
 
@@ -25,7 +25,8 @@ Convert human requests into search/rank/confirm/enqueue workflows.
 - normalize text,
 - search sources,
 - rank release candidates,
-- confirm or reject ambiguous options,
+- reject unwanted options,
+- enqueue an explicit release candidate when an ambiguous option is selected,
 - enqueue through the shared downloader path.
 
 ## Expectations

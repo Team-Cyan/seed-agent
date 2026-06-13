@@ -641,9 +641,12 @@ def test_http_wants_payload_includes_best_candidate_score(tmp_path: Path) -> Non
     assert payload["items"][0]["best_candidate_score"] == 86
 
 
-def test_http_want_enqueue_preview_can_select_lower_match_release(
+def test_http_want_enqueue_can_select_lower_match_release(
     tmp_path: Path,
+    monkeypatch,
 ) -> None:
+    from seed_agent import cli
+
     config_path = _write_minimal_config(tmp_path)
     store = StateStore(tmp_path / ".seed-agent" / "state.db")
     intent = ResourceIntent(
@@ -666,12 +669,11 @@ def test_http_want_enqueue_preview_can_select_lower_match_release(
                     site="mt",
                     title="Call Me by Your Name 2017 1080p WEB-DL",
                     source_url="https://kp.m-team.cc/detail/99",
-                    download_url="mteam-api://torrent/99",
+                    download_url="https://tracker.example/download?id=99",
                     size_bytes=8 * 1024**3,
                     seeders=100,
                     leechers=1,
                     discount=Discount.FREE,
-                    metadata={"download_url_source": "mteam_api_deferred"},
                 ),
                 score=40,
                 confidence=0.4,
@@ -683,6 +685,21 @@ def test_http_want_enqueue_preview_can_select_lower_match_release(
         ]
     )
 
+    class FakeDownloader:
+        calls: list[tuple[str, str, list[str]]] = []
+
+        async def add_url(
+            self, url: str, category: str, tags: list[str], *, paused: bool = False
+        ) -> str | None:
+            self.calls.append((url, category, tags))
+            return "0123456789abcdef0123456789abcdef01234567"
+
+        async def list_torrents(self, category=None, tags=None):
+            return []
+
+    downloader = FakeDownloader()
+    monkeypatch.setattr(cli, "build_downloader", lambda loaded: downloader)
+
     with _running_server(config_path) as base_url:
         payload = _request_json(
             base_url,
@@ -691,13 +708,95 @@ def test_http_want_enqueue_preview_can_select_lower_match_release(
             {"release_id": "mt:https://kp.m-team.cc/detail/99", "execute": "false"},
         )
 
-    assert payload["execute"] is False
+    assert payload["execute"] is True
     assert payload["selected"]["release_id"] == "mt:https://kp.m-team.cc/detail/99"
     assert payload["enqueued"] == 1
     assert any(item["action"] == "qb.enqueue" for item in payload["decisions"])
+    assert downloader.calls == [
+        (
+            "https://tracker.example/download?id=99",
+            "seed",
+            ["seed-agent"],
+        )
+    ]
     row = store.get_intent(intent.intent_id)
     assert row["selected_release_id"] == "mt:https://kp.m-team.cc/detail/99"
-    assert row["state"] == IntentState.CONFIRMED.value
+    assert row["state"] == IntentState.ENQUEUED.value
+
+
+def test_http_want_enqueue_failure_returns_actionable_status(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from seed_agent import cli
+
+    config_path = _write_minimal_config(tmp_path)
+    store = StateStore(tmp_path / ".seed-agent" / "state.db")
+    intent = ResourceIntent(
+        intent_id="douban_wanted:spider-noir",
+        source=IntentSource.DOUBAN_WANTED,
+        raw_text="Spider Noir 2026",
+        kind=IntentKind.SHOW,
+        title="Spider Noir",
+        year=2026,
+        requested_at=datetime(2025, 1, 1, tzinfo=UTC),
+        state=IntentState.CONFIRMATION_REQUIRED,
+    )
+    store.upsert_intent(intent)
+    store.save_ranked_releases(
+        [
+            RankedRelease(
+                intent_id=intent.intent_id,
+                release=ReleaseCandidate(
+                    release_id="mt:https://kp.m-team.cc/detail/99",
+                    site="mt",
+                    title="Spider-Noir 2026 S01 2160p WEB-DL",
+                    source_url="https://kp.m-team.cc/detail/99",
+                    download_url="https://tracker.example/download?id=99",
+                    size_bytes=36 * 1024**3,
+                    seeders=701,
+                    leechers=3,
+                    discount=Discount.FREE,
+                ),
+                score=59,
+                confidence=0.59,
+                accepted=False,
+                confirmation_required=True,
+                reasons=["title tokens matched"],
+                risks=["required keyword missing: Remux"],
+            )
+        ]
+    )
+
+    class FailingDownloader:
+        async def add_url(
+            self, url: str, category: str, tags: list[str], *, paused: bool = False
+        ) -> str | None:
+            raise RuntimeError("qB add response closed after request")
+
+        async def list_torrents(self, category=None, tags=None):
+            return []
+
+    monkeypatch.setattr(cli, "build_downloader", lambda loaded: FailingDownloader())
+
+    with _running_server(config_path) as base_url:
+        payload = _request_json(
+            base_url,
+            "POST",
+            f"/api/wants/{intent.intent_id}/enqueue",
+            {"release_id": "mt:https://kp.m-team.cc/detail/99", "execute": True},
+            expected_status=400,
+        )
+
+    assert payload["error"] == "qBittorrent enqueue batch failed"
+    assert payload["execute"] is True
+    assert payload["enqueued"] == 0
+    assert [item["action"] for item in payload["decisions"]] == [
+        "qb.enqueue.failed",
+    ]
+    assert "qB add response closed" in payload["decisions"][0]["reason"]
+    assert payload["status"][0]["level"] == "warning"
+    assert "qB add response closed" in payload["status"][0]["message"]
 
 
 def test_http_config_section_preview_returns_diff_without_writing(
