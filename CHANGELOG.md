@@ -4,6 +4,13 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.9.1 - 2026-06-13
+
+### Fixed
+
+- Dashboard attention warnings now ignore normal Want List review-required
+  states and only warn for actual failed candidate or intent records.
+
 ## 0.9.0 - 2026-06-13
 
 ### Changed

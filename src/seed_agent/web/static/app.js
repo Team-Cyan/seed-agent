@@ -252,8 +252,8 @@ const copy = {
       yes: "是",
       no: "否",
       attentionHeartbeat: "心跳不是正常状态，请检查 schedule-run 或容器状态。",
-      attentionCandidateFailures: "候选种子里存在失败或待复核记录。",
-      attentionIntentFailures: "获取意图里存在失败或待复核记录。",
+      attentionCandidateFailures: "候选种子里存在失败记录。",
+      attentionIntentFailures: "获取意图里存在失败记录。",
       attentionNoPools: "还没有配置容量池，dashboard 无法展示容量边界。",
       doubanUser: "Douban 用户",
       chooseTypeFirst: "先选择类型。选完类型后，只显示这个类型需要继续配置的选项。",
@@ -478,8 +478,8 @@ const copy = {
       yes: "Yes",
       no: "No",
       attentionHeartbeat: "Heartbeat is not OK. Check schedule-run or container status.",
-      attentionCandidateFailures: "Candidate torrents include failed or review-required records.",
-      attentionIntentFailures: "Resource intents include failed or review-required records.",
+      attentionCandidateFailures: "Candidate torrents include failed records.",
+      attentionIntentFailures: "Resource intents include failed records.",
       attentionNoPools: "No budget pools are configured, so the dashboard cannot show capacity boundaries.",
       doubanUser: "Douban user",
       chooseTypeFirst: "Choose a type first. After that, only fields for the selected tracker type are shown.",
@@ -972,10 +972,10 @@ function renderAttentionList(health, candidateStates, intentStates, budgetPools)
   if (health.status !== "ok") {
     items.push(uiText("attentionHeartbeat"));
   }
-  if ((candidateStates.failed || 0) > 0 || (candidateStates.confirmation_required || 0) > 0) {
+  if ((candidateStates.failed || 0) > 0) {
     items.push(uiText("attentionCandidateFailures"));
   }
-  if ((intentStates.failed || 0) > 0 || (intentStates.confirmation_required || 0) > 0) {
+  if ((intentStates.failed || 0) > 0) {
     items.push(uiText("attentionIntentFailures"));
   }
   if (budgetPools.length === 0) {

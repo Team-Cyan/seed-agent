@@ -343,6 +343,15 @@ def test_want_list_exposes_candidate_review_drawer() -> None:
     assert "opacity: 0.72" not in styles
 
 
+def test_dashboard_attention_does_not_warn_for_review_required_items() -> None:
+    script = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
+
+    assert "Candidate torrents include failed records." in script
+    assert "Resource intents include failed records." in script
+    assert "(candidateStates.confirmation_required || 0)" not in script
+    assert "(intentStates.confirmation_required || 0)" not in script
+
+
 def test_mobile_ui_uses_touch_sized_controls_and_modal_actions() -> None:
     styles = (STATIC_ROOT / "styles.css").read_text(encoding="utf-8")
 
