@@ -7,6 +7,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 
 from seed_agent.models import Discount
+from seed_agent.quality_tags import quality_tag_group_keys
 
 MTeamDiscoveryMode = Literal[
     "normal",
@@ -186,20 +187,6 @@ class DiscoveryConfig(BaseModel):
     max_active_downloads: int | None = None
     max_total_amount_left_gb: float | None = None
 
-    @model_validator(mode="before")
-    @classmethod
-    def migrate_legacy_seed_pressure(cls, value: Any) -> Any:
-        if not isinstance(value, dict):
-            return value
-        data = dict(value)
-        legacy_max_seeders = data.pop("max_seeders", None)
-        if "target_seed_leecher_ratio" not in data and legacy_max_seeders is not None:
-            min_leechers = data.get("min_leechers") or 1
-            data["target_seed_leecher_ratio"] = float(legacy_max_seeders) / float(min_leechers)
-        if data.get("max_size_gb") == 0:
-            data["max_size_gb"] = None
-        return data
-
     @field_validator("discounts", mode="before")
     @classmethod
     def normalize_discounts(cls, value: Any) -> list[Discount]:
@@ -232,6 +219,8 @@ class DiscoveryConfig(BaseModel):
             and self.max_size_gb < self.min_size_gb
         ):
             raise ValueError("max_size_gb must be >= min_size_gb")
+        if self.max_size_gb is not None and self.max_size_gb <= 0:
+            raise ValueError("max_size_gb must be > 0")
         if (
             self.preferred_size_min_gb is not None
             and self.preferred_size_max_gb is not None
@@ -421,14 +410,17 @@ class SearchConfig(BaseModel):
     max_results_per_site: int = 20
     prefer_free: bool = True
     reject_hr_by_default: bool = True
-    required_keywords: list[str] = Field(default_factory=list)
-    preferred_keywords: list[str] = Field(default_factory=list)
-    excluded_keywords: list[str] = Field(default_factory=list)
+    quality_tag_scores: dict[str, int] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def validate_limits(self) -> SearchConfig:
         if self.max_results_per_site < 1:
             raise ValueError("max_results_per_site must be >= 1")
+        unknown_keys = set(self.quality_tag_scores) - quality_tag_group_keys()
+        if unknown_keys:
+            raise ValueError(
+                "unknown quality tag score keys: " + ", ".join(sorted(unknown_keys))
+            )
         return self
 
 
@@ -514,20 +506,20 @@ class SeedAgentConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     mode: Literal["balanced"]
-    sites: list[SiteConfig]
-    discovery: DiscoveryConfig
-    scoring: ScoringConfig
-    downloader: DownloaderConfig
-    cleanup: CleanupConfig
-    intent: IntentConfig = Field(default_factory=IntentConfig)
-    search: SearchConfig = Field(default_factory=SearchConfig)
-    sources: SourcesConfig = Field(default_factory=SourcesConfig)
-    state: StateConfig = Field(default_factory=StateConfig)
+    tracker_sites: list[SiteConfig]
+    pt_filters: DiscoveryConfig
+    pt_scoring: ScoringConfig
+    download_client: DownloaderConfig
+    seed_cleanup: CleanupConfig
+    want_decision: IntentConfig = Field(default_factory=IntentConfig)
+    release_preferences: SearchConfig = Field(default_factory=SearchConfig)
+    want_sources: SourcesConfig = Field(default_factory=SourcesConfig)
+    local_state: StateConfig = Field(default_factory=StateConfig)
     _config_dir: Path | None = PrivateAttr(default=None)
 
     @property
     def enabled_sites(self) -> list[SiteConfig]:
-        return [site for site in self.sites if site.enabled]
+        return [site for site in self.tracker_sites if site.enabled]
 
     @property
     def config_dir(self) -> Path | None:

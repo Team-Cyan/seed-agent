@@ -71,14 +71,14 @@ def test_save_tracker_draft_writes_config_ref_and_secret_file(tmp_path: Path) ->
     config_path.write_text(
         """
 mode: balanced
-sites: []
-discovery:
+tracker_sites: []
+pt_filters:
   discounts: [free]
   min_left_time_minutes: 120
   min_leechers: 1
-  max_seeders: 100
+  target_seed_leecher_ratio: 100
   allow_hr: false
-scoring:
+pt_scoring:
   min_score_to_enqueue: 70
   weights:
     discount: 30
@@ -87,7 +87,7 @@ scoring:
     left_time: 15
     size: 10
     site_history: 5
-downloader:
+download_client:
   type: qbittorrent
   target: local
   default_category: seed
@@ -102,7 +102,7 @@ downloader:
     - name: downloads
       max_size_tib: 1
   secret_ref: null
-cleanup:
+seed_cleanup:
   cold_after_days: 7
   min_upload_delta_gb: 1
   protect_hr: true
@@ -144,9 +144,9 @@ def test_http_config_redacts_secret_values(tmp_path: Path) -> None:
     )
     config_path.write_text(
         config_path.read_text(encoding="utf-8").replace(
-            "sites: []",
+            "tracker_sites: []",
             """
-sites:
+tracker_sites:
   - name: mt
     type: mteam
     enabled: true
@@ -164,8 +164,8 @@ sites:
         payload = _request_json(base_url, "GET", "/api/config")
 
     assert payload["trackers"][0]["name"] == "mt"
-    assert payload["sections"]["downloader"]["target"] == "local"
-    assert payload["sections"]["intent"]["inbox_ref"] == "local/inbox/intents.jsonl"
+    assert payload["sections"]["download_client"]["target"] == "local"
+    assert payload["sections"]["want_decision"]["inbox_ref"] == "local/inbox/intents.jsonl"
     assert payload["trackers"][0]["has_api_key"] is True
     assert "secret-token" not in json.dumps(payload)
 
@@ -179,7 +179,7 @@ def test_http_config_section_save_updates_safe_phase2_fields(tmp_path: Path) -> 
             "POST",
             "/api/config/sections",
             {
-                "section": "intent",
+                "section": "want_decision",
                 "data": {
                     "confirmation_threshold": 0.7,
                     "auto_enqueue_threshold": 0.9,
@@ -191,8 +191,8 @@ def test_http_config_section_save_updates_safe_phase2_fields(tmp_path: Path) -> 
             },
         )
 
-    assert payload["section"] == "intent"
-    assert payload["status"] == [{"level": "ok", "message": "intent config saved"}]
+    assert payload["section"] == "want_decision"
+    assert payload["status"] == [{"level": "ok", "message": "want_decision config saved"}]
     saved = config_path.read_text(encoding="utf-8")
     assert "default_resolution: 2160p" in saved
     assert "local/inbox/phase2.jsonl" in saved
@@ -518,10 +518,11 @@ def test_http_want_candidates_show_matching_and_lower_match_releases(
     config_path.write_text(
         config_path.read_text(encoding="utf-8")
         + """
-search:
-  required_keywords: [Remux]
-  preferred_keywords: [2160p]
-intent:
+release_preferences:
+  quality_tag_scores:
+    remux: 20
+    webdl: -30
+want_decision:
   default_resolution: null
 """,
         encoding="utf-8",
@@ -572,7 +573,7 @@ intent:
     assert candidates_payload["items"][0]["size_gb"] == 66.0
     assert candidates_payload["items"][1]["matches_requirements"] is False
     assert candidates_payload["items"][1]["status_label"] == "不符合偏好"
-    assert "required keyword missing: Remux" in candidates_payload["items"][1]["risks"]
+    assert "quality tag score -30: WEB-DL" in candidates_payload["items"][1]["reasons"]
 
 
 def test_http_wants_payload_includes_best_candidate_score(tmp_path: Path) -> None:
@@ -679,8 +680,8 @@ def test_http_want_enqueue_can_select_lower_match_release(
                 confidence=0.4,
                 accepted=False,
                 confirmation_required=True,
-                reasons=["title tokens matched"],
-                risks=["required keyword missing: Remux"],
+                reasons=["title tokens matched", "quality tag score -20: WEB-DL"],
+                risks=[],
             )
         ]
     )
@@ -762,8 +763,8 @@ def test_http_want_enqueue_failure_returns_actionable_status(
                 confidence=0.59,
                 accepted=False,
                 confirmation_required=True,
-                reasons=["title tokens matched"],
-                risks=["required keyword missing: Remux"],
+                reasons=["title tokens matched", "quality tag score -20: WEB-DL"],
+                risks=[],
             )
         ]
     )
@@ -811,7 +812,7 @@ def test_http_config_section_preview_returns_diff_without_writing(
             "POST",
             "/api/config/sections/preview",
             {
-                "section": "intent",
+                "section": "want_decision",
                 "data": {
                     "confirmation_threshold": 0.7,
                     "auto_enqueue_threshold": 0.9,
@@ -824,9 +825,11 @@ def test_http_config_section_preview_returns_diff_without_writing(
         )
 
     assert config_path.read_text(encoding="utf-8") == before
-    assert payload["section"] == "intent"
+    assert payload["section"] == "want_decision"
     assert payload["data"]["default_resolution"] == "2160p"
-    assert payload["status"] == [{"level": "ok", "message": "intent config preview ready"}]
+    assert payload["status"] == [
+        {"level": "ok", "message": "want_decision config preview ready"}
+    ]
     assert "-  default_resolution: 1080p" in payload["diff"]
     assert "+  default_resolution: 2160p" in payload["diff"]
     assert "secret-token" not in json.dumps(payload)
@@ -843,15 +846,17 @@ def test_http_config_section_save_updates_search_and_source_refs_without_secrets
             "POST",
             "/api/config/sections",
             {
-                "section": "search",
+                "section": "release_preferences",
                 "data": {
                     "site_priority": {"mt": 30, "demo": 10},
                     "max_results_per_site": 12,
                     "prefer_free": True,
                     "reject_hr_by_default": False,
-                    "required_keywords": ["Remux"],
-                    "preferred_keywords": ["2160p", "HDR"],
-                    "excluded_keywords": ["CAM"],
+                    "quality_tag_scores": {
+                        "remux": 20,
+                        "dolby_vision": 15,
+                        "webdl": -10,
+                    },
                 },
             },
         )
@@ -860,7 +865,7 @@ def test_http_config_section_save_updates_search_and_source_refs_without_secrets
             "POST",
             "/api/config/sections",
             {
-                "section": "sources",
+                "section": "want_sources",
                 "data": {
                     "telegram": {
                         "enabled": True,
@@ -885,7 +890,11 @@ def test_http_config_section_save_updates_search_and_source_refs_without_secrets
         )
 
     assert search_payload["data"]["site_priority"] == {"mt": 30, "demo": 10}
-    assert search_payload["data"]["required_keywords"] == ["Remux"]
+    assert search_payload["data"]["quality_tag_scores"] == {
+        "remux": 20,
+        "dolby_vision": 15,
+        "webdl": -10,
+    }
     assert sources_payload["data"]["telegram"]["enabled"] is True
     assert sources_payload["data"]["douban_wanted"]["user_name"] == "LancerC"
     assert sources_payload["data"]["douban_wanted"]["max_pages"] == 2
@@ -906,7 +915,7 @@ def test_http_config_section_save_updates_downloader_visual_fields(
             "POST",
             "/api/config/sections",
             {
-                "section": "downloader",
+                "section": "download_client",
                 "data": {
                     "type": "qbittorrent",
                     "target": "local",
@@ -988,20 +997,17 @@ def test_http_config_exposes_and_saves_section_yaml_without_splitting_file(
             "POST",
             "/api/config/sections/yaml/preview",
             {
-                "section": "search",
+                "section": "release_preferences",
                 "yaml": """
-search:
+release_preferences:
   site_priority:
     mt: 30
   max_results_per_site: 6
   prefer_free: true
   reject_hr_by_default: true
-  required_keywords:
-    - Remux
-  preferred_keywords:
-    - 2160p
-  excluded_keywords:
-    - CAM
+  quality_tag_scores:
+    remux: 20
+    webdl: -10
 """.strip(),
             },
         )
@@ -1010,32 +1016,29 @@ search:
             "POST",
             "/api/config/sections/yaml",
             {
-                "section": "search",
+                "section": "release_preferences",
                 "yaml": """
-search:
+release_preferences:
   site_priority:
     mt: 30
   max_results_per_site: 6
   prefer_free: true
   reject_hr_by_default: true
-  required_keywords:
-    - Remux
-  preferred_keywords:
-    - 2160p
-  excluded_keywords:
-    - CAM
+  quality_tag_scores:
+    remux: 20
+    webdl: -10
 """.strip(),
             },
         )
 
     assert "section_yamls" in initial
-    assert "search:" in initial["section_yamls"]["search"]
+    assert "release_preferences:" in initial["section_yamls"]["release_preferences"]
     assert "config_yaml" in initial
-    assert preview["section"] == "search"
+    assert preview["section"] == "release_preferences"
     assert "+  max_results_per_site: 6" in preview["diff"]
-    assert "search:" in preview["yaml"]
+    assert "release_preferences:" in preview["yaml"]
     assert saved["data"]["max_results_per_site"] == 6
-    assert saved["data"]["required_keywords"] == ["Remux"]
+    assert saved["data"]["quality_tag_scores"] == {"remux": 20, "webdl": -10}
     assert "max_results_per_site: 6" in config_path.read_text(encoding="utf-8")
 
 
@@ -1048,7 +1051,7 @@ def test_http_config_section_save_rejects_invalid_threshold_order(tmp_path: Path
             "POST",
             "/api/config/sections",
             {
-                "section": "intent",
+                "section": "want_decision",
                 "data": {
                     "confirmation_threshold": 0.95,
                     "auto_enqueue_threshold": 0.9,
@@ -1331,14 +1334,14 @@ def _write_minimal_config(tmp_path: Path) -> Path:
     config_path.write_text(
         """
 mode: balanced
-sites: []
-discovery:
+tracker_sites: []
+pt_filters:
   discounts: [free]
   min_left_time_minutes: 120
   min_leechers: 1
-  max_seeders: 100
+  target_seed_leecher_ratio: 100
   allow_hr: false
-scoring:
+pt_scoring:
   min_score_to_enqueue: 70
   weights:
     discount: 30
@@ -1347,7 +1350,7 @@ scoring:
     left_time: 15
     size: 10
     site_history: 5
-downloader:
+download_client:
   type: qbittorrent
   target: local
   default_category: seed
@@ -1362,7 +1365,7 @@ downloader:
     - name: downloads
       max_size_tib: 1
   secret_ref: null
-cleanup:
+seed_cleanup:
   cold_after_days: 7
   min_upload_delta_gb: 1
   protect_hr: true

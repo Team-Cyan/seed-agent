@@ -16,20 +16,20 @@ def _write_config(tmp_path: Path, *, discovery_extra: str = "") -> Path:
     path.write_text(
         f"""
 mode: balanced
-sites:
+tracker_sites:
   - name: demo-free
     type: nexusphp
     enabled: true
     rss_url: https://tracker.example/rss.php
     cookie_ref: null
-discovery:
+pt_filters:
   discounts: ["free", "2xfree"]
   min_left_time_minutes: 120
   min_leechers: 8
-  max_seeders: 80
+  target_seed_leecher_ratio: 10
   allow_hr: false
 {discovery_block}\
-scoring:
+pt_scoring:
   min_score_to_enqueue: 70
   weights:
     discount: 30
@@ -38,7 +38,7 @@ scoring:
     left_time: 15
     size: 10
     site_history: 5
-downloader:
+download_client:
   type: qbittorrent
   target: unraid-qb
   default_category: seed
@@ -53,27 +53,27 @@ downloader:
     - name: downloads
       max_size_tib: 10
   secret_ref: null
-cleanup:
+seed_cleanup:
   cold_after_days: 7
   min_upload_delta_gb: 1
   protect_hr: true
   protect_manual: true
   protect_media_library: true
   pause_before_delete_hours: 24
-intent:
+want_decision:
   confirmation_threshold: 0.82
   auto_enqueue_threshold: 0.94
   ambiguity_gap: 0.08
   default_resolution: 1080p
   preferred_languages: ["zh", "en"]
   inbox_ref: {inbox.relative_to(tmp_path).as_posix()}
-search:
+release_preferences:
   site_priority:
     demo-free: 5
   max_results_per_site: 20
   prefer_free: true
   reject_hr_by_default: true
-sources:
+want_sources:
   douban_wanted:
     enabled: false
     export_ref: null

@@ -9,7 +9,7 @@ from seed_agent.config import SeedAgentConfig, load_config
 def _valid_config_data(secret_ref: str) -> dict[str, object]:
     return {
         "mode": "balanced",
-        "sites": [
+        "tracker_sites": [
             {
                 "name": "demo-free",
                 "type": "nexusphp",
@@ -25,14 +25,14 @@ def _valid_config_data(secret_ref: str) -> dict[str, object]:
                 "rss_url": "https://tracker.example/rss-disabled.php",
             },
         ],
-        "discovery": {
+        "pt_filters": {
             "discounts": ["free", "2xfree"],
             "min_left_time_minutes": 120,
             "min_leechers": 8,
-            "max_seeders": 80,
+            "target_seed_leecher_ratio": 10,
             "allow_hr": False,
         },
-        "scoring": {
+        "pt_scoring": {
             "min_score_to_enqueue": 70,
             "weights": {
                 "discount": 30,
@@ -43,7 +43,7 @@ def _valid_config_data(secret_ref: str) -> dict[str, object]:
                 "site_history": 5,
             },
         },
-        "downloader": {
+        "download_client": {
             "type": "qbittorrent",
             "target": "unraid-qb",
             "default_category": "seed",
@@ -77,7 +77,7 @@ def _valid_config_data(secret_ref: str) -> dict[str, object]:
             ],
             "secret_ref": secret_ref,
         },
-        "cleanup": {
+        "seed_cleanup": {
             "cold_after_days": 7,
             "min_upload_delta_gb": 1,
             "protect_hr": True,
@@ -96,7 +96,7 @@ def test_load_config_accepts_example_shape(tmp_path: Path) -> None:
     config_path.write_text(
         f"""
 mode: balanced
-sites:
+tracker_sites:
   - name: demo-free
     type: nexusphp
     enabled: true
@@ -106,13 +106,13 @@ sites:
     type: nexusphp
     enabled: false
     rss_url: https://tracker.example/rss-disabled.php
-discovery:
+pt_filters:
   discounts: ["free", "2xfree"]
   min_left_time_minutes: 120
   min_leechers: 8
-  max_seeders: 80
+  target_seed_leecher_ratio: 10
   allow_hr: false
-scoring:
+pt_scoring:
   min_score_to_enqueue: 70
   weights:
     discount: 30
@@ -121,7 +121,7 @@ scoring:
     left_time: 15
     size: 10
     site_history: 5
-downloader:
+download_client:
   type: qbittorrent
   target: unraid-qb
   default_category: seed
@@ -144,7 +144,7 @@ downloader:
     - name: media
       max_size_tib: 10
   secret_ref: {secret_path.as_posix()}
-cleanup:
+seed_cleanup:
   cold_after_days: 7
   min_upload_delta_gb: 1
   protect_hr: true
@@ -160,10 +160,10 @@ cleanup:
     assert isinstance(config, SeedAgentConfig)
     assert len(config.enabled_sites) == 1
     assert config.enabled_sites[0].name == "demo-free"
-    assert config.downloader.secret_ref == secret_path.as_posix()
-    assert config.downloader.default_category == "seed"
-    assert [policy.name for policy in config.downloader.category_policies] == ["seed", "movie"]
-    assert [pool.name for pool in config.downloader.budget_pools] == ["downloads", "media"]
+    assert config.download_client.secret_ref == secret_path.as_posix()
+    assert config.download_client.default_category == "seed"
+    assert [policy.name for policy in config.download_client.category_policies] == ["seed", "movie"]
+    assert [pool.name for pool in config.download_client.budget_pools] == ["downloads", "media"]
     assert config.config_dir == config_path.parent.resolve()
     assert "config_dir" not in config.model_dump()
 
@@ -173,18 +173,18 @@ def test_load_config_supports_category_policies_and_budget_pools(tmp_path: Path)
     config_path.write_text(
         """
 mode: balanced
-sites:
+tracker_sites:
   - name: demo
     type: nexusphp
     enabled: true
     rss_url: https://tracker.example/rss.php
-discovery:
+pt_filters:
   discounts: ["free"]
   min_left_time_minutes: 120
   min_leechers: 8
-  max_seeders: 80
+  target_seed_leecher_ratio: 10
   allow_hr: false
-scoring:
+pt_scoring:
   min_score_to_enqueue: 70
   weights:
     discount: 30
@@ -193,7 +193,7 @@ scoring:
     left_time: 15
     size: 10
     site_history: 5
-downloader:
+download_client:
   type: qbittorrent
   target: unraid-qb
   default_category: seed
@@ -216,7 +216,7 @@ downloader:
       max_size_tib: 10
     - name: media
       max_size_tib: 10
-cleanup:
+seed_cleanup:
   cold_after_days: 7
   min_upload_delta_gb: 1
   protect_hr: true
@@ -229,14 +229,14 @@ cleanup:
 
     config = load_config(config_path)
 
-    assert config.downloader.default_category == "seed"
-    assert [policy.name for policy in config.downloader.category_policies] == ["seed", "movie"]
-    assert [pool.name for pool in config.downloader.budget_pools] == ["downloads", "media"]
+    assert config.download_client.default_category == "seed"
+    assert [policy.name for policy in config.download_client.category_policies] == ["seed", "movie"]
+    assert [pool.name for pool in config.download_client.budget_pools] == ["downloads", "media"]
 
 
 def test_downloader_media_category_map_routes_want_types_to_configured_categories() -> None:
     data = _valid_config_data("local/secrets/qb.yaml")
-    data["downloader"]["category_policies"].append(
+    data["download_client"]["category_policies"].append(
         {
             "name": "anime",
             "mode": "add_only",
@@ -246,7 +246,7 @@ def test_downloader_media_category_map_routes_want_types_to_configured_categorie
             "tags": ["seed-agent", "anime"],
         }
     )
-    data["downloader"]["category_policies"].append(
+    data["download_client"]["category_policies"].append(
         {
             "name": "tv",
             "mode": "add_only",
@@ -256,7 +256,7 @@ def test_downloader_media_category_map_routes_want_types_to_configured_categorie
             "tags": ["seed-agent", "tv"],
         }
     )
-    data["downloader"]["media_category_map"] = {
+    data["download_client"]["media_category_map"] = {
         "movie": "movie",
         "tv": "tv",
         "anime": "anime",
@@ -264,7 +264,7 @@ def test_downloader_media_category_map_routes_want_types_to_configured_categorie
 
     config = SeedAgentConfig(**data)
 
-    assert config.downloader.media_category_map == {
+    assert config.download_client.media_category_map == {
         "movie": "movie",
         "tv": "tv",
         "anime": "anime",
@@ -273,7 +273,7 @@ def test_downloader_media_category_map_routes_want_types_to_configured_categorie
 
 def test_downloader_media_category_map_rejects_unknown_category() -> None:
     data = _valid_config_data("local/secrets/qb.yaml")
-    data["downloader"]["media_category_map"] = {"movie": "missing"}
+    data["download_client"]["media_category_map"] = {"movie": "missing"}
 
     try:
         SeedAgentConfig(**data)
@@ -285,36 +285,37 @@ def test_downloader_media_category_map_rejects_unknown_category() -> None:
 
 def test_load_config_accepts_optional_runtime_enqueue_gates(tmp_path: Path) -> None:
     data = _valid_config_data("local/secrets/qb.yaml")
-    data["discovery"] = {
-        **data["discovery"],
+    data["pt_filters"] = {
+        **data["pt_filters"],
         "max_active_downloads": 3,
         "max_total_amount_left_gb": 150,
     }
 
     config = SeedAgentConfig(**data)
 
-    assert config.discovery.max_active_downloads == 3
-    assert config.discovery.max_total_amount_left_gb == 150
+    assert config.pt_filters.max_active_downloads == 3
+    assert config.pt_filters.max_total_amount_left_gb == 150
 
 
 def test_discovery_accepts_ratio_seed_pressure_config_name() -> None:
     data = _valid_config_data("local/secrets/qb.yaml")
-    discovery = dict(data["discovery"])  # type: ignore[arg-type]
-    discovery.pop("max_seeders")
+    discovery = dict(data["pt_filters"])  # type: ignore[arg-type]
     discovery["target_seed_leecher_ratio"] = 12.5
     discovery["allow_non_free"] = True
-    data["discovery"] = discovery
+    data["pt_filters"] = discovery
 
     config = SeedAgentConfig(**data)
 
-    assert config.discovery.target_seed_leecher_ratio == 12.5
-    assert config.discovery.allow_non_free is True
+    assert config.pt_filters.target_seed_leecher_ratio == 12.5
+    assert config.pt_filters.allow_non_free is True
 
 
-def test_discovery_migrates_legacy_max_seeders_to_ratio() -> None:
-    config = SeedAgentConfig(**_valid_config_data("local/secrets/qb.yaml"))
+def test_discovery_rejects_legacy_max_seeders() -> None:
+    data = _valid_config_data("local/secrets/qb.yaml")
+    data["pt_filters"]["max_seeders"] = 80  # type: ignore[index]
 
-    assert config.discovery.target_seed_leecher_ratio == 10.0
+    with pytest.raises(ValidationError, match="max_seeders"):
+        SeedAgentConfig(**data)
 
 
 def test_unknown_config_key_raises_validation_error() -> None:
@@ -331,7 +332,7 @@ def test_invalid_mode_raises_validation_error() -> None:
 
 def test_invalid_site_type_raises_validation_error() -> None:
     data = _valid_config_data("local/secrets/qb.yaml")
-    data["sites"] = [
+    data["tracker_sites"] = [
         {
             "name": "demo-free",
             "type": "nexusphpp",
@@ -348,7 +349,7 @@ def test_invalid_site_type_raises_validation_error() -> None:
 
 def test_mteam_site_type_is_accepted() -> None:
     data = _valid_config_data("local/secrets/qb.yaml")
-    data["sites"] = [
+    data["tracker_sites"] = [
         {
             "name": "mt",
             "type": "mteam",
@@ -367,7 +368,7 @@ def test_mteam_site_type_is_accepted() -> None:
 
 def test_mteam_site_accepts_api_discovery_mode() -> None:
     data = _valid_config_data("local/secrets/qb.yaml")
-    data["sites"] = [
+    data["tracker_sites"] = [
         {
             "name": "mt",
             "type": "mteam",
@@ -420,7 +421,7 @@ def test_mteam_site_accepts_api_discovery_mode() -> None:
 
 def test_mteam_api_discovery_rejects_invalid_openapi_filter_limits() -> None:
     data = _valid_config_data("local/secrets/qb.yaml")
-    data["sites"] = [
+    data["tracker_sites"] = [
         {
             "name": "mt",
             "type": "mteam",
@@ -449,7 +450,7 @@ def test_mteam_api_discovery_rejects_invalid_openapi_filter_limits() -> None:
 
 def test_mteam_api_discovery_rejects_duplicate_modes() -> None:
     data = _valid_config_data("local/secrets/qb.yaml")
-    data["sites"] = [
+    data["tracker_sites"] = [
         {
             "name": "mt",
             "type": "mteam",
@@ -478,7 +479,7 @@ def test_mteam_api_discovery_rejects_duplicate_modes() -> None:
 
 def test_mteam_api_discovery_allows_zero_max_seeders_as_unbounded() -> None:
     data = _valid_config_data("local/secrets/qb.yaml")
-    data["sites"] = [
+    data["tracker_sites"] = [
         {
             "name": "mt",
             "type": "mteam",
@@ -509,8 +510,8 @@ def test_mteam_api_discovery_allows_zero_max_seeders_as_unbounded() -> None:
 
 def test_discovery_rejects_invalid_size_limits() -> None:
     data = _valid_config_data("local/secrets/qb.yaml")
-    data["discovery"] = {
-        **data["discovery"],
+    data["pt_filters"] = {
+        **data["pt_filters"],
         "min_size_gb": 200,
         "max_size_gb": 150,
     }
@@ -519,18 +520,17 @@ def test_discovery_rejects_invalid_size_limits() -> None:
         SeedAgentConfig(**data)
 
 
-def test_discovery_treats_zero_max_size_as_unbounded() -> None:
+def test_discovery_rejects_zero_max_size() -> None:
     data = _valid_config_data("local/secrets/qb.yaml")
-    data["discovery"] = {**data["discovery"], "max_size_gb": 0}
+    data["pt_filters"] = {**data["pt_filters"], "max_size_gb": 0}
 
-    config = SeedAgentConfig(**data)
-
-    assert config.discovery.max_size_gb is None
+    with pytest.raises(ValidationError, match="max_size_gb"):
+        SeedAgentConfig(**data)
 
 
 def test_non_mteam_site_rejects_api_discovery_mode() -> None:
     data = _valid_config_data("local/secrets/qb.yaml")
-    data["sites"][0] = {
+    data["tracker_sites"][0] = {
         "name": "demo-free",
         "type": "nexusphp",
         "enabled": True,
@@ -555,7 +555,7 @@ def test_non_mteam_site_rejects_api_discovery_mode() -> None:
 
 def test_mteam_api_discovery_requires_api_key_ref() -> None:
     data = _valid_config_data("local/secrets/qb.yaml")
-    data["sites"] = [
+    data["tracker_sites"] = [
         {
             "name": "mt",
             "type": "mteam",
@@ -583,7 +583,7 @@ def test_mteam_api_discovery_requires_api_key_ref() -> None:
 
 def test_invalid_downloader_type_raises_validation_error() -> None:
     data = _valid_config_data("local/secrets/qb.yaml")
-    data["downloader"] = {**data["downloader"], "type": "qbittorrentx"}
+    data["download_client"] = {**data["download_client"], "type": "qbittorrentx"}
 
     with pytest.raises(ValidationError, match="qbittorrent"):
         SeedAgentConfig(**data)
@@ -591,7 +591,7 @@ def test_invalid_downloader_type_raises_validation_error() -> None:
 
 def test_discovery_numeric_fields_reject_strings() -> None:
     data = _valid_config_data("local/secrets/qb.yaml")
-    data["discovery"] = {**data["discovery"], "min_left_time_minutes": "120"}
+    data["pt_filters"] = {**data["pt_filters"], "min_left_time_minutes": "120"}
 
     with pytest.raises(ValidationError, match="min_left_time_minutes"):
         SeedAgentConfig(**data)
@@ -599,7 +599,7 @@ def test_discovery_numeric_fields_reject_strings() -> None:
 
 def test_discovery_bool_fields_reject_strings() -> None:
     data = _valid_config_data("local/secrets/qb.yaml")
-    data["discovery"] = {**data["discovery"], "allow_hr": "false"}
+    data["pt_filters"] = {**data["pt_filters"], "allow_hr": "false"}
 
     with pytest.raises(ValidationError, match="allow_hr"):
         SeedAgentConfig(**data)
@@ -607,7 +607,7 @@ def test_discovery_bool_fields_reject_strings() -> None:
 
 def test_unknown_site_key_raises_validation_error() -> None:
     data = _valid_config_data("local/secrets/qb.yaml")
-    data["sites"] = [
+    data["tracker_sites"] = [
         {
             "name": "demo-free",
             "type": "nexusphp",
@@ -624,7 +624,7 @@ def test_unknown_site_key_raises_validation_error() -> None:
 
 def test_discovery_unknown_discount_raises_validation_error() -> None:
     data = _valid_config_data("local/secrets/qb.yaml")
-    data["discovery"] = {**data["discovery"], "discounts": ["free", "2xfre"]}
+    data["pt_filters"] = {**data["pt_filters"], "discounts": ["free", "2xfre"]}
 
     with pytest.raises(ValidationError, match="unknown discount label"):
         SeedAgentConfig(**data)
@@ -632,7 +632,7 @@ def test_discovery_unknown_discount_raises_validation_error() -> None:
 
 def test_discovery_discounts_must_be_a_list() -> None:
     data = _valid_config_data("local/secrets/qb.yaml")
-    data["discovery"] = {**data["discovery"], "discounts": "free"}
+    data["pt_filters"] = {**data["pt_filters"], "discounts": "free"}
 
     with pytest.raises(ValidationError, match="discounts must be a list"):
         SeedAgentConfig(**data)
@@ -640,7 +640,7 @@ def test_discovery_discounts_must_be_a_list() -> None:
 
 def test_discovery_null_discounts_raise_validation_error() -> None:
     data = _valid_config_data("local/secrets/qb.yaml")
-    data["discovery"] = {**data["discovery"], "discounts": None}
+    data["pt_filters"] = {**data["pt_filters"], "discounts": None}
 
     with pytest.raises(ValidationError, match="discounts"):
         SeedAgentConfig(**data)
@@ -648,7 +648,7 @@ def test_discovery_null_discounts_raise_validation_error() -> None:
 
 def test_scoring_weights_must_use_exact_keys() -> None:
     data = _valid_config_data("local/secrets/qb.yaml")
-    data["scoring"] = {
+    data["pt_scoring"] = {
         "min_score_to_enqueue": 70,
         "weights": {
             "discount": 30,
@@ -667,7 +667,7 @@ def test_scoring_weights_must_use_exact_keys() -> None:
 
 def test_scoring_weights_missing_key_raises_validation_error() -> None:
     data = _valid_config_data("local/secrets/qb.yaml")
-    data["scoring"] = {
+    data["pt_scoring"] = {
         "min_score_to_enqueue": 70,
         "weights": {
             "discount": 30,
@@ -684,7 +684,7 @@ def test_scoring_weights_missing_key_raises_validation_error() -> None:
 
 def test_scoring_weights_must_sum_to_100() -> None:
     data = _valid_config_data("local/secrets/qb.yaml")
-    data["scoring"] = {
+    data["pt_scoring"] = {
         "min_score_to_enqueue": 70,
         "weights": {
             "discount": 30,
@@ -702,7 +702,7 @@ def test_scoring_weights_must_sum_to_100() -> None:
 
 def test_cleanup_pause_before_delete_hours_zero_raises_validation_error() -> None:
     data = _valid_config_data("local/secrets/qb.yaml")
-    data["cleanup"] = {**data["cleanup"], "pause_before_delete_hours": 0}
+    data["seed_cleanup"] = {**data["seed_cleanup"], "pause_before_delete_hours": 0}
 
     with pytest.raises(ValidationError, match="pause_before_delete_hours"):
         SeedAgentConfig(**data)

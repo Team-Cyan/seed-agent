@@ -22,12 +22,12 @@ def test_index_contains_tracker_first_ui_anchors() -> None:
     assert "data-language-menu" in html
     assert "data-config-path" in html
     assert 'data-section="overview"' in html
-    assert 'data-section="downloader"' in html
-    assert 'data-section="search"' in html
-    assert 'data-section="sources"' not in html
+    assert 'data-section="download_client"' in html
+    assert 'data-section="release_preferences"' in html
+    assert 'data-section="want_sources"' not in html
     assert 'data-section="wants"' in html
-    assert "获取决策" in html
-    assert "种子筛选" in html
+    assert "想看决策" in html
+    assert "资源匹配" in html
     assert "配置文件" in html
     assert "资源意图" not in html
     assert "搜索策略" not in html
@@ -132,8 +132,12 @@ def test_non_tracker_sections_render_config_panels() -> None:
     assert "newClientId" in script
     assert "globalThis.crypto?.randomUUID" in script
     assert "qBittorrent 目标" in script
-    assert "种子筛选" in script
-    assert "required_keywords" in script
+    assert "资源匹配" in script
+    assert "quality_tag_scores" in script
+    assert "renderSearchTagScoreEditor" in script
+    assert "readSearchTagScoreData" in script
+    assert "Blu-ray" in script
+    assert "同组别名只计一次" in script
     assert "want_lists" in script
     assert "watchlist_url" in script
     assert "series_search_mode" in script
@@ -280,10 +284,14 @@ def test_mobile_help_controls_remain_tappable() -> None:
 def test_navigation_uses_user_facing_acquisition_and_torrent_filter_terms() -> None:
     script = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
 
-    assert 'intent: "获取决策"' in script
-    assert 'search: "种子筛选"' in script
-    assert 'title: "获取决策"' in script
-    assert 'title: "种子筛选"' in script
+    assert 'pt_filters: "PT 入队规则"' in script
+    assert 'seed_cleanup: "保种清理"' in script
+    assert 'want_decision: "想看决策"' in script
+    assert 'release_preferences: "资源匹配"' in script
+    assert 'title: "PT 入队规则"' in script
+    assert 'title: "资源匹配"' in script
+    assert 'intent: "获取决策"' not in script
+    assert 'search: "种子筛选"' not in script
     assert "资源意图" not in script
     assert "搜索策略" not in script
 

@@ -32,7 +32,7 @@ Expose the operator-facing command surface and safe summaries.
   refresh syncs configured Douban/IMDb sources into local intent state, while
   search runs the non-mutating torrent search for the current filters,
 - intent enqueue routes resource downloads by media type through
-  `downloader.media_category_map` when configured. Without an explicit map,
+  `download_client.media_category_map` when configured. Without an explicit map,
   movie requests use `movie` when present, show/episode/anime requests use
   `tv` when present, and unknown resource types fall back to the downloader
   default category,

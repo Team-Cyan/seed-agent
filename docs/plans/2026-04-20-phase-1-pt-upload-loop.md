@@ -233,19 +233,19 @@ def test_load_config_accepts_example_shape(tmp_path: Path) -> None:
     config_path.write_text(
         f"""
 mode: balanced
-sites:
+tracker_sites:
   - name: demo
     type: nexusphp
     enabled: true
     rss_url: https://tracker.example/rss.php?passkey=secret
     cookie_ref: local/secrets/demo.cookie
-discovery:
+pt_filters:
   discounts: [free, 2xfree]
   min_left_time_minutes: 120
   min_leechers: 8
   max_seeders: 80
   allow_hr: false
-scoring:
+pt_scoring:
   min_score_to_enqueue: 70
   weights:
     discount: 30
@@ -254,13 +254,13 @@ scoring:
     left_time: 15
     size: 10
     site_history: 5
-downloader:
+download_client:
   type: qbittorrent
   target: unraid-qb
   category: pt-auto
   tags: [seed-agent, pt-auto]
   secret_ref: "{secret}"
-cleanup:
+seed_cleanup:
   cold_after_days: 7
   min_upload_delta_gb: 1
   protect_hr: true
@@ -283,22 +283,22 @@ def test_config_rejects_delete_delay_below_pause_window(tmp_path: Path) -> None:
     config_path.write_text(
         """
 mode: balanced
-sites: []
-discovery:
+tracker_sites: []
+pt_filters:
   discounts: [free]
   min_left_time_minutes: 120
   min_leechers: 1
   max_seeders: 100
   allow_hr: false
-scoring:
+pt_scoring:
   min_score_to_enqueue: 70
   weights: {discount: 30, leechers: 25, seeders: 15, left_time: 15, size: 10, site_history: 5}
-downloader:
+download_client:
   type: qbittorrent
   target: unraid-qb
   category: pt-auto
   tags: [seed-agent]
-cleanup:
+seed_cleanup:
   cold_after_days: 7
   min_upload_delta_gb: 1
   protect_hr: true

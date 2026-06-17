@@ -1,7 +1,7 @@
 # Upload-farming tracker strategy example.
 # Copy selected blocks into your real config; this is not a standalone config.
 
-sites:
+tracker_sites:
   - name: mt
     type: mteam
     discovery_mode: api
@@ -15,7 +15,7 @@ sites:
       max_seeders: 0
       min_leechers: 0
 
-discovery:
+pt_filters:
   discounts: [free, 2xfree]
   min_left_time_minutes: 120
   min_seeders: 1
@@ -31,7 +31,7 @@ discovery:
   allow_non_free: false
   allow_hr: false
 
-scoring:
+pt_scoring:
   min_score_to_enqueue: 68
   weights:
     discount: 25

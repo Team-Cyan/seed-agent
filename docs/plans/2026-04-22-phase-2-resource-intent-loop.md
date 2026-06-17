@@ -154,7 +154,7 @@ class RankedRelease(BaseModel):
 Extend `config/example.yaml` with Phase 2 sections:
 
 ```yaml
-intent:
+want_decision:
   confirmation_threshold: 0.82
   auto_enqueue_threshold: 0.94
   ambiguity_gap: 0.08
@@ -162,14 +162,14 @@ intent:
   preferred_languages: ["zh", "en"]
   inbox_ref: local/inbox/intents.jsonl
 
-search:
+release_preferences:
   site_priority:
     demo-free: 10
   max_results_per_site: 20
   prefer_free: true
   reject_hr_by_default: true
 
-sources:
+want_sources:
   telegram:
     enabled: false
     secret_ref: local/secrets/telegram.yaml

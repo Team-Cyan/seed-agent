@@ -88,9 +88,9 @@ by completion period, and unfinished work is ordered by current priority.
   - M-Team API-backed intent search uses native search, prefers Douban/IMDb ID
     filters when available, and defers download-token resolution until
     execute-mode enqueue.
-  - Search preferences are generic config knobs:
-    `required_keywords`, `preferred_keywords`, and `excluded_keywords`.
-  - `intent.series_search_mode` controls TV/anime season-pack vs episode search
+  - Search preferences use `quality_tag_scores`, a generic tag-group score map
+    where aliases such as `BluRay` and `Blu-ray` count once.
+  - `want_decision.series_search_mode` controls TV/anime season-pack vs episode search
     and ranking.
   - Want List ingestion stores source evidence and merges duplicate wants by
     `douban:<subject_id>` / `imdb:<tt_id>` aliases.
@@ -108,12 +108,12 @@ by completion period, and unfinished work is ordered by current priority.
     diff preview.
   - Downloader settings now include visual editors for qB category policies,
     budget pools, and Want List movie/TV/anime routing via
-    `downloader.media_category_map`, so these common operations no longer
+    `download_client.media_category_map`, so these common operations no longer
     require hand-editing YAML.
   - Each settings page exposes its own editable top-level YAML block while the
     runtime still uses one physical config file for Docker, CLI, and Unraid
     compatibility.
-  - Search keyword preferences and Want List source settings can be edited
+  - Search tag-score preferences and Want List source settings can be edited
     without exposing secret values.
   - Generic source integration settings remain in the config/API layer, but the
     Web UI navigation only exposes Douban/IMDb Want List configuration from the
@@ -121,9 +121,9 @@ by completion period, and unfinished work is ordered by current priority.
   - Want List page shows canonical Douban/IMDb wants with source/type filters,
     source evidence summaries, media type, added time, mobile card layout, and
     search/download queue status.
-  - Want List release ranking interprets quality requirements by media type:
-    movie, TV, and anime intents are scored separately, with Remux treated as a
-    movie-only hard requirement.
+  - Want List release ranking applies operator-configured quality tag scores,
+    including M-Team official tags and inferred title tags, while keeping
+    lower-match candidates visible for manual override.
   - Want List toolbar now exposes separate manual actions for refreshing
     configured Douban/IMDb sources and for triggering torrent search against the
     current filters.

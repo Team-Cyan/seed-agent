@@ -55,7 +55,7 @@ Out of scope:
 Example shape:
 
 ```yaml
-sites:
+tracker_sites:
   - name: mt
     type: mteam
     enabled: true

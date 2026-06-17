@@ -73,18 +73,18 @@ def test_load_config_supports_category_policies_and_budget_pools(tmp_path: Path)
     config_path.write_text(
         """
 mode: balanced
-sites:
+tracker_sites:
   - name: demo
     type: nexusphp
     enabled: true
     rss_url: https://tracker.example/rss.php
-discovery:
+pt_filters:
   discounts: ["free"]
   min_left_time_minutes: 120
   min_leechers: 8
   max_seeders: 80
   allow_hr: false
-scoring:
+pt_scoring:
   min_score_to_enqueue: 70
   weights:
     discount: 30
@@ -93,7 +93,7 @@ scoring:
     left_time: 15
     size: 10
     site_history: 5
-downloader:
+download_client:
   type: qbittorrent
   target: unraid-qb
   default_category: seed
@@ -116,7 +116,7 @@ downloader:
       max_size_tib: 10
     - name: media
       max_size_tib: 10
-cleanup:
+seed_cleanup:
   cold_after_days: 7
   min_upload_delta_gb: 1
   protect_hr: true
@@ -192,7 +192,7 @@ class DownloaderConfig(BaseModel):
 - [ ] **Step 4: Update the example config to the new shape**
 
 ```yaml
-downloader:
+download_client:
   type: qbittorrent
   target: unraid-qb
   default_category: seed
@@ -752,7 +752,7 @@ git commit -m "feat: wire qbt category policies into cli flows"
 - [ ] **Step 1: Update docs to show category policies and shared pools**
 
 ```yaml
-downloader:
+download_client:
   type: qbittorrent
   target: unraid-qb
   default_category: seed

@@ -193,7 +193,7 @@ class SiteConfig(BaseModel):
 - [ ] **Step 4: Document the example config shape**
 
 ```yaml
-sites:
+tracker_sites:
   - name: mt
     type: mteam
     enabled: false

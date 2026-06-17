@@ -1,5 +1,5 @@
 mode: balanced
-sites:
+tracker_sites:
   - name: demo
     type: nexusphp
     enabled: true
@@ -36,18 +36,18 @@ sites:
   #     # teams: [9]
   #     # labels_new: []
   #     # hot: true
-  #     # null inherits discovery.min_seeders for upload discovery. Use 0 to
+  #     # null inherits pt_filters.min_seeders for upload discovery. Use 0 to
   #     # intentionally disable the native lower-bound filter at the M-Team API layer.
   #     min_seeders: null
   #     # 0 or null means no native API seeder upper-bound filter.
   #     max_seeders: 0
-  #     # null inherits discovery.min_leechers for upload discovery. Use 0 for
+  #     # null inherits pt_filters.min_leechers for upload discovery. Use 0 for
   #     # broad search followed by local scoring.
   #     min_leechers: null
   #     min_times_completed: 0
   #   # Optional compatibility fallback: a logged-in M-Team site cookie.
   #   cookie_ref: local/secrets/mt.cookie
-discovery:
+pt_filters:
   discounts: [free, 2xfree]
   min_left_time_minutes: 120
   min_seeders: 1
@@ -64,7 +64,7 @@ discovery:
   # stay eligible without discount-score credit.
   allow_non_free: false
   # Hard candidate size bounds. Use these to keep giant packs out of mutable seed pools.
-  # Set max_size_gb to 0 or null to disable the hard size ceiling.
+  # Set max_size_gb to null to disable the hard size ceiling.
   max_size_gb: 150
   # Soft scoring preference range. Candidates outside this range lose size points
   # but are not rejected unless they violate min_size_gb/max_size_gb.
@@ -79,7 +79,7 @@ discovery:
   # max_active_downloads: 3
   # max_total_amount_left_gb: 150
   allow_hr: false
-scoring:
+pt_scoring:
   min_score_to_enqueue: 70
   weights:
     discount: 30
@@ -88,7 +88,7 @@ scoring:
     left_time: 15
     size: 10
     site_history: 5
-downloader:
+download_client:
   type: qbittorrent
   target: unraid-qb
   default_category: seed
@@ -124,7 +124,7 @@ downloader:
     - name: media
       max_size_tib: 10
   secret_ref: local/secrets/qbittorrent.yaml
-cleanup:
+seed_cleanup:
   cold_after_days: 7
   min_upload_delta_gb: 1
   protect_hr: true
@@ -132,7 +132,7 @@ cleanup:
   protect_media_library: true
   delete_after_no_upload_hours: 2
   pause_before_delete_hours: 24
-intent:
+want_decision:
   confirmation_threshold: 0.82
   auto_enqueue_threshold: 0.94
   ambiguity_gap: 0.08
@@ -142,20 +142,22 @@ intent:
   series_search_mode: season
   preferred_languages: [zh, en]
   inbox_ref: local/inbox/intents.jsonl
-search:
+release_preferences:
   site_priority:
     demo: 10
   max_results_per_site: 20
   prefer_free: true
   reject_hr_by_default: true
-  # Intent search quality preferences. For a Remux-first setup, require Remux
-  # and optionally prefer 2160p/HDR/Dolby Vision terms.
-  required_keywords: []
-  preferred_keywords: []
-  excluded_keywords: []
-state:
+  # Intent search quality preferences. Values are integer score adjustments
+  # for canonical tag groups; aliases in the same group count once.
+  quality_tag_scores:
+    remux: 20
+    dolby_vision: 15
+    hdr10_plus: 10
+    webdl: -10
+local_state:
   candidate_retention_days: 30
-sources:
+want_sources:
   telegram:
     enabled: false
     secret_ref: local/secrets/telegram.yaml

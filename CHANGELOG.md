@@ -4,6 +4,33 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.11.0 - 2026-06-17
+
+### Changed
+
+- Renamed Web UI settings pages and config sections to domain-specific names:
+  `tracker_sites`, `pt_filters`, `pt_scoring`, `download_client`,
+  `seed_cleanup`, `want_decision`, `release_preferences`, `want_sources`, and
+  `local_state`.
+- Removed legacy compatibility for `pt_filters.max_seeders` and the
+  `max_size_gb: 0` unlimited sentinel; use
+  `pt_filters.target_seed_leecher_ratio` and `max_size_gb: null` instead.
+- Replaced Want List search keyword preferences with
+  `release_preferences.quality_tag_scores`, a canonical release-tag score map
+  where aliases such as `BluRay`, `Blu-ray`, `Bluray`, `Blue-Ray`, and `蓝光`
+  count once per candidate.
+- Want List candidate ranking now reads quality tags from release titles and
+  M-Team metadata, applies positive or negative integer tag scores, and marks
+  negatively scored tag matches as lower-match candidates without hiding them.
+
+### Added
+
+- Added a structured Web UI editor for common release tags, including
+  descriptions and alias help for video source, HDR, codec, audio, and common
+  TV/anime subtitle/audio tags.
+- Added `docs/operations/config-and-state-fields.md` to inventory all
+  user-facing config keys and SQLite state tables/columns.
+
 ## 0.9.2 - 2026-06-13
 
 ### Fixed

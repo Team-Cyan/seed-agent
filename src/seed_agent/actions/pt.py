@@ -41,7 +41,7 @@ def get_last_discovery_warnings() -> list[dict[str, str]]:
 async def discover_candidates(config: SeedAgentConfig) -> list[TorrentCandidate]:
     global _LAST_DISCOVERY_WARNINGS
     tasks = [
-        _discover_site_candidates(site, config.config_dir, config.discovery)
+        _discover_site_candidates(site, config.config_dir, config.pt_filters)
         for site in config.enabled_sites
     ]
     results = await asyncio.gather(*tasks, return_exceptions=True) if tasks else []

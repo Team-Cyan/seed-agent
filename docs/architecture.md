@@ -71,7 +71,7 @@ flowchart TB
 | Strategy reporting | `strategy-report`, joined enqueue-time evidence, qB runtime enrichment, no-upload observation, missing-from-qB reconciliation. |
 | Resource intents | CLI add, JSONL inbox, Douban wanted ingestion, IMDb watchlist/list ingestion, deterministic parsing, RSS search, M-Team API search, ranking, rejection, explicit candidate enqueue. |
 | Want List | Web UI page backed by canonical intent state, Douban/IMDb source labels, source/type filters, merged source evidence, media type, added time, search/queue status, and candidate review. |
-| M-Team intent search | Native Douban/IMDb ID search first, title/year fallback search, generic required/preferred/excluded keyword preferences after fetch, Remux-first configs, captured M-Team tags, and configurable TV/anime `series_search_mode` for season-pack or episode search. |
+| M-Team intent search | Native Douban/IMDb ID search first, title/year fallback search, generic `quality_tag_scores` after fetch, captured M-Team tags, and configurable TV/anime `series_search_mode` for season-pack or episode search. |
 | Web UI | Local settings UI, tracker config, read-only status, budget-pool summary, safe section saves with schema validation and diff preview, search/acquisition settings, Douban/IMDb Want List source configuration, and explicit candidate-level qB enqueue actions. |
 | Source adapters | File inbox, Douban wanted, and IMDb watchlists are wired; Telegram and WeChat bridge parsers are present but no hosted bot/receiver loop is shipped. |
 
@@ -98,4 +98,4 @@ flowchart TB
 - Source adapters stay upstream of the generic `ResourceIntent` boundary.
 - Want List deduplication uses reliable external ID aliases only; title-only
   fuzzy matching must not auto-merge works.
-- Release-quality preferences are composable config knobs, not hardcoded profiles.
+- Release-quality preferences are composable tag-group score knobs, not hardcoded profiles.

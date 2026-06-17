@@ -69,11 +69,7 @@ async def test_mteam_search_provider_keeps_non_matching_candidates_for_review() 
     provider = MTeamSearchProvider(
         site="mt",
         api_key="secret-api-key",
-        search_config=SearchConfig(
-            max_results_per_site=10,
-            required_keywords=["Remux"],
-            preferred_keywords=["2160p"],
-        ),
+        search_config=SearchConfig(max_results_per_site=10),
         default_resolution="2160p",
         fetch_candidates=fake_fetch_candidates,
     )
@@ -155,7 +151,7 @@ async def test_mteam_search_provider_prefers_douban_identifier_search() -> None:
     provider = MTeamSearchProvider(
         site="mt",
         api_key="secret-api-key",
-        search_config=SearchConfig(required_keywords=["Remux"]),
+        search_config=SearchConfig(),
         default_resolution=None,
         fetch_candidates=fake_fetch_candidates,
     )
@@ -226,7 +222,7 @@ async def test_mteam_search_provider_supplements_douban_with_imdb_and_keyword_re
     provider = MTeamSearchProvider(
         site="mt",
         api_key="secret-api-key",
-        search_config=SearchConfig(required_keywords=["Remux"]),
+        search_config=SearchConfig(),
         fetch_candidates=fake_fetch_candidates,
     )
 
@@ -259,7 +255,7 @@ async def test_mteam_search_provider_uses_imdb_identifier_when_douban_is_missing
     provider = MTeamSearchProvider(
         site="mt",
         api_key="secret-api-key",
-        search_config=SearchConfig(required_keywords=["Remux"]),
+        search_config=SearchConfig(),
         fetch_candidates=fake_fetch_candidates,
     )
 
@@ -286,7 +282,7 @@ async def test_mteam_search_provider_defaults_episode_intents_to_season_keyword(
     provider = MTeamSearchProvider(
         site="mt",
         api_key="secret-api-key",
-        search_config=SearchConfig(required_keywords=["Remux"]),
+        search_config=SearchConfig(),
         default_resolution="2160p",
         fetch_candidates=fake_fetch_candidates,
     )
@@ -317,7 +313,7 @@ async def test_mteam_search_provider_can_search_episode_keywords() -> None:
     provider = MTeamSearchProvider(
         site="mt",
         api_key="secret-api-key",
-        search_config=SearchConfig(required_keywords=["Remux"]),
+        search_config=SearchConfig(),
         default_resolution="2160p",
         series_search_mode="episode",
         fetch_candidates=fake_fetch_candidates,

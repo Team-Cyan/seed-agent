@@ -7,10 +7,10 @@ ranking, rejection, explicit candidate selection, and enqueue reuse.
 
 Start from `config/example.yaml`. Keep downloader credentials and tracker cookies under `local/secrets/`, and keep source inbox/export files under `local/inbox/`.
 
-The local inbox path is configured by `intent.inbox_ref`:
+The local inbox path is configured by `want_decision.inbox_ref`:
 
 ```yaml
-intent:
+want_decision:
   inbox_ref: local/inbox/intents.jsonl
 ```
 
@@ -36,7 +36,7 @@ explicit button click and browser confirmation; search itself never enqueues.
 For a movie Remux-first Douban/IMDb-to-M-Team intent flow:
 
 ```yaml
-sites:
+tracker_sites:
   - name: mt
     type: mteam
     enabled: true
@@ -49,16 +49,18 @@ sites:
       sort_field: seeders
       sort_order: desc
 
-intent:
+want_decision:
   default_resolution: 2160p
   series_search_mode: season
 
-search:
-  required_keywords: [Remux]
-  preferred_keywords: [HDR, Dolby Vision]
-  excluded_keywords: [CAM, TC]
+release_preferences:
+  quality_tag_scores:
+    remux: 20
+    dolby_vision: 15
+    hdr10_plus: 10
+    webdl: -10
 
-sources:
+want_sources:
   want_lists:
     - provider: douban
       id: douban-me
@@ -74,14 +76,11 @@ sources:
       export_ref: local/inbox/imdb-weekend.csv
 ```
 
-`required_keywords` are ranking requirements for M-Team API-backed intent
-search: missing required terms push a candidate into the lower-match review
-group instead of hiding it. Ranking interprets these requirements by media type:
-movie, TV, and anime intents are scored separately, and `Remux` is treated as a
-movie-only hard requirement because TV and anime candidates usually do not have
-Remux releases. `preferred_keywords` add ranking credit when present.
-`excluded_keywords` penalize matching search results and mark them as not meeting
-the operator preference.
+`quality_tag_scores` is the Want List ranking preference map for M-Team
+API-backed intent search. Keys are canonical tag groups, and values are integer
+score adjustments. Aliases in the same group count once, so `BluRay`,
+`Blu-ray`, `Bluray`, `Blue-Ray`, and `蓝光` do not stack. Negative tag scores
+push a candidate into the lower-match review group instead of hiding it.
 
 For TV/anime episode intents, `series_search_mode: season` searches and ranks
 full-season packs. Use `series_search_mode: episode` when the operator prefers

@@ -20,20 +20,20 @@ def _write_config(
     path.write_text(
         f"""
 mode: balanced
-sites:
+tracker_sites:
   - name: demo-free
     type: nexusphp
     enabled: true
     rss_url: https://tracker.example/rss.php
     cookie_ref: null
-discovery:
+pt_filters:
   discounts: ["free", "2xfree"]
   min_left_time_minutes: 120
   min_leechers: 8
-  max_seeders: 80
+  target_seed_leecher_ratio: 10
   allow_hr: false
 {discovery_block}\
-scoring:
+pt_scoring:
   min_score_to_enqueue: 70
   weights:
     discount: 30
@@ -42,7 +42,7 @@ scoring:
     left_time: 15
     size: 10
     site_history: 5
-downloader:
+download_client:
   type: qbittorrent
   target: unraid-qb
   default_category: seed
@@ -72,7 +72,7 @@ downloader:
       max_size_tib: 10
   secret_ref: null
 {downloader_extra}\
-cleanup:
+seed_cleanup:
   cold_after_days: 7
   min_upload_delta_gb: 1
   protect_hr: true
@@ -499,7 +499,7 @@ def test_intent_enqueue_execute_resolves_mteam_deferred_download_url(
     config_path.write_text(
         config_path.read_text(encoding="utf-8").replace(
             """
-sites:
+tracker_sites:
   - name: demo-free
     type: nexusphp
     enabled: true
@@ -507,7 +507,7 @@ sites:
     cookie_ref: null
 """,
             """
-sites:
+tracker_sites:
   - name: mt
     type: mteam
     enabled: true

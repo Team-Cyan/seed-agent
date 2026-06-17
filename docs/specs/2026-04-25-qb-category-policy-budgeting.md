@@ -69,7 +69,7 @@ Each qB category should be configured through one unified object. Logical capaci
 Proposed shape:
 
 ```yaml
-downloader:
+download_client:
   type: qbittorrent
   target: unraid-qb
   secret_ref: local/secrets/qbittorrent.yaml

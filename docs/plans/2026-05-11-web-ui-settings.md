@@ -117,14 +117,14 @@ def test_save_tracker_draft_writes_config_ref_and_secret_file(tmp_path: Path) ->
     config_path.write_text(
         """
 mode: balanced
-sites: []
-discovery:
+tracker_sites: []
+pt_filters:
   discounts: [free]
   min_left_time_minutes: 120
   min_leechers: 1
   max_seeders: 100
   allow_hr: false
-scoring:
+pt_scoring:
   min_score_to_enqueue: 70
   weights:
     discount: 30
@@ -133,7 +133,7 @@ scoring:
     left_time: 15
     size: 10
     site_history: 5
-downloader:
+download_client:
   type: qbittorrent
   target: local
   default_category: seed
@@ -148,7 +148,7 @@ downloader:
     - name: downloads
       max_size_tib: 1
   secret_ref: null
-cleanup:
+seed_cleanup:
   cold_after_days: 7
   min_upload_delta_gb: 1
   protect_hr: true

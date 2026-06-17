@@ -194,21 +194,21 @@ Early shape:
 ```yaml
 mode: balanced
 
-sites:
+tracker_sites:
   - name: example
     type: nexusphp
     enabled: true
     rss_url: "https://example.invalid/rss"
     cookie_ref: "local/secrets/pt/example.cookie"
 
-discovery:
+pt_filters:
   discounts: ["free", "2xfree"]
   min_left_time_minutes: 120
   min_leechers: 8
   max_seeders: 80
   allow_hr: false
 
-scoring:
+pt_scoring:
   min_score_to_enqueue: 70
   weights:
     discount: 30
@@ -218,13 +218,13 @@ scoring:
     size: 10
     site_history: 5
 
-downloader:
+download_client:
   type: qbittorrent
   target: unraid-qb
   category: pt-auto
   tags: ["seed-agent", "pt-auto"]
 
-cleanup:
+seed_cleanup:
   cold_after_days: 7
   min_upload_delta_gb: 1
   protect_hr: true

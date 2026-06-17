@@ -166,7 +166,7 @@ def site_probe(
     payload = {
         "command": "site-probe",
         "config": str(config),
-        "sites": summary_by_site,
+        "tracker_sites": summary_by_site,
     }
     _attach_discovery_warnings(payload)
     _print_json(payload)
@@ -178,7 +178,7 @@ def score(
 ) -> None:
     loaded = load_config(config)
     candidates = _discover_candidates(loaded)
-    scored = score_candidates(candidates, loaded.discovery, loaded.scoring)
+    scored = score_candidates(candidates, loaded.pt_filters, loaded.pt_scoring)
     payload = {
         "command": "score",
         "config": str(config),
@@ -206,7 +206,7 @@ def enqueue(
     loaded = load_config(config)
     store = StateStore(_state_path(loaded))
     candidates = _discover_candidates(loaded)
-    scored = score_candidates(candidates, loaded.discovery, loaded.scoring)
+    scored = score_candidates(candidates, loaded.pt_filters, loaded.pt_scoring)
     scored = _apply_free_window_safety(
         scored,
         min_free_window_minutes=min_free_window_minutes,
@@ -291,7 +291,7 @@ def intent_inbox(
 ) -> None:
     loaded = load_config(config)
     store = StateStore(_state_path(loaded))
-    inbox_path = _resolve_path(loaded.intent.inbox_ref, loaded.config_dir)
+    inbox_path = _resolve_path(loaded.want_decision.inbox_ref, loaded.config_dir)
     if inbox_path is None:
         intents_and_decisions = []
     else:
@@ -306,7 +306,7 @@ def intent_inbox(
     payload = {
         "command": "intent-inbox",
         "config": str(config),
-        "inbox_ref": loaded.intent.inbox_ref,
+        "inbox_ref": loaded.want_decision.inbox_ref,
         "ingested": len(intents),
         "intents": [_intent_summary(intent) for intent in intents],
         "decisions": [_decision_summary(decision) for decision in decisions],
@@ -346,7 +346,12 @@ def intent_rank(
     loaded = load_config(config)
     store = StateStore(_state_path(loaded))
     try:
-        intent, ranked, decision = rank_intent(intent_id, store, loaded.intent, loaded.search)
+        intent, ranked, decision = rank_intent(
+            intent_id,
+            store,
+            loaded.want_decision,
+            loaded.release_preferences,
+        )
     except ValueError as exc:
         raise typer.BadParameter(str(exc)) from exc
     _write_audit_decisions(loaded, [decision])
@@ -541,7 +546,7 @@ def daily_report_command(
     loaded = load_config(config)
     store = StateStore(_state_path(loaded))
     candidates = _discover_candidates(loaded)
-    scored = score_candidates(candidates, loaded.discovery, loaded.scoring)
+    scored = score_candidates(candidates, loaded.pt_filters, loaded.pt_scoring)
     managed_torrents, missing_reconciled = _managed_torrents_for_report_with_reconciliation(
         loaded, store=store
     )
@@ -574,7 +579,7 @@ def strategy_report_command(
     loaded = load_config(config)
     store = StateStore(_state_path(loaded))
     candidates = _discover_candidates(loaded)
-    scored = score_candidates(candidates, loaded.discovery, loaded.scoring)
+    scored = score_candidates(candidates, loaded.pt_filters, loaded.pt_scoring)
     downloader = _maybe_build_downloader(loaded)
     managed_torrents = _load_policy_torrents(downloader, loaded) if downloader is not None else []
     policy_lookup = _policy_lookup(loaded)
@@ -779,7 +784,7 @@ def _prune_payload(
     store = StateStore(_state_path(loaded))
     mutable_policies = [
         policy
-        for policy in loaded.downloader.category_policies
+        for policy in loaded.download_client.category_policies
         if policy.mode == "mutable" and policy.delete_enabled
     ]
     if execute:
@@ -811,7 +816,7 @@ def _prune_payload(
                     prune_cold_torrents(
                         category_torrents,
                         downloader,
-                        loaded.cleanup,
+                        loaded.seed_cleanup,
                         policy,
                         execute,
                         pool_usage=_pool_usage_for_policy(loaded, all_torrents, policy),
@@ -875,7 +880,7 @@ def _run_once_payload(
             **_candidate_snapshot_kwargs(candidate),
         )
 
-    scored = score_candidates(candidates, loaded.discovery, loaded.scoring)
+    scored = score_candidates(candidates, loaded.pt_filters, loaded.pt_scoring)
     scored = _apply_free_window_safety(
         scored,
         min_free_window_minutes=min_free_window_minutes,
@@ -896,7 +901,7 @@ def _run_once_payload(
         )
     scored, skipped_existing = _filter_existing_enqueue_candidates(store, scored)
     stale_candidates_pruned = store.prune_stale_candidates(
-        retention_days=loaded.state.candidate_retention_days
+        retention_days=loaded.local_state.candidate_retention_days
     )
 
     downloader, live_torrents, paused, pool_usage, missing_reconciled = _enqueue_runtime_context(
@@ -1006,7 +1011,7 @@ def _intent_run_once_payload(config_path: Path, *, execute: bool) -> dict[str, A
     loaded = load_config(config_path)
     store = StateStore(_state_path(loaded))
     providers = _build_search_providers(loaded)
-    inbox_path = _resolve_path(loaded.intent.inbox_ref, loaded.config_dir)
+    inbox_path = _resolve_path(loaded.want_decision.inbox_ref, loaded.config_dir)
     default_policy = _default_category_policy(loaded)
 
     def policy_resolver(intent: ResourceIntent) -> CategoryPolicyConfig:
@@ -1036,8 +1041,8 @@ def _intent_run_once_payload(config_path: Path, *, execute: bool) -> dict[str, A
                 inbox_path=inbox_path,
                 store=store,
                 providers=providers,
-                intent_config=loaded.intent,
-                search_config=loaded.search,
+                intent_config=loaded.want_decision,
+                search_config=loaded.release_preferences,
                 downloader=downloader,
                 policy=default_policy,
                 execute=execute,
@@ -1345,6 +1350,11 @@ def _runtime_status_payload(
         )
     else:
         runtime_root = _runtime_root(loaded)
+        credential_path = (
+            _resolve_path(loaded.download_client.secret_ref, loaded.config_dir)
+            if loaded.download_client.secret_ref
+            else None
+        )
         payload.update(
             {
                 "status": "ok",
@@ -1355,7 +1365,7 @@ def _runtime_status_payload(
                 "audit_path": str(_audit_path(loaded)),
                 "audit_exists": _audit_path(loaded).exists(),
                 "runtime_root": str(runtime_root),
-                "sites": [
+                "tracker_sites": [
                     {
                         "name": site.name,
                         "type": site.type,
@@ -1363,21 +1373,19 @@ def _runtime_status_payload(
                         "discovery_mode": site.discovery_mode,
                         "access_mode": _site_access_mode(site, loaded.config_dir),
                     }
-                    for site in loaded.sites
+                    for site in loaded.tracker_sites
                 ],
-                "downloader": {
-                    "type": loaded.downloader.type,
-                    "target": loaded.downloader.target,
-                    "default_category": loaded.downloader.default_category,
-                    "credential_ref_set": loaded.downloader.secret_ref is not None,
+                "download_client": {
+                    "type": loaded.download_client.type,
+                    "target": loaded.download_client.target,
+                    "default_category": loaded.download_client.default_category,
+                    "credential_ref_set": loaded.download_client.secret_ref is not None,
                     "credential_file_present": bool(
-                        loaded.downloader.secret_ref
-                        and _resolve_path(loaded.downloader.secret_ref, loaded.config_dir)
-                        and _resolve_path(loaded.downloader.secret_ref, loaded.config_dir).exists()
+                        credential_path and credential_path.exists()
                     ),
                     "budget_pools": [
                         {"name": pool.name, "max_size_tib": pool.max_size_tib}
-                        for pool in loaded.downloader.budget_pools
+                        for pool in loaded.download_client.budget_pools
                     ],
                     "category_policies": [
                         {
@@ -1386,20 +1394,22 @@ def _runtime_status_payload(
                             "budget_pool": policy.budget_pool,
                             "delete_enabled": policy.delete_enabled,
                         }
-                        for policy in loaded.downloader.category_policies
+                        for policy in loaded.download_client.category_policies
                     ],
                 },
-                "discovery": {
-                    "min_leechers": loaded.discovery.min_leechers,
-                    "min_seeders": loaded.discovery.min_seeders,
-                    "max_size_gb": loaded.discovery.max_size_gb,
-                    "max_active_downloads": loaded.discovery.max_active_downloads,
-                    "max_total_amount_left_gb": loaded.discovery.max_total_amount_left_gb,
+                "pt_filters": {
+                    "min_leechers": loaded.pt_filters.min_leechers,
+                    "min_seeders": loaded.pt_filters.min_seeders,
+                    "max_size_gb": loaded.pt_filters.max_size_gb,
+                    "max_active_downloads": loaded.pt_filters.max_active_downloads,
+                    "max_total_amount_left_gb": loaded.pt_filters.max_total_amount_left_gb,
                 },
-                "cleanup": {
-                    "cold_after_days": loaded.cleanup.cold_after_days,
-                    "delete_after_no_upload_hours": loaded.cleanup.delete_after_no_upload_hours,
-                    "pause_before_delete_hours": loaded.cleanup.pause_before_delete_hours,
+                "seed_cleanup": {
+                    "cold_after_days": loaded.seed_cleanup.cold_after_days,
+                    "delete_after_no_upload_hours": (
+                        loaded.seed_cleanup.delete_after_no_upload_hours
+                    ),
+                    "pause_before_delete_hours": loaded.seed_cleanup.pause_before_delete_hours,
                 },
             }
         )
@@ -1724,11 +1734,11 @@ def _candidate_evidence_summary(store: StateStore, torrent_hash: str) -> dict[st
 
 
 def _policy_lookup(config: SeedAgentConfig) -> dict[str, CategoryPolicyConfig]:
-    return {policy.name: policy for policy in config.downloader.category_policies}
+    return {policy.name: policy for policy in config.download_client.category_policies}
 
 
 def _default_category_policy(config: SeedAgentConfig) -> CategoryPolicyConfig:
-    return _policy_lookup(config)[config.downloader.default_category]
+    return _policy_lookup(config)[config.download_client.default_category]
 
 
 def _intent_category_policy(
@@ -1740,12 +1750,12 @@ def _intent_category_policy(
         intent.metadata.get("media_type") or intent.metadata.get("kind") or ""
     ).strip().lower()
     if media_type == "anime":
-        mapped_category = config.downloader.media_category_map.get("anime")
+        mapped_category = config.download_client.media_category_map.get("anime")
         if mapped_category and mapped_category in policies:
             return policies[mapped_category]
         return policies.get("tv") or _default_category_policy(config)
     if intent.kind == IntentKind.MOVIE or media_type == "movie":
-        mapped_category = config.downloader.media_category_map.get("movie")
+        mapped_category = config.download_client.media_category_map.get("movie")
         if mapped_category and mapped_category in policies:
             return policies[mapped_category]
         return policies.get("movie") or _default_category_policy(config)
@@ -1754,7 +1764,7 @@ def _intent_category_policy(
         "show",
         "series",
     }:
-        mapped_category = config.downloader.media_category_map.get("tv")
+        mapped_category = config.download_client.media_category_map.get("tv")
         if mapped_category and mapped_category in policies:
             return policies[mapped_category]
         return policies.get("tv") or _default_category_policy(config)
@@ -1767,7 +1777,9 @@ def _load_policy_torrents(
     *,
     policies: list[CategoryPolicyConfig] | None = None,
 ) -> list[ManagedTorrent]:
-    selected_policies = policies if policies is not None else config.downloader.category_policies
+    selected_policies = (
+        policies if policies is not None else config.download_client.category_policies
+    )
     policy_names = {policy.name for policy in selected_policies}
     torrents: list[ManagedTorrent] = []
     seen_hashes: set[str] = set()
@@ -1787,8 +1799,8 @@ def _pool_usage_summary(
     torrents: list[ManagedTorrent],
 ) -> dict[str, dict[str, float | bool]]:
     usage = usage_by_pool(
-        config.downloader.category_policies,
-        config.downloader.budget_pools,
+        config.download_client.category_policies,
+        config.download_client.budget_pools,
         torrents,
     )
     return {name: _pool_usage_item_summary(item) for name, item in usage.items()}
@@ -1810,19 +1822,19 @@ def _default_category_budget_state_from_torrents(
     config: SeedAgentConfig,
     torrents: list[ManagedTorrent],
 ) -> tuple[bool, PoolUsage | None]:
-    if not torrents and not config.downloader.category_policies:
+    if not torrents and not config.download_client.category_policies:
         return False, None
     default_policy = _default_category_policy(config)
     usage = usage_by_pool(
-        config.downloader.category_policies,
-        config.downloader.budget_pools,
+        config.download_client.category_policies,
+        config.download_client.budget_pools,
         torrents,
     )
     pool_usage = usage[default_policy.budget_pool]
     paused = (
         pool_usage.over_budget
         and default_policy.over_budget_behavior == "add_paused"
-        and config.discovery.max_total_amount_left_gb is None
+        and config.pt_filters.max_total_amount_left_gb is None
     )
     return paused, pool_usage
 
@@ -1888,7 +1900,7 @@ def _enqueue_candidate_batches(
     if hard_reasons:
         return [(accepted, True, hard_reasons)]
 
-    max_left_gb = config.discovery.max_total_amount_left_gb
+    max_left_gb = config.pt_filters.max_total_amount_left_gb
     if max_left_gb is None:
         return [(accepted, False, [])]
 
@@ -1945,7 +1957,7 @@ def _enqueue_pause_reasons(
     if (
         pool_usage is not None
         and pool_usage.over_budget
-        and config.discovery.max_total_amount_left_gb is None
+        and config.pt_filters.max_total_amount_left_gb is None
     ):
         reasons.append(
             f"budget pool {pool_usage.pool_name} over budget "
@@ -1953,12 +1965,12 @@ def _enqueue_pause_reasons(
             f"{round(pool_usage.max_size_bytes / 1024**4, 2)} TiB)"
         )
     runtime = _runtime_activity_summary(torrents)
-    max_active_downloads = config.discovery.max_active_downloads
+    max_active_downloads = config.pt_filters.max_active_downloads
     if max_active_downloads is not None and runtime["active_download_count"] > max_active_downloads:
         reasons.append(
             f"active downloads {runtime['active_download_count']} > max {max_active_downloads}"
         )
-    max_total_amount_left_gb = config.discovery.max_total_amount_left_gb
+    max_total_amount_left_gb = config.pt_filters.max_total_amount_left_gb
     if not include_amount:
         return reasons
     total_amount_left_bytes = sum(_download_liability_bytes(torrent) for torrent in torrents)
@@ -1989,8 +2001,8 @@ def _pool_usage_for_policy(
     policy: CategoryPolicyConfig,
 ) -> PoolUsage | None:
     usage = usage_by_pool(
-        config.downloader.category_policies,
-        config.downloader.budget_pools,
+        config.download_client.category_policies,
+        config.download_client.budget_pools,
         torrents,
     )
     return usage.get(policy.budget_pool)
@@ -2129,7 +2141,7 @@ def _runtime_activity_summary(torrents: list[ManagedTorrent]) -> dict[str, float
 
 
 def _maybe_build_downloader(config: SeedAgentConfig) -> QbittorrentClient | None:
-    secret_ref = config.downloader.secret_ref
+    secret_ref = config.download_client.secret_ref
     if not secret_ref:
         return None
     secret_path = _resolve_path(secret_ref, config.config_dir)
@@ -2145,7 +2157,7 @@ def _maybe_build_downloader(config: SeedAgentConfig) -> QbittorrentClient | None
 
 
 def build_downloader(config: SeedAgentConfig) -> QbittorrentClient:
-    secret_ref = config.downloader.secret_ref
+    secret_ref = config.download_client.secret_ref
     if not secret_ref:
         raise typer.BadParameter("missing downloader secret")
     secret_path = _resolve_path(secret_ref, config.config_dir)
@@ -2169,9 +2181,9 @@ def _build_search_providers(config: SeedAgentConfig) -> list[SearchProvider]:
                     api_key=api_key,
                     api_key_header=site.auth_header,
                     cookie=cookie,
-                    search_config=config.search,
-                    default_resolution=config.intent.default_resolution,
-                    series_search_mode=config.intent.series_search_mode,
+                    search_config=config.release_preferences,
+                    default_resolution=config.want_decision.default_resolution,
+                    series_search_mode=config.want_decision.series_search_mode,
                 )
             )
             continue
@@ -2182,7 +2194,7 @@ def _build_search_providers(config: SeedAgentConfig) -> list[SearchProvider]:
                 site_type=site.type,
                 cookie=cookie,
                 api_key=api_key,
-                max_results=config.search.max_results_per_site,
+                max_results=config.release_preferences.max_results_per_site,
             )
         )
     return providers
@@ -2190,7 +2202,7 @@ def _build_search_providers(config: SeedAgentConfig) -> list[SearchProvider]:
 
 def _read_configured_source_events(config: SeedAgentConfig) -> list[SourceIntentEvent]:
     events: list[SourceIntentEvent] = []
-    for source in config.sources.want_lists:
+    for source in config.want_sources.want_lists:
         if not source.enabled:
             continue
         if source.provider == "douban":
@@ -2233,7 +2245,7 @@ def _read_configured_source_events(config: SeedAgentConfig) -> list[SourceIntent
                         label=source.label,
                     )
                 )
-    douban = config.sources.douban_wanted
+    douban = config.want_sources.douban_wanted
     if not douban.enabled:
         return events
     if douban.export_ref:

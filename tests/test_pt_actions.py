@@ -29,7 +29,7 @@ def _candidate(**overrides: object) -> TorrentCandidate:
 def _config(cookie_ref: str | None = None, api_key_ref: str | None = None) -> SeedAgentConfig:
     return SeedAgentConfig(
         mode="balanced",
-        sites=[
+        tracker_sites=[
             {
                 "name": "demo-free",
                 "type": "nexusphp",
@@ -45,14 +45,14 @@ def _config(cookie_ref: str | None = None, api_key_ref: str | None = None) -> Se
                 "rss_url": "https://tracker.example/rss-disabled.php",
             },
         ],
-        discovery=DiscoveryConfig(
+        pt_filters=DiscoveryConfig(
             discounts=["free", "2xfree"],
             min_left_time_minutes=120,
             min_leechers=8,
-            max_seeders=80,
+            target_seed_leecher_ratio=10,
             allow_hr=False,
         ),
-        scoring=ScoringConfig(
+        pt_scoring=ScoringConfig(
             min_score_to_enqueue=70,
             weights={
                 "discount": 30,
@@ -63,7 +63,7 @@ def _config(cookie_ref: str | None = None, api_key_ref: str | None = None) -> Se
                 "site_history": 5,
             },
         ),
-        downloader={
+        download_client={
             "type": "qbittorrent",
             "target": "unraid-qb",
             "default_category": "seed",
@@ -80,7 +80,7 @@ def _config(cookie_ref: str | None = None, api_key_ref: str | None = None) -> Se
             "budget_pools": [{"name": "downloads", "max_size_tib": 10}],
             "secret_ref": None,
         },
-        cleanup={
+        seed_cleanup={
             "cold_after_days": 7,
             "min_upload_delta_gb": 1,
             "protect_hr": True,
@@ -96,8 +96,8 @@ def test_score_candidates_returns_structured_breakdown() -> None:
 
     scored = score_candidates(
         [_candidate()],
-        _config().discovery,
-        _config().scoring,
+        _config().pt_filters,
+        _config().pt_scoring,
     )
 
     assert len(scored) == 1
@@ -138,7 +138,7 @@ async def test_discover_candidates_keeps_going_when_one_site_fails(monkeypatch) 
 
     config = SeedAgentConfig(
         mode="balanced",
-        sites=[
+        tracker_sites=[
             {
                 "name": "demo-bad",
                 "type": "nexusphp",
@@ -154,10 +154,10 @@ async def test_discover_candidates_keeps_going_when_one_site_fails(monkeypatch) 
                 "cookie_ref": None,
             },
         ],
-        discovery=_config().discovery,
-        scoring=_config().scoring,
-        downloader=_config().downloader,
-        cleanup=_config().cleanup,
+        pt_filters=_config().pt_filters,
+        pt_scoring=_config().pt_scoring,
+        download_client=_config().download_client,
+        seed_cleanup=_config().seed_cleanup,
     )
 
     calls: list[str] = []
@@ -256,19 +256,19 @@ async def test_discover_candidates_resolves_relative_cookie_ref_against_config_p
     config_path.write_text(
         """
 mode: balanced
-sites:
+tracker_sites:
   - name: demo-free
     type: nexusphp
     enabled: true
     rss_url: https://tracker.example/rss.php
     cookie_ref: local/secrets/demo.cookie
-discovery:
+pt_filters:
   discounts: ["free", "2xfree"]
   min_left_time_minutes: 120
   min_leechers: 8
-  max_seeders: 80
+  target_seed_leecher_ratio: 10
   allow_hr: false
-scoring:
+pt_scoring:
   min_score_to_enqueue: 70
   weights:
     discount: 30
@@ -277,7 +277,7 @@ scoring:
     left_time: 15
     size: 10
     site_history: 5
-downloader:
+download_client:
   type: qbittorrent
   target: unraid-qb
   default_category: seed
@@ -292,7 +292,7 @@ downloader:
     - name: downloads
       max_size_tib: 10
   secret_ref: null
-cleanup:
+seed_cleanup:
   cold_after_days: 7
   min_upload_delta_gb: 1
   protect_hr: true
@@ -346,7 +346,7 @@ async def test_discover_candidates_resolves_repo_relative_site_secret_for_config
     config_path.write_text(
         """
 mode: balanced
-sites:
+tracker_sites:
   - name: mt
     type: mteam
     enabled: true
@@ -363,13 +363,13 @@ sites:
       max_seeders: 200
       min_leechers: 0
       min_times_completed: 0
-discovery:
+pt_filters:
   discounts: ["free", "2xfree"]
   min_left_time_minutes: 120
   min_leechers: 8
-  max_seeders: 80
+  target_seed_leecher_ratio: 10
   allow_hr: false
-scoring:
+pt_scoring:
   min_score_to_enqueue: 70
   weights:
     discount: 30
@@ -378,7 +378,7 @@ scoring:
     left_time: 15
     size: 10
     site_history: 5
-downloader:
+download_client:
   type: qbittorrent
   target: unraid-qb
   default_category: seed
@@ -393,7 +393,7 @@ downloader:
     - name: downloads
       max_size_tib: 10
   secret_ref: null
-cleanup:
+seed_cleanup:
   cold_after_days: 7
   min_upload_delta_gb: 1
   protect_hr: true
@@ -434,7 +434,7 @@ async def test_discover_candidates_expands_mteam_api_modes_and_deduplicates(
     config_path.write_text(
         """
 mode: balanced
-sites:
+tracker_sites:
   - name: mt
     type: mteam
     enabled: true
@@ -452,14 +452,14 @@ sites:
       max_seeders: 0
       min_leechers: null
       min_times_completed: 0
-discovery:
+pt_filters:
   discounts: ["free", "2xfree"]
   min_left_time_minutes: 120
   min_leechers: 30
   min_seeders: 1
   target_seed_leecher_ratio: 4
   allow_hr: false
-scoring:
+pt_scoring:
   min_score_to_enqueue: 70
   weights:
     discount: 30
@@ -468,7 +468,7 @@ scoring:
     left_time: 15
     size: 10
     site_history: 5
-downloader:
+download_client:
   type: qbittorrent
   target: unraid-qb
   default_category: seed
@@ -483,7 +483,7 @@ downloader:
     - name: downloads
       max_size_tib: 10
   secret_ref: null
-cleanup:
+seed_cleanup:
   cold_after_days: 7
   min_upload_delta_gb: 1
   protect_hr: true
@@ -527,7 +527,7 @@ async def test_discover_candidates_errors_when_mteam_api_secret_is_missing(
     config_path.write_text(
         """
 mode: balanced
-sites:
+tracker_sites:
   - name: mt
     type: mteam
     enabled: true
@@ -544,13 +544,13 @@ sites:
       max_seeders: 200
       min_leechers: 0
       min_times_completed: 0
-discovery:
+pt_filters:
   discounts: ["free", "2xfree"]
   min_left_time_minutes: 120
   min_leechers: 8
-  max_seeders: 80
+  target_seed_leecher_ratio: 10
   allow_hr: false
-scoring:
+pt_scoring:
   min_score_to_enqueue: 70
   weights:
     discount: 30
@@ -559,7 +559,7 @@ scoring:
     left_time: 15
     size: 10
     site_history: 5
-downloader:
+download_client:
   type: qbittorrent
   target: unraid-qb
   default_category: seed
@@ -574,7 +574,7 @@ downloader:
     - name: downloads
       max_size_tib: 10
   secret_ref: null
-cleanup:
+seed_cleanup:
   cold_after_days: 7
   min_upload_delta_gb: 1
   protect_hr: true
@@ -638,7 +638,7 @@ async def test_discover_candidates_uses_mteam_api_mode_when_configured(
     config = SeedAgentConfig(
         **{
             **_config().model_dump(),
-            "sites": [
+            "tracker_sites": [
                 {
                     "name": "mt",
                     "type": "mteam",
@@ -692,12 +692,12 @@ async def test_discover_candidates_inherits_mteam_api_thresholds_from_discovery(
     api_key_path = tmp_path / "mt.api-key"
     api_key_path.write_text("secret-api-key\n", encoding="utf-8")
     base = _config().model_dump()
-    base["discovery"]["min_seeders"] = 2
-    base["discovery"]["min_leechers"] = 8
+    base["pt_filters"]["min_seeders"] = 2
+    base["pt_filters"]["min_leechers"] = 8
     config = SeedAgentConfig(
         **{
             **base,
-            "sites": [
+            "tracker_sites": [
                 {
                     "name": "mt",
                     "type": "mteam",
@@ -750,12 +750,12 @@ async def test_discover_candidates_preserves_explicit_zero_mteam_api_thresholds(
     api_key_path = tmp_path / "mt.api-key"
     api_key_path.write_text("secret-api-key\n", encoding="utf-8")
     base = _config().model_dump()
-    base["discovery"]["min_seeders"] = 2
-    base["discovery"]["min_leechers"] = 8
+    base["pt_filters"]["min_seeders"] = 2
+    base["pt_filters"]["min_leechers"] = 8
     config = SeedAgentConfig(
         **{
             **base,
-            "sites": [
+            "tracker_sites": [
                 {
                     "name": "mt",
                     "type": "mteam",
@@ -810,7 +810,7 @@ async def test_resolve_deferred_download_urls_uses_mteam_api_key(
     config = SeedAgentConfig(
         **{
             **_config().model_dump(),
-            "sites": [
+            "tracker_sites": [
                 {
                     "name": "mt",
                     "type": "mteam",
@@ -889,7 +889,7 @@ async def test_resolve_deferred_download_urls_rejects_candidate_on_mteam_timeout
     config = SeedAgentConfig(
         **{
             **_config().model_dump(),
-            "sites": [
+            "tracker_sites": [
                 {
                     "name": "mt",
                     "type": "mteam",

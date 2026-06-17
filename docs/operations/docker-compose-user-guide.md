@@ -43,21 +43,21 @@ cp config/example.yaml config/config.yaml
 
 Then update at least:
 
-- `sites:`
-- `discovery:`
-- `downloader:`
-- `cleanup:`
+- `tracker_sites:`
+- `pt_filters:`
+- `download_client:`
+- `seed_cleanup:`
 
 For unattended NAS use, strongly consider:
 
-- `discovery.min_left_time_minutes`
-- `discovery.max_active_downloads`
-- `discovery.max_total_amount_left_gb`
-- `downloader.category_policies`
-- `downloader.budget_pools`
-- `cleanup.delete_after_no_upload_hours`
+- `pt_filters.min_left_time_minutes`
+- `pt_filters.max_active_downloads`
+- `pt_filters.max_total_amount_left_gb`
+- `download_client.category_policies`
+- `download_client.budget_pools`
+- `seed_cleanup.delete_after_no_upload_hours`
 
-`discovery.max_total_amount_left_gb` is an active download liability cap. The
+`pt_filters.max_total_amount_left_gb` is an active download liability cap. The
 agent ignores zero-progress stopped download placeholders for that cap and uses
 score order when deciding which accepted candidates should start versus be added
 paused.

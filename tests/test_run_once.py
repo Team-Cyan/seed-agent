@@ -20,14 +20,14 @@ def _config(
         "discounts": ["free", "2xfree"],
         "min_left_time_minutes": 120,
         "min_leechers": 8,
-        "max_seeders": 80,
+        "target_seed_leecher_ratio": 10,
         "allow_hr": False,
     }
     if discovery_overrides:
         discovery_data.update(discovery_overrides)
     return SeedAgentConfig(
         mode="balanced",
-        sites=[
+        tracker_sites=[
             {
                 "name": "demo-free",
                 "type": "nexusphp",
@@ -36,8 +36,8 @@ def _config(
                 "cookie_ref": None,
             }
         ],
-        discovery=DiscoveryConfig(**discovery_data),
-        scoring=ScoringConfig(
+        pt_filters=DiscoveryConfig(**discovery_data),
+        pt_scoring=ScoringConfig(
             min_score_to_enqueue=70,
             weights={
                 "discount": 30,
@@ -48,7 +48,7 @@ def _config(
                 "site_history": 5,
             },
         ),
-        downloader={
+        download_client={
             "type": "qbittorrent",
             "target": "unraid-qb",
             "default_category": "seed",
@@ -65,7 +65,7 @@ def _config(
             "budget_pools": [{"name": "downloads", "max_size_tib": 10}],
             "secret_ref": secret_ref,
         },
-        cleanup={
+        seed_cleanup={
             "cold_after_days": 7,
             "min_upload_delta_gb": 1,
             "protect_hr": True,
@@ -117,20 +117,20 @@ def _config_file(
     path.write_text(
         f"""
 mode: balanced
-sites:
+tracker_sites:
   - name: demo-free
     type: nexusphp
     enabled: true
     rss_url: https://tracker.example/rss.php
     cookie_ref: null
-discovery:
+pt_filters:
   discounts: ["free", "2xfree"]
   min_left_time_minutes: 120
   min_leechers: 8
-  max_seeders: 80
+  target_seed_leecher_ratio: 10
   allow_hr: false
 {discovery_extra}
-scoring:
+pt_scoring:
   min_score_to_enqueue: 70
   weights:
     discount: 30
@@ -139,7 +139,7 @@ scoring:
     left_time: 15
     size: 10
     site_history: 5
-downloader:
+download_client:
   type: qbittorrent
   target: unraid-qb
   default_category: seed
@@ -154,7 +154,7 @@ downloader:
     - name: downloads
       max_size_tib: 10
   secret_ref: {secret_line}
-cleanup:
+seed_cleanup:
   cold_after_days: 7
   min_upload_delta_gb: 1
   protect_hr: true

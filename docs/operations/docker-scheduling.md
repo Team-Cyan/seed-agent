@@ -36,7 +36,7 @@ unknown.
 
 Recommended protections:
 
-- set `discovery.min_left_time_minutes` to a conservative value for your own
+- set `pt_filters.min_left_time_minutes` to a conservative value for your own
   bandwidth and queueing behavior,
 - use `--require-known-free-window` for unattended execute runs,
 - optionally raise `--min-free-window-minutes` above the config default when you

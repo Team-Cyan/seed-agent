@@ -7,16 +7,17 @@ Use this guide when tuning tracker candidate selection from live evidence.
 - Do not add a coarse `profile` runtime field for strategy.
 - Express strategy through concrete configuration knobs:
   - M-Team `api_discovery` filters and sort order,
-  - `discovery.min_leechers`,
-  - `discovery.leecher_score_full_at_multiplier`,
-  - `discovery.target_seed_leecher_ratio`,
-  - `discovery.max_size_gb`,
-  - `discovery.preferred_size_min_gb`,
-  - `discovery.preferred_size_max_gb`,
-  - `discovery.size_partial_max_gb`,
-  - `scoring.weights`,
-  - `scoring.min_score_to_enqueue`,
-  - qB runtime gates such as `max_active_downloads` and `max_total_amount_left_gb`.
+  - `pt_filters.min_leechers`,
+  - `pt_filters.leecher_score_full_at_multiplier`,
+  - `pt_filters.target_seed_leecher_ratio`,
+  - `pt_filters.max_size_gb`,
+  - `pt_filters.preferred_size_min_gb`,
+  - `pt_filters.preferred_size_max_gb`,
+  - `pt_filters.size_partial_max_gb`,
+  - `pt_scoring.weights`,
+  - `pt_scoring.min_score_to_enqueue`,
+  - qB runtime gates such as `pt_filters.max_active_downloads` and
+    `pt_filters.max_total_amount_left_gb`.
 - Keep FREE/2xFREE, H&R protection, dry-run first, and mutable-category cleanup
   boundaries unless the operator explicitly changes them.
 

@@ -20,17 +20,17 @@ balanced safety policy.
 - treat qB category membership as the cleanup ownership boundary,
 - never treat tags alone as cleanup authorization outside the configured category,
 - observe zero-total-upload managed torrents from qB `added_at` for
-  `cleanup.delete_after_no_upload_hours` before deleting them, including
+  `seed_cleanup.delete_after_no_upload_hours` before deleting them, including
   incomplete downloads that consumed space but never uploaded,
 - keep completed seeds available for upload; automated cleanup should not pause
   or delete a completed seed simply because it is cold, has no recent upload, or
   has a free-window expiry, unless the operator explicitly enables completed
   low-upload cleanup,
-- when `cleanup.delete_completed_low_upload_after_hours` is set, completed
+- when `seed_cleanup.delete_completed_low_upload_after_hours` is set, completed
   mutable-category seeds can be deleted without requiring an over-budget pool if
   their no-upload observation window has exceeded that delay and their total
-  upload remains below `cleanup.completed_low_upload_min_gb` or their ratio is
-  below `cleanup.completed_low_upload_min_ratio`. Scheduled conservative prune
+  upload remains below `seed_cleanup.completed_low_upload_min_gb` or their ratio is
+  below `seed_cleanup.completed_low_upload_min_ratio`. Scheduled conservative prune
   can opt into requiring space reclamation for this completed low-upload rule,
   so low-demand completed seeds are kept when there is no better candidate
   waiting for capacity,
@@ -47,7 +47,7 @@ balanced safety policy.
   whether a torrent is still contributing upload.
 - For upload-farming seed pools, a 24-hour zero-upload observation window is too
   slow. The default is now 2 hours: if a managed incomplete torrent has total
-  uploaded bytes of zero for at least `cleanup.delete_after_no_upload_hours`,
+  uploaded bytes of zero for at least `seed_cleanup.delete_after_no_upload_hours`,
   prune may preview deletion, but only when the mutable category's budget pool
   is over budget and space reclamation is needed.
 - Capacity-pressure prune is the aggressive mode. It is triggered by enqueue

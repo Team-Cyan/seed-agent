@@ -83,7 +83,7 @@ Important nuance:
 - RSS must stay in the codebase because it is useful for other sites and fallback flows.
 - M-Team API discovery is the preferred authenticated path when an API key is configured.
 - Intent search can be Remux-first through generic search keywords and can
-  prefer season packs or individual episodes through `intent.series_search_mode`.
+  prefer season packs or individual episodes through `want_decision.series_search_mode`.
 
 ## Current Downloader Story
 

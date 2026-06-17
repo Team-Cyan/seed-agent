@@ -9,7 +9,7 @@ from seed_agent.config import SeedAgentConfig, load_config
 def _valid_config_data(secret_ref: str) -> dict[str, object]:
     return {
         "mode": "balanced",
-        "sites": [
+        "tracker_sites": [
             {
                 "name": "demo-free",
                 "type": "nexusphp",
@@ -18,14 +18,14 @@ def _valid_config_data(secret_ref: str) -> dict[str, object]:
                 "cookie_ref": None,
             }
         ],
-        "discovery": {
+        "pt_filters": {
             "discounts": ["free", "2xfree"],
             "min_left_time_minutes": 120,
             "min_leechers": 8,
-            "max_seeders": 80,
+            "target_seed_leecher_ratio": 10,
             "allow_hr": False,
         },
-        "scoring": {
+        "pt_scoring": {
             "min_score_to_enqueue": 70,
             "weights": {
                 "discount": 30,
@@ -36,7 +36,7 @@ def _valid_config_data(secret_ref: str) -> dict[str, object]:
                 "site_history": 5,
             },
         },
-        "downloader": {
+        "download_client": {
             "type": "qbittorrent",
             "target": "unraid-qb",
             "default_category": "seed",
@@ -58,7 +58,7 @@ def _valid_config_data(secret_ref: str) -> dict[str, object]:
             ],
             "secret_ref": secret_ref,
         },
-        "cleanup": {
+        "seed_cleanup": {
             "cold_after_days": 7,
             "min_upload_delta_gb": 1,
             "protect_hr": True,
@@ -73,7 +73,7 @@ def _phase2_data() -> dict[str, object]:
     data = _valid_config_data("local/secrets/qb.yaml")
     data.update(
         {
-            "intent": {
+            "want_decision": {
                 "confirmation_threshold": 0.82,
                 "auto_enqueue_threshold": 0.94,
                 "ambiguity_gap": 0.08,
@@ -81,16 +81,18 @@ def _phase2_data() -> dict[str, object]:
                 "preferred_languages": ["zh", "en"],
                 "inbox_ref": "local/inbox/intents.jsonl",
             },
-            "search": {
+            "release_preferences": {
                 "site_priority": {"demo-free": 10},
                 "max_results_per_site": 20,
                 "prefer_free": True,
                 "reject_hr_by_default": True,
-                "required_keywords": ["Remux"],
-                "preferred_keywords": ["2160p", "HDR"],
-                "excluded_keywords": ["CAM"],
+                "quality_tag_scores": {
+                    "remux": 20,
+                    "dolby_vision": 15,
+                    "webdl": -10,
+                },
             },
-            "sources": {
+            "want_sources": {
                 "telegram": {
                     "enabled": False,
                     "secret_ref": "local/secrets/telegram.yaml",
@@ -136,46 +138,48 @@ def _phase2_data() -> dict[str, object]:
 def test_phase2_config_accepts_intent_search_and_source_sections() -> None:
     config = SeedAgentConfig(**_phase2_data())
 
-    assert config.intent.confirmation_threshold == 0.82
-    assert config.intent.auto_enqueue_threshold == 0.94
-    assert config.intent.inbox_ref == "local/inbox/intents.jsonl"
-    assert config.intent.series_search_mode == "season"
-    assert config.search.site_priority == {"demo-free": 10}
-    assert config.search.required_keywords == ["Remux"]
-    assert config.search.preferred_keywords == ["2160p", "HDR"]
-    assert config.search.excluded_keywords == ["CAM"]
-    assert config.sources.telegram.secret_ref == "local/secrets/telegram.yaml"
-    assert config.sources.douban_wanted.export_ref == "local/inbox/douban-wanted.json"
-    assert config.sources.douban_wanted.user_name == "LancerC"
-    assert config.sources.douban_wanted.max_pages == 2
-    assert config.sources.want_lists[0].provider == "douban"
-    assert config.sources.want_lists[0].id == "douban-me"
-    assert config.sources.want_lists[0].label == "我"
-    assert config.sources.want_lists[1].provider == "imdb"
-    assert config.sources.want_lists[1].watchlist_url == "https://www.imdb.com/user/p.demo/watchlist/"
+    assert config.want_decision.confirmation_threshold == 0.82
+    assert config.want_decision.auto_enqueue_threshold == 0.94
+    assert config.want_decision.inbox_ref == "local/inbox/intents.jsonl"
+    assert config.want_decision.series_search_mode == "season"
+    assert config.release_preferences.site_priority == {"demo-free": 10}
+    assert config.release_preferences.quality_tag_scores == {
+        "remux": 20,
+        "dolby_vision": 15,
+        "webdl": -10,
+    }
+    assert config.want_sources.telegram.secret_ref == "local/secrets/telegram.yaml"
+    assert config.want_sources.douban_wanted.export_ref == "local/inbox/douban-wanted.json"
+    assert config.want_sources.douban_wanted.user_name == "LancerC"
+    assert config.want_sources.douban_wanted.max_pages == 2
+    assert config.want_sources.want_lists[0].provider == "douban"
+    assert config.want_sources.want_lists[0].id == "douban-me"
+    assert config.want_sources.want_lists[0].label == "我"
+    assert config.want_sources.want_lists[1].provider == "imdb"
+    assert config.want_sources.want_lists[1].watchlist_url == "https://www.imdb.com/user/p.demo/watchlist/"
 
 
 def test_phase2_config_defaults_keep_phase1_configs_loadable() -> None:
     config = SeedAgentConfig(**_valid_config_data("local/secrets/qb.yaml"))
 
-    assert config.intent.confirmation_threshold == 0.82
-    assert config.intent.series_search_mode == "season"
-    assert config.search.max_results_per_site == 20
-    assert config.search.required_keywords == []
-    assert config.sources.telegram.enabled is False
-    assert config.sources.douban_wanted.max_pages == 1
-    assert config.sources.want_lists == []
+    assert config.want_decision.confirmation_threshold == 0.82
+    assert config.want_decision.series_search_mode == "season"
+    assert config.release_preferences.max_results_per_site == 20
+    assert config.release_preferences.quality_tag_scores == {}
+    assert config.want_sources.telegram.enabled is False
+    assert config.want_sources.douban_wanted.max_pages == 1
+    assert config.want_sources.want_lists == []
 
 
 def test_phase2_config_accepts_episode_series_search_mode() -> None:
     data = _phase2_data()
-    intent = data["intent"]
+    intent = data["want_decision"]
     assert isinstance(intent, dict)
     intent["series_search_mode"] = "episode"
 
     config = SeedAgentConfig(**data)
 
-    assert config.intent.series_search_mode == "episode"
+    assert config.want_decision.series_search_mode == "episode"
 
 
 def test_load_config_reads_phase2_example(tmp_path: Path) -> None:
@@ -183,19 +187,19 @@ def test_load_config_reads_phase2_example(tmp_path: Path) -> None:
     config_path.write_text(
         """
 mode: balanced
-sites:
+tracker_sites:
   - name: demo-free
     type: nexusphp
     enabled: true
     rss_url: https://tracker.example/rss.php
     cookie_ref: null
-discovery:
+pt_filters:
   discounts: ["free", "2xfree"]
   min_left_time_minutes: 120
   min_leechers: 8
-  max_seeders: 80
+  target_seed_leecher_ratio: 10
   allow_hr: false
-scoring:
+pt_scoring:
   min_score_to_enqueue: 70
   weights:
     discount: 30
@@ -204,7 +208,7 @@ scoring:
     left_time: 15
     size: 10
     site_history: 5
-downloader:
+download_client:
   type: qbittorrent
   target: unraid-qb
   default_category: seed
@@ -219,30 +223,30 @@ downloader:
     - name: downloads
       max_size_tib: 10
   secret_ref: local/secrets/qbittorrent.yaml
-cleanup:
+seed_cleanup:
   cold_after_days: 7
   min_upload_delta_gb: 1
   protect_hr: true
   protect_manual: true
   protect_media_library: true
   pause_before_delete_hours: 24
-intent:
+want_decision:
   confirmation_threshold: 0.82
   auto_enqueue_threshold: 0.94
   ambiguity_gap: 0.08
   default_resolution: 1080p
   preferred_languages: ["zh", "en"]
   inbox_ref: local/inbox/intents.jsonl
-search:
+release_preferences:
   site_priority:
     demo-free: 10
   max_results_per_site: 20
   prefer_free: true
   reject_hr_by_default: true
-  required_keywords: ["Remux"]
-  preferred_keywords: ["2160p"]
-  excluded_keywords: ["CAM"]
-sources:
+  quality_tag_scores:
+    remux: 20
+    webdl: -10
+want_sources:
   telegram:
     enabled: false
     secret_ref: local/secrets/telegram.yaml
@@ -276,25 +280,25 @@ sources:
 
     config = load_config(config_path)
 
-    assert config.intent.default_resolution == "1080p"
-    assert config.search.site_priority["demo-free"] == 10
-    assert config.search.required_keywords == ["Remux"]
-    assert config.sources.douban_wanted.user_name == "LancerC"
-    assert config.sources.douban_wanted.max_pages == 2
-    assert config.sources.want_lists[0].provider == "douban"
-    assert config.sources.want_lists[1].provider == "imdb"
-    assert config.sources.want_lists[1].export_ref == "local/inbox/imdb-weekend.csv"
-    assert config.sources.subscription.rules_ref == "config/subscriptions.yaml"
-    assert config.downloader.default_category == "seed"
+    assert config.want_decision.default_resolution == "1080p"
+    assert config.release_preferences.site_priority["demo-free"] == 10
+    assert config.release_preferences.quality_tag_scores == {"remux": 20, "webdl": -10}
+    assert config.want_sources.douban_wanted.user_name == "LancerC"
+    assert config.want_sources.douban_wanted.max_pages == 2
+    assert config.want_sources.want_lists[0].provider == "douban"
+    assert config.want_sources.want_lists[1].provider == "imdb"
+    assert config.want_sources.want_lists[1].export_ref == "local/inbox/imdb-weekend.csv"
+    assert config.want_sources.subscription.rules_ref == "config/subscriptions.yaml"
+    assert config.download_client.default_category == "seed"
 
 
 def test_phase2_config_rejects_invalid_douban_page_limit() -> None:
     data = _phase2_data()
-    sources = dict(data["sources"])  # type: ignore[arg-type]
+    sources = dict(data["want_sources"])  # type: ignore[arg-type]
     douban = dict(sources["douban_wanted"])  # type: ignore[index]
     douban["max_pages"] = 0
     sources["douban_wanted"] = douban
-    data["sources"] = sources
+    data["want_sources"] = sources
 
     with pytest.raises(ValidationError, match="max_pages"):
         SeedAgentConfig(**data)
@@ -303,13 +307,13 @@ def test_phase2_config_rejects_invalid_douban_page_limit() -> None:
 def test_phase2_config_accepts_category_policy_downloader_shape() -> None:
     config = SeedAgentConfig(**_phase2_data())
 
-    assert config.downloader.default_category == "seed"
-    assert config.downloader.category_policies[0].budget_pool == "downloads"
+    assert config.download_client.default_category == "seed"
+    assert config.download_client.category_policies[0].budget_pool == "downloads"
 
 
 def test_phase2_config_rejects_unknown_intent_key() -> None:
     data = _phase2_data()
-    data["intent"] = {**data["intent"], "surprise": True}
+    data["want_decision"] = {**data["want_decision"], "surprise": True}
 
     with pytest.raises(ValidationError, match="surprise"):
         SeedAgentConfig(**data)
@@ -317,8 +321,8 @@ def test_phase2_config_rejects_unknown_intent_key() -> None:
 
 def test_phase2_config_rejects_invalid_threshold_order() -> None:
     data = _phase2_data()
-    data["intent"] = {
-        **data["intent"],
+    data["want_decision"] = {
+        **data["want_decision"],
         "confirmation_threshold": 0.95,
         "auto_enqueue_threshold": 0.9,
     }
@@ -329,8 +333,8 @@ def test_phase2_config_rejects_invalid_threshold_order() -> None:
 
 def test_phase2_config_rejects_string_bool_and_invalid_search_limit() -> None:
     data = _phase2_data()
-    data["sources"] = {
-        **data["sources"],
+    data["want_sources"] = {
+        **data["want_sources"],
         "telegram": {"enabled": "false", "secret_ref": "local/secrets/telegram.yaml"},
     }
 
@@ -338,7 +342,7 @@ def test_phase2_config_rejects_string_bool_and_invalid_search_limit() -> None:
         SeedAgentConfig(**data)
 
     data = _phase2_data()
-    data["search"] = {**data["search"], "max_results_per_site": 0}
+    data["release_preferences"] = {**data["release_preferences"], "max_results_per_site": 0}
 
     with pytest.raises(ValidationError, match="max_results_per_site"):
         SeedAgentConfig(**data)
@@ -346,8 +350,8 @@ def test_phase2_config_rejects_string_bool_and_invalid_search_limit() -> None:
 
 def test_phase2_config_rejects_source_specific_wrong_ref_fields() -> None:
     data = _phase2_data()
-    data["sources"] = {
-        **data["sources"],
+    data["want_sources"] = {
+        **data["want_sources"],
         "telegram": {"enabled": False, "export_ref": "local/inbox/telegram.json"},
     }
 
@@ -355,8 +359,8 @@ def test_phase2_config_rejects_source_specific_wrong_ref_fields() -> None:
         SeedAgentConfig(**data)
 
     data = _phase2_data()
-    data["sources"] = {
-        **data["sources"],
+    data["want_sources"] = {
+        **data["want_sources"],
         "douban_wanted": {"enabled": False, "secret_ref": "local/secrets/douban.yaml"},
     }
 

@@ -28,6 +28,7 @@ from seed_agent.config import (
     load_config,
 )
 from seed_agent.models import IntentSource, RankedRelease, ReleaseCandidate
+from seed_agent.quality_tags import matching_quality_tag_groups
 from seed_agent.search.base import SearchProvider
 from seed_agent.state import StateStore
 from seed_agent.web.settings import (
@@ -66,7 +67,7 @@ def make_handler(config_path: Path) -> type[BaseHTTPRequestHandler]:
                 self._send_json(
                     {
                         "config_path": str(resolved_config_path),
-                        "trackers": [_tracker_summary(site, root) for site in config.sites],
+                        "trackers": [_tracker_summary(site, root) for site in config.tracker_sites],
                         "sections": config_sections_payload(config),
                         "section_yamls": config_section_yamls_payload(config),
                         "config_yaml": normalized_config_yaml(config),
@@ -289,7 +290,7 @@ def _site_probe_payload(
     try:
         site = tracker_draft_to_config(draft)
         config = load_config(config_path)
-        candidates = run(_discover_site_candidates(site, config.config_dir, config.discovery))
+        candidates = run(_discover_site_candidates(site, config.config_dir, config.pt_filters))
     except Exception as exc:
         return {
             "status": [*status, {"level": "warning", "message": _friendly_error(exc)}],
@@ -318,8 +319,8 @@ def _dry_run_payload(
     try:
         site = tracker_draft_to_config(draft)
         config = load_config(config_path)
-        candidates = run(_discover_site_candidates(site, config.config_dir, config.discovery))
-        scored = score_candidates(candidates, config.discovery, config.scoring)
+        candidates = run(_discover_site_candidates(site, config.config_dir, config.pt_filters))
+        scored = score_candidates(candidates, config.pt_filters, config.pt_scoring)
     except Exception as exc:
         return {
             "status": [*status, {"level": "warning", "message": _friendly_error(exc)}],
@@ -363,7 +364,7 @@ def _state_summary_payload(config_path: Path, root: Path) -> dict[str, Any]:
 def _pools_payload(config_path: Path) -> dict[str, Any]:
     config = load_config(config_path)
     policies_by_pool: dict[str, list[dict[str, Any]]] = {}
-    for policy in config.downloader.category_policies:
+    for policy in config.download_client.category_policies:
         policies_by_pool.setdefault(policy.budget_pool, []).append(
             {
                 "name": policy.name,
@@ -379,9 +380,9 @@ def _pools_payload(config_path: Path) -> dict[str, Any]:
                 "max_size_tib": pool.max_size_tib,
                 "category_policies": policies_by_pool.get(pool.name, []),
             }
-            for pool in config.downloader.budget_pools
+            for pool in config.download_client.budget_pools
         ],
-        "default_category": config.downloader.default_category,
+        "default_category": config.download_client.default_category,
         "runtime": {
             "available": False,
             "reason": "live downloader polling is not exposed by the read-only web API",
@@ -450,7 +451,15 @@ def _search_wants_payload(body: dict[str, Any], config_path: Path, root: Path) -
     config = load_config(config_path)
     store = StateStore(state_path)
     providers = _build_want_search_providers(config)
-    searched = run(_search_want_items(items, store, providers, config.intent, config.search))
+    searched = run(
+        _search_want_items(
+            items,
+            store,
+            providers,
+            config.want_decision,
+            config.release_preferences,
+        )
+    )
     return {
         "synced": sync_payload["ingested"],
         "searched": searched,
@@ -788,16 +797,18 @@ def _want_candidate_item(
 
 def _candidate_matches_requirements(ranked: RankedRelease) -> bool:
     requirement_risk_prefixes = (
-        "required keyword missing",
-        "excluded keyword matched",
         "resolution missing",
         "season missing",
         "episode missing",
     )
-    return not any(
+    has_requirement_risk = any(
         any(risk.startswith(prefix) for prefix in requirement_risk_prefixes)
         for risk in ranked.risks
     )
+    has_quality_penalty = any(
+        reason.startswith("quality tag score -") for reason in ranked.reasons
+    )
+    return not has_requirement_risk and not has_quality_penalty
 
 
 def _clean_label_list(value: Any) -> list[str]:
@@ -818,36 +829,7 @@ def _clean_label_list(value: Any) -> list[str]:
 
 
 def _inferred_release_tags(title: str) -> list[str]:
-    text = f" {title.upper().replace('.', ' ').replace('_', ' ')} "
-    tags: list[str] = []
-    checks = [
-        ("REMUX", "Remux"),
-        ("BLU-RAY", "Blu-ray"),
-        ("BLURAY", "Blu-ray"),
-        ("WEB-DL", "WEB-DL"),
-        ("WEB DL", "WEB-DL"),
-        ("2160P", "2160p"),
-        (" 4K ", "4K"),
-        ("1080P", "1080p"),
-        ("DOLBY VISION", "Dolby Vision"),
-        (" DOVI ", "Dolby Vision"),
-        (" DV ", "Dolby Vision"),
-        ("HDR10+", "HDR10+"),
-        (" HDR ", "HDR"),
-        ("HEVC", "HEVC"),
-        ("H 265", "H.265"),
-        ("H265", "H.265"),
-        ("AVC", "AVC"),
-        ("H 264", "H.264"),
-        ("H264", "H.264"),
-        ("DTS-HD MA", "DTS-HD MA"),
-        ("TRUEHD", "TrueHD"),
-        ("ATMOS", "Atmos"),
-    ]
-    for needle, label in checks:
-        if needle in text and label not in tags:
-            tags.append(label)
-    return tags
+    return [group.label for group in matching_quality_tag_groups([title])]
 
 
 def _decision_summary_payload(item: Any) -> dict[str, Any]:

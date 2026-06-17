@@ -17,8 +17,7 @@ Score discovered torrents or ranked releases using explicit policy weights and e
 - produce explainable breakdowns,
 - keep enqueue decisions auditable,
 - rank releases for intent workflows.
-- apply generic intent-search keyword preferences, including required,
-  preferred, and excluded title terms.
+- apply generic intent-search quality tag scores.
 
 ## Expectations
 
@@ -32,23 +31,22 @@ Score discovered torrents or ranked releases using explicit policy weights and e
 - M-Team API candidates that explicitly expose an open-ended FREE window, such
   as `discountEndTime=null` alongside `discount=FREE`, are treated as having a
   known unlimited free window for scoring and execute-time safety gates.
-- `discovery.min_size_gb` and `discovery.max_size_gb` are hard candidate size
+- `pt_filters.min_size_gb` and `pt_filters.max_size_gb` are hard candidate size
   bounds; set `max_size_gb` to `0` or `null` to disable the hard upper bound.
   `preferred_size_min_gb` and `preferred_size_max_gb` only affect the size score
   contribution.
-- `discovery.min_seeders` and `discovery.max_leechers` are hard bounds when
+- `pt_filters.min_seeders` and `pt_filters.max_leechers` are hard bounds when
   configured; they protect the seed pool from dead or overly crowded candidates.
-- `discovery.leecher_score_full_at_multiplier` is a soft demand-shaping knob.
+- `pt_filters.leecher_score_full_at_multiplier` is a soft demand-shaping knob.
   The default `1.0` preserves the old behavior where `min_leechers` gets full
   leecher credit. Values above `1.0` make candidates ramp from partial credit at
   `min_leechers` to full credit at `min_leechers * multiplier`.
-- `discovery.target_seed_leecher_ratio` is a soft seed-pressure score input,
-  computed as `seeders / max(leechers, 1)`. It replaces the old absolute
-  `discovery.max_seeders` scoring name; legacy configs are migrated at load time.
-- `discovery.size_partial_max_gb` is the soft size-credit ceiling after
+- `pt_filters.target_seed_leecher_ratio` is a soft seed-pressure score input,
+  computed as `seeders / max(leechers, 1)`.
+- `pt_filters.size_partial_max_gb` is the soft size-credit ceiling after
   `preferred_size_max_gb`. Raise it for upload-farming strategies that allow
   very large hot packs; lower it for space-saving strategies.
-- `discovery.allow_non_free` lets NORMAL/non-free candidates remain eligible
+- `pt_filters.allow_non_free` lets NORMAL/non-free candidates remain eligible
   without discount-score credit. Keep it false for freeleech-only discovery.
 - Use `seed-agent strategy-report --config <config>` before changing strategy
   knobs. It groups current candidates and linked qB runtime outcomes by demand,
@@ -64,14 +62,12 @@ Score discovered torrents or ranked releases using explicit policy weights and e
 - Do not overfit a single live run. Use live review/prune samples to identify
   suspicious bands, then encode changes as explainable scoring weights or
   retention thresholds with tests.
-- Keep quality wishes such as Remux, BluRay, 2160p, HDR, or Dolby Vision in
-  `search.required_keywords` / `search.preferred_keywords` /
-  `search.excluded_keywords` so users can compose profiles without adding a
-  hardcoded `profile` enum. Intent ranking still interprets those wishes by
-  media class: movie/show/anime are scored separately, and Remux is movie-only
-  as a hard requirement because TV and anime releases usually do not have Remux
-  candidates.
-- For TV/anime resource intents, `intent.series_search_mode=season` treats
+- Keep quality wishes such as Remux, BluRay, WEB-DL, 2160p, HDR10+, Dolby
+  Vision, DDP, TrueHD, FLAC, or ASS subtitles in `release_preferences.quality_tag_scores`.
+  Values are integer score adjustments keyed by canonical tag group. Each group
+  counts once per release even when multiple aliases are present, so `BluRay`
+  plus `Blu-ray` does not double-score.
+- For TV/anime resource intents, `want_decision.series_search_mode=season` treats
   SxxEyy requests as season-pack searches and does not penalize missing episode
   tokens. Use `episode` when the operator wants one episode at a time.
 - Want List titles can arrive as mixed Chinese and English aliases, such as a

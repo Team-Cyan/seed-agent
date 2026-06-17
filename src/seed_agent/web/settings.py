@@ -11,13 +11,21 @@ from pydantic import BaseModel, ConfigDict, Field
 from seed_agent.config import MTeamApiDiscoveryConfig, SeedAgentConfig, SiteConfig, load_config
 
 CONFIG_SECTION_NAMES = {
-    "downloader",
-    "discovery",
-    "cleanup",
-    "intent",
-    "search",
-    "sources",
+    "download_client",
+    "pt_filters",
+    "seed_cleanup",
+    "want_decision",
+    "release_preferences",
+    "want_sources",
 }
+ConfigSectionName = Literal[
+    "download_client",
+    "pt_filters",
+    "seed_cleanup",
+    "want_decision",
+    "release_preferences",
+    "want_sources",
+]
 LOCAL_SECRETS_DIR = Path("local/secrets")
 
 
@@ -38,14 +46,14 @@ class TrackerDraft(BaseModel):
 class ConfigSectionDraft(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
-    section: Literal["downloader", "discovery", "cleanup", "intent", "search", "sources"]
+    section: ConfigSectionName
     data: dict[str, Any]
 
 
 class ConfigSectionYamlDraft(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True, strict=True)
 
-    section: Literal["downloader", "discovery", "cleanup", "intent", "search", "sources"]
+    section: ConfigSectionName
     yaml_text: str = Field(alias="yaml")
 
 
@@ -221,7 +229,7 @@ def save_tracker_draft(config_path: Path, draft: TrackerDraft) -> SiteConfig:
     if not isinstance(raw, dict):
         raise ValueError("configuration root must be a mapping")
 
-    sites = raw.setdefault("sites", [])
+    sites = raw.setdefault("tracker_sites", [])
     if not isinstance(sites, list):
         raise ValueError("sites must be a list")
 

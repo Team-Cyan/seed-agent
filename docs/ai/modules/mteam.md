@@ -35,8 +35,9 @@ Implemented today:
   lack external-ID metadata
 - search result metadata captures M-Team API tag fields such as medium,
   standard, video codec, audio codec, and labels for Web UI candidate review
-- intent search supports generic Remux/quality preferences through `search.*`
-  keyword lists and TV/anime pack behavior through `intent.series_search_mode`
+- intent search supports generic Remux/quality preferences through
+  `release_preferences.quality_tag_scores` and TV/anime pack behavior through
+  `want_decision.series_search_mode`
 - `site-probe` visibility for authenticated M-Team access and discovery mode
 
 Current preferred auth:
@@ -62,12 +63,11 @@ Current fallback still present in code:
   search-specific defaults and should not inherit adult/freeleech upload
   discovery filters.
 - For upload discovery, `api_discovery.min_seeders` and `min_leechers` can be
-  `null` to inherit global `discovery` thresholds. Explicit `0` keeps the
+  `null` to inherit global `pt_filters` thresholds. Explicit `0` keeps the
   native M-Team API lower-bound filter open.
-- For intent search, keep user quality preferences generic in `search`
-  (`required_keywords`, `preferred_keywords`, and `excluded_keywords`) rather
-  than inventing M-Team-only Remux/Profile switches. Use
-  `intent.series_search_mode` for season-pack vs episode behavior.
+- For intent search, keep user quality preferences generic in
+  `release_preferences.quality_tag_scores` rather than inventing M-Team-only Remux/Profile
+  switches. Use `want_decision.series_search_mode` for season-pack vs episode behavior.
 - ID-first intent search should not put quality terms such as Remux into the
   API keyword field. Fetch by Douban/IMDb ID first, supplement with a broad
   title/year keyword query, then apply generic quality preferences during

@@ -100,11 +100,11 @@ cp config/example.yaml config/config.yaml
 
 3. Review and adjust:
 
-- tracker/site config under `sites:`
-- strategy thresholds under `discovery:` and `scoring:`
-- qB category ownership under `downloader.category_policies:`
-- Want List routing under `downloader.media_category_map:`
-- cleanup thresholds under `cleanup:`
+- tracker/site config under `tracker_sites:`
+- PT intake thresholds under `pt_filters:` and `pt_scoring:`
+- qB category ownership under `download_client.category_policies:`
+- Want List routing under `download_client.media_category_map:`
+- cleanup thresholds under `seed_cleanup:`
 
 4. Start the container:
 
@@ -190,26 +190,27 @@ For M-Team, the preferred authenticated path is API-driven discovery with
 `api_key_ref`. RSS remains in the repo as a fallback path for other sites and
 compatibility flows.
 
-For resource intents, `sources.want_lists` can hold multiple Douban users and
+For resource intents, `want_sources.want_lists` can hold multiple Douban users and
 IMDb watchlists/lists. Douban source entries use `user_name`; IMDb entries use
 `watchlist_url` or a CSV `export_ref`. The intent loop merges repeated wants by
-Douban/IMDb IDs, then `search.required_keywords` / `search.preferred_keywords`
-describe the desired release shape, such as Remux, 2160p, HDR, or Dolby Vision.
+Douban/IMDb IDs, then `release_preferences.quality_tag_scores` describes the desired release
+shape with integer adjustments for tag groups such as Remux, Blu-ray, WEB-DL,
+Dolby Vision, HDR10+, DDP, TrueHD, FLAC, or ASS subtitles.
 M-Team intent search fetches by Douban/IMDb IDs first and supplements with a
-broad title/year keyword query; quality terms are applied during ranking so the
-Web UI can show both matching candidates and lower-match fallback releases.
+broad title/year keyword query; quality tags are applied during ranking so the
+Web UI can show both preferred candidates and lower-match fallback releases.
 The same source/search boundary is intended to support later movie-list sites,
 chat bridges, or API-triggered requests.
 
-For TV or anime intents, `intent.series_search_mode` controls whether episode
+For TV or anime intents, `want_decision.series_search_mode` controls whether episode
 requests search/rank full-season packs (`season`, the default) or individual
 episodes (`episode`).
 
 The local Web Settings UI keeps one physical config file for Docker/Unraid/CLI
 compatibility. Each settings page also exposes the YAML block for its own
-top-level section, so operators can edit `search:`, `intent:`, `downloader:`,
-and similar blocks directly without splitting the runtime config into multiple
-files.
+top-level section, so operators can edit `release_preferences:`,
+`want_decision:`, `download_client:`, and similar blocks directly without
+splitting the runtime config into multiple files.
 
 On the downloader page, common qB settings are editable without hand-writing
 YAML: category policies, budget pools, and the movie/TV/anime Want List routing
@@ -219,11 +220,11 @@ map. The YAML editor remains available for advanced edits and review.
 
 Recommended unattended protections:
 
-- conservative `discovery.min_left_time_minutes`
+- conservative `pt_filters.min_left_time_minutes`
 - `SEED_AGENT_MIN_FREE_WINDOW_MINUTES=180`
 - `SEED_AGENT_REQUIRE_KNOWN_FREE_WINDOW=true`
-- `discovery.max_active_downloads`
-- `discovery.max_total_amount_left_gb`
+- `pt_filters.max_active_downloads`
+- `pt_filters.max_total_amount_left_gb`
 
 These guards help avoid:
 

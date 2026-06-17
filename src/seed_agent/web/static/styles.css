@@ -590,6 +590,29 @@ body.dark .secondary-button {
   grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
 }
 
+.quality-tag-score-row {
+  align-items: center;
+  grid-template-columns: minmax(0, 1fr) 150px;
+}
+
+.quality-tag-label {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.quality-tag-label span {
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 750;
+}
+
+.quality-tag-label small {
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
 .row-remove-button {
   align-self: end;
 }
@@ -636,6 +659,7 @@ body.dark .secondary-button {
   max-width: 280px;
   padding: 10px 12px;
   position: fixed;
+  white-space: pre-line;
   z-index: 20;
 }
 

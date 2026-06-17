@@ -5,15 +5,15 @@ This guide covers the operator flow for the Phase 1 PT upload loop. It stays int
 ## Config Setup
 
 1. Start from `config/example.yaml`.
-2. Point `downloader.secret_ref` at `local/secrets/qbittorrent.yaml`.
+2. Point `download_client.secret_ref` at `local/secrets/qbittorrent.yaml`.
 3. Keep any tracker cookies or site credentials in separate local files under `local/secrets/`.
-4. Adjust discovery, scoring, and cleanup thresholds for your own managed torrent policy.
+4. Adjust PT filter, scoring, and cleanup thresholds for your own managed torrent policy.
 5. Keep the config under version control only if it contains no secrets.
 
 Example:
 
 ```yaml
-downloader:
+download_client:
   type: qbittorrent
   target: unraid-qb
   default_category: seed
@@ -130,7 +130,7 @@ agent. If M-Team marks an API candidate as explicitly unlimited, the persisted
 expiry is `9999-12-31T23:59:59+00:00`.
 
 Candidate rows that never become linked to a qB torrent are pruned after
-`state.candidate_retention_days` days, defaulting to 30. Enqueued, downloading,
+`local_state.candidate_retention_days` days, defaulting to 30. Enqueued, downloading,
 seeding, paused, and deleted rows are retained because they explain live cleanup
 history.
 

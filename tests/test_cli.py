@@ -21,7 +21,7 @@ from seed_agent.state import StateStore
 def _config(secret_ref: str | None = None) -> SeedAgentConfig:
     return SeedAgentConfig(
         mode="balanced",
-        sites=[
+        tracker_sites=[
             {
                 "name": "demo-free",
                 "type": "nexusphp",
@@ -30,14 +30,14 @@ def _config(secret_ref: str | None = None) -> SeedAgentConfig:
                 "cookie_ref": None,
             }
         ],
-        discovery=DiscoveryConfig(
+        pt_filters=DiscoveryConfig(
             discounts=["free", "2xfree"],
             min_left_time_minutes=120,
             min_leechers=8,
-            max_seeders=80,
+            target_seed_leecher_ratio=10,
             allow_hr=False,
         ),
-        scoring=ScoringConfig(
+        pt_scoring=ScoringConfig(
             min_score_to_enqueue=70,
             weights={
                 "discount": 30,
@@ -48,7 +48,7 @@ def _config(secret_ref: str | None = None) -> SeedAgentConfig:
                 "site_history": 5,
             },
         ),
-        downloader={
+        download_client={
             "type": "qbittorrent",
             "target": "unraid-qb",
             "default_category": "seed",
@@ -76,7 +76,7 @@ def _config(secret_ref: str | None = None) -> SeedAgentConfig:
             ],
             "secret_ref": secret_ref,
         },
-        cleanup={
+        seed_cleanup={
             "cold_after_days": 7,
             "min_upload_delta_gb": 1,
             "protect_hr": True,
@@ -197,19 +197,19 @@ def _config_file(tmp_path: Path, secret_ref: str | None = None) -> Path:
     path.write_text(
         f"""
 mode: balanced
-sites:
+tracker_sites:
   - name: demo-free
     type: nexusphp
     enabled: true
     rss_url: https://tracker.example/rss.php
     cookie_ref: null
-discovery:
+pt_filters:
   discounts: ["free", "2xfree"]
   min_left_time_minutes: 120
   min_leechers: 8
-  max_seeders: 80
+  target_seed_leecher_ratio: 10
   allow_hr: false
-scoring:
+pt_scoring:
   min_score_to_enqueue: 70
   weights:
     discount: 30
@@ -218,7 +218,7 @@ scoring:
     left_time: 15
     size: 10
     site_history: 5
-downloader:
+download_client:
   type: qbittorrent
   target: unraid-qb
   default_category: seed
@@ -241,7 +241,7 @@ downloader:
     - name: media
       max_size_tib: 10
   secret_ref: {secret_line}
-cleanup:
+seed_cleanup:
   cold_after_days: 7
   min_upload_delta_gb: 1
   protect_hr: true
@@ -1093,7 +1093,7 @@ def test_runtime_status_reports_version_config_paths_and_heartbeat(tmp_path: Pat
     assert payload["version"] == __version__
     assert payload["status"] == "ok"
     assert payload["config_exists"] is True
-    assert payload["downloader"]["credential_file_present"] is True
+    assert payload["download_client"]["credential_file_present"] is True
     assert payload["heartbeat"]["cycle"] == 3
     assert "password" not in result.output
 
@@ -1107,7 +1107,7 @@ def test_site_probe_reports_sparse_and_enriched_counts(
     config = SeedAgentConfig(
         **{
             **_config().model_dump(),
-            "sites": [
+            "tracker_sites": [
                 {
                     "name": "mt",
                     "type": "mteam",
@@ -1157,7 +1157,7 @@ def test_site_probe_reports_sparse_and_enriched_counts(
     assert result.exit_code == 0
     payload = _json_output(result)
     assert payload["command"] == "site-probe"
-    mt = payload["sites"]["mt"]
+    mt = payload["tracker_sites"]["mt"]
     assert mt["site_type"] == "mteam"
     assert mt["access_mode"] == "api_key"
     assert mt["discovery_mode"] == "api"
@@ -1866,7 +1866,7 @@ def test_load_policy_torrents_keeps_category_filter_for_single_category() -> Non
     from seed_agent import cli
 
     config = _config(secret_ref="local/secrets/qb.yaml")
-    seed_policy = config.downloader.category_policies[0]
+    seed_policy = config.download_client.category_policies[0]
 
     class FakeDownloader:
         def __init__(self) -> None:
@@ -2513,19 +2513,19 @@ def test_build_downloader_resolves_repo_relative_secret_for_config_dir_named_con
     config_path.write_text(
         """
 mode: balanced
-sites:
+tracker_sites:
   - name: demo-free
     type: nexusphp
     enabled: true
     rss_url: https://tracker.example/rss.php
     cookie_ref: null
-discovery:
+pt_filters:
   discounts: ["free", "2xfree"]
   min_left_time_minutes: 120
   min_leechers: 8
-  max_seeders: 80
+  target_seed_leecher_ratio: 10
   allow_hr: false
-scoring:
+pt_scoring:
   min_score_to_enqueue: 70
   weights:
     discount: 30
@@ -2534,7 +2534,7 @@ scoring:
     left_time: 15
     size: 10
     site_history: 5
-downloader:
+download_client:
   type: qbittorrent
   target: unraid-qb
   default_category: seed
@@ -2549,7 +2549,7 @@ downloader:
     - name: downloads
       max_size_tib: 10
   secret_ref: local/secrets/qb.yaml
-cleanup:
+seed_cleanup:
   cold_after_days: 7
   min_upload_delta_gb: 1
   protect_hr: true

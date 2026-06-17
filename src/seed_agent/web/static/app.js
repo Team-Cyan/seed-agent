@@ -47,13 +47,13 @@ const copy = {
     nav: {
       overview: "状态",
       tracker: "站点",
-      downloader: "下载器",
-      discovery: "发现策略",
-      cleanup: "清理策略",
-      intent: "获取决策",
+      download_client: "下载与分类",
+      pt_filters: "PT 入队规则",
+      seed_cleanup: "保种清理",
+      want_decision: "想看决策",
       wants: "想看列表",
-      search: "种子筛选",
-      advanced: "配置文件",
+      release_preferences: "资源匹配",
+      config_file: "配置文件",
     },
     overviewTitle: "状态",
     overviewSubtitle: "本地只读状态：心跳、候选/意图数量和配置的容量池。",
@@ -62,31 +62,31 @@ const copy = {
     addTracker: "添加站点",
     emptyTracker: "还没有站点。点击右上角添加站点开始配置。",
     placeholders: {
-      downloader: {
-        title: "下载器",
+      download_client: {
+        title: "下载与分类",
         description: "配置 qBittorrent 目标、默认分类、分类策略和容量池。",
       },
-      discovery: {
-        title: "发现策略",
+      pt_filters: {
+        title: "PT 入队规则",
         description: "配置优惠标签、做种/下载数、体积上限和运行时限制。",
       },
-      cleanup: {
-        title: "清理策略",
+      seed_cleanup: {
+        title: "保种清理",
         description: "配置冷种判断、保护项和删除前暂停观察。",
       },
-      intent: {
-        title: "获取决策",
+      want_decision: {
+        title: "想看决策",
         description: "配置自动找片/入队阈值、模糊确认、剧集搜索方式和收件箱。",
       },
       wants: {
         title: "想看列表",
         description: "集中查看 Douban 和 IMDb 想看资源，以及搜索/入队状态。",
       },
-      search: {
-        title: "种子筛选",
-        description: "配置候选种子的站点优先级、结果数量和 Remux/4K/HDR 关键词过滤。",
+      release_preferences: {
+        title: "资源匹配",
+        description: "配置想看候选资源的站点优先级、结果数量、免费偏好和资源格式加减分。",
       },
-      advanced: {
+      config_file: {
         title: "配置文件",
         description: "查看当前配置文件和各配置页对应的 YAML 区块。",
       },
@@ -160,6 +160,9 @@ const copy = {
       localApiLoading: "正在读取本地只读 API。",
       lowerMatch: "低匹配，可强制",
       maxSizeTib: "容量上限 TiB",
+      qualityTagScores: "常见标签加减分",
+      qualityTagScoresHelp: "给常见资源标签设置整数加减分；同组别名只计一次，避免 BluRay 和 Blu-ray 重复加分或扣分。",
+      scoreAdjustment: "加减分",
       bestCandidateScore: "最高分",
       mediaCategoryMap: "想看类型路由",
       mediaType: "类型",
@@ -273,13 +276,13 @@ const copy = {
     nav: {
       overview: "Status",
       tracker: "Tracker",
-      downloader: "Downloader",
-      discovery: "Discovery",
-      cleanup: "Cleanup",
-      intent: "Acquisition",
+      download_client: "Download Client",
+      pt_filters: "PT Intake Rules",
+      seed_cleanup: "Seed Cleanup",
+      want_decision: "Want Decisions",
       wants: "Want List",
-      search: "Torrent Filters",
-      advanced: "Config File",
+      release_preferences: "Release Matching",
+      config_file: "Config File",
     },
     overviewTitle: "Status",
     overviewSubtitle: "Local read-only status: heartbeat, candidate/intent counts, and configured budget pools.",
@@ -288,31 +291,31 @@ const copy = {
     addTracker: "Add Tracker",
     emptyTracker: "No trackers yet. Click Add Tracker in the top right to start.",
     placeholders: {
-      downloader: {
-        title: "Downloader",
+      download_client: {
+        title: "Download Client",
         description: "This section will configure the qBittorrent target, category policies, and budget pools.",
       },
-      discovery: {
-        title: "Discovery",
+      pt_filters: {
+        title: "PT Intake Rules",
         description: "This section will configure freeleech filters, seed/leech limits, size bounds, and runtime gates.",
       },
-      cleanup: {
-        title: "Cleanup",
+      seed_cleanup: {
+        title: "Seed Cleanup",
         description: "This section will configure cold torrent rules, protections, and pause-before-delete behavior.",
       },
-      intent: {
-        title: "Acquisition Rules",
+      want_decision: {
+        title: "Want Decisions",
         description: "Configure score thresholds, ambiguity handling, series mode, and inbox settings for automated acquisition.",
       },
       wants: {
         title: "Want List",
         description: "Review Douban and IMDb wants with search and queue status.",
       },
-      search: {
-        title: "Torrent Filters",
-        description: "Configure candidate torrent limits, site priority, and Remux/4K/HDR keyword filters.",
+      release_preferences: {
+        title: "Release Matching",
+        description: "Configure Want List candidate limits, site priority, freeleech preference, and release-format score adjustments.",
       },
-      advanced: {
+      config_file: {
         title: "Config File",
         description: "Review the active config file and the YAML sections edited by each page.",
       },
@@ -386,6 +389,9 @@ const copy = {
       localApiLoading: "Reading the local read-only API.",
       lowerMatch: "Lower match, force allowed",
       maxSizeTib: "Size limit TiB",
+      qualityTagScores: "Common tag scores",
+      qualityTagScoresHelp: "Set integer score adjustments for common release tags. Aliases in the same group count once, so BluRay and Blu-ray do not double-score.",
+      scoreAdjustment: "Score",
       bestCandidateScore: "Best score",
       mediaCategoryMap: "Want type routing",
       mediaType: "Type",
@@ -493,76 +499,73 @@ const copy = {
 
 const settingsPanelsByLanguage = {
   CN: {
-  downloader: {
-    title: "下载器",
+    download_client: {
+      title: "下载与分类",
       fields: [
-        ["qBittorrent 目标", "target", "text", "选择下载器目标。会写入 downloader.target。"],
+        ["qBittorrent 目标", "target", "text", "选择下载器目标。会写入 download_client.target。"],
         ["默认分类", "default_category", "text", "默认加入的 qBittorrent 分类。"],
         ["凭据文件", "secret_ref", "optional-text", "本地 qB 凭据文件路径，不保存明文。"],
       ],
     },
-  discovery: {
-    title: "发现策略",
-    fields: [
-      ["优惠标签", "discounts", "csv", "候选折扣过滤，例如 free 或 2xfree。"],
-      ["免费剩余时间下限", "min_left_time_minutes", "number", "免费窗口剩余分钟数低于此值时不自动加入。"],
-      ["最小做种数", "min_seeders", "optional-number", "低于此做种数时不自动加入；留空表示不限制。"],
-      ["最小下载数", "min_leechers", "number", "低于这个下载需求时不自动加入。"],
-      ["目标做种/下载比", "target_seed_leecher_ratio", "number", "控制热门程度，不再使用绝对做种数上限。"],
-      ["允许非免费", "allow_non_free", "boolean", "是否允许普通候选进入评分。"],
-      ["最大体积 GB", "max_size_gb", "optional-number", "候选硬大小上限；留空表示不限制。"],
-      ["最大活动下载数", "max_active_downloads", "optional-number", "超过后将候选转为暂停添加。"],
-      ["最大剩余下载量 GB", "max_total_amount_left_gb", "optional-number", "剩余下载总量超过后暂停添加。"],
-    ],
-  },
-  cleanup: {
-    title: "清理策略",
-    fields: [
-      ["冷种天数", "cold_after_days", "number", "多久没有有效上传后视为冷种。"],
-      ["最小上传增量 GB", "min_upload_delta_gb", "number", "上传增量低于此值才进入清理候选。"],
-      ["保护 HR", "protect_hr", "boolean", "HR 风险项默认保护。"],
-      ["保护手动标记", "protect_manual", "boolean", "手动标记项默认保护。"],
-      ["保护媒体库", "protect_media_library", "boolean", "媒体库相关种子默认保护。"],
-      ["零上传删除小时数", "delete_after_no_upload_hours", "number", "零上传观察窗口。"],
-      ["删除前暂停小时数", "pause_before_delete_hours", "number", "删除前先暂停观察的小时数。"],
-    ],
-  },
-  intent: {
-    title: "获取决策",
-    fields: [
-      ["复核阈值", "confirmation_threshold", "number", "低于自动入队阈值或有风险时进入人工复核。"],
-      ["自动入队阈值", "auto_enqueue_threshold", "number", "高于此阈值可自动入队。"],
-      ["模糊分差", "ambiguity_gap", "number", "候选分差低于此值时视为模糊。"],
-      ["默认清晰度", "default_resolution", "optional-text", "默认解析度偏好。"],
-      ["剧集搜索方式", "series_search_mode", "select:season|episode", "电视剧/动漫按整季搜索或按单集搜索。"],
-      ["偏好语言", "preferred_languages", "csv", "按逗号填写语言偏好。"],
-      ["收件箱文件", "inbox_ref", "text", "本地意图收件箱 JSONL 路径。"],
-    ],
-  },
-  search: {
-    title: "种子筛选",
-    fields: [
-      ["站点优先级", "site_priority", "map", "按 site=priority 填写，例如 mteam=10。只影响搜索排序，不保存 secret。"],
-      ["每站结果上限", "max_results_per_site", "number", "每个站点最多保留的搜索结果数量。"],
-      ["优先免费", "prefer_free", "boolean", "搜索排序中优先 free/freeleech 资源。"],
-      ["默认排除 HR", "reject_hr_by_default", "boolean", "默认拒绝 HR 风险资源。"],
-      ["必须包含关键词", "required_keywords", "csv", "必须出现在搜索结果标题中的关键词，例如 Remux。"],
-      ["偏好关键词", "preferred_keywords", "csv", "加分关键词，例如 2160p、HDR 或 Dolby Vision。"],
-      ["排除关键词", "excluded_keywords", "csv", "排除关键词，例如 CAM、TC 或 Hardcoded。"],
-    ],
-  },
+    pt_filters: {
+      title: "PT 入队规则",
+      fields: [
+        ["优惠标签", "discounts", "csv", "候选折扣过滤，例如 free 或 2xfree。"],
+        ["免费剩余时间下限", "min_left_time_minutes", "number", "免费窗口剩余分钟数低于此值时不自动加入。"],
+        ["最小做种数", "min_seeders", "optional-number", "低于此做种数时不自动加入；留空表示不限制。"],
+        ["最小下载数", "min_leechers", "number", "低于这个下载需求时不自动加入。"],
+        ["目标做种/下载比", "target_seed_leecher_ratio", "number", "控制热门程度，不再使用绝对做种数上限。"],
+        ["允许非免费", "allow_non_free", "boolean", "是否允许普通候选进入评分。"],
+        ["最大体积 GB", "max_size_gb", "optional-number", "候选硬大小上限；留空表示不限制。"],
+        ["最大活动下载数", "max_active_downloads", "optional-number", "超过后将候选转为暂停添加。"],
+        ["最大剩余下载量 GB", "max_total_amount_left_gb", "optional-number", "剩余下载总量超过后暂停添加。"],
+      ],
+    },
+    seed_cleanup: {
+      title: "保种清理",
+      fields: [
+        ["冷种天数", "cold_after_days", "number", "多久没有有效上传后视为冷种。"],
+        ["最小上传增量 GB", "min_upload_delta_gb", "number", "上传增量低于此值才进入清理候选。"],
+        ["保护 HR", "protect_hr", "boolean", "HR 风险项默认保护。"],
+        ["保护手动标记", "protect_manual", "boolean", "手动标记项默认保护。"],
+        ["保护媒体库", "protect_media_library", "boolean", "媒体库相关种子默认保护。"],
+        ["零上传删除小时数", "delete_after_no_upload_hours", "number", "零上传观察窗口。"],
+        ["删除前暂停小时数", "pause_before_delete_hours", "number", "删除前先暂停观察的小时数。"],
+      ],
+    },
+    want_decision: {
+      title: "想看决策",
+      fields: [
+        ["复核阈值", "confirmation_threshold", "number", "低于自动入队阈值或有风险时进入人工复核。"],
+        ["自动入队阈值", "auto_enqueue_threshold", "number", "高于此阈值可自动入队。"],
+        ["模糊分差", "ambiguity_gap", "number", "候选分差低于此值时视为模糊。"],
+        ["默认清晰度", "default_resolution", "optional-text", "默认解析度偏好。"],
+        ["剧集搜索方式", "series_search_mode", "select:season|episode", "电视剧/动漫按整季搜索或按单集搜索。"],
+        ["偏好语言", "preferred_languages", "csv", "按逗号填写语言偏好。"],
+        ["收件箱文件", "inbox_ref", "text", "本地意图收件箱 JSONL 路径。"],
+      ],
+    },
+    release_preferences: {
+      title: "资源匹配",
+      fields: [
+        ["站点优先级", "site_priority", "map", "按 site=priority 填写，例如 mteam=10。只影响搜索排序，不保存 secret。"],
+        ["每站结果上限", "max_results_per_site", "number", "每个站点最多保留的搜索结果数量。"],
+        ["优先免费", "prefer_free", "boolean", "搜索排序中优先 free/freeleech 资源。"],
+        ["默认排除 HR", "reject_hr_by_default", "boolean", "默认拒绝 HR 风险资源。"],
+      ],
+    },
   },
   EN: {
-    downloader: {
-      title: "Downloader",
+    download_client: {
+      title: "Download Client",
       fields: [
-        ["qBittorrent target", "target", "text", "Select the downloader target. Writes downloader.target."],
+        ["qBittorrent target", "target", "text", "Select the downloader target. Writes download_client.target."],
         ["Default category", "default_category", "text", "Default qBittorrent category for new tasks."],
         ["Credential file", "secret_ref", "optional-text", "Local qB credential file path. Plain secrets are not saved here."],
       ],
     },
-    discovery: {
-      title: "Discovery",
+    pt_filters: {
+      title: "PT Intake Rules",
       fields: [
         ["Discount labels", "discounts", "csv", "Candidate discount filters, for example free or 2xfree."],
         ["Minimum free minutes left", "min_left_time_minutes", "number", "Skip automatic enqueue when the free window is shorter than this."],
@@ -575,8 +578,8 @@ const settingsPanelsByLanguage = {
         ["Maximum remaining download GB", "max_total_amount_left_gb", "optional-number", "Above this remaining-download total, candidates are added paused."],
       ],
     },
-    cleanup: {
-      title: "Cleanup",
+    seed_cleanup: {
+      title: "Seed Cleanup",
       fields: [
         ["Cold after days", "cold_after_days", "number", "Treat torrents as cold after this many days without useful upload."],
         ["Minimum upload delta GB", "min_upload_delta_gb", "number", "Only cleanup candidates below this upload delta."],
@@ -587,8 +590,8 @@ const settingsPanelsByLanguage = {
         ["Pause before delete hours", "pause_before_delete_hours", "number", "Hours to pause before delete observation."],
       ],
     },
-    intent: {
-      title: "Acquisition",
+    want_decision: {
+      title: "Want Decisions",
       fields: [
         ["Review threshold", "confirmation_threshold", "number", "Below the auto-enqueue threshold or with risks, candidates require review."],
         ["Auto-enqueue threshold", "auto_enqueue_threshold", "number", "Above this threshold, candidates can auto-enqueue."],
@@ -599,43 +602,211 @@ const settingsPanelsByLanguage = {
         ["Inbox file", "inbox_ref", "text", "Local intent inbox JSONL path."],
       ],
     },
-    search: {
-      title: "Torrent Filters",
+    release_preferences: {
+      title: "Release Matching",
       fields: [
         ["Site priority", "site_priority", "map", "Use site=priority, for example mteam=10. Affects search ranking only and never saves secrets."],
         ["Max results per site", "max_results_per_site", "number", "Maximum retained search results per site."],
         ["Prefer free", "prefer_free", "boolean", "Prefer free/freeleech releases in search ranking."],
         ["Reject HR by default", "reject_hr_by_default", "boolean", "Reject HR-risk releases by default."],
-        ["Required keywords", "required_keywords", "csv", "Keywords that must appear in result titles, for example Remux."],
-        ["Preferred keywords", "preferred_keywords", "csv", "Scoring keywords, for example 2160p, HDR, or Dolby Vision."],
-        ["Excluded keywords", "excluded_keywords", "csv", "Keywords to reject, for example CAM, TC, or Hardcoded."],
       ],
     },
   },
 };
 
+const qualityTagGroups = [
+  {
+    key: "remux",
+    label: "Remux",
+    aliases: ["REMUX"],
+    CN: "蓝光原盘视频音频无重编码重封装，电影收藏常见，体积很大。",
+    EN: "Blu-ray stream remux without video/audio re-encoding. Common for movie archives and very large.",
+  },
+  {
+    key: "bluray",
+    label: "Blu-ray",
+    aliases: ["BluRay", "Blu-ray", "Bluray", "Blue-Ray", "蓝光", "BDRip"],
+    CN: "来自蓝光盘源或蓝光压制。电影和完结动漫常见，通常比 WEB 体积大。",
+    EN: "Blu-ray sourced or encoded releases. Common for movies and finished anime, usually larger than WEB.",
+  },
+  {
+    key: "uhd_bluray",
+    label: "UHD Blu-ray",
+    aliases: ["UHD BluRay", "4K UHD", "Ultra HD"],
+    CN: "4K UHD 蓝光源，常见于电影 Remux 或高质量压制。",
+    EN: "4K UHD Blu-ray source, usually movie Remux or high-quality encode material.",
+  },
+  {
+    key: "webdl",
+    label: "WEB-DL",
+    aliases: ["WEB-DL", "WEBDL", "WEB DL"],
+    CN: "流媒体原档下载。电视剧、新番动漫和日常观看通常最稳。",
+    EN: "Direct streaming-platform file. Usually the safest daily choice for TV and current anime.",
+  },
+  {
+    key: "webrip",
+    label: "WEBRip",
+    aliases: ["WEBRip", "WEB-Rip"],
+    CN: "流媒体录制或再处理版本，通常不如 WEB-DL 干净。",
+    EN: "Captured or reprocessed streaming release, usually less clean than WEB-DL.",
+  },
+  {
+    key: "hdtv",
+    label: "HDTV",
+    aliases: ["HDTV"],
+    CN: "电视播出版来源，老剧或即时节目常见，画质通常低于 WEB-DL。",
+    EN: "Broadcast TV source, common for older or quick-turnaround releases and usually below WEB-DL.",
+  },
+  {
+    key: "dolby_vision",
+    label: "Dolby Vision",
+    aliases: ["DoVi", "DV", "Dolby Vision", "杜比视界"],
+    CN: "杜比视界动态 HDR。Apple TV 友好资源通常还会带 HDR10 fallback。",
+    EN: "Dolby dynamic HDR. Apple TV-friendly releases often include HDR10 fallback too.",
+  },
+  {
+    key: "hdr10_plus",
+    label: "HDR10+",
+    aliases: ["HDR10+", "HDR 10+"],
+    CN: "动态 HDR10+。电视支持但旧 Apple TV 4K 不支持，升级盒子后更有价值。",
+    EN: "Dynamic HDR10+. Useful with compatible players; older Apple TV 4K models do not support it.",
+  },
+  {
+    key: "hdr10",
+    label: "HDR10",
+    aliases: ["HDR10", "HDR 10"],
+    CN: "最通用的 HDR 基础格式，兼容性最稳。",
+    EN: "The most common baseline HDR format with the widest compatibility.",
+  },
+  {
+    key: "hdr",
+    label: "HDR",
+    aliases: ["HDR"],
+    CN: "泛 HDR 标记；不区分 HDR10、HDR10+ 或 Dolby Vision。",
+    EN: "Generic HDR marker; does not distinguish HDR10, HDR10+, or Dolby Vision.",
+  },
+  {
+    key: "sdr",
+    label: "SDR",
+    aliases: ["SDR"],
+    CN: "普通动态范围。兼容性最好，但没有 HDR 高光和暗部元数据。",
+    EN: "Standard dynamic range. Most compatible, but without HDR highlight and shadow metadata.",
+  },
+  {
+    key: "2160p",
+    label: "2160p / 4K",
+    aliases: ["2160p", "4K"],
+    CN: "4K 分辨率。电影和高规格剧集常见，体积明显更大。",
+    EN: "4K resolution. Common for movies and premium shows, with much larger files.",
+  },
+  {
+    key: "1080p",
+    label: "1080p",
+    aliases: ["1080p", "FHD"],
+    CN: "全高清。动漫和普通剧集常见，体积与兼容性更平衡。",
+    EN: "Full HD. Common for anime and regular TV, with balanced size and compatibility.",
+  },
+  {
+    key: "hevc",
+    label: "HEVC / H.265",
+    aliases: ["HEVC", "H.265", "H265", "x265"],
+    CN: "H.265 视频编码。4K 和 10bit 动漫常见，压缩效率高。",
+    EN: "H.265 video codec. Common for 4K and 10-bit anime, with strong compression efficiency.",
+  },
+  {
+    key: "avc",
+    label: "AVC / H.264",
+    aliases: ["AVC", "H.264", "H264", "x264"],
+    CN: "H.264 视频编码。兼容性极好，1080p 资源常见。",
+    EN: "H.264 video codec. Very compatible and common for 1080p releases.",
+  },
+  {
+    key: "av1",
+    label: "AV1",
+    aliases: ["AV1"],
+    CN: "新一代视频编码。压缩效率高，但老播放器或硬件兼容性需要确认。",
+    EN: "Newer video codec with strong efficiency; older players or hardware may need compatibility checks.",
+  },
+  {
+    key: "atmos",
+    label: "Dolby Atmos",
+    aliases: ["Atmos", "Dolby Atmos", "杜比全景声"],
+    CN: "杜比全景声。WEB 资源常搭配 DDP，蓝光 Remux 常搭配 TrueHD。",
+    EN: "Dolby Atmos. WEB releases often use DDP; Blu-ray Remux often uses TrueHD.",
+  },
+  {
+    key: "ddp",
+    label: "DDP / E-AC3",
+    aliases: ["DDP", "DD+", "EAC3", "E-AC3", "Dolby Digital Plus"],
+    CN: "杜比数字 Plus，流媒体多声道和 Atmos 常见，Apple TV 友好。",
+    EN: "Dolby Digital Plus. Common for streaming multichannel and Atmos; Apple TV-friendly.",
+  },
+  {
+    key: "truehd",
+    label: "TrueHD",
+    aliases: ["TrueHD", "Dolby TrueHD"],
+    CN: "蓝光无损杜比音轨，电影 Remux 常见，Apple TV 链路未必能完整直通。",
+    EN: "Lossless Dolby Blu-ray audio, common on movie Remux. Apple TV chains may not preserve it fully.",
+  },
+  {
+    key: "dts_hd_ma",
+    label: "DTS-HD MA",
+    aliases: ["DTS-HD MA", "DTS HD MA"],
+    CN: "蓝光无损 DTS 音轨，Remux 常见，流媒体剧集较少见。",
+    EN: "Lossless DTS Blu-ray audio, common on Remux and uncommon on streaming TV.",
+  },
+  {
+    key: "dts_x",
+    label: "DTS:X",
+    aliases: ["DTS:X", "DTS X"],
+    CN: "DTS 对象音频，蓝光资源中偶见；Apple TV 链路通常不是它的理想播放路径。",
+    EN: "DTS object audio, sometimes seen on Blu-ray releases; Apple TV chains are usually not ideal for it.",
+  },
+  {
+    key: "aac",
+    label: "AAC",
+    aliases: ["AAC"],
+    CN: "常见有损音频。新番动漫和小体积资源常见。",
+    EN: "Common lossy audio. Frequent in current anime and smaller releases.",
+  },
+  {
+    key: "flac",
+    label: "FLAC",
+    aliases: ["FLAC"],
+    CN: "无损音频。动漫 BDRip 常见，体积比 AAC 更大。",
+    EN: "Lossless audio. Common in anime BDRip and larger than AAC.",
+  },
+  {
+    key: "ass",
+    label: "ASS subtitles",
+    aliases: ["ASS", "SSA", "特效字幕"],
+    CN: "高级字幕格式，动漫字幕组常用，特效字幕效果更好但播放器兼容性更挑。",
+    EN: "Advanced subtitle format common in anime fansubs; better styling, fussier playback compatibility.",
+  },
+];
+
 const navigationSections = [
   "overview",
   "wants",
   "tracker",
-  "downloader",
-  "discovery",
-  "cleanup",
-  "intent",
-  "search",
-  "advanced",
+  "download_client",
+  "pt_filters",
+  "seed_cleanup",
+  "want_decision",
+  "release_preferences",
+  "config_file",
 ];
 
 const sectionGroupBySection = {
   overview: "operations",
   wants: "operations",
   tracker: "automation",
-  downloader: "automation",
-  discovery: "acquisition",
-  cleanup: "acquisition",
-  intent: "acquisition",
-  search: "acquisition",
-  advanced: "advanced",
+  download_client: "automation",
+  pt_filters: "acquisition",
+  seed_cleanup: "acquisition",
+  want_decision: "acquisition",
+  release_preferences: "acquisition",
+  config_file: "advanced",
 };
 
 function activeCopy() {
@@ -856,7 +1027,7 @@ function renderSection() {
     trackerList.replaceChildren(renderWantsPanel());
     return;
   }
-  if (state.currentSection === "advanced") {
+  if (state.currentSection === "config_file") {
     const placeholder = copy[state.language].placeholders.advanced;
     title.textContent = placeholder.title;
     subtitle.textContent = placeholder.description;
@@ -1180,7 +1351,7 @@ function sourceLabelForKey(key) {
 }
 
 function renderWantConfigModal() {
-  const sources = state.configSections.sources || {};
+  const sources = state.configSections.want_sources || {};
   const wantLists = configuredWantLists(sources);
   return `
     <div class="modal-backdrop hidden" data-want-config-modal>
@@ -1575,7 +1746,7 @@ async function handleWantAction(panel, action, event) {
   if (action === "config-save") {
     const payload = await submitWantSourceConfig(panel, "/api/config/sections");
     if (payload?.data) {
-      state.configSections.sources = payload.data;
+      state.configSections.want_sources = payload.data;
       if (payload.section_yamls) {
         state.sectionYamls = payload.section_yamls;
       }
@@ -1733,12 +1904,12 @@ function readWantSourceConfig(panel) {
 async function submitWantSourceConfig(panel, endpoint) {
   const status = panel.querySelector("[data-want-config-status]");
   try {
-    const data = { ...(state.configSections.sources || {}) };
+    const data = { ...(state.configSections.want_sources || {}) };
     data.want_lists = readWantSourceConfig(panel);
     const response = await fetch(endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ section: "sources", data }),
+      body: JSON.stringify({ section: "want_sources", data }),
     });
     const payload = await response.json();
     if (!response.ok) {
@@ -2251,6 +2422,42 @@ function renderDownloaderStructuredEditor(sectionData) {
   `;
 }
 
+function renderSearchTagScoreEditor(sectionData) {
+  const scores = sectionData.quality_tag_scores || {};
+  return `
+    <div class="structured-editor quality-tag-score-editor" data-search-tag-score-editor>
+      <div class="structured-section">
+        <div class="structured-section-head">
+          <div>
+            <div class="section-title">${escapeHtml(uiText("qualityTagScores"))}</div>
+            <p>${escapeHtml(uiText("qualityTagScoresHelp"))}</p>
+          </div>
+        </div>
+        <div class="structured-list quality-tag-score-list">
+          ${qualityTagGroups.map((group) => renderSearchTagScoreRow(group, scores[group.key] || 0)).join("")}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderSearchTagScoreRow(group, score) {
+  const description = group[state.language] || group.EN;
+  const helpText = `${description}\n\n${uiText("tags")}: ${group.aliases.join(", ")}\n${uiText("qualityTagScoresHelp")}`;
+  return `
+    <div class="structured-row quality-tag-score-row" data-quality-tag-score-row>
+      <div class="quality-tag-label">
+        <span>${escapeHtml(group.label)} ${help(helpText)}</span>
+        <small>${escapeHtml(group.aliases.slice(0, 4).join(" / "))}</small>
+      </div>
+      <label class="field">
+        <span>${escapeHtml(uiText("scoreAdjustment"))}</span>
+        <input data-quality-tag-score="${escapeAttribute(group.key)}" type="number" step="1" value="${escapeAttribute(score)}" />
+      </label>
+    </div>
+  `;
+}
+
 function renderMediaCategoryMapField(mediaType, value) {
   return `
     <label class="field">
@@ -2346,7 +2553,8 @@ function renderSettingsPanel(section) {
       <span class="badge">${escapeHtml(uiText("fromYaml"))}</span>
     </div>
     <div class="field-grid">${fields}</div>
-    ${section === "downloader" ? renderDownloaderStructuredEditor(sectionData) : ""}
+    ${section === "download_client" ? renderDownloaderStructuredEditor(sectionData) : ""}
+    ${section === "release_preferences" ? renderSearchTagScoreEditor(sectionData) : ""}
     ${renderSectionYamlEditor(section)}
     <div class="tracker-actions sticky-actions">
       <div class="tracker-actions-group">
@@ -2409,15 +2617,15 @@ function handleDownloaderStructuredAction(page, action, target) {
 }
 
 function updateSettingsPanelStatus(page, section, action) {
-  if (section !== "advanced" && action === "yaml-preview") {
+  if (section !== "config_file" && action === "yaml-preview") {
     previewSettingsPanelYaml(page, section);
     return;
   }
-  if (section !== "advanced" && action === "yaml-save") {
+  if (section !== "config_file" && action === "yaml-save") {
     saveSettingsPanelYaml(page, section);
     return;
   }
-  if (section !== "advanced" && action === "save") {
+  if (section !== "config_file" && action === "save") {
     if (page.dataset.previewConfirmed === "true") {
       confirmSettingsPanelSave(page, section);
       return;
@@ -2425,7 +2633,7 @@ function updateSettingsPanelStatus(page, section, action) {
     previewSettingsPanelSave(page, section);
     return;
   }
-  if (action === "preview" && section !== "advanced") {
+  if (action === "preview" && section !== "config_file") {
     previewSettingsPanelSave(page, section);
     return;
   }
@@ -2486,10 +2694,25 @@ function readSettingsPanelData(page, section) {
       coerceSettingValue(field.value, field.dataset.settingType),
     );
   });
-  if (section === "downloader") {
+  if (section === "download_client") {
     readDownloaderStructuredData(page, data);
   }
+  if (section === "release_preferences") {
+    readSearchTagScoreData(page, data);
+  }
   return data;
+}
+
+function readSearchTagScoreData(page, data) {
+  const scores = {};
+  page.querySelectorAll("[data-quality-tag-score]").forEach((field) => {
+    const score = Number.parseInt(field.value || "0", 10);
+    if (Number.isNaN(score) || score === 0) {
+      return;
+    }
+    scores[field.dataset.qualityTagScore] = score;
+  });
+  data.quality_tag_scores = scores;
 }
 
 function readDownloaderStructuredData(page, data) {

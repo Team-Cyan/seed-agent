@@ -65,9 +65,7 @@ def _search_config(**overrides: object) -> SearchConfig:
         "max_results_per_site": 20,
         "prefer_free": True,
         "reject_hr_by_default": True,
-        "required_keywords": [],
-        "preferred_keywords": [],
-        "excluded_keywords": [],
+        "quality_tag_scores": {},
     }
     data.update(overrides)
     return SearchConfig(**data)
@@ -171,67 +169,58 @@ def test_rank_releases_orders_by_score() -> None:
     ]
 
 
-def test_rank_releases_applies_configured_keyword_preferences() -> None:
+def test_rank_releases_applies_quality_tag_scores_once_per_group() -> None:
     ranked = rank_releases(
         _intent(resolution=None),
         [
             _release(
-                release_id="demo:https://tracker.example/details.php?id=remux",
-                title="Inception 2010 2160p BluRay Remux HDR",
+                release_id="demo:https://tracker.example/details.php?id=tagged",
+                title="Inception 2010 1080p BluRay Blu-ray Blue-Ray Dolby Vision DoVi WEB-DL",
                 discount=Discount.NORMAL,
-            ),
-            _release(
-                release_id="demo:https://tracker.example/details.php?id=web",
-                title="Inception 2010 2160p WEB-DL",
-                discount=Discount.FREE,
-                seeders=100,
-                leechers=20,
+                seeders=0,
+                leechers=0,
             ),
         ],
-        _intent_config(default_resolution="2160p"),
-        _search_config(required_keywords=["Remux"], preferred_keywords=["HDR"]),
+        _intent_config(default_resolution="1080p"),
+        _search_config(
+            site_priority={},
+            prefer_free=False,
+            quality_tag_scores={"bluray": 20, "dolby_vision": 15, "webdl": -10},
+        ),
     )
 
-    assert ranked[0].release.release_id.endswith("remux")
-    assert "required keyword matched: Remux" in ranked[0].reasons
-    assert "preferred keyword matched: HDR" in ranked[0].reasons
-    assert "required keyword missing: Remux" in ranked[1].risks
+    assert ranked[0].score == 94
+    assert ranked[0].reasons.count("quality tag score +20: Blu-ray") == 1
+    assert ranked[0].reasons.count("quality tag score +15: Dolby Vision") == 1
+    assert ranked[0].reasons.count("quality tag score -10: WEB-DL") == 1
 
 
-def test_rank_releases_keeps_remux_required_for_movies_only() -> None:
+def test_rank_releases_reads_quality_tags_from_mteam_metadata() -> None:
     ranked = rank_releases(
         _intent(resolution=None),
-        [_release(title="Inception 2010 2160p WEB-DL HDR")],
-        _intent_config(default_resolution="2160p"),
-        _search_config(required_keywords=["Remux"], preferred_keywords=["HDR"]),
-    )
-
-    assert "required keyword missing: Remux" in ranked[0].risks
-    assert ranked[0].score < 82
-
-
-def test_rank_releases_does_not_require_remux_for_shows() -> None:
-    ranked = rank_releases(
-        _intent(
-            kind=IntentKind.SHOW,
-            title="Spider Noir",
-            raw_text="Spider Noir 2026 S01 2160p",
-            year=2026,
-            season=1,
-            resolution="2160p",
-            metadata={"media_type": "tv"},
+        [
+            _release(
+                title="Inception 2010 1080p",
+                discount=Discount.NORMAL,
+                seeders=0,
+                leechers=0,
+                metadata={"mteam_tags": ["杜比视界", "Dolby Atmos"]},
+            )
+        ],
+        _intent_config(default_resolution="1080p"),
+        _search_config(
+            site_priority={},
+            prefer_free=False,
+            quality_tag_scores={"dolby_vision": 15, "atmos": 8},
         ),
-        [_release(title="Spider-Noir 2026 S01 2160p WEB-DL HDR", seeders=701, leechers=3)],
-        _intent_config(default_resolution="2160p"),
-        _search_config(required_keywords=["Remux"], preferred_keywords=["HDR"]),
     )
 
-    assert "required keyword missing: Remux" not in ranked[0].risks
-    assert any(reason == "show quality keyword skipped: Remux" for reason in ranked[0].reasons)
-    assert ranked[0].score >= 82
+    assert "quality tag score +15: Dolby Vision" in ranked[0].reasons
+    assert "quality tag score +8: Dolby Atmos" in ranked[0].reasons
+    assert ranked[0].score == 92
 
 
-def test_rank_releases_does_not_require_remux_for_anime() -> None:
+def test_rank_releases_lets_tv_and_anime_use_the_same_quality_tag_scores() -> None:
     ranked = rank_releases(
         _intent(
             kind=IntentKind.SHOW,
@@ -242,13 +231,14 @@ def test_rank_releases_does_not_require_remux_for_anime() -> None:
             resolution="1080p",
             metadata={"media_type": "anime"},
         ),
-        [_release(title="Frieren 2023 S01 1080p WEB-DL", seeders=80, leechers=4)],
+        [_release(title="Frieren 2023 S01 1080p WEB-DL HEVC FLAC", seeders=80, leechers=4)],
         _intent_config(default_resolution="1080p"),
-        _search_config(required_keywords=["Remux"]),
+        _search_config(quality_tag_scores={"webdl": 10, "hevc": 6, "flac": 4}),
     )
 
-    assert "required keyword missing: Remux" not in ranked[0].risks
-    assert any(reason == "anime quality keyword skipped: Remux" for reason in ranked[0].reasons)
+    assert "quality tag score +10: WEB-DL" in ranked[0].reasons
+    assert "quality tag score +6: HEVC / H.265" in ranked[0].reasons
+    assert "quality tag score +4: FLAC" in ranked[0].reasons
     assert ranked[0].score >= 82
 
 
@@ -283,7 +273,7 @@ def test_rank_releases_defaults_episode_intents_to_season_pack_matching() -> Non
         ),
         [_release(title="Severance 2025 S02 2160p BluRay Remux")],
         _intent_config(default_resolution="2160p"),
-        _search_config(required_keywords=["Remux"]),
+        _search_config(quality_tag_scores={"remux": 20}),
     )
 
     assert "season matched" in ranked[0].reasons
@@ -303,7 +293,7 @@ def test_rank_releases_can_require_episode_when_configured() -> None:
         ),
         [_release(title="Severance 2025 S02 2160p BluRay Remux")],
         _intent_config(default_resolution="2160p", series_search_mode="episode"),
-        _search_config(required_keywords=["Remux"]),
+        _search_config(quality_tag_scores={"remux": 20}),
     )
 
     assert "episode missing" in ranked[0].risks
