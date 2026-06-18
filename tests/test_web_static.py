@@ -158,6 +158,26 @@ def test_non_tracker_sections_render_config_panels() -> None:
     assert "Raw YAML preview" not in script
 
 
+def test_quality_tag_help_copy_is_device_neutral() -> None:
+    script = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
+
+    forbidden_device_terms = [
+        "Apple TV",
+        "小米",
+        "Xiaomi",
+        "播放器友好",
+        "友好资源",
+        "player-friendly",
+        "TV-friendly",
+    ]
+    for term in forbidden_device_terms:
+        assert term not in script
+
+    assert "source, player, and display" in script
+    assert "Dolby lossless audio format" in script
+    assert "Playback requires compatible audio support" in script
+
+
 def test_want_list_toolbar_exposes_manual_refresh_and_seed_search() -> None:
     script = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
 

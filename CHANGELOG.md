@@ -4,6 +4,13 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.11.1 - 2026-06-18
+
+### Changed
+
+- Revised release-tag help text to use device-neutral wording and polished the
+  English descriptions for HDR, source, audio, and subtitle tags.
+
 ## 0.11.0 - 2026-06-17
 
 ### Changed
