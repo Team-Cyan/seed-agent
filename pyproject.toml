@@ -4,10 +4,10 @@ build-backend = "hatchling.build"
 
 [project]
 name = "seed-agent"
-version = "0.11.1"
+version = "0.11.2"
 description = "Docker-first PT automation for NAS and homelab qBittorrent operations"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.14"
 license = "MIT"
 dependencies = [
   "feedparser>=6.0,<7.0",
@@ -36,7 +36,7 @@ asyncio_mode = "auto"
 
 [tool.ruff]
 line-length = 100
-target-version = "py312"
+target-version = "py314"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]

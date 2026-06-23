@@ -166,8 +166,43 @@ tracker_sites:
     assert payload["trackers"][0]["name"] == "mt"
     assert payload["sections"]["download_client"]["target"] == "local"
     assert payload["sections"]["want_decision"]["inbox_ref"] == "local/inbox/intents.jsonl"
+    assert payload["runtime_root"] == str(tmp_path)
     assert payload["trackers"][0]["has_api_key"] is True
     assert "secret-token" not in json.dumps(payload)
+
+
+def test_http_status_payloads_expose_runtime_provenance(tmp_path: Path) -> None:
+    config_path = _write_minimal_config(tmp_path)
+    heartbeat_path = tmp_path / "state" / "schedule-heartbeat.json"
+    heartbeat_path.parent.mkdir()
+    heartbeat_path.write_text(
+        json.dumps(
+            {
+                "command": "schedule-run",
+                "cycle": 4,
+                "updated_at": (datetime.now(UTC) - timedelta(minutes=5)).isoformat(),
+                "error": None,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with _running_server(config_path) as base_url:
+        config_payload = _request_json(base_url, "GET", "/api/config")
+        state_payload = _request_json(base_url, "GET", "/api/state/summary")
+        health_payload = _request_json(base_url, "GET", "/api/health")
+
+    assert config_payload["config_path"] == str(config_path)
+    assert config_payload["runtime_root"] == str(tmp_path)
+    assert config_payload["state_path"] == str(tmp_path / ".seed-agent" / "state.db")
+    assert config_payload["heartbeat_file"] == str(heartbeat_path)
+    assert state_payload["config_path"] == str(config_path)
+    assert state_payload["runtime_root"] == str(tmp_path)
+    assert state_payload["state_path"] == str(tmp_path / ".seed-agent" / "state.db")
+    assert state_payload["heartbeat_file"] == str(heartbeat_path)
+    assert health_payload["runtime_root"] == str(tmp_path)
+    assert health_payload["state_path"] == str(tmp_path / ".seed-agent" / "state.db")
+    assert health_payload["heartbeat_file"] == str(heartbeat_path)
 
 
 def test_http_config_section_save_updates_safe_phase2_fields(tmp_path: Path) -> None:
@@ -702,11 +737,29 @@ def test_http_want_enqueue_can_select_lower_match_release(
     monkeypatch.setattr(cli, "build_downloader", lambda loaded: downloader)
 
     with _running_server(config_path) as base_url:
-        payload = _request_json(
+        preview_payload = _request_json(
             base_url,
             "POST",
             f"/api/wants/{intent.intent_id}/enqueue",
             {"release_id": "mt:https://kp.m-team.cc/detail/99", "execute": "false"},
+        )
+        assert preview_payload["execute"] is False
+        assert preview_payload["selected"]["release_id"] == "mt:https://kp.m-team.cc/detail/99"
+        assert preview_payload["enqueued"] == 0
+        assert [item["action"] for item in preview_payload["decisions"]] == ["qb.enqueue"]
+        assert preview_payload["decisions"][0]["execute"] is False
+        assert preview_payload["runtime_activity"]["managed_count"] == 0
+        assert preview_payload["status"][0]["level"] == "ok"
+        assert downloader.calls == []
+        preview_row = store.get_intent(intent.intent_id)
+        assert preview_row["selected_release_id"] is None
+        assert preview_row["state"] == IntentState.CONFIRMATION_REQUIRED.value
+
+        payload = _request_json(
+            base_url,
+            "POST",
+            f"/api/wants/{intent.intent_id}/enqueue",
+            {"release_id": "mt:https://kp.m-team.cc/detail/99", "execute": True},
         )
 
     assert payload["execute"] is True
@@ -723,6 +776,89 @@ def test_http_want_enqueue_can_select_lower_match_release(
     row = store.get_intent(intent.intent_id)
     assert row["selected_release_id"] == "mt:https://kp.m-team.cc/detail/99"
     assert row["state"] == IntentState.ENQUEUED.value
+
+
+def test_http_want_enqueue_preview_does_not_mutate_downloader(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from seed_agent import cli
+
+    config_path = _write_minimal_config(tmp_path)
+    store = StateStore(tmp_path / ".seed-agent" / "state.db")
+    intent = ResourceIntent(
+        intent_id="douban_wanted:preview-only",
+        source=IntentSource.DOUBAN_WANTED,
+        raw_text="Preview Only 2025",
+        kind=IntentKind.MOVIE,
+        title="Preview Only",
+        year=2025,
+        requested_at=datetime(2025, 1, 1, tzinfo=UTC),
+        state=IntentState.CONFIRMATION_REQUIRED,
+    )
+    store.upsert_intent(intent)
+    store.save_ranked_releases(
+        [
+            RankedRelease(
+                intent_id=intent.intent_id,
+                release=ReleaseCandidate(
+                    release_id="mt:https://kp.m-team.cc/detail/100",
+                    site="mt",
+                    title="Preview Only 2025 2160p Remux",
+                    source_url="https://kp.m-team.cc/detail/100",
+                    download_url="https://tracker.example/download?id=100",
+                    size_bytes=40 * 1024**3,
+                    seeders=30,
+                    leechers=2,
+                    discount=Discount.FREE,
+                ),
+                score=91,
+                confidence=0.91,
+                accepted=True,
+                confirmation_required=False,
+                reasons=["title tokens matched"],
+                risks=[],
+            )
+        ]
+    )
+
+    class FakeDownloader:
+        calls: list[str] = []
+        list_calls = 0
+
+        async def add_url(
+            self, url: str, category: str, tags: list[str], *, paused: bool = False
+        ) -> str | None:
+            self.calls.append(url)
+            return "0123456789abcdef0123456789abcdef01234567"
+
+        async def list_torrents(self, category=None, tags=None):
+            self.list_calls += 1
+            return []
+
+    downloader = FakeDownloader()
+    monkeypatch.setattr(cli, "build_downloader", lambda loaded: downloader)
+
+    with _running_server(config_path) as base_url:
+        payload = _request_json(
+            base_url,
+            "POST",
+            f"/api/wants/{intent.intent_id}/enqueue",
+            {"release_id": "mt:https://kp.m-team.cc/detail/100"},
+        )
+
+    assert payload["execute"] is False
+    assert payload["selected"]["release_id"] == "mt:https://kp.m-team.cc/detail/100"
+    assert payload["enqueued"] == 0
+    assert [item["action"] for item in payload["decisions"]] == ["qb.enqueue"]
+    assert payload["decisions"][0]["execute"] is False
+    assert payload["runtime_activity"]["managed_count"] == 0
+    assert downloader.calls == []
+    assert downloader.list_calls == 0
+    assert not (tmp_path / "audit.jsonl").exists()
+    row = store.get_intent(intent.intent_id)
+    assert row["selected_release_id"] is None
+    assert row["state"] == IntentState.CONFIRMATION_REQUIRED.value
 
 
 def test_http_want_enqueue_failure_returns_actionable_status(

@@ -67,6 +67,7 @@ def make_handler(config_path: Path) -> type[BaseHTTPRequestHandler]:
                 self._send_json(
                     {
                         "config_path": str(resolved_config_path),
+                        **_runtime_provenance(root),
                         "trackers": [_tracker_summary(site, root) for site in config.tracker_sites],
                         "sections": config_sections_payload(config),
                         "section_yamls": config_section_yamls_payload(config),
@@ -344,7 +345,7 @@ def _state_summary_payload(config_path: Path, root: Path) -> dict[str, Any]:
     state_path = _state_db_path(root)
     payload: dict[str, Any] = {
         "config_path": str(config_path),
-        "state_path": str(state_path),
+        **_runtime_provenance(root),
         "state_exists": state_path.exists(),
         "candidates": {"total": 0, "by_state": {}},
         "intents": {"total": 0, "by_state": {}},
@@ -538,6 +539,7 @@ def _enqueue_want_payload(
         _enqueue_pause_reasons,
         _enqueue_runtime_context,
         _intent_category_policy,
+        _NullDownloader,
         _pool_usage_item_summary,
         _ranked_release_summary,
         _runtime_activity_summary,
@@ -547,21 +549,29 @@ def _enqueue_want_payload(
     release_id = str(body.get("release_id") or "").strip()
     if not release_id:
         return {"error": "release_id is required"}, HTTPStatus.BAD_REQUEST
-    execute = True
+    execute = _truthy_execute(body.get("execute"))
     store = StateStore(_state_db_path(root))
     config = load_config(config_path)
     decisions = []
     try:
         default_policy = _default_category_policy(config)
-        downloader, live_torrents, paused, pool_usage, missing_reconciled = (
-            _enqueue_runtime_context(
-                config,
-                store=store,
-                execute=execute,
+        if execute:
+            downloader, live_torrents, paused, pool_usage, missing_reconciled = (
+                _enqueue_runtime_context(
+                    config,
+                    store=store,
+                    execute=execute,
+                )
             )
-        )
-        pause_reasons = _enqueue_pause_reasons(config, live_torrents, pool_usage)
-        release_resolver = _build_release_download_resolver(config)
+            pause_reasons = _enqueue_pause_reasons(config, live_torrents, pool_usage)
+        else:
+            downloader = _NullDownloader()
+            live_torrents = []
+            paused = False
+            pool_usage = None
+            missing_reconciled = 0
+            pause_reasons = []
+        release_resolver = _build_release_download_resolver(config) if execute else None
         intent, ranked, enqueue_decisions = run(
             enqueue_intent(
                 intent_id,
@@ -578,7 +588,8 @@ def _enqueue_want_payload(
             )
         )
         decisions.extend(enqueue_decisions)
-        _write_audit_decisions(config, decisions)
+        if execute:
+            _write_audit_decisions(config, decisions)
     except ValueError as exc:
         return {"error": str(exc)}, HTTPStatus.BAD_REQUEST
     except MutationBatchError as exc:
@@ -591,7 +602,7 @@ def _enqueue_want_payload(
         return {
             "error": str(exc),
             "execute": execute,
-            "enqueued": sum(1 for item in decisions if item.action == "qb.enqueue"),
+            "enqueued": _executed_enqueue_count(decisions),
             "decisions": [_decision_summary_payload(item) for item in decisions],
             "status": [
                 {
@@ -609,7 +620,7 @@ def _enqueue_want_payload(
             store.list_intent_source_evidence(intent.intent_id),
         ),
         "selected": _ranked_release_summary(ranked),
-        "enqueued": sum(1 for item in decisions if item.action == "qb.enqueue"),
+        "enqueued": _executed_enqueue_count(decisions),
         "decisions": [_decision_summary_payload(item) for item in decisions],
         "runtime_activity": _runtime_activity_summary(live_torrents),
         "missing_from_qb_reconciled": missing_reconciled,
@@ -626,6 +637,22 @@ def _enqueue_want_payload(
     if pause_reasons:
         payload["enqueue_paused_reasons"] = pause_reasons
     return payload, HTTPStatus.OK
+
+
+def _truthy_execute(value: Any) -> bool:
+    if value is True:
+        return True
+    if isinstance(value, str):
+        return value.strip().lower() in {"true", "1", "yes", "on"}
+    return False
+
+
+def _executed_enqueue_count(decisions: list[Any]) -> int:
+    return sum(
+        1
+        for item in decisions
+        if item.action == "qb.enqueue" and bool(getattr(item, "execute", False))
+    )
 
 
 def _read_configured_want_source_events(config) -> list[Any]:
@@ -987,10 +1014,10 @@ def _want_download_status_label(state: str, release_count: int, selected: bool) 
 
 
 def _health_payload(root: Path) -> dict[str, Any]:
-    heartbeat_path = root / "state" / "schedule-heartbeat.json"
+    heartbeat_path = _heartbeat_file_path(root)
     payload: dict[str, Any] = {
         "status": "unknown",
-        "heartbeat_file": str(heartbeat_path),
+        **_runtime_provenance(root),
         "heartbeat_exists": heartbeat_path.exists(),
     }
     if not heartbeat_path.exists():
@@ -1019,6 +1046,18 @@ def _health_payload(root: Path) -> dict[str, Any]:
 
 def _state_db_path(root: Path) -> Path:
     return root / ".seed-agent" / "state.db"
+
+
+def _heartbeat_file_path(root: Path) -> Path:
+    return root / "state" / "schedule-heartbeat.json"
+
+
+def _runtime_provenance(root: Path) -> dict[str, str]:
+    return {
+        "runtime_root": str(root),
+        "state_path": str(_state_db_path(root)),
+        "heartbeat_file": str(_heartbeat_file_path(root)),
+    }
 
 
 def _table_state_counts(

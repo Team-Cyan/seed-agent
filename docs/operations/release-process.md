@@ -11,7 +11,7 @@ Keep these files on the same version before tagging a release:
 - `pyproject.toml`
 - `src/seed_agent/__init__.py`
 
-The current release line is `0.11.1`.
+The current release line is `0.11.2`.
 
 ## Version Bump Policy
 
@@ -66,7 +66,7 @@ pointer for that minor line, not a working branch.
 1. Classify the change as docs-only, codefix/operational fix, or feature.
 2. Apply the version bump policy when the change affects the published Docker
    image or deployment behavior.
-3. When a version bump is required, run `python scripts/bump_version.py <version>`
+3. When a version bump is required, run `uv run python scripts/bump_version.py <version>`
    to update release metadata, then review the diff before committing.
 4. Move user-facing entries from `CHANGELOG.md` `Unreleased` into a versioned
    section.

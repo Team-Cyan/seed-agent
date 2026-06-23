@@ -331,6 +331,32 @@ def test_web_help_includes_local_server_options() -> None:
     assert "--port" in result.output
 
 
+def test_web_reports_actionable_port_conflict(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import errno
+
+    import seed_agent.web.app as web_app
+    from seed_agent.cli import app
+
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("mode: balanced\ntracker_sites: []\n", encoding="utf-8")
+
+    def raise_port_conflict(config: Path, host: str, port: int) -> None:
+        raise OSError(errno.EADDRINUSE, "Address already in use")
+
+    monkeypatch.setattr(web_app, "serve", raise_port_conflict)
+
+    result = CliRunner().invoke(
+        app,
+        ["web", "--config", str(config_path), "--host", "127.0.0.1", "--port", "8765"],
+    )
+
+    assert result.exit_code == 1
+    assert "Port 8765 is already in use on 127.0.0.1" in result.output
+    assert "--port 8766" in result.output
+
+
 def test_discover_command_prints_safe_output_without_raw_download_url(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

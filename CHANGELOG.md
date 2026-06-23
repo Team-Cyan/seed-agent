@@ -4,6 +4,22 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.11.2 - 2026-06-23
+
+### Changed
+
+- Raised the supported Python runtime baseline to 3.14+.
+- Added runtime provenance to the Web UI and API so operators can see the active
+  config path, runtime root, state database, and heartbeat file.
+- Made Want List candidate enqueue preview-first in the Web UI; qB mutations now
+  require an explicit confirmation after preview.
+- Added strategy summaries and release preference presets to the release
+  matching settings page.
+- Improved mobile Web UI density, Want List empty states, and Web UI port
+  conflict guidance.
+- Added a Web UI operator guide and linked the Web UI/CLI decision path from
+  the main docs.
+
 ## 0.11.1 - 2026-06-18
 
 ### Changed

@@ -316,6 +316,24 @@ body.dark .secondary-button {
   text-align: center;
 }
 
+.action-empty-state {
+  display: grid;
+  gap: 12px;
+  justify-items: center;
+}
+
+.action-empty-state h3,
+.action-empty-state p {
+  margin: 0;
+}
+
+.empty-state-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+}
+
 .placeholder-page h2 {
   color: var(--text);
   font-size: 20px;
@@ -469,6 +487,7 @@ body.dark .secondary-button {
 
 .overview-list,
 .attention-list,
+.runtime-provenance,
 .overview-state-groups {
   display: grid;
   gap: 10px;
@@ -487,6 +506,22 @@ body.dark .secondary-button {
   gap: 12px;
   justify-content: space-between;
   padding: 10px 12px;
+}
+
+.runtime-row {
+  background: var(--panel-subtle);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  display: grid;
+  gap: 5px;
+  padding: 10px 12px;
+}
+
+.runtime-path {
+  color: var(--text);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .overview-pool-row strong,
@@ -574,6 +609,36 @@ body.dark .secondary-button {
 .structured-list {
   display: grid;
   gap: 10px;
+}
+
+.strategy-summary {
+  background: color-mix(in srgb, var(--panel) 90%, var(--accent));
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 12px;
+}
+
+.strategy-summary-chips,
+.preset-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.strategy-chip {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--muted);
+  display: grid;
+  font-size: 12px;
+  gap: 4px;
+  padding: 10px;
+}
+
+.strategy-chip strong {
+  color: var(--text);
+  font-size: 14px;
 }
 
 .structured-row {
@@ -1093,6 +1158,35 @@ body.dark .secondary-button {
   justify-content: flex-end;
 }
 
+.candidate-preview {
+  background: var(--panel-subtle);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+}
+
+.candidate-preview-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.candidate-preview-summary span {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 12px;
+  padding: 4px 8px;
+}
+
+.candidate-preview-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
 @media (max-width: 900px) {
   .app-shell {
     grid-template-columns: 1fr;
@@ -1151,6 +1245,11 @@ body.dark .secondary-button {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .strategy-summary-chips,
+  .preset-grid {
+    grid-template-columns: 1fr;
+  }
+
   .wants-toolbar {
     align-items: stretch;
     flex-direction: column;
@@ -1181,7 +1280,8 @@ body.dark .secondary-button {
   }
 
   .sticky-actions .tracker-actions-group,
-  .candidate-actions {
+  .candidate-actions,
+  .candidate-preview-actions {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -1200,8 +1300,22 @@ body.dark .secondary-button {
     gap: 12px;
   }
 
+  .page-header h1 {
+    font-size: 22px;
+  }
+
+  .page-header p {
+    display: none;
+  }
+
   .section-eyebrow {
     display: none;
+  }
+
+  .config-path {
+    font-size: 11px;
+    max-height: 2.9em;
+    overflow: hidden;
   }
 
   .header-actions {
@@ -1321,7 +1435,8 @@ body.dark .secondary-button {
 @media (max-width: 420px) {
   .want-filters,
   .sticky-actions .tracker-actions-group,
-  .candidate-actions {
+  .candidate-actions,
+  .candidate-preview-actions {
     grid-template-columns: 1fr;
   }
 

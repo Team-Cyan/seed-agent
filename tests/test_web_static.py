@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 STATIC_ROOT = Path("src/seed_agent/web/static")
@@ -158,6 +159,43 @@ def test_non_tracker_sections_render_config_panels() -> None:
     assert "Raw YAML preview" not in script
 
 
+def test_strategy_pages_expose_operator_summary_and_release_presets() -> None:
+    script = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
+    styles = (STATIC_ROOT / "styles.css").read_text(encoding="utf-8")
+
+    assert "renderStrategySummary" in script
+    assert "strategySummary" in script
+    assert "策略概要" in script
+    assert "Strategy summary" in script
+    assert "releasePreferencePresets" in script
+    assert "movie_remux_first" in script
+    assert "tv_webdl_first" in script
+    assert "anime_subtitle_friendly" in script
+    assert "space_saving" in script
+    assert '"1080p":' in script
+    assert '"2160p":' in script
+    assert "applyReleasePreferencePreset" in script
+    assert "data-release-preset" in script
+    assert ".strategy-summary" in styles
+    assert ".preset-grid" in styles
+
+
+def test_mobile_header_and_want_empty_state_are_compact_and_actionable() -> None:
+    html = (STATIC_ROOT / "index.html").read_text(encoding="utf-8")
+    script = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
+    styles = (STATIC_ROOT / "styles.css").read_text(encoding="utf-8")
+
+    assert "mobile-section-select" in html
+    assert "noWantsHelp" in script
+    assert "action-empty-state" in script
+    assert "empty-state-actions" in script
+    assert 'data-want-action="sync"' in script
+    assert 'data-want-action="config-open"' in script
+    assert ".page-header p {\n    display: none;" in styles
+    assert ".config-path {\n    font-size: 11px;" in styles
+    assert ".empty-state-actions" in styles
+
+
 def test_quality_tag_help_copy_is_device_neutral() -> None:
     script = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
 
@@ -249,6 +287,22 @@ def test_each_config_page_exposes_section_yaml_editor() -> None:
     assert "renderConfigFilePanel" in script
     assert ".section-yaml-editor" in styles
     assert ".section-yaml-textarea" in styles
+
+
+def test_config_file_navigation_uses_existing_placeholder_key() -> None:
+    script = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
+
+    match = re.search(
+        r'if \(state\.currentSection === "config_file"\) \{\n(?P<body>.*?)\n  \}',
+        script,
+        re.DOTALL,
+    )
+
+    assert match is not None
+    config_file_branch = match.group("body")
+    assert "copy[state.language].placeholders.config_file" in config_file_branch
+    assert "copy[state.language].placeholders.advanced" not in config_file_branch
+    assert "renderConfigFilePanel()" in config_file_branch
 
 
 def test_settings_pages_use_sticky_action_bar() -> None:
@@ -371,6 +425,26 @@ def test_want_list_exposes_candidate_review_drawer() -> None:
     assert "opacity: 0.72" not in styles
 
 
+def test_want_candidate_enqueue_is_preview_first() -> None:
+    script = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
+    styles = (STATIC_ROOT / "styles.css").read_text(encoding="utf-8")
+
+    assert "previewWantCandidateEnqueue" in script
+    assert "confirmWantCandidateEnqueue" in script
+    assert "renderWantCandidatePreview" in script
+    assert 'data-want-candidate-action="enqueue-confirm"' in script
+    assert "previewEnqueueQb" in script
+    assert "confirmEnqueueQb" in script
+    assert "enqueuePreviewReady" in script
+    assert "runtimeManagedCount" in script
+    assert 'uiText("confirmEnqueue")' not in script
+    assert "window.confirm" not in script
+    assert "submitWantCandidateEnqueue(intentId, releaseId, false)" in script
+    assert "submitWantCandidateEnqueue(intentId, releaseId, true)" in script
+    assert ".candidate-preview" in styles
+    assert ".candidate-preview-actions" in styles
+
+
 def test_dashboard_attention_does_not_warn_for_review_required_items() -> None:
     script = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
 
@@ -459,6 +533,25 @@ def test_javascript_renders_readonly_overview_panel() -> None:
     assert ".overview-summary-strip" in styles
     assert ".overview-detail-grid" in styles
     assert ".overview-chip" in styles
+
+
+def test_overview_surfaces_config_and_runtime_provenance() -> None:
+    script = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
+    styles = (STATIC_ROOT / "styles.css").read_text(encoding="utf-8")
+
+    assert "runtimeRoot" in script
+    assert "renderRuntimeProvenance" in script
+    assert "runtimeProvenance" in script
+    assert "配置与运行来源" in script
+    assert "Config and runtime provenance" in script
+    assert "运行根目录" in script
+    assert "Runtime root" in script
+    assert "状态数据库" in script
+    assert "State database" in script
+    assert "心跳文件" in script
+    assert "Heartbeat file" in script
+    assert ".runtime-provenance" in styles
+    assert ".runtime-path" in styles
 
 
 def test_mobile_dashboard_uses_compact_single_column_layout() -> None:

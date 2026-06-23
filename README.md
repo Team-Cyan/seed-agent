@@ -58,8 +58,8 @@ The default deployment shape for self-hosted use is a Docker container running
 | M-Team RSS | Supported | Available as fallback and compatibility path. |
 | M-Team API discovery/search | Supported | Preferred authenticated path when `api_key_ref` is configured, including intent search with Douban/IMDb ID lookup, broad keyword fallback, M-Team tag capture, and execute-time deferred download-token resolution. |
 | Resource intent loop | Supported | Local intent add, inbox/Douban/IMDb Want List ingestion, search, ranking, rejection, explicit candidate enqueue, and default dry-run CLI enqueue are implemented. |
-| Want List | Supported | Web UI page shows canonical Douban/IMDb wants with source/type filters, mobile cards, added time, merged source evidence, release/search status, and candidate review with explicit qB actions. |
-| Web Settings UI | WIP | Local configuration UI exists for grouped safe settings edits with schema validation, diff previews, per-section YAML editing, visual downloader category/budget routing, sticky save actions, mobile navigation, read-only status, and Want List. |
+| Want List | Supported | Web UI page shows canonical Douban/IMDb wants with source/type filters, mobile cards, added time, merged source evidence, release/search status, preview-first refresh/search, and candidate review with explicit qB enqueue actions. |
+| Web Settings UI | WIP | Local configuration UI exists for grouped safe settings edits with schema validation, diff previews, per-section YAML editing, visual downloader category/budget routing, sticky save actions, mobile navigation, read-only status, runtime provenance, and Want List. |
 | Read-only dashboard/API | Partial | State summary, heartbeat health, budget pools, and Want List are exposed; richer audit/cleanup dashboards remain planned. |
 
 ## Roadmap Snapshot
@@ -216,6 +216,15 @@ On the downloader page, common qB settings are editable without hand-writing
 YAML: category policies, budget pools, and the movie/TV/anime Want List routing
 map. The YAML editor remains available for advanced edits and review.
 
+The Web UI is preview-first for routine operator work. Status and health views
+read mounted runtime files, settings saves validate and preview diffs, and Want
+List refresh/search may read configured sources, tracker search APIs, local
+state, and downloader-adjacent runtime context without adding torrents to
+qBittorrent. qB enqueue from the Web UI is limited to an explicit
+candidate-level confirmation after preview; cleanup and broad batch execution
+remain CLI-owned. See the [Web UI Operator Guide](docs/operations/web-ui-operator-guide.md)
+for the Web UI vs CLI decision path and runtime provenance checks.
+
 ## Runtime Safety Defaults
 
 Recommended unattended protections:
@@ -255,6 +264,7 @@ These guards help avoid:
 - [Docker Image Publishing](docs/operations/docker-image-publishing.md)
 - [Release Process](docs/operations/release-process.md)
 - [Unraid DockerMan Install](docs/operations/unraid-dockerman.md)
+- [Web UI Operator Guide](docs/operations/web-ui-operator-guide.md)
 - [Phase 1 Usage](docs/operations/phase-1-usage.md)
 - [Phase 2 Usage](docs/operations/phase-2-usage.md)
 - [Compose Example](deploy/docker-compose.example.yml)

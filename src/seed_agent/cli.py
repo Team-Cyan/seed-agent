@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import errno
 import json
 import time
 from collections.abc import Awaitable, Callable
@@ -117,7 +118,21 @@ def web(
     from seed_agent.web.app import serve
 
     typer.echo(f"Serving seed-agent settings UI at http://{host}:{port}")
-    serve(config, host, port)
+    try:
+        serve(config, host, port)
+    except OSError as exc:
+        if exc.errno != errno.EADDRINUSE:
+            raise
+        alternate_port = port + 1
+        typer.echo(
+            (
+                f"Port {port} is already in use on {host}. "
+                f"Retry with --port {alternate_port}, for example: "
+                f"seed-agent web --config {config} --host {host} --port {alternate_port}"
+            ),
+            err=True,
+        )
+        raise typer.Exit(1) from exc
 
 
 @app.command(name="site-probe")

@@ -59,6 +59,9 @@ flowchart TB
   release candidates, qB runtime facts, and lifecycle reconciliation.
 - `.seed-agent/audit.jsonl` records downloader mutations and policy decisions.
 - `state/schedule-heartbeat.json` is the scheduler liveness signal.
+- Web UI runtime provenance exposes the active config path, state path, and
+  heartbeat path so operators can tell whether they are inspecting the expected
+  Docker/CLI/Unraid runtime files.
 
 ## Supported Features
 
@@ -72,7 +75,7 @@ flowchart TB
 | Resource intents | CLI add, JSONL inbox, Douban wanted ingestion, IMDb watchlist/list ingestion, deterministic parsing, RSS search, M-Team API search, ranking, rejection, explicit candidate enqueue. |
 | Want List | Web UI page backed by canonical intent state, Douban/IMDb source labels, source/type filters, merged source evidence, media type, added time, search/queue status, and candidate review. |
 | M-Team intent search | Native Douban/IMDb ID search first, title/year fallback search, generic `quality_tag_scores` after fetch, captured M-Team tags, and configurable TV/anime `series_search_mode` for season-pack or episode search. |
-| Web UI | Local settings UI, tracker config, read-only status, budget-pool summary, safe section saves with schema validation and diff preview, search/acquisition settings, Douban/IMDb Want List source configuration, and explicit candidate-level qB enqueue actions. |
+| Web UI | Local settings UI, tracker config, read-only status, budget-pool summary, safe section saves with schema validation and diff preview, search/acquisition settings, Douban/IMDb Want List source configuration, runtime provenance, preview-first Want List refresh/search, and explicit candidate-level qB enqueue actions. |
 | Source adapters | File inbox, Douban wanted, and IMDb watchlists are wired; Telegram and WeChat bridge parsers are present but no hosted bot/receiver loop is shipped. |
 
 ## Key Modules
@@ -94,8 +97,17 @@ flowchart TB
 - RSS remains supported even when M-Team API is preferred.
 - Secrets stay behind gitignored local files and are referenced by path.
 - qB mutations are dry-run by default unless the operator explicitly executes.
+- Web UI status, config preview, tracker probe, and Want List search surfaces may
+  read runtime/downloader state or external sources, but they must not enqueue
+  to qBittorrent or clean up torrents.
+- Web UI qB enqueue is limited to an explicit reviewed Want List candidate
+  action. Batch execution, scheduler changes, and cleanup remain CLI-first
+  operator workflows.
 - Cleanup authority comes from configured category policy, not tags alone.
 - Source adapters stay upstream of the generic `ResourceIntent` boundary.
 - Want List deduplication uses reliable external ID aliases only; title-only
   fuzzy matching must not auto-merge works.
 - Release-quality preferences are composable tag-group score knobs, not hardcoded profiles.
+
+Operator workflow details live in
+[`docs/operations/web-ui-operator-guide.md`](operations/web-ui-operator-guide.md).

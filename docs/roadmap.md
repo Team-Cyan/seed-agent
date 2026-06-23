@@ -148,6 +148,9 @@ by completion period, and unfinished work is ordered by current priority.
     assets.
   - Web UI Want List search is dry-run/search-only; it does not enqueue or
     download unless the separate intent enqueue path is explicitly executed.
+  - Web UI operator guidance now documents the Web UI surfaces, risk levels,
+    Web UI vs CLI decision path, runtime provenance checks, and the
+    preview-first Want List refresh/search boundary.
   - Want List refresh/search actions show immediate in-progress feedback in the
     Web UI, and `schedule-run` now refreshes configured Want List sources and
     searches/ranks resource candidates every cycle by default while keeping the
@@ -164,8 +167,8 @@ by completion period, and unfinished work is ordered by current priority.
     `docker port seed-agent` publishes `8765/tcp`.
   - Open the DockerMan WebUI button and confirm Douban/IMDb Want List source
     settings display correctly with no secret leaks.
-  - Add a small operator note for preview/local runtime setup if the workflow
-    proves stable.
+  - Reconcile the Web UI provenance fields with live Unraid paths so wrong
+    config/state/heartbeat mounts are easy to spot during operator checks.
 
 - Next P0 - Close the intent automation loop with real M-Team results
   - Run Douban and IMDb ingestion for configured public/export sources.
