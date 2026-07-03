@@ -49,6 +49,7 @@ from seed_agent.web.settings import (
 )
 
 STATIC_ROOT = Path(__file__).parent / "static"
+SCHEDULE_BACKOFF_FILE = "schedule-backoff.json"
 
 
 def make_handler(config_path: Path) -> type[BaseHTTPRequestHandler]:
@@ -452,6 +453,20 @@ def _wants_payload(root: Path) -> dict[str, Any]:
 
 
 def _search_wants_payload(body: dict[str, Any], config_path: Path, root: Path) -> dict[str, Any]:
+    backoff = _schedule_backoff_status(root)
+    if backoff.get("active"):
+        return {
+            "synced": 0,
+            "searched": 0,
+            "skipped_by_backoff": True,
+            "schedule_backoff": backoff,
+            "status": [
+                {
+                    "level": "warning",
+                    "message": "M-Team backoff active; skipped Want List search",
+                }
+            ],
+        }
     sync_payload = _sync_wants_payload(config_path, root)
     state_path = _state_db_path(root)
     if not state_path.exists():
@@ -489,6 +504,20 @@ def _search_single_want_payload(
     row = store.get_intent(intent_id)
     if row is None:
         return {"error": "want not found"}, HTTPStatus.NOT_FOUND
+    backoff = _schedule_backoff_status(root)
+    if backoff.get("active"):
+        return {
+            "searched": 0,
+            "skipped": 1,
+            "skipped_by_backoff": True,
+            "schedule_backoff": backoff,
+            "status": [
+                {
+                    "level": "warning",
+                    "message": "M-Team backoff active; skipped Want List search",
+                }
+            ],
+        }, HTTPStatus.OK
     item = _want_item(
         row,
         {"release_count": len(store.list_release_candidates(intent_id))},
@@ -1108,6 +1137,37 @@ def _health_payload(root: Path) -> dict[str, Any]:
 
 def _state_db_path(root: Path) -> Path:
     return root / ".seed-agent" / "state.db"
+
+
+def _schedule_backoff_path(root: Path) -> Path:
+    return root / ".seed-agent" / SCHEDULE_BACKOFF_FILE
+
+
+def _schedule_backoff_status(root: Path) -> dict[str, Any]:
+    path = _schedule_backoff_path(root)
+    status: dict[str, Any] = {"active": False, "path": str(path)}
+    if not path.exists():
+        return status
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return status
+    if not isinstance(raw, dict):
+        return status
+    until = _parse_iso_datetime(raw.get("until"))
+    if until is None:
+        return status
+    remaining_minutes = (until - datetime.now(UTC)).total_seconds() / 60
+    status.update(
+        {
+            "active": remaining_minutes > 0,
+            "created_at": raw.get("created_at"),
+            "until": until.isoformat(),
+            "reason": raw.get("reason"),
+            "remaining_minutes": round(max(remaining_minutes, 0.0), 2),
+        }
+    )
+    return status
 
 
 def _heartbeat_file_path(root: Path) -> Path:

@@ -54,6 +54,12 @@ Expose the operator-facing command surface and safe summaries.
   single-item Want List searches manually from the Web UI. Scheduled resource
   enqueue remains a dry-run unless `--intent-execute` is explicitly set, and the
   loop can be disabled with `--no-intent`,
+- `schedule-run` records a persistent scheduler backoff when M-Team returns
+  "request too frequent" responses. While that backoff is active, the scheduler
+  keeps writing heartbeat output but skips cleanup, PT discovery, and Want List
+  work until the local midnight after at least 24 hours. Web UI Want List search
+  actions read the same backoff file and skip tracker searches during that
+  window,
 - free-window safety previewing for freeleech-sensitive workflows,
 - optional cleanup through `run-once --prune` and scheduled cleanup through
   `schedule-run --prune`. Standalone `run-once --prune` keeps the historical
@@ -101,6 +107,9 @@ Expose the operator-facing command surface and safe summaries.
 - keep scheduled Want List search non-mutating by default and limited to the
   local midnight hour; automatic resource qB enqueue requires explicit
   `--intent-execute`,
+- when M-Team rate limits scheduled discovery, keep the container alive through
+  heartbeat updates but skip PT discovery and Want List search until the shared
+  scheduler backoff expires. The backoff must not become a tight retry loop,
 - keep configured Want List source refresh failures fail-soft so Douban/IMDb
   availability issues do not restart long-running scheduler containers,
 - expose cleanup preview details before execute-mode mutation,

@@ -4,6 +4,17 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.12.1 - 2026-07-03
+
+### Changed
+
+- Added a persistent scheduler backoff after M-Team "request too frequent"
+  responses. During backoff, `schedule-run` keeps heartbeat liveness but skips
+  PT discovery, cleanup, and Want List work until the local midnight after at
+  least 24 hours.
+- Web UI Want List torrent search now reads the same scheduler backoff file and
+  skips bulk or single-item M-Team searches while backoff is active.
+
 ## 0.12.0 - 2026-07-03
 
 ### Changed

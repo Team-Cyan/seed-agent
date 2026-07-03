@@ -385,6 +385,46 @@ def test_http_wants_search_skips_enqueued_wants(
     assert calls == 0
 
 
+def test_http_wants_search_skips_during_schedule_backoff(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from seed_agent.web import app as web_app
+
+    def fail_build_providers(config):
+        raise AssertionError("providers should not be built during schedule backoff")
+
+    config_path = _write_minimal_config(tmp_path)
+    backoff_dir = tmp_path / ".seed-agent"
+    backoff_dir.mkdir(parents=True)
+    backoff_dir.joinpath("schedule-backoff.json").write_text(
+        json.dumps(
+            {
+                "active": True,
+                "created_at": datetime.now(UTC).isoformat(),
+                "until": (datetime.now(UTC) + timedelta(days=2)).isoformat(),
+                "reason": "mteam request too frequent",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(web_app, "_build_want_search_providers", fail_build_providers)
+
+    with _running_server(config_path) as base_url:
+        payload = _request_json(
+            base_url,
+            "POST",
+            "/api/wants/search",
+            {"source": "all"},
+        )
+
+    assert payload["synced"] == 0
+    assert payload["searched"] == 0
+    assert payload["skipped_by_backoff"] is True
+    assert payload["schedule_backoff"]["active"] is True
+
+
 def test_http_single_want_search_searches_one_item(
     tmp_path: Path,
     monkeypatch,
@@ -434,6 +474,58 @@ def test_http_single_want_search_searches_one_item(
 
     assert payload["searched"] == 1
     assert calls == [first.intent_id]
+
+
+def test_http_single_want_search_skips_during_schedule_backoff(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from seed_agent.web import app as web_app
+
+    def fail_build_providers(config):
+        raise AssertionError("providers should not be built during schedule backoff")
+
+    config_path = _write_minimal_config(tmp_path)
+    store = StateStore(tmp_path / ".seed-agent" / "state.db")
+    intent = ingest_events(
+        [
+            SourceIntentEvent(
+                source=IntentSource.DOUBAN_WANTED,
+                raw_text="退避单条 2024",
+                source_event_id="douban:single-backoff",
+                requested_at=datetime(2025, 1, 2, tzinfo=UTC),
+                metadata={"source_config_id": "douban-me", "media_type": "movie"},
+            )
+        ],
+        store,
+    )[0][0]
+    backoff_dir = tmp_path / ".seed-agent"
+    backoff_dir.mkdir(parents=True, exist_ok=True)
+    backoff_dir.joinpath("schedule-backoff.json").write_text(
+        json.dumps(
+            {
+                "active": True,
+                "created_at": datetime.now(UTC).isoformat(),
+                "until": (datetime.now(UTC) + timedelta(days=2)).isoformat(),
+                "reason": "mteam request too frequent",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(web_app, "_build_want_search_providers", fail_build_providers)
+
+    with _running_server(config_path) as base_url:
+        payload = _request_json(
+            base_url,
+            "POST",
+            f"/api/wants/{intent.intent_id}/search",
+        )
+
+    assert payload["searched"] == 0
+    assert payload["skipped"] == 1
+    assert payload["skipped_by_backoff"] is True
+    assert payload["schedule_backoff"]["active"] is True
 
 
 def test_http_single_want_search_skips_enqueued_item(

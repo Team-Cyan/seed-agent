@@ -3,7 +3,7 @@
 ARG AGENT_PYTHON_UV_BASE=ghcr.io/astral-sh/uv:python3.14-trixie
 FROM ${AGENT_PYTHON_UV_BASE}
 
-ARG VERSION=0.12.0
+ARG VERSION=0.12.1
 ARG REVISION=unknown
 ARG BUILD_DATE=unknown
 

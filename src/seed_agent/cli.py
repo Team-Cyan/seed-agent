@@ -71,6 +71,9 @@ ReleaseDownloadResolver = Callable[[ReleaseCandidate], Awaitable[ReleaseCandidat
 
 app = typer.Typer(help="Docker-first PT automation for NAS and homelab operations.")
 DEFAULT_CONFIG = Path("config/example.yaml")
+SCHEDULE_BACKOFF_FILE = "schedule-backoff.json"
+MTEAM_RATE_LIMIT_MARKERS = ("請求過於頻繁", "请求过于频繁")
+MTEAM_RATE_LIMIT_BACKOFF_HOURS = 24
 
 
 @app.callback(invoke_without_command=True)
@@ -710,6 +713,7 @@ def schedule_run(
     cycle = 0
     while True:
         cycle += 1
+        backoff = _schedule_backoff_status(config)
         if heartbeat_file is not None:
             _write_heartbeat(
                 heartbeat_file,
@@ -721,40 +725,59 @@ def schedule_run(
                     "execute": execute,
                     "phase": "running",
                     "error": None,
+                    "schedule_backoff": backoff if backoff.get("active") else None,
+                    "skipped_by_backoff": bool(backoff.get("active")),
                 },
             )
-        prune_payload: dict[str, Any] | None = None
-        if prune:
-            prune_payload = _prune_payload(
+        if backoff.get("active"):
+            payload = _schedule_backoff_skip_payload(
                 config,
                 execute=execute,
-                free_window_min_remaining_minutes=interval_minutes,
-                completed_low_upload_requires_reclamation=True,
+                intent_enabled=intent,
+                intent_execute=intent_execute,
+                backoff=backoff,
             )
-            if "error" in prune_payload:
-                payload = {
-                    "command": "schedule-run",
-                    "config": str(config),
-                    "execute": execute,
-                    "error": f"prune: {prune_payload['error']}",
-                    "prune": prune_payload,
-                }
+        else:
+            prune_payload: dict[str, Any] | None = None
+            if prune:
+                prune_payload = _prune_payload(
+                    config,
+                    execute=execute,
+                    free_window_min_remaining_minutes=interval_minutes,
+                    completed_low_upload_requires_reclamation=True,
+                )
+                if "error" in prune_payload:
+                    payload = {
+                        "command": "schedule-run",
+                        "config": str(config),
+                        "execute": execute,
+                        "error": f"prune: {prune_payload['error']}",
+                        "prune": prune_payload,
+                    }
+                else:
+                    payload = {}
             else:
                 payload = {}
-        else:
-            payload = {}
 
-        if "error" not in payload:
-            payload = _run_once_payload(
-                config,
-                execute=execute,
-                min_free_window_minutes=min_free_window_minutes,
-                require_known_free_window=require_known_free_window if execute else False,
-                prune=False,
-                capacity_prune=prune,
-            )
-            if prune_payload is not None:
-                payload["prune"] = prune_payload
+            if "error" not in payload:
+                payload = _run_once_payload(
+                    config,
+                    execute=execute,
+                    min_free_window_minutes=min_free_window_minutes,
+                    require_known_free_window=require_known_free_window
+                    if execute
+                    else False,
+                    prune=False,
+                    capacity_prune=prune,
+                )
+                if prune_payload is not None:
+                    payload["prune"] = prune_payload
+                if _payload_has_mteam_rate_limit(payload):
+                    payload["schedule_backoff"] = _record_schedule_rate_limit_backoff(
+                        config,
+                        reason="mteam request too frequent",
+                    )
+                    payload["skipped_by_backoff"] = True
 
         payload["command"] = "schedule-run"
         payload["cycle"] = cycle
@@ -765,7 +788,14 @@ def schedule_run(
         payload["prune_enabled"] = prune
         payload["intent_enabled"] = intent
         payload["intent_execute"] = intent_execute
-        if intent and "error" not in payload:
+        if payload.get("schedule_backoff", {}).get("active"):
+            payload["intent_search_enabled"] = False
+            if intent and "intent" not in payload:
+                payload["intent"] = _intent_backoff_skip_payload(
+                    execute=intent_execute,
+                    backoff=payload["schedule_backoff"],
+                )
+        elif intent and "error" not in payload:
             intent_search = _scheduled_intent_search_due()
             intent_payload = _intent_run_once_payload(
                 config,
@@ -796,6 +826,161 @@ def schedule_run(
 def _scheduled_intent_search_due(now: datetime | None = None) -> bool:
     current = now or datetime.now().astimezone()
     return current.hour == 0
+
+
+def _schedule_backoff_path(config_path: Path) -> Path:
+    return _runtime_root(load_config(config_path)) / SCHEDULE_BACKOFF_FILE
+
+
+def _schedule_backoff_status(
+    config_path: Path,
+    *,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    path = _schedule_backoff_path(config_path)
+    status: dict[str, Any] = {"active": False, "path": str(path)}
+    if not path.exists():
+        return status
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return status
+    if not isinstance(raw, dict):
+        return status
+    until = _parse_schedule_backoff_datetime(raw.get("until"))
+    if until is None:
+        return status
+    current = now or datetime.now().astimezone()
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=UTC)
+    remaining_minutes = (until - current).total_seconds() / 60
+    status.update(
+        {
+            "active": remaining_minutes > 0,
+            "created_at": raw.get("created_at"),
+            "until": until.isoformat(),
+            "reason": raw.get("reason"),
+            "remaining_minutes": round(max(remaining_minutes, 0.0), 2),
+        }
+    )
+    return status
+
+
+def _record_schedule_rate_limit_backoff(
+    config_path: Path,
+    *,
+    reason: str,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    current = now or datetime.now().astimezone()
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=UTC)
+    until = _next_local_midnight_at_or_after(
+        current + timedelta(hours=MTEAM_RATE_LIMIT_BACKOFF_HOURS)
+    )
+    path = _schedule_backoff_path(config_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "active": True,
+                "created_at": current.isoformat(),
+                "until": until.isoformat(),
+                "reason": reason,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return _schedule_backoff_status(config_path, now=current)
+
+
+def _next_local_midnight_at_or_after(value: datetime) -> datetime:
+    local = value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+    local = local.astimezone()
+    candidate = local.replace(hour=0, minute=0, second=0, microsecond=0)
+    if candidate < local:
+        candidate += timedelta(days=1)
+    return candidate
+
+
+def _parse_schedule_backoff_datetime(value: Any) -> datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed
+
+
+def _payload_has_mteam_rate_limit(payload: dict[str, Any]) -> bool:
+    messages: list[str] = []
+    for warning in payload.get("discovery_warnings") or []:
+        if isinstance(warning, dict):
+            messages.append(str(warning.get("message") or warning.get("error") or ""))
+        else:
+            messages.append(str(warning))
+    if payload.get("error"):
+        messages.append(str(payload["error"]))
+    return any(
+        marker in message
+        for message in messages
+        for marker in MTEAM_RATE_LIMIT_MARKERS
+    )
+
+
+def _schedule_backoff_skip_payload(
+    config_path: Path,
+    *,
+    execute: bool,
+    intent_enabled: bool,
+    intent_execute: bool,
+    backoff: dict[str, Any],
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "command": "schedule-run",
+        "config": str(config_path),
+        "execute": execute,
+        "discovered": 0,
+        "scored": 0,
+        "accepted": 0,
+        "enqueued": 0,
+        "scores": [],
+        "decisions": [],
+        "schedule_backoff": backoff,
+        "skipped_by_backoff": True,
+    }
+    if intent_enabled:
+        payload["intent"] = _intent_backoff_skip_payload(
+            execute=intent_execute,
+            backoff=backoff,
+        )
+        payload["intent_search_enabled"] = False
+    return payload
+
+
+def _intent_backoff_skip_payload(
+    *,
+    execute: bool,
+    backoff: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "command": "intent-run-once",
+        "execute": execute,
+        "search_enabled": False,
+        "ingested": 0,
+        "searched": 0,
+        "ranked": 0,
+        "enqueue_candidates": 0,
+        "decisions": [],
+        "schedule_backoff": backoff,
+        "skipped_by_backoff": True,
+    }
 
 
 def _prune_payload(
@@ -1271,6 +1456,8 @@ def _write_heartbeat(
         "enqueued": payload.get("enqueued"),
         "intent": _intent_payload_summary(payload.get("intent")),
         "intent_search_enabled": payload.get("intent_search_enabled"),
+        "schedule_backoff": payload.get("schedule_backoff"),
+        "skipped_by_backoff": payload.get("skipped_by_backoff"),
         "error": payload.get("error"),
     }
     heartbeat_file.write_text(
@@ -1515,6 +1702,8 @@ def _schedule_log_summary(payload: dict[str, Any]) -> dict[str, Any]:
         "intent_enabled",
         "intent_execute",
         "intent_search_enabled",
+        "schedule_backoff",
+        "skipped_by_backoff",
         "heartbeat_file",
         "discovered",
         "scored",
@@ -1572,6 +1761,10 @@ def _intent_payload_summary(payload: object) -> dict[str, Any] | None:
     }
     if payload.get("source_warnings"):
         summary["source_warnings"] = payload.get("source_warnings")
+    if payload.get("skipped_by_backoff"):
+        summary["skipped_by_backoff"] = payload.get("skipped_by_backoff")
+    if payload.get("schedule_backoff"):
+        summary["schedule_backoff"] = payload.get("schedule_backoff")
     return summary
 
 

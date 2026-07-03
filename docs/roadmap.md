@@ -155,6 +155,10 @@ by completion period, and unfinished work is ordered by current priority.
     Web UI, and `schedule-run` now refreshes configured Want List sources and
     searches/ranks resource candidates every cycle by default while keeping the
     scheduled resource loop dry-run unless `--intent-execute` is explicitly set.
+  - M-Team tracker rate-limit responses now trigger a persistent scheduler
+    backoff; the container keeps heartbeat liveness but skips PT discovery,
+    cleanup, and Want List tracker searches until the local midnight after at
+    least 24 hours.
   - Scheduled prune now runs before PT add, PT add can trigger an aggressive
     capacity-pressure cleanup when accepted candidates would otherwise be paused,
     and the Want List intent loop remains the final scheduled phase.

@@ -510,6 +510,8 @@ def test_schedule_run_executes_single_cycle_and_emits_schedule_metadata(
             "intent": None,
             "intent_search_enabled": None,
             "phase": "running",
+            "schedule_backoff": None,
+            "skipped_by_backoff": False,
             "updated_at": startup_heartbeats[0]["updated_at"],
             "version": __version__,
         }
@@ -597,6 +599,144 @@ def test_scheduled_intent_search_runs_only_during_midnight_hour() -> None:
     assert cli._scheduled_intent_search_due(
         datetime(2026, 7, 3, 1, 0)
     ) is False
+
+
+def test_schedule_rate_limit_backoff_uses_next_midnight_after_24h(
+    tmp_path: Path,
+) -> None:
+    from seed_agent import cli
+
+    config_path = _config_file(tmp_path)
+    local_tz = datetime.now().astimezone().tzinfo
+    now = datetime(2026, 7, 3, 21, 30, tzinfo=local_tz)
+
+    status = cli._record_schedule_rate_limit_backoff(
+        config_path,
+        reason="mteam request too frequent",
+        now=now,
+    )
+
+    until = datetime.fromisoformat(status["until"])
+    assert status["active"] is True
+    assert until.hour == 0
+    assert until.minute == 0
+    assert until >= now + timedelta(hours=24)
+    assert until - now < timedelta(hours=48)
+    assert (tmp_path / ".seed-agent" / "schedule-backoff.json").exists()
+
+
+def test_schedule_run_records_backoff_and_skips_intent_after_mteam_rate_limit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from seed_agent import cli
+
+    config_path = _config_file(tmp_path)
+    intent_called = False
+
+    def fake_run_once_payload(
+        config_path_value: Path,
+        *,
+        execute: bool,
+        min_free_window_minutes: int | None,
+        require_known_free_window: bool,
+        prune: bool,
+        prune_free_window_min_remaining_minutes: int | None = None,
+        capacity_prune: bool = False,
+    ) -> dict[str, object]:
+        return {
+            "command": "run-once",
+            "config": str(config_path_value),
+            "execute": execute,
+            "discovered": 0,
+            "scored": 0,
+            "accepted": 0,
+            "enqueued": 0,
+            "scores": [],
+            "decisions": [],
+            "discovery_warnings": [
+                {
+                    "site": "mteam",
+                    "message": "torrent/search failed: code=1 message=請求過於頻繁",
+                }
+            ],
+        }
+
+    def fake_intent_run_once_payload(
+        config_path_value: Path,
+        *,
+        execute: bool,
+        search_ingested: bool = True,
+    ) -> dict[str, object]:
+        nonlocal intent_called
+        intent_called = True
+        return {"command": "intent-run-once", "execute": execute}
+
+    monkeypatch.setattr(cli, "_run_once_payload", fake_run_once_payload)
+    monkeypatch.setattr(cli, "_intent_run_once_payload", fake_intent_run_once_payload)
+
+    result = CliRunner().invoke(
+        cli.app,
+        ["schedule-run", "--config", str(config_path), "--max-cycles", "1"],
+    )
+
+    assert result.exit_code == 0
+    payload = _json_output(result)
+    assert payload["skipped_by_backoff"] is True
+    assert payload["schedule_backoff"]["active"] is True
+    assert payload["intent_search_enabled"] is False
+    assert payload["intent"]["skipped_by_backoff"] is True
+    assert payload["intent"]["searched"] == 0
+    assert intent_called is False
+    assert (tmp_path / ".seed-agent" / "schedule-backoff.json").exists()
+
+
+def test_schedule_run_skips_work_while_backoff_is_active(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from seed_agent import cli
+
+    config_path = _config_file(tmp_path)
+    cli._record_schedule_rate_limit_backoff(
+        config_path,
+        reason="mteam request too frequent",
+        now=datetime.now().astimezone(),
+    )
+
+    def fail_run_once_payload(*args: object, **kwargs: object) -> dict[str, object]:
+        pytest.fail("run-once should be skipped during schedule backoff")
+
+    def fail_prune_payload(*args: object, **kwargs: object) -> dict[str, object]:
+        pytest.fail("prune should be skipped during schedule backoff")
+
+    def fail_intent_run_once_payload(*args: object, **kwargs: object) -> dict[str, object]:
+        pytest.fail("intent should be skipped during schedule backoff")
+
+    monkeypatch.setattr(cli, "_run_once_payload", fail_run_once_payload)
+    monkeypatch.setattr(cli, "_prune_payload", fail_prune_payload)
+    monkeypatch.setattr(cli, "_intent_run_once_payload", fail_intent_run_once_payload)
+
+    result = CliRunner().invoke(
+        cli.app,
+        [
+            "schedule-run",
+            "--config",
+            str(config_path),
+            "--prune",
+            "--max-cycles",
+            "1",
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = _json_output(result)
+    assert payload["skipped_by_backoff"] is True
+    assert payload["discovered"] == 0
+    assert payload["accepted"] == 0
+    assert payload["enqueued"] == 0
+    assert payload["intent"]["skipped_by_backoff"] is True
+    assert payload["intent_search_enabled"] is False
 
 
 def test_schedule_run_can_execute_intent_cycle_when_explicit(
