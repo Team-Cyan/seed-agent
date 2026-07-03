@@ -338,6 +338,151 @@ def test_http_wants_search_runs_filtered_search_without_downloader(
     assert row["selected_release_id"] is None
 
 
+def test_http_wants_search_skips_enqueued_wants(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from seed_agent.web import app as web_app
+
+    calls = 0
+
+    class FakeSearchProvider:
+        async def search(self, intent):
+            nonlocal calls
+            calls += 1
+            return []
+
+    config_path = _write_minimal_config(tmp_path)
+    store = StateStore(tmp_path / ".seed-agent" / "state.db")
+    intent = ingest_events(
+        [
+            SourceIntentEvent(
+                source=IntentSource.DOUBAN_WANTED,
+                raw_text="已下载电影 2024",
+                source_event_id="douban:skip",
+                requested_at=datetime(2025, 1, 2, tzinfo=UTC),
+                metadata={"source_config_id": "douban-me", "media_type": "movie"},
+            )
+        ],
+        store,
+    )[0][0]
+    store.update_intent_state(intent.intent_id, IntentState.ENQUEUED)
+    monkeypatch.setattr(
+        web_app,
+        "_build_want_search_providers",
+        lambda config: [FakeSearchProvider()],
+    )
+
+    with _running_server(config_path) as base_url:
+        payload = _request_json(
+            base_url,
+            "POST",
+            "/api/wants/search",
+            {"source": "douban-me", "media_type": "movie"},
+        )
+
+    assert payload["searched"] == 0
+    assert calls == 0
+
+
+def test_http_single_want_search_searches_one_item(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from seed_agent.web import app as web_app
+
+    calls: list[str] = []
+
+    class FakeSearchProvider:
+        async def search(self, intent):
+            calls.append(intent.intent_id)
+            return []
+
+    config_path = _write_minimal_config(tmp_path)
+    store = StateStore(tmp_path / ".seed-agent" / "state.db")
+    first = ingest_events(
+        [
+            SourceIntentEvent(
+                source=IntentSource.DOUBAN_WANTED,
+                raw_text="单条搜索 2024",
+                source_event_id="douban:single",
+                requested_at=datetime(2025, 1, 2, tzinfo=UTC),
+                metadata={"source_config_id": "douban-me", "media_type": "movie"},
+            ),
+            SourceIntentEvent(
+                source=IntentSource.DOUBAN_WANTED,
+                raw_text="另一条 2024",
+                source_event_id="douban:other",
+                requested_at=datetime(2025, 1, 3, tzinfo=UTC),
+                metadata={"source_config_id": "douban-me", "media_type": "movie"},
+            ),
+        ],
+        store,
+    )[0][0]
+    monkeypatch.setattr(
+        web_app,
+        "_build_want_search_providers",
+        lambda config: [FakeSearchProvider()],
+    )
+
+    with _running_server(config_path) as base_url:
+        payload = _request_json(
+            base_url,
+            "POST",
+            f"/api/wants/{first.intent_id}/search",
+        )
+
+    assert payload["searched"] == 1
+    assert calls == [first.intent_id]
+
+
+def test_http_single_want_search_skips_enqueued_item(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from seed_agent.web import app as web_app
+
+    calls = 0
+
+    class FakeSearchProvider:
+        async def search(self, intent):
+            nonlocal calls
+            calls += 1
+            return []
+
+    config_path = _write_minimal_config(tmp_path)
+    store = StateStore(tmp_path / ".seed-agent" / "state.db")
+    intent = ingest_events(
+        [
+            SourceIntentEvent(
+                source=IntentSource.DOUBAN_WANTED,
+                raw_text="已入队单条 2024",
+                source_event_id="douban:single-skip",
+                requested_at=datetime(2025, 1, 2, tzinfo=UTC),
+                metadata={"source_config_id": "douban-me", "media_type": "movie"},
+            )
+        ],
+        store,
+    )[0][0]
+    store.update_intent_state(intent.intent_id, IntentState.ENQUEUED)
+    monkeypatch.setattr(
+        web_app,
+        "_build_want_search_providers",
+        lambda config: [FakeSearchProvider()],
+    )
+
+    with _running_server(config_path) as base_url:
+        payload = _request_json(
+            base_url,
+            "POST",
+            f"/api/wants/{intent.intent_id}/search",
+        )
+
+    assert payload["searched"] == 0
+    assert payload["skipped"] == 1
+    assert calls == 0
+
+
 def test_http_wants_sync_ingests_configured_sources(
     tmp_path: Path,
     monkeypatch,

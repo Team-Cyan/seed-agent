@@ -26,11 +26,14 @@ Expose the operator-facing command surface and safe summaries.
 - read-only web API endpoints for state summary, configured budget pools, and
   heartbeat health,
 - web Want List endpoints for listing canonical Douban/IMDb wants, triggering
-  search-only dry runs, reviewing saved release candidates, and explicitly
-  enqueueing one release through the same intent enqueue path,
+  search-only dry runs for current filters or a single item, reviewing saved
+  release candidates, and explicitly enqueueing one release through the same
+  intent enqueue path,
 - the Web UI Want List toolbar separates source refresh from torrent search:
   refresh syncs configured Douban/IMDb sources into local intent state, while
-  search runs the non-mutating torrent search for the current filters,
+  search runs the non-mutating torrent search for the current filters. Each
+  Want List row also exposes a single-item search action. Already queued wants
+  are skipped by default instead of searching M-Team again,
 - intent enqueue routes resource downloads by media type through
   `download_client.media_category_map` when configured. Without an explicit map,
   movie requests use `movie` when present, show/episode/anime requests use
@@ -45,11 +48,12 @@ Expose the operator-facing command surface and safe summaries.
   single physical runtime config file,
 - configured source-event ingestion during `intent-run-once`, including Douban
   wanted-list and IMDb watchlist/list events,
-- `schedule-run` runs the resource intent loop every cycle by default, so
-  configured Want List sources are refreshed and searched without requiring the
-  operator to click the Web UI buttons. This scheduled resource loop remains a
-  dry-run unless `--intent-execute` is explicitly set, and it can be disabled
-  with `--no-intent`,
+- `schedule-run` runs the resource intent loop every cycle by default so
+  configured Want List sources are refreshed, but scheduled torrent search only
+  runs during the local midnight hour. Operators can still trigger filtered or
+  single-item Want List searches manually from the Web UI. Scheduled resource
+  enqueue remains a dry-run unless `--intent-execute` is explicitly set, and the
+  loop can be disabled with `--no-intent`,
 - free-window safety previewing for freeleech-sensitive workflows,
 - optional cleanup through `run-once --prune` and scheduled cleanup through
   `schedule-run --prune`. Standalone `run-once --prune` keeps the historical
@@ -92,9 +96,11 @@ Expose the operator-facing command surface and safe summaries.
   window is unknown or too short for the configured safety threshold,
 - keep optional scheduled pruning explicit through `--prune` so cleanup is never
   silently bundled into a long-running deployment. When enabled, schedule order
-  must remain conservative prune, PT add, then Want List source refresh/search,
-- keep scheduled Want List search non-mutating by default; automatic resource
-  qB enqueue requires explicit `--intent-execute`,
+  must remain conservative prune, PT add, then Want List source refresh, with
+  Want List torrent search only during the local midnight hour,
+- keep scheduled Want List search non-mutating by default and limited to the
+  local midnight hour; automatic resource qB enqueue requires explicit
+  `--intent-execute`,
 - keep configured Want List source refresh failures fail-soft so Douban/IMDb
   availability issues do not restart long-running scheduler containers,
 - expose cleanup preview details before execute-mode mutation,

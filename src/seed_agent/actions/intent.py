@@ -378,12 +378,13 @@ async def run_intent_once(
     source_events: Iterable[SourceIntentEvent] = (),
     release_resolver: ReleaseDownloadResolver | None = None,
     policy_resolver: IntentPolicyResolver | None = None,
+    search_ingested: bool = True,
 ) -> IntentRunResult:
     ingested_pairs = ingest_inbox(inbox_path, store) if inbox_path is not None else []
     ingested_pairs.extend(ingest_events(source_events, store))
     ingested = [item[0] for item in ingested_pairs]
     decisions = [item[1] for item in ingested_pairs]
-    pending_search = _dedupe_intents_by_id(ingested)
+    pending_search = _dedupe_intents_by_id(ingested) if search_ingested else []
     searched: list[ResourceIntent] = []
     ranked_releases: list[RankedRelease] = []
     enqueue_selected: list[RankedRelease] = []

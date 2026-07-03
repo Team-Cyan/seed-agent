@@ -433,16 +433,18 @@ def test_schedule_run_executes_single_cycle_and_emits_schedule_metadata(
         config_path_value: Path,
         *,
         execute: bool,
+        search_ingested: bool = True,
     ) -> dict[str, object]:
-        intent_seen.append((config_path_value, execute))
+        intent_seen.append((config_path_value, execute, search_ingested))
         return {
             "command": "intent-run-once",
             "config": str(config_path_value),
             "execute": execute,
+            "search_enabled": search_ingested,
             "ingested": 2,
-            "searched": 2,
-            "ranked": 2,
-            "enqueue_candidates": 1,
+            "searched": 2 if search_ingested else 0,
+            "ranked": 2 if search_ingested else 0,
+            "enqueue_candidates": 1 if search_ingested else 0,
             "decisions": [{"action": "intent.search"}],
         }
 
@@ -486,14 +488,15 @@ def test_schedule_run_executes_single_cycle_and_emits_schedule_metadata(
     assert payload["intent"] == {
         "command": "intent-run-once",
         "execute": False,
+        "search_enabled": False,
         "ingested": 2,
-        "searched": 2,
-        "ranked": 2,
-        "enqueue_candidates": 1,
+        "searched": 0,
+        "ranked": 0,
+        "enqueue_candidates": 0,
         "decisions_count": 1,
     }
     assert seen == [(config_path, True, 180, True)]
-    assert intent_seen == [(config_path, False)]
+    assert intent_seen == [(config_path, False, False)]
     assert startup_heartbeats == [
         {
             "accepted": None,
@@ -505,6 +508,7 @@ def test_schedule_run_executes_single_cycle_and_emits_schedule_metadata(
             "execute": True,
             "interval_minutes": 15,
             "intent": None,
+            "intent_search_enabled": None,
             "phase": "running",
             "updated_at": startup_heartbeats[0]["updated_at"],
             "version": __version__,
@@ -516,7 +520,8 @@ def test_schedule_run_executes_single_cycle_and_emits_schedule_metadata(
     assert heartbeat["phase"] is None
     assert heartbeat["accepted"] == 1
     assert heartbeat["enqueued"] == 1
-    assert heartbeat["intent"]["searched"] == 2
+    assert heartbeat["intent"]["searched"] == 0
+    assert heartbeat["intent_search_enabled"] is False
 
 
 def test_schedule_run_can_skip_intent_cycle(
@@ -555,6 +560,7 @@ def test_schedule_run_can_skip_intent_cycle(
         config_path_value: Path,
         *,
         execute: bool,
+        search_ingested: bool = True,
     ) -> dict[str, object]:
         nonlocal intent_called
         intent_called = True
@@ -580,6 +586,17 @@ def test_schedule_run_can_skip_intent_cycle(
     assert payload["intent_enabled"] is False
     assert "intent" not in payload
     assert intent_called is False
+
+
+def test_scheduled_intent_search_runs_only_during_midnight_hour() -> None:
+    from seed_agent import cli
+
+    assert cli._scheduled_intent_search_due(
+        datetime(2026, 7, 3, 0, 15)
+    ) is True
+    assert cli._scheduled_intent_search_due(
+        datetime(2026, 7, 3, 1, 0)
+    ) is False
 
 
 def test_schedule_run_can_execute_intent_cycle_when_explicit(
@@ -618,12 +635,14 @@ def test_schedule_run_can_execute_intent_cycle_when_explicit(
         config_path_value: Path,
         *,
         execute: bool,
+        search_ingested: bool = True,
     ) -> dict[str, object]:
         seen_execute.append(execute)
         return {
             "command": "intent-run-once",
             "config": str(config_path_value),
             "execute": execute,
+            "search_enabled": search_ingested,
             "ingested": 0,
             "searched": 0,
             "ranked": 0,
@@ -650,6 +669,7 @@ def test_schedule_run_can_execute_intent_cycle_when_explicit(
     payload = _json_output(result)
     assert payload["intent_execute"] is True
     assert payload["intent"]["execute"] is True
+    assert payload["intent"]["search_enabled"] is False
     assert seen_execute == [True]
 
 
@@ -808,12 +828,14 @@ def test_schedule_run_can_prune_each_cycle(
         config_path_value: Path,
         *,
         execute: bool,
+        search_ingested: bool = True,
     ) -> dict[str, object]:
         seen.append(("intent", execute))
         return {
             "command": "intent-run-once",
             "config": str(config_path_value),
             "execute": execute,
+            "search_enabled": search_ingested,
             "ingested": 0,
             "searched": 0,
             "ranked": 0,
@@ -840,6 +862,7 @@ def test_schedule_run_can_prune_each_cycle(
     assert result.exit_code == 0
     payload = _json_output(result)
     assert seen == [("prune", 60), ("run_once", (False, True)), ("intent", False)]
+    assert payload["intent_search_enabled"] is False
     assert payload["prune"]["command"] == "prune"
 
 

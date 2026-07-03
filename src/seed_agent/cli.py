@@ -766,8 +766,14 @@ def schedule_run(
         payload["intent_enabled"] = intent
         payload["intent_execute"] = intent_execute
         if intent and "error" not in payload:
-            intent_payload = _intent_run_once_payload(config, execute=intent_execute)
+            intent_search = _scheduled_intent_search_due()
+            intent_payload = _intent_run_once_payload(
+                config,
+                execute=intent_execute,
+                search_ingested=intent_search,
+            )
             payload["intent"] = intent_payload
+            payload["intent_search_enabled"] = intent_search
             if "error" in intent_payload:
                 payload["error"] = f"intent: {intent_payload['error']}"
         if heartbeat_file is not None:
@@ -785,6 +791,11 @@ def schedule_run(
         if max_cycles is not None and cycle >= max_cycles:
             return
         time.sleep(interval_minutes * 60)
+
+
+def _scheduled_intent_search_due(now: datetime | None = None) -> bool:
+    current = now or datetime.now().astimezone()
+    return current.hour == 0
 
 
 def _prune_payload(
@@ -1022,7 +1033,12 @@ def _run_once_payload(
     return payload
 
 
-def _intent_run_once_payload(config_path: Path, *, execute: bool) -> dict[str, Any]:
+def _intent_run_once_payload(
+    config_path: Path,
+    *,
+    execute: bool,
+    search_ingested: bool = True,
+) -> dict[str, Any]:
     loaded = load_config(config_path)
     store = StateStore(_state_path(loaded))
     providers = _build_search_providers(loaded)
@@ -1067,6 +1083,7 @@ def _intent_run_once_payload(config_path: Path, *, execute: bool) -> dict[str, A
                 source_events=source_events,
                 release_resolver=release_resolver,
                 policy_resolver=policy_resolver,
+                search_ingested=search_ingested,
             )
         )
         decisions = result.decisions
@@ -1079,6 +1096,7 @@ def _intent_run_once_payload(config_path: Path, *, execute: bool) -> dict[str, A
         "command": "intent-run-once",
         "config": str(config_path),
         "execute": execute,
+        "search_enabled": search_ingested,
         "ingested": len(result.ingested) if result is not None else 0,
         "searched": len(result.searched) if result is not None else 0,
         "ranked": len(result.ranked) if result is not None else 0,
@@ -1252,6 +1270,7 @@ def _write_heartbeat(
         "accepted": payload.get("accepted"),
         "enqueued": payload.get("enqueued"),
         "intent": _intent_payload_summary(payload.get("intent")),
+        "intent_search_enabled": payload.get("intent_search_enabled"),
         "error": payload.get("error"),
     }
     heartbeat_file.write_text(
@@ -1495,6 +1514,7 @@ def _schedule_log_summary(payload: dict[str, Any]) -> dict[str, Any]:
         "prune_enabled",
         "intent_enabled",
         "intent_execute",
+        "intent_search_enabled",
         "heartbeat_file",
         "discovered",
         "scored",
@@ -1543,6 +1563,7 @@ def _intent_payload_summary(payload: object) -> dict[str, Any] | None:
     summary = {
         "command": payload.get("command"),
         "execute": payload.get("execute"),
+        "search_enabled": payload.get("search_enabled"),
         "ingested": payload.get("ingested"),
         "searched": payload.get("searched"),
         "ranked": payload.get("ranked"),

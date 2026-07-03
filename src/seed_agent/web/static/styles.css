@@ -277,6 +277,13 @@ button {
   padding: 0 14px;
 }
 
+.compact-button {
+  font-size: 12px;
+  font-weight: 800;
+  min-height: 30px;
+  padding: 0 9px;
+}
+
 .primary-button:disabled,
 .secondary-button:disabled,
 .icon-button:disabled {
@@ -1051,6 +1058,7 @@ body.dark .secondary-button {
 
 .want-card-footer {
   display: flex;
+  gap: 8px;
   justify-content: flex-end;
 }
 

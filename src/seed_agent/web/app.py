@@ -196,6 +196,15 @@ def make_handler(config_path: Path) -> type[BaseHTTPRequestHandler]:
             if self.path == "/api/wants/sync":
                 self._send_json(_sync_wants_payload(resolved_config_path, root))
                 return
+            want_search_id = _want_subresource_intent_id(self.path, "search")
+            if want_search_id is not None:
+                payload, status = _search_single_want_payload(
+                    resolved_config_path,
+                    root,
+                    want_search_id,
+                )
+                self._send_json(payload, status=status)
+                return
             want_enqueue_id = _want_subresource_intent_id(self.path, "enqueue")
             if want_enqueue_id is not None:
                 payload, status = _enqueue_want_payload(
@@ -448,7 +457,7 @@ def _search_wants_payload(body: dict[str, Any], config_path: Path, root: Path) -
     if not state_path.exists():
         return {"searched": 0, "status": [{"level": "ok", "message": "no wants"}]}
     payload = _wants_payload(root)
-    items = _filter_want_items(payload["items"], body)
+    items = _filter_searchable_want_items(_filter_want_items(payload["items"], body))
     config = load_config(config_path)
     store = StateStore(state_path)
     providers = _build_want_search_providers(config)
@@ -466,6 +475,46 @@ def _search_wants_payload(body: dict[str, Any], config_path: Path, root: Path) -
         "searched": searched,
         "status": [{"level": "ok", "message": f"searched {searched} wants"}],
     }
+
+
+def _search_single_want_payload(
+    config_path: Path,
+    root: Path,
+    intent_id: str,
+) -> tuple[dict[str, Any], HTTPStatus]:
+    state_path = _state_db_path(root)
+    if not state_path.exists():
+        return {"error": "state db not found"}, HTTPStatus.NOT_FOUND
+    store = StateStore(state_path)
+    row = store.get_intent(intent_id)
+    if row is None:
+        return {"error": "want not found"}, HTTPStatus.NOT_FOUND
+    item = _want_item(
+        row,
+        {"release_count": len(store.list_release_candidates(intent_id))},
+        store.list_intent_source_evidence(intent_id),
+    )
+    if not _want_searchable(item):
+        return {
+            "searched": 0,
+            "skipped": 1,
+            "status": [{"level": "ok", "message": "already queued; skipped search"}],
+        }, HTTPStatus.OK
+    config = load_config(config_path)
+    searched = run(
+        _search_want_items(
+            [item],
+            store,
+            _build_want_search_providers(config),
+            config.want_decision,
+            config.release_preferences,
+        )
+    )
+    return {
+        "searched": searched,
+        "skipped": 0,
+        "status": [{"level": "ok", "message": f"searched {searched} want"}],
+    }, HTTPStatus.OK
 
 
 def _sync_wants_payload(config_path: Path, root: Path) -> dict[str, Any]:
@@ -697,6 +746,19 @@ def _filter_want_items(
     if media_type != "all":
         filtered = [item for item in filtered if item.get("media_type") == media_type]
     return filtered
+
+
+def _filter_searchable_want_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [item for item in items if _want_searchable(item)]
+
+
+def _want_searchable(item: dict[str, Any]) -> bool:
+    state = str(item.get("state") or "")
+    if state == "enqueued":
+        return False
+    if item.get("selected_release_id"):
+        return False
+    return True
 
 
 def _intent_release_counts(conn: sqlite3.Connection) -> dict[str, dict[str, Any]]:

@@ -216,6 +216,7 @@ const copy = {
       search: "搜索",
       searchCompleted: "搜索已完成",
       searchCurrentFilter: "搜索当前筛选",
+      searchOneWant: "搜索这条",
       searchingWants: "正在搜索种子",
       searchTorrentsCurrentFilter: "搜索种子",
       sectionYamlDescription: "对应 {path} 中的 {section}: 区块。可以保留顶层区块名，也可以只填写区块内容。",
@@ -465,6 +466,7 @@ const copy = {
       search: "Search",
       searchCompleted: "Search completed",
       searchCurrentFilter: "Search current filters",
+      searchOneWant: "Search this",
       searchingWants: "Searching torrents",
       searchTorrentsCurrentFilter: "Search torrents",
       sectionYamlDescription: "Maps to the {section}: block in {path}. You can keep the top-level section name or enter only the section body.",
@@ -1672,6 +1674,7 @@ function renderWantRow(item) {
       <td>
         <span class="badge ${item.status === "queued" ? "ok" : ""}">${escapeHtml(item.status_label || item.state)}</span>
         ${bestScore ? `<span class="want-score-pill">${escapeHtml(bestScore)}</span>` : ""}
+        <button class="secondary-button compact-button" type="button" data-want-action="search-one" data-want-id="${escapeAttribute(item.intent_id)}">${escapeHtml(uiText("searchOneWant"))}</button>
         <span class="inline-action">${escapeHtml(uiText("viewCandidates"))}</span>
       </td>
     </tr>
@@ -1696,6 +1699,7 @@ function renderWantCard(item) {
         <span>${escapeHtml(formatDate(item.added_at))}</span>
       </div>
       <div class="want-card-footer">
+        <button class="secondary-button compact-button" type="button" data-want-action="search-one" data-want-id="${escapeAttribute(item.intent_id)}">${escapeHtml(uiText("searchOneWant"))}</button>
         <span class="inline-action">${escapeHtml(uiText("viewCandidates"))}</span>
       </div>
     </article>
@@ -1914,6 +1918,10 @@ async function handleWantAction(panel, action, event) {
     await searchFilteredWants(panel, event);
     return;
   }
+  if (action === "search-one") {
+    await searchSingleWant(panel, event);
+    return;
+  }
   if (action === "config-open") {
     panel.querySelector("[data-want-config-modal]")?.classList.remove("hidden");
     return;
@@ -2003,6 +2011,39 @@ async function searchFilteredWants(panel, button) {
   }
 }
 
+async function searchSingleWant(panel, button) {
+  const intentId = button?.dataset?.wantId;
+  const status = panel.querySelector("[data-want-status]");
+  if (!intentId) {
+    return;
+  }
+  setWantActionBusy(panel, button, true);
+  if (status) {
+    status.innerHTML = `<div class="status-item info">${escapeHtml(uiText("searchingWants"))}</div>`;
+  }
+  try {
+    const response = await fetch(`/api/wants/${encodeURIComponent(intentId)}/search`, {
+      method: "POST",
+    });
+    const payload = await response.json();
+    if (!response.ok) {
+      throw new Error(payload.status?.[0]?.message || `${uiText("requestFailedPrefix")}: ${response.status}`);
+    }
+    await loadWants();
+    renderSection();
+    const refreshedStatus = document.querySelector("[data-want-status]");
+    if (refreshedStatus) {
+      refreshedStatus.innerHTML = `<div class="status-item ok">${escapeHtml(payload.status?.[0]?.message || uiText("searchCompleted"))}</div>`;
+    }
+  } catch (error) {
+    if (status) {
+      status.innerHTML = `<div class="status-item warning">${escapeHtml(error.message)}</div>`;
+    }
+  } finally {
+    setWantActionBusy(panel, button, false);
+  }
+}
+
 async function syncConfiguredWants(panel) {
   const status = panel.querySelector("[data-want-config-status]") || panel.querySelector("[data-want-status]");
   if (status) {
@@ -2027,7 +2068,7 @@ async function syncConfiguredWants(panel) {
 }
 
 function setWantActionBusy(panel, button, busy) {
-  panel.querySelectorAll('[data-want-action="sync"], [data-want-action="search"]').forEach((item) => {
+  panel.querySelectorAll('[data-want-action="sync"], [data-want-action="search"], [data-want-action="search-one"]').forEach((item) => {
     item.disabled = busy;
     item.setAttribute("aria-busy", busy ? "true" : "false");
   });

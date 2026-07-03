@@ -4,6 +4,16 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.12.0 - 2026-07-03
+
+### Changed
+
+- Limited scheduled Want List torrent search to the local midnight hour while
+  keeping source refresh in the regular scheduler loop.
+- Added a Web UI action to search a single Want List item manually.
+- Skipped already queued Want List items during default torrent search so M-Team
+  is not queried again for downloaded or selected resources.
+
 ## 0.11.3 - 2026-07-03
 
 ### Changed

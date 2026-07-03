@@ -221,9 +221,13 @@ def test_want_list_toolbar_exposes_manual_refresh_and_seed_search() -> None:
 
     assert 'data-want-action="sync"' in script
     assert 'data-want-action="search"' in script
+    assert 'data-want-action="search-one"' in script
     assert "refreshWants" in script
     assert "searchTorrentsCurrentFilter" in script
+    assert "searchOneWant" in script
     assert 'if (action === "sync")' in script
+    assert 'if (action === "search-one")' in script
+    assert "/search`, {" in script
     assert "await syncConfiguredWants(panel);" in script
     assert "await loadWants();" in script
 
