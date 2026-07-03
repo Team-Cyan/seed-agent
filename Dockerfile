@@ -1,6 +1,9 @@
-FROM python:3.14-slim
+# syntax=docker/dockerfile:1.7
 
-ARG VERSION=0.11.2
+ARG AGENT_PYTHON_UV_BASE=ghcr.io/astral-sh/uv:python3.14-trixie
+FROM ${AGENT_PYTHON_UV_BASE}
+
+ARG VERSION=0.11.3
 ARG REVISION=unknown
 ARG BUILD_DATE=unknown
 
@@ -21,12 +24,14 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 COPY pyproject.toml uv.lock README.md VERSION /app/
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev --no-editable --no-install-project
+
 COPY src /app/src
 COPY docker /app/docker
-
-RUN pip install --no-cache-dir uv \
-    && uv sync --frozen --no-dev --no-editable
-RUN chmod +x /app/docker/entrypoint.sh
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev --no-editable \
+    && chmod +x /app/docker/entrypoint.sh
 
 EXPOSE 8765
 

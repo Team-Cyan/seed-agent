@@ -73,7 +73,7 @@ docker run --rm \
   -e SEED_AGENT_MODE=schedule-run \
   -e SEED_AGENT_CONFIG=/app/config/config.yaml \
   -e SEED_AGENT_EXECUTE=true \
-  -e SEED_AGENT_INTERVAL_MINUTES=30 \
+  -e SEED_AGENT_INTERVAL_MINUTES=60 \
   -e SEED_AGENT_MIN_FREE_WINDOW_MINUTES=180 \
   -e SEED_AGENT_REQUIRE_KNOWN_FREE_WINDOW=true \
   -e SEED_AGENT_HEARTBEAT_FILE=/state/schedule-heartbeat.json \

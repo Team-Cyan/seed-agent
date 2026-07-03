@@ -4,6 +4,17 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.11.3 - 2026-07-03
+
+### Changed
+
+- Switched the Docker build to the shared Python 3.14 uv base image and cached
+  dependency installation before copying application source.
+- Updated M-Team upload-farming discovery examples to query both `normal` and
+  `adult` modes while keeping freeleech and leecher-sorted filters.
+- Raised the Docker scheduler example interval to 60 minutes to reduce tracker
+  API pressure.
+
 ## 0.11.2 - 2026-06-23
 
 ### Changed

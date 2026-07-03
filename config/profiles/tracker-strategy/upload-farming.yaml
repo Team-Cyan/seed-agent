@@ -6,6 +6,7 @@ tracker_sites:
     type: mteam
     discovery_mode: api
     api_discovery:
+      modes: [normal, adult]
       only_free: true
       sort_field: leechers
       sort_order: desc

@@ -17,6 +17,9 @@ tracker_sites:
   #   # Versioned strategy config. Keep this block in config, not in secrets.
   #   api_discovery:
   #     mode: adult
+  #     # Optional multi-mode discovery. When set, each mode is queried with
+  #     # the same filters and results are deduplicated before scoring.
+  #     modes: [normal, adult]
   #     page_number: 1
   #     only_free: true
   #     # Optional OpenAPI discount enum. When omitted, only_free=true sends FREE.

@@ -29,6 +29,15 @@ The repository is compatible with:
 docker build -t seed-agent:local .
 ```
 
+The Dockerfile starts from the shared Python 3.14 + uv base image:
+
+```text
+ghcr.io/astral-sh/uv:python3.14-trixie
+```
+
+Use the `AGENT_PYTHON_UV_BASE` build argument only when pinning or mirroring the
+shared base for local infrastructure.
+
 ## Tag For A Registry
 
 Docker Hub example:
