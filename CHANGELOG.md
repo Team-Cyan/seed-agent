@@ -4,6 +4,28 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.13.0 - 2026-07-04
+
+### Added
+
+- Added SQLite-backed scheduler runs, phase events, tracker backoffs, tracker
+  API events, and Want List search history for durable operational debugging.
+- Added structured M-Team rate-limit handling across search and deferred
+  download-token resolution, with scheduler/Web backoff reads from SQLite.
+- Added read-only CLI reports for scheduler history, tracker API events,
+  contribution/low-upload review, config status, and runtime doctor checks.
+- Added Web UI `/api/ops` and an overview operations panel for recent scheduler,
+  tracker, backoff, and Want List search state.
+
+### Changed
+
+- `schedule-run` now emits run IDs and phase JSON logs, records heartbeat
+  summaries with run identity, aborts further tracker work immediately after
+  M-Team frequency errors, and persists backoff until at least 24 hours later at
+  local midnight.
+- Prune payloads now include structured cleanup evidence summarizing action
+  counts, low-upload large torrents, and representative pause/delete samples.
+
 ## 0.12.1 - 2026-07-03
 
 ### Changed

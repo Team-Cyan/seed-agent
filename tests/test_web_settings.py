@@ -205,6 +205,45 @@ def test_http_status_payloads_expose_runtime_provenance(tmp_path: Path) -> None:
     assert health_payload["heartbeat_file"] == str(heartbeat_path)
 
 
+def test_http_ops_payload_exposes_scheduler_and_tracker_state(tmp_path: Path) -> None:
+    config_path = _write_minimal_config(tmp_path)
+    store = StateStore(tmp_path / ".seed-agent" / "state.db")
+    store.start_scheduler_run(
+        run_id="sched-web",
+        command="schedule-run",
+        config=str(config_path),
+        execute=False,
+        interval_minutes=60,
+        prune_enabled=True,
+        intent_enabled=True,
+        intent_execute=False,
+        backoff_active=False,
+        backoff_until=None,
+    )
+    store.finish_scheduler_run(run_id="sched-web", status="success", summary={})
+    store.record_tracker_api_event(
+        site="mteam",
+        endpoint="torrent/search",
+        event="rate_limited",
+        rate_limited=True,
+    )
+    store.record_want_search_run(
+        intent_id="intent-web",
+        source="web",
+        status="searched",
+        search_enabled=True,
+        results_count=2,
+    )
+
+    with _running_server(config_path) as base_url:
+        payload = _request_json(base_url, "GET", "/api/ops")
+
+    assert payload["state_exists"] is True
+    assert payload["scheduler_runs"][0]["run_id"] == "sched-web"
+    assert payload["tracker_api_events"][0]["site"] == "mteam"
+    assert payload["want_search_runs"][0]["intent_id"] == "intent-web"
+
+
 def test_http_config_section_save_updates_safe_phase2_fields(tmp_path: Path) -> None:
     config_path = _write_minimal_config(tmp_path)
 
@@ -336,6 +375,10 @@ def test_http_wants_search_runs_filtered_search_without_downloader(
     assert row is not None
     assert row["state"] == IntentState.CONFIRMATION_REQUIRED.value
     assert row["selected_release_id"] is None
+    search_runs = store.list_want_search_runs(intent_id=intent.intent_id)
+    assert len(search_runs) == 1
+    assert search_runs[0]["status"] == "searched"
+    assert search_runs[0]["results_count"] == 0
 
 
 def test_http_wants_search_skips_enqueued_wants(
@@ -423,6 +466,59 @@ def test_http_wants_search_skips_during_schedule_backoff(
     assert payload["searched"] == 0
     assert payload["skipped_by_backoff"] is True
     assert payload["schedule_backoff"]["active"] is True
+
+
+def test_http_wants_search_skips_during_sqlite_tracker_backoff(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from seed_agent.web import app as web_app
+
+    def fail_build_providers(config):
+        raise AssertionError("providers should not be built during tracker backoff")
+
+    config_path = _write_minimal_config(tmp_path)
+    store = StateStore(tmp_path / ".seed-agent" / "state.db")
+    intent = ingest_events(
+        [
+            SourceIntentEvent(
+                source=IntentSource.DOUBAN_WANTED,
+                raw_text="退避批量 2024",
+                source_event_id="douban:bulk-backoff",
+                requested_at=datetime(2025, 1, 2, tzinfo=UTC),
+                metadata={"source_config_id": "douban-me", "media_type": "movie"},
+            )
+        ],
+        store,
+    )[0][0]
+    store.set_tracker_backoff(
+        site="mteam",
+        endpoint="torrent/genDlToken",
+        until=(datetime.now(UTC) + timedelta(days=2)).isoformat(),
+        reason="mteam request too frequent",
+        source="test",
+        run_id="sched-test",
+    )
+    monkeypatch.setattr(web_app, "_build_want_search_providers", fail_build_providers)
+
+    with _running_server(config_path) as base_url:
+        payload = _request_json(
+            base_url,
+            "POST",
+            "/api/wants/search",
+            {"source": "all"},
+        )
+
+    assert payload["synced"] == 0
+    assert payload["searched"] == 0
+    assert payload["skipped_by_backoff"] is True
+    assert payload["schedule_backoff"]["active"] is True
+    assert payload["schedule_backoff"]["endpoint"] == "torrent/genDlToken"
+    assert not (tmp_path / ".seed-agent" / "schedule-backoff.json").exists()
+    search_runs = store.list_want_search_runs(intent_id=intent.intent_id)
+    assert len(search_runs) == 1
+    assert search_runs[0]["status"] == "skipped_backoff"
+    assert bool(search_runs[0]["backoff_active"]) is True
 
 
 def test_http_single_want_search_searches_one_item(

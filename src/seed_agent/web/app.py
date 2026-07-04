@@ -88,6 +88,9 @@ def make_handler(config_path: Path) -> type[BaseHTTPRequestHandler]:
             if self.path == "/api/health":
                 self._send_json(_health_payload(root))
                 return
+            if self.path == "/api/ops":
+                self._send_json(_ops_payload(root))
+                return
             if self.path == "/":
                 self._send_static("index.html")
                 return
@@ -455,9 +458,16 @@ def _wants_payload(root: Path) -> dict[str, Any]:
 def _search_wants_payload(body: dict[str, Any], config_path: Path, root: Path) -> dict[str, Any]:
     backoff = _schedule_backoff_status(root)
     if backoff.get("active"):
+        skipped = _record_want_search_backoff_skips(
+            root,
+            body=body,
+            backoff=backoff,
+            source="web-bulk",
+        )
         return {
             "synced": 0,
             "searched": 0,
+            "skipped": skipped,
             "skipped_by_backoff": True,
             "schedule_backoff": backoff,
             "status": [
@@ -506,6 +516,12 @@ def _search_single_want_payload(
         return {"error": "want not found"}, HTTPStatus.NOT_FOUND
     backoff = _schedule_backoff_status(root)
     if backoff.get("active"):
+        _record_single_want_search_skip(
+            store,
+            row,
+            backoff=backoff,
+            source="web-single",
+        )
         return {
             "searched": 0,
             "skipped": 1,
@@ -752,9 +768,93 @@ async def _search_want_items(
         if not intent_id:
             continue
         searched_intent, _, _ = await search_intent(intent_id, store, providers)
-        rank_intent(searched_intent.intent_id, store, intent_config, search_config)
+        _, ranked, _ = rank_intent(
+            searched_intent.intent_id,
+            store,
+            intent_config,
+            search_config,
+        )
+        _record_want_search_run(
+            store,
+            searched_intent,
+            source="web",
+            search_enabled=True,
+            ranked=ranked,
+        )
         searched += 1
     return searched
+
+
+def _record_want_search_backoff_skips(
+    root: Path,
+    *,
+    body: dict[str, Any],
+    backoff: dict[str, Any],
+    source: str,
+) -> int:
+    state_path = _state_db_path(root)
+    if not state_path.exists():
+        return 0
+    store = StateStore(state_path)
+    items = _filter_searchable_want_items(_filter_want_items(_wants_payload(root)["items"], body))
+    skipped = 0
+    for item in items:
+        row = store.get_intent(str(item.get("intent_id") or ""))
+        if row is None:
+            continue
+        _record_single_want_search_skip(store, row, backoff=backoff, source=source)
+        skipped += 1
+    return skipped
+
+
+def _record_single_want_search_skip(
+    store: StateStore,
+    row: dict[str, Any],
+    *,
+    backoff: dict[str, Any],
+    source: str,
+) -> None:
+    normalized = _want_normalized_json(row.get("normalized_json"))
+    store.record_want_search_run(
+        intent_id=str(row.get("intent_id") or normalized.get("intent_id") or ""),
+        source=source,
+        status="skipped_backoff",
+        search_enabled=False,
+        results_count=0,
+        selected_release_id=str(row.get("selected_release_id"))
+        if row.get("selected_release_id") is not None
+        else None,
+        backoff_active=True,
+        backoff_until=str(backoff.get("until")) if backoff.get("until") else None,
+        message="M-Team backoff active; skipped Want List search",
+        payload={"title": row.get("title") or normalized.get("title")},
+    )
+
+
+def _record_want_search_run(
+    store: StateStore,
+    intent: Any,
+    *,
+    source: str,
+    search_enabled: bool,
+    ranked: list[RankedRelease],
+) -> None:
+    best = ranked[0] if ranked else None
+    row = store.get_intent(intent.intent_id) or {}
+    store.record_want_search_run(
+        intent_id=intent.intent_id,
+        source=source,
+        status="searched" if search_enabled else "skipped",
+        search_enabled=search_enabled,
+        results_count=len(ranked),
+        best_score=best.score if best is not None else None,
+        selected_release_id=str(row.get("selected_release_id"))
+        if row.get("selected_release_id") is not None
+        else None,
+        backoff_active=False,
+        message=None,
+        payload={"state": row.get("state"), "title": getattr(intent, "title", None)},
+    )
 
 
 def _build_want_search_providers(config) -> list[SearchProvider]:
@@ -1135,6 +1235,31 @@ def _health_payload(root: Path) -> dict[str, Any]:
     return payload
 
 
+def _ops_payload(root: Path) -> dict[str, Any]:
+    state_path = _state_db_path(root)
+    payload: dict[str, Any] = {
+        **_runtime_provenance(root),
+        "state_exists": state_path.exists(),
+        "schedule_backoff": _schedule_backoff_status(root),
+        "scheduler_runs": [],
+        "tracker_backoffs": [],
+        "tracker_api_events": [],
+        "want_search_runs": [],
+    }
+    if not state_path.exists():
+        return payload
+    store = StateStore(state_path)
+    payload.update(
+        {
+            "scheduler_runs": store.list_scheduler_runs(limit=10),
+            "tracker_backoffs": store.list_tracker_backoffs(),
+            "tracker_api_events": store.list_tracker_api_events(limit=10),
+            "want_search_runs": store.list_want_search_runs(limit=10),
+        }
+    )
+    return payload
+
+
 def _state_db_path(root: Path) -> Path:
     return root / ".seed-agent" / "state.db"
 
@@ -1146,6 +1271,9 @@ def _schedule_backoff_path(root: Path) -> Path:
 def _schedule_backoff_status(root: Path) -> dict[str, Any]:
     path = _schedule_backoff_path(root)
     status: dict[str, Any] = {"active": False, "path": str(path)}
+    tracker_status = _tracker_backoff_status(root)
+    if tracker_status.get("active"):
+        return tracker_status
     if not path.exists():
         return status
     try:
@@ -1168,6 +1296,41 @@ def _schedule_backoff_status(root: Path) -> dict[str, Any]:
         }
     )
     return status
+
+
+def _tracker_backoff_status(root: Path) -> dict[str, Any]:
+    state_path = _state_db_path(root)
+    if not state_path.exists():
+        return {"active": False, "path": str(_schedule_backoff_path(root))}
+    store = StateStore(state_path)
+    active_rows: list[dict[str, Any]] = []
+    for row in store.list_tracker_backoffs():
+        if str(row.get("site")) != "mteam" or not bool(row.get("active")):
+            continue
+        until = _parse_iso_datetime(row.get("until"))
+        if until is None:
+            continue
+        remaining_minutes = (until - datetime.now(UTC)).total_seconds() / 60
+        if remaining_minutes <= 0:
+            continue
+        item = dict(row)
+        item["until"] = until.isoformat()
+        item["remaining_minutes"] = round(remaining_minutes, 2)
+        active_rows.append(item)
+    if not active_rows:
+        return {"active": False, "path": str(_schedule_backoff_path(root))}
+    primary = max(active_rows, key=lambda row: str(row.get("until") or ""))
+    return {
+        "active": True,
+        "path": str(_schedule_backoff_path(root)),
+        "site": primary.get("site"),
+        "endpoint": primary.get("endpoint"),
+        "created_at": primary.get("created_at"),
+        "until": primary.get("until"),
+        "reason": primary.get("reason"),
+        "remaining_minutes": primary.get("remaining_minutes"),
+        "tracker_backoffs": active_rows,
+    }
 
 
 def _heartbeat_file_path(root: Path) -> Path:

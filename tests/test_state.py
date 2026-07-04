@@ -585,3 +585,105 @@ def test_state_store_applies_runtime_with_batched_sqlite_access(tmp_path: Path) 
 
     assert len(enriched) == 8
     assert connect_count <= 4
+
+
+def test_state_store_records_scheduler_run_and_events(tmp_path: Path) -> None:
+    store = StateStore(tmp_path / "state.sqlite3")
+
+    store.start_scheduler_run(
+        run_id="sched-test",
+        command="schedule-run",
+        config="config/config.yaml",
+        execute=True,
+        interval_minutes=60,
+        prune_enabled=True,
+        intent_enabled=True,
+        intent_execute=False,
+        backoff_active=False,
+        backoff_until=None,
+        summary={"phase": "startup"},
+    )
+    store.record_scheduler_event(
+        run_id="sched-test",
+        phase="pt_discovery",
+        event="warning",
+        message="rate limited",
+        payload={"rate_limited": True},
+    )
+    store.finish_scheduler_run(
+        run_id="sched-test",
+        status="rate_limited",
+        summary={
+            "discovered": 0,
+            "scored": 0,
+            "accepted": 0,
+            "enqueued": 0,
+            "discovery_warnings": [{"rate_limited": True}],
+            "intent": {"ingested": 1, "searched": 0, "ranked": 0},
+            "schedule_backoff": {"active": True, "until": "2026-07-05T00:00:00+08:00"},
+        },
+    )
+
+    runs = store.list_scheduler_runs()
+    events = store.list_scheduler_run_events(run_id="sched-test")
+
+    assert runs[0]["run_id"] == "sched-test"
+    assert runs[0]["status"] == "rate_limited"
+    assert runs[0]["backoff_active"] == 1
+    assert runs[0]["warning_count"] == 1
+    assert runs[0]["intent_ingested"] == 1
+    assert events[0]["phase"] == "pt_discovery"
+    assert events[0]["event"] == "warning"
+
+
+def test_state_store_records_tracker_backoff_and_api_events(tmp_path: Path) -> None:
+    store = StateStore(tmp_path / "state.sqlite3")
+
+    store.set_tracker_backoff(
+        site="mteam",
+        endpoint="torrent/search",
+        until="2026-07-05T00:00:00+08:00",
+        reason="request too frequent",
+        source="schedule",
+        run_id="sched-test",
+    )
+    store.record_tracker_api_event(
+        site="mteam",
+        endpoint="torrent/search",
+        event="response_error",
+        run_id="sched-test",
+        api_code="1",
+        rate_limited=True,
+        message="請求過於頻繁",
+    )
+
+    backoff = store.get_tracker_backoff("mteam", "torrent/search")
+    events = store.list_tracker_api_events()
+
+    assert backoff is not None
+    assert backoff["active"] == 1
+    assert backoff["run_id"] == "sched-test"
+    assert events[0]["site"] == "mteam"
+    assert events[0]["rate_limited"] == 1
+
+
+def test_state_store_records_want_search_runs(tmp_path: Path) -> None:
+    store = StateStore(tmp_path / "state.sqlite3")
+
+    store.record_want_search_run(
+        intent_id="douban_wanted:1",
+        source="schedule",
+        status="skipped_backoff",
+        search_enabled=False,
+        results_count=0,
+        run_id="sched-test",
+        backoff_active=True,
+        backoff_until="2026-07-05T00:00:00+08:00",
+        message="M-Team backoff active",
+    )
+
+    rows = store.list_want_search_runs(intent_id="douban_wanted:1")
+
+    assert rows[0]["intent_id"] == "douban_wanted:1"
+    assert rows[0]["status"] == "skipped_backoff"
+    assert rows[0]["backoff_active"] == 1

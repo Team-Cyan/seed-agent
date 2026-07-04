@@ -180,6 +180,18 @@ def test_strategy_pages_expose_operator_summary_and_release_presets() -> None:
     assert ".preset-grid" in styles
 
 
+def test_overview_reads_and_renders_ops_dashboard() -> None:
+    script = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
+
+    assert 'fetch("/api/ops")' in script
+    assert "renderOpsSummary" in script
+    assert "opsDashboard" in script
+    assert "trackerBackoff" in script
+    assert "recentSchedulerRuns" in script
+    assert "tracker_api_events" in script
+    assert "want_search_runs" in script
+
+
 def test_mobile_header_and_want_empty_state_are_compact_and_actionable() -> None:
     html = (STATIC_ROOT / "index.html").read_text(encoding="utf-8")
     script = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")

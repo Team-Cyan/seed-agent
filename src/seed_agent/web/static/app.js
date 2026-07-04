@@ -4,6 +4,7 @@ const state = {
     health: null,
     stateSummary: null,
     pools: null,
+    ops: null,
     error: null,
   },
   wants: {
@@ -179,6 +180,7 @@ const copy = {
       noCandidates: "还没有候选。先点“搜索”。",
       noDashboardAttention: "当前没有需要特别处理的状态。",
       noData: "无数据",
+      inactive: "未启用",
       noPools: "未配置容量池",
       noStateRecords: "暂无状态记录",
       noTags: "无标签",
@@ -187,6 +189,7 @@ const copy = {
       notChecked: "尚未检查",
       notSaved: "尚未保存",
       operationComplete: "操作完成",
+      opsDashboard: "调度",
       pages: "页数",
       preview: "预览",
       previewEnqueueQb: "预览入队",
@@ -199,6 +202,7 @@ const copy = {
       refreshWants: "刷新列表",
       requestFailedPrefix: "请求失败",
       resourceIntents: "获取意图",
+      recentSchedulerRuns: "最近调度",
       runtimeProvenance: "配置与运行来源",
       runtimeManagedCount: "运行中任务",
       runtimeRoot: "运行根目录",
@@ -254,6 +258,8 @@ const copy = {
       syncingWants: "正在刷新想看列表",
       title: "标题",
       trackerCancel: "取消",
+      trackerApiEvents: "站点 API",
+      trackerBackoff: "站点退避",
       trackerConfigMteam: "M-Team 配置",
       trackerConfigNexusphp: "NexusPHP 配置",
       trackerDryRun: "试运行预览",
@@ -273,6 +279,7 @@ const copy = {
       wantRoutingHelp: "把想看列表里的电影、电视剧、动漫分别映射到 qB 分类。留空会使用后端默认回退。",
       wantCandidateSubtitle: "符合偏好的候选排在前面；低匹配候选会灰显，但仍可手动强制加入 qB。",
       wantResources: "想看资源",
+      wantSearchRuns: "想看搜索",
       wantsReadFailed: "想看列表读取失败",
       yes: "是",
       no: "否",
@@ -429,6 +436,7 @@ const copy = {
       noCandidates: "No candidates yet. Run Search first.",
       noDashboardAttention: "No status needs attention right now.",
       noData: "No data",
+      inactive: "Inactive",
       noPools: "No budget pools configured",
       noStateRecords: "No state records yet",
       noTags: "No tags",
@@ -437,6 +445,7 @@ const copy = {
       notChecked: "Not checked",
       notSaved: "Not saved",
       operationComplete: "Operation completed",
+      opsDashboard: "Scheduler",
       pages: "Pages",
       preview: "Preview",
       previewEnqueueQb: "Preview queue",
@@ -449,6 +458,7 @@ const copy = {
       refreshWants: "Refresh list",
       requestFailedPrefix: "Request failed",
       resourceIntents: "Resource intents",
+      recentSchedulerRuns: "Recent runs",
       runtimeProvenance: "Config and runtime provenance",
       runtimeManagedCount: "Runtime tasks",
       runtimeRoot: "Runtime root",
@@ -504,6 +514,8 @@ const copy = {
       syncingWants: "Refreshing Want List",
       title: "Title",
       trackerCancel: "Cancel",
+      trackerApiEvents: "Tracker API",
+      trackerBackoff: "Tracker backoff",
       trackerConfigMteam: "M-Team config",
       trackerConfigNexusphp: "NexusPHP config",
       trackerDryRun: "Dry-run preview",
@@ -523,6 +535,7 @@ const copy = {
       wantRoutingHelp: "Map movie, TV, and anime wants to qB categories. Empty fields use the backend fallback.",
       wantCandidateSubtitle: "Preferred candidates stay first; lower-match candidates are dimmed but can still be forced into qB.",
       wantResources: "Wanted resources",
+      wantSearchRuns: "Want searches",
       wantsReadFailed: "Failed to read Want List",
       yes: "Yes",
       no: "No",
@@ -1047,18 +1060,20 @@ async function loadConfig() {
 
 async function loadOverview() {
   try {
-    const [healthResponse, stateResponse, poolsResponse] = await Promise.all([
+    const [healthResponse, stateResponse, poolsResponse, opsResponse] = await Promise.all([
       fetch("/api/health"),
       fetch("/api/state/summary"),
       fetch("/api/pools"),
+      fetch("/api/ops"),
     ]);
-    if (!healthResponse.ok || !stateResponse.ok || !poolsResponse.ok) {
+    if (!healthResponse.ok || !stateResponse.ok || !poolsResponse.ok || !opsResponse.ok) {
       throw new Error(uiText("readingStatus"));
     }
     state.overview = {
       health: await healthResponse.json(),
       stateSummary: await stateResponse.json(),
       pools: await poolsResponse.json(),
+      ops: await opsResponse.json(),
       error: null,
     };
   } catch (error) {
@@ -1066,6 +1081,7 @@ async function loadOverview() {
       health: null,
       stateSummary: null,
       pools: null,
+      ops: null,
       error: error.message,
     };
   }
@@ -1148,12 +1164,12 @@ function renderSection() {
 function renderOverviewPanel() {
   const panel = document.createElement("section");
   panel.className = "overview-dashboard";
-  const { health, stateSummary, pools, error } = state.overview;
+  const { health, stateSummary, pools, ops, error } = state.overview;
   if (error) {
     panel.append(renderMetricCard(uiText("readingStatus"), uiText("failed"), error, "warning"));
     return panel;
   }
-  if (!health || !stateSummary || !pools) {
+  if (!health || !stateSummary || !pools || !ops) {
     panel.append(renderMetricCard(uiText("readingStatus"), uiText("loading"), uiText("localApiLoading"), "info"));
     return panel;
   }
@@ -1196,6 +1212,10 @@ function renderOverviewPanel() {
       <div class="section-title">${escapeHtml(uiText("dashboardAttention"))}</div>
       ${renderAttentionList(health, candidateStates, intentStates, budgetPools)}
     </article>
+    <article class="overview-detail-panel">
+      <div class="section-title">${escapeHtml(uiText("opsDashboard"))}</div>
+      ${renderOpsSummary(ops)}
+    </article>
     <article class="overview-detail-panel wide">
       <div class="section-title">${escapeHtml(uiText("runtimeProvenance"))}</div>
       ${renderRuntimeProvenance(health, stateSummary)}
@@ -1216,6 +1236,33 @@ function renderOverviewPanel() {
   `;
   panel.append(detailGrid);
   return panel;
+}
+
+function renderOpsSummary(ops) {
+  const runs = ops.scheduler_runs || [];
+  const events = ops.tracker_api_events || [];
+  const wantRuns = ops.want_search_runs || [];
+  const backoff = ops.schedule_backoff || {};
+  const rows = [
+    [uiText("trackerBackoff"), backoff.active ? `${backoff.endpoint || "mteam"} · ${backoff.remaining_minutes ?? "?"}m` : uiText("inactive")],
+    [uiText("recentSchedulerRuns"), runs.length ? `${runs[0].status || "unknown"} · ${runs[0].run_id || ""}` : uiText("noData")],
+    [uiText("trackerApiEvents"), events.length],
+    [uiText("wantSearchRuns"), wantRuns.length ? `${wantRuns[0].status || "unknown"} · ${wantRuns[0].source || ""}` : uiText("noData")],
+  ];
+  return `
+    <div class="overview-list">
+      ${rows
+        .map(
+          ([label, value]) => `
+            <div class="overview-pool-row">
+              <strong>${escapeHtml(label)}</strong>
+              <span>${escapeHtml(value)}</span>
+            </div>
+          `,
+        )
+        .join("")}
+    </div>
+  `;
 }
 
 function renderRuntimeProvenance(health, stateSummary) {

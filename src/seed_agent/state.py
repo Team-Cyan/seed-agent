@@ -36,6 +36,414 @@ class StateStore:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._initialize()
 
+    def start_scheduler_run(
+        self,
+        *,
+        run_id: str,
+        command: str,
+        config: str | None,
+        execute: bool,
+        interval_minutes: int | None,
+        prune_enabled: bool,
+        intent_enabled: bool,
+        intent_execute: bool,
+        backoff_active: bool,
+        backoff_until: str | None,
+        summary: dict[str, Any] | None = None,
+        started_at: datetime | None = None,
+    ) -> None:
+        started = (started_at or _utc_now_datetime()).isoformat()
+        summary_json = _json_dumps(summary or {})
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO scheduler_runs (
+                  run_id,
+                  started_at,
+                  finished_at,
+                  status,
+                  command,
+                  config,
+                  execute,
+                  interval_minutes,
+                  prune_enabled,
+                  intent_enabled,
+                  intent_execute,
+                  backoff_active,
+                  backoff_until,
+                  warning_count,
+                  summary_json
+                )
+                VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
+                ON CONFLICT(run_id) DO UPDATE SET
+                  started_at = excluded.started_at,
+                  finished_at = NULL,
+                  status = excluded.status,
+                  command = excluded.command,
+                  config = excluded.config,
+                  execute = excluded.execute,
+                  interval_minutes = excluded.interval_minutes,
+                  prune_enabled = excluded.prune_enabled,
+                  intent_enabled = excluded.intent_enabled,
+                  intent_execute = excluded.intent_execute,
+                  backoff_active = excluded.backoff_active,
+                  backoff_until = excluded.backoff_until,
+                  error = NULL,
+                  summary_json = excluded.summary_json
+                """,
+                (
+                    run_id,
+                    started,
+                    "running",
+                    command,
+                    config,
+                    int(execute),
+                    interval_minutes,
+                    int(prune_enabled),
+                    int(intent_enabled),
+                    int(intent_execute),
+                    int(backoff_active),
+                    backoff_until,
+                    summary_json,
+                ),
+            )
+
+    def finish_scheduler_run(
+        self,
+        *,
+        run_id: str,
+        status: str,
+        summary: dict[str, Any],
+        finished_at: datetime | None = None,
+    ) -> None:
+        finished = (finished_at or _utc_now_datetime()).isoformat()
+        intent_payload = summary.get("intent") if isinstance(summary.get("intent"), dict) else {}
+        backoff = (
+            summary.get("schedule_backoff")
+            if isinstance(summary.get("schedule_backoff"), dict)
+            else {}
+        )
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE scheduler_runs
+                SET
+                  finished_at = ?,
+                  status = ?,
+                  backoff_active = ?,
+                  backoff_until = ?,
+                  discovered = ?,
+                  scored = ?,
+                  accepted = ?,
+                  enqueued = ?,
+                  intent_ingested = ?,
+                  intent_searched = ?,
+                  intent_ranked = ?,
+                  intent_enqueue_candidates = ?,
+                  warning_count = ?,
+                  error = ?,
+                  summary_json = ?
+                WHERE run_id = ?
+                """,
+                (
+                    finished,
+                    status,
+                    int(bool(backoff.get("active"))),
+                    backoff.get("until"),
+                    _optional_int(summary.get("discovered")),
+                    _optional_int(summary.get("scored")),
+                    _optional_int(summary.get("accepted")),
+                    _optional_int(summary.get("enqueued")),
+                    _optional_int(intent_payload.get("ingested")),
+                    _optional_int(intent_payload.get("searched")),
+                    _optional_int(intent_payload.get("ranked")),
+                    _optional_int(intent_payload.get("enqueue_candidates")),
+                    len(summary.get("discovery_warnings") or []),
+                    summary.get("error"),
+                    _json_dumps(summary),
+                    run_id,
+                ),
+            )
+
+    def record_scheduler_event(
+        self,
+        *,
+        run_id: str,
+        phase: str,
+        event: str,
+        message: str | None = None,
+        payload: dict[str, Any] | None = None,
+        created_at: datetime | None = None,
+    ) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO scheduler_run_events (
+                  run_id,
+                  phase,
+                  event,
+                  created_at,
+                  message,
+                  payload_json
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    run_id,
+                    phase,
+                    event,
+                    (created_at or _utc_now_datetime()).isoformat(),
+                    message,
+                    _json_dumps(payload) if payload is not None else None,
+                ),
+            )
+
+    def list_scheduler_runs(self, *, limit: int = 20) -> list[dict[str, Any]]:
+        with self._connect(row_factory=sqlite3.Row) as conn:
+            rows = conn.execute(
+                """
+                SELECT *
+                FROM scheduler_runs
+                ORDER BY started_at DESC
+                LIMIT ?
+                """,
+                (max(limit, 1),),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def list_scheduler_run_events(
+        self,
+        *,
+        run_id: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        query = "SELECT * FROM scheduler_run_events"
+        params: list[Any] = []
+        if run_id is not None:
+            query += " WHERE run_id = ?"
+            params.append(run_id)
+        query += " ORDER BY created_at DESC, id DESC LIMIT ?"
+        params.append(max(limit, 1))
+        with self._connect(row_factory=sqlite3.Row) as conn:
+            rows = conn.execute(query, params).fetchall()
+        return [dict(row) for row in rows]
+
+    def set_tracker_backoff(
+        self,
+        *,
+        site: str,
+        endpoint: str,
+        until: str,
+        reason: str,
+        active: bool = True,
+        source: str | None = None,
+        run_id: str | None = None,
+        created_at: datetime | None = None,
+    ) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO tracker_backoffs (
+                  site,
+                  endpoint,
+                  active,
+                  created_at,
+                  until,
+                  reason,
+                  source,
+                  run_id
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(site, endpoint) DO UPDATE SET
+                  active = excluded.active,
+                  created_at = excluded.created_at,
+                  until = excluded.until,
+                  reason = excluded.reason,
+                  source = excluded.source,
+                  run_id = excluded.run_id
+                """,
+                (
+                    site,
+                    endpoint,
+                    int(active),
+                    (created_at or _utc_now_datetime()).isoformat(),
+                    until,
+                    reason,
+                    source,
+                    run_id,
+                ),
+            )
+
+    def get_tracker_backoff(self, site: str, endpoint: str) -> dict[str, Any] | None:
+        with self._connect(row_factory=sqlite3.Row) as conn:
+            row = conn.execute(
+                """
+                SELECT *
+                FROM tracker_backoffs
+                WHERE site = ? AND endpoint = ?
+                """,
+                (site, endpoint),
+            ).fetchone()
+        return dict(row) if row is not None else None
+
+    def list_tracker_backoffs(self) -> list[dict[str, Any]]:
+        with self._connect(row_factory=sqlite3.Row) as conn:
+            rows = conn.execute(
+                """
+                SELECT *
+                FROM tracker_backoffs
+                ORDER BY created_at DESC, site ASC, endpoint ASC
+                """
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def record_tracker_api_event(
+        self,
+        *,
+        site: str,
+        endpoint: str,
+        event: str,
+        run_id: str | None = None,
+        status_code: int | None = None,
+        api_code: str | None = None,
+        rate_limited: bool = False,
+        message: str | None = None,
+        request: dict[str, Any] | None = None,
+        response: dict[str, Any] | None = None,
+        created_at: datetime | None = None,
+    ) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO tracker_api_events (
+                  site,
+                  endpoint,
+                  event,
+                  created_at,
+                  run_id,
+                  status_code,
+                  api_code,
+                  rate_limited,
+                  message,
+                  request_json,
+                  response_json
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    site,
+                    endpoint,
+                    event,
+                    (created_at or _utc_now_datetime()).isoformat(),
+                    run_id,
+                    status_code,
+                    api_code,
+                    int(rate_limited),
+                    message,
+                    _json_dumps(request) if request is not None else None,
+                    _json_dumps(response) if response is not None else None,
+                ),
+            )
+
+    def list_tracker_api_events(
+        self,
+        *,
+        site: str | None = None,
+        endpoint: str | None = None,
+        event: str | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        query = "SELECT * FROM tracker_api_events"
+        params: list[Any] = []
+        filters = []
+        if site is not None:
+            filters.append("site = ?")
+            params.append(site)
+        if endpoint is not None:
+            filters.append("endpoint = ?")
+            params.append(endpoint)
+        if event is not None:
+            filters.append("event = ?")
+            params.append(event)
+        if filters:
+            query += " WHERE " + " AND ".join(filters)
+        query += " ORDER BY created_at DESC, id DESC LIMIT ?"
+        params.append(max(limit, 1))
+        with self._connect(row_factory=sqlite3.Row) as conn:
+            rows = conn.execute(query, params).fetchall()
+        return [dict(row) for row in rows]
+
+    def record_want_search_run(
+        self,
+        *,
+        intent_id: str,
+        source: str,
+        status: str,
+        search_enabled: bool,
+        results_count: int,
+        run_id: str | None = None,
+        best_score: int | None = None,
+        selected_release_id: str | None = None,
+        backoff_active: bool = False,
+        backoff_until: str | None = None,
+        message: str | None = None,
+        payload: dict[str, Any] | None = None,
+        searched_at: datetime | None = None,
+    ) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO want_search_runs (
+                  intent_id,
+                  run_id,
+                  source,
+                  searched_at,
+                  status,
+                  search_enabled,
+                  results_count,
+                  best_score,
+                  selected_release_id,
+                  backoff_active,
+                  backoff_until,
+                  message,
+                  payload_json
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    intent_id,
+                    run_id,
+                    source,
+                    (searched_at or _utc_now_datetime()).isoformat(),
+                    status,
+                    int(search_enabled),
+                    results_count,
+                    best_score,
+                    selected_release_id,
+                    int(backoff_active),
+                    backoff_until,
+                    message,
+                    _json_dumps(payload) if payload is not None else None,
+                ),
+            )
+
+    def list_want_search_runs(
+        self,
+        *,
+        intent_id: str | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        query = "SELECT * FROM want_search_runs"
+        params: list[Any] = []
+        if intent_id is not None:
+            query += " WHERE intent_id = ?"
+            params.append(intent_id)
+        query += " ORDER BY searched_at DESC, id DESC LIMIT ?"
+        params.append(max(limit, 1))
+        with self._connect(row_factory=sqlite3.Row) as conn:
+            rows = conn.execute(query, params).fetchall()
+        return [dict(row) for row in rows]
+
     def upsert_candidate(
         self,
         stable_id: str,
@@ -1118,6 +1526,88 @@ class StateStore:
                 CREATE INDEX IF NOT EXISTS idx_intents_state ON intents(state);
                 CREATE INDEX IF NOT EXISTS idx_release_candidates_intent
                   ON release_candidates(intent_id);
+                CREATE TABLE IF NOT EXISTS scheduler_runs (
+                  run_id TEXT PRIMARY KEY,
+                  started_at TEXT NOT NULL,
+                  finished_at TEXT,
+                  status TEXT NOT NULL,
+                  command TEXT NOT NULL,
+                  config TEXT,
+                  execute INTEGER NOT NULL,
+                  interval_minutes INTEGER,
+                  prune_enabled INTEGER NOT NULL,
+                  intent_enabled INTEGER NOT NULL,
+                  intent_execute INTEGER NOT NULL,
+                  backoff_active INTEGER NOT NULL,
+                  backoff_until TEXT,
+                  discovered INTEGER,
+                  scored INTEGER,
+                  accepted INTEGER,
+                  enqueued INTEGER,
+                  intent_ingested INTEGER,
+                  intent_searched INTEGER,
+                  intent_ranked INTEGER,
+                  intent_enqueue_candidates INTEGER,
+                  warning_count INTEGER NOT NULL DEFAULT 0,
+                  error TEXT,
+                  summary_json TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS scheduler_run_events (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  run_id TEXT NOT NULL,
+                  phase TEXT NOT NULL,
+                  event TEXT NOT NULL,
+                  created_at TEXT NOT NULL,
+                  message TEXT,
+                  payload_json TEXT
+                );
+                CREATE INDEX IF NOT EXISTS idx_scheduler_run_events_run_id
+                  ON scheduler_run_events(run_id);
+                CREATE TABLE IF NOT EXISTS tracker_backoffs (
+                  site TEXT NOT NULL,
+                  endpoint TEXT NOT NULL,
+                  active INTEGER NOT NULL,
+                  created_at TEXT NOT NULL,
+                  until TEXT NOT NULL,
+                  reason TEXT NOT NULL,
+                  source TEXT,
+                  run_id TEXT,
+                  PRIMARY KEY (site, endpoint)
+                );
+                CREATE TABLE IF NOT EXISTS tracker_api_events (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  site TEXT NOT NULL,
+                  endpoint TEXT NOT NULL,
+                  event TEXT NOT NULL,
+                  created_at TEXT NOT NULL,
+                  run_id TEXT,
+                  status_code INTEGER,
+                  api_code TEXT,
+                  rate_limited INTEGER NOT NULL,
+                  message TEXT,
+                  request_json TEXT,
+                  response_json TEXT
+                );
+                CREATE INDEX IF NOT EXISTS idx_tracker_api_events_site_endpoint
+                  ON tracker_api_events(site, endpoint);
+                CREATE TABLE IF NOT EXISTS want_search_runs (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  intent_id TEXT NOT NULL,
+                  run_id TEXT,
+                  source TEXT NOT NULL,
+                  searched_at TEXT NOT NULL,
+                  status TEXT NOT NULL,
+                  search_enabled INTEGER NOT NULL,
+                  results_count INTEGER NOT NULL,
+                  best_score INTEGER,
+                  selected_release_id TEXT,
+                  backoff_active INTEGER NOT NULL,
+                  backoff_until TEXT,
+                  message TEXT,
+                  payload_json TEXT
+                );
+                CREATE INDEX IF NOT EXISTS idx_want_search_runs_intent
+                  ON want_search_runs(intent_id);
                 """
             )
             self._migrate_candidates(conn)
@@ -1269,6 +1759,15 @@ def _utc_now_datetime() -> datetime:
 
 def _json_dumps(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True)
+
+
+def _optional_int(value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _optional_text(value: Any) -> str | None:

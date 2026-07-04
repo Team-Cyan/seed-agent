@@ -20,6 +20,7 @@ DiscoverFetcher = Callable[..., Awaitable[list[TorrentCandidate]]]
 DownloadUrlFetcher = Callable[[str], Awaitable[str | None]]
 
 DEFERRED_DOWNLOAD_URL_PREFIX = "mteam-api://torrent/"
+MTEAM_RATE_LIMIT_MARKERS = ("請求過於頻繁", "请求过于频繁")
 
 
 class MTeamApiResponseError(RuntimeError):
@@ -28,6 +29,14 @@ class MTeamApiResponseError(RuntimeError):
         self.code = code
         self.message = message
         super().__init__(f"{endpoint} failed: code={code} message={message}")
+
+    @property
+    def rate_limited(self) -> bool:
+        return is_mteam_rate_limit_message(self.message)
+
+
+def is_mteam_rate_limit_message(message: str) -> bool:
+    return any(marker in message for marker in MTEAM_RATE_LIMIT_MARKERS)
 
 
 class MTeamApiDiscoveryOptions(BaseModel):
@@ -258,8 +267,18 @@ class MTeamApiClient:
             response.raise_for_status()
 
         payload = response.json()
-        if not isinstance(payload, dict) or str(payload.get("code")) != "0":
-            return None
+        if not isinstance(payload, dict):
+            raise MTeamApiResponseError(
+                endpoint="torrent/genDlToken",
+                code="invalid_response",
+                message="expected object response",
+            )
+        if str(payload.get("code")) != "0":
+            raise MTeamApiResponseError(
+                endpoint="torrent/genDlToken",
+                code=str(payload.get("code")),
+                message=str(payload.get("message") or ""),
+            )
         data = payload.get("data")
         if not isinstance(data, str):
             return None

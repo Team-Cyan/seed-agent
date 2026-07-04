@@ -152,6 +152,11 @@ def test_intent_run_once_ingests_searches_ranks_and_dry_run_enqueues(
     assert "passkey=secret" not in result.output
     store = StateStore(tmp_path / ".seed-agent" / "state.db")
     assert len(store.list_intents_by_state(IntentState.SEARCHED)) == 1
+    search_runs = store.list_want_search_runs()
+    assert len(search_runs) == 1
+    assert search_runs[0]["status"] == "searched"
+    assert search_runs[0]["results_count"] == 1
+    assert search_runs[0]["best_score"] is not None
     audit = (tmp_path / ".seed-agent" / "audit.jsonl").read_text(encoding="utf-8")
     assert "intent.ingest" in audit
     assert "intent.search" in audit

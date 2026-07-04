@@ -159,6 +159,18 @@ by completion period, and unfinished work is ordered by current priority.
     backoff; the container keeps heartbeat liveness but skips PT discovery,
     cleanup, and Want List tracker searches until the local midnight after at
     least 24 hours.
+  - Scheduler runs, scheduler phase events, tracker backoffs, tracker API
+    events, and Want List search history now persist in SQLite with run IDs for
+    post-run debugging.
+  - M-Team search and deferred download-token rate-limit errors now propagate as
+    structured throttle events so later API calls in the same cycle stop
+    immediately.
+  - Read-only CLI reports expose scheduler history, tracker API events,
+    contribution/low-upload evidence, config status, and runtime doctor checks.
+  - The Web UI overview includes an operations panel backed by `/api/ops` for
+    recent scheduler, tracker, backoff, and Want List search state.
+  - Prune payloads include structured cleanup evidence for action counts,
+    low-upload large torrents, and representative pause/delete samples.
   - Scheduled prune now runs before PT add, PT add can trigger an aggressive
     capacity-pressure cleanup when accepted candidates would otherwise be paused,
     and the Want List intent loop remains the final scheduled phase.

@@ -255,7 +255,8 @@ seed_cleanup:
 
 
 def _json_output(result) -> dict[str, object]:
-    parsed = json.loads(result.output)
+    lines = [line for line in result.output.splitlines() if line.strip()]
+    parsed = json.loads(lines[-1])
     assert isinstance(parsed, dict)
     return parsed
 
@@ -434,6 +435,7 @@ def test_schedule_run_executes_single_cycle_and_emits_schedule_metadata(
         *,
         execute: bool,
         search_ingested: bool = True,
+        run_id: str | None = None,
     ) -> dict[str, object]:
         intent_seen.append((config_path_value, execute, search_ingested))
         return {
@@ -487,6 +489,7 @@ def test_schedule_run_executes_single_cycle_and_emits_schedule_metadata(
     assert "prune" not in payload
     assert payload["intent"] == {
         "command": "intent-run-once",
+        "run_id": None,
         "execute": False,
         "search_enabled": False,
         "ingested": 2,
@@ -510,6 +513,7 @@ def test_schedule_run_executes_single_cycle_and_emits_schedule_metadata(
             "intent": None,
             "intent_search_enabled": None,
             "phase": "running",
+            "run_id": startup_heartbeats[0]["run_id"],
             "schedule_backoff": None,
             "skipped_by_backoff": False,
             "updated_at": startup_heartbeats[0]["updated_at"],
@@ -522,6 +526,8 @@ def test_schedule_run_executes_single_cycle_and_emits_schedule_metadata(
     assert heartbeat["phase"] is None
     assert heartbeat["accepted"] == 1
     assert heartbeat["enqueued"] == 1
+    assert isinstance(heartbeat["run_id"], str)
+    assert heartbeat["run_id"].startswith("sched-")
     assert heartbeat["intent"]["searched"] == 0
     assert heartbeat["intent_search_enabled"] is False
 
@@ -563,6 +569,7 @@ def test_schedule_run_can_skip_intent_cycle(
         *,
         execute: bool,
         search_ingested: bool = True,
+        run_id: str | None = None,
     ) -> dict[str, object]:
         nonlocal intent_called
         intent_called = True
@@ -667,6 +674,7 @@ def test_schedule_run_records_backoff_and_skips_intent_after_mteam_rate_limit(
         *,
         execute: bool,
         search_ingested: bool = True,
+        run_id: str | None = None,
     ) -> dict[str, object]:
         nonlocal intent_called
         intent_called = True
@@ -689,6 +697,15 @@ def test_schedule_run_records_backoff_and_skips_intent_after_mteam_rate_limit(
     assert payload["intent"]["searched"] == 0
     assert intent_called is False
     assert (tmp_path / ".seed-agent" / "schedule-backoff.json").exists()
+    store = StateStore(tmp_path / ".seed-agent" / "state.db")
+    backoff = store.get_tracker_backoff("mteam", "torrent/search")
+    assert backoff is not None
+    assert bool(backoff["active"]) is True
+    assert backoff["run_id"] == payload["run_id"]
+    events = store.list_tracker_api_events(site="mteam")
+    assert len(events) == 1
+    assert events[0]["event"] == "rate_limited"
+    assert bool(events[0]["rate_limited"]) is True
 
 
 def test_schedule_run_skips_work_while_backoff_is_active(
@@ -739,6 +756,210 @@ def test_schedule_run_skips_work_while_backoff_is_active(
     assert payload["intent_search_enabled"] is False
 
 
+def test_schedule_run_skips_work_from_sqlite_tracker_backoff(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from seed_agent import cli
+
+    config_path = _config_file(tmp_path)
+    store = StateStore(tmp_path / ".seed-agent" / "state.db")
+    store.set_tracker_backoff(
+        site="mteam",
+        endpoint="torrent/genDlToken",
+        until=(datetime.now(UTC) + timedelta(hours=25)).isoformat(),
+        reason="mteam request too frequent",
+        source="test",
+        run_id="sched-test",
+    )
+
+    def fail_run_once_payload(*args: object, **kwargs: object) -> dict[str, object]:
+        pytest.fail("run-once should be skipped during sqlite tracker backoff")
+
+    def fail_intent_run_once_payload(*args: object, **kwargs: object) -> dict[str, object]:
+        pytest.fail("intent should be skipped during sqlite tracker backoff")
+
+    monkeypatch.setattr(cli, "_run_once_payload", fail_run_once_payload)
+    monkeypatch.setattr(cli, "_intent_run_once_payload", fail_intent_run_once_payload)
+
+    result = CliRunner().invoke(
+        cli.app,
+        ["schedule-run", "--config", str(config_path), "--max-cycles", "1"],
+    )
+
+    assert result.exit_code == 0
+    payload = _json_output(result)
+    assert payload["skipped_by_backoff"] is True
+    assert payload["schedule_backoff"]["active"] is True
+    assert payload["schedule_backoff"]["endpoint"] == "torrent/genDlToken"
+    assert not (tmp_path / ".seed-agent" / "schedule-backoff.json").exists()
+
+
+def test_scheduler_report_reads_runs_events_backoff_and_want_history(tmp_path: Path) -> None:
+    from seed_agent import cli
+
+    config_path = _config_file(tmp_path)
+    store = StateStore(tmp_path / ".seed-agent" / "state.db")
+    store.start_scheduler_run(
+        run_id="sched-test",
+        command="schedule-run",
+        config=str(config_path),
+        execute=False,
+        interval_minutes=60,
+        prune_enabled=True,
+        intent_enabled=True,
+        intent_execute=False,
+        backoff_active=False,
+        backoff_until=None,
+    )
+    store.record_scheduler_event(
+        run_id="sched-test",
+        phase="pt_discovery",
+        event="start",
+    )
+    store.finish_scheduler_run(run_id="sched-test", status="success", summary={})
+    store.set_tracker_backoff(
+        site="mteam",
+        endpoint="torrent/search",
+        until=(datetime.now(UTC) + timedelta(hours=25)).isoformat(),
+        reason="mteam request too frequent",
+        source="test",
+        run_id="sched-test",
+    )
+    store.record_want_search_run(
+        intent_id="intent-1",
+        source="test",
+        status="skipped_backoff",
+        search_enabled=False,
+        results_count=0,
+        backoff_active=True,
+    )
+
+    result = CliRunner().invoke(
+        cli.app,
+        ["scheduler-report", "--config", str(config_path), "--run-id", "sched-test"],
+    )
+
+    assert result.exit_code == 0
+    payload = _json_output(result)
+    assert payload["command"] == "scheduler-report"
+    assert payload["backoff"]["active"] is True
+    assert payload["runs"][0]["run_id"] == "sched-test"
+    assert payload["events"][0]["phase"] == "pt_discovery"
+    assert payload["want_search_runs"][0]["status"] == "skipped_backoff"
+
+
+def test_tracker_api_report_filters_events(tmp_path: Path) -> None:
+    from seed_agent import cli
+
+    config_path = _config_file(tmp_path)
+    store = StateStore(tmp_path / ".seed-agent" / "state.db")
+    store.record_tracker_api_event(
+        site="mteam",
+        endpoint="torrent/search",
+        event="rate_limited",
+        rate_limited=True,
+        message="too frequent",
+    )
+    store.record_tracker_api_event(
+        site="other",
+        endpoint="torrent/search",
+        event="ok",
+    )
+
+    result = CliRunner().invoke(
+        cli.app,
+        ["tracker-api-report", "--config", str(config_path), "--site", "mteam"],
+    )
+
+    assert result.exit_code == 0
+    payload = _json_output(result)
+    assert payload["command"] == "tracker-api-report"
+    assert payload["summary"]["total"] == 1
+    assert payload["summary"]["rate_limited"] == 1
+    assert payload["events"][0]["site"] == "mteam"
+
+
+def test_config_status_and_runtime_doctor_are_read_only(tmp_path: Path) -> None:
+    from seed_agent import cli
+
+    config_path = _config_file(tmp_path)
+
+    status_result = CliRunner().invoke(
+        cli.app,
+        ["config-status", "--config", str(config_path)],
+    )
+    doctor_result = CliRunner().invoke(
+        cli.app,
+        ["runtime-doctor", "--config", str(config_path)],
+    )
+
+    assert status_result.exit_code == 0
+    status_payload = _json_output(status_result)
+    assert status_payload["command"] == "config-status"
+    assert status_payload["state_exists"] is True
+    assert "pt_filters" in status_payload
+    assert doctor_result.exit_code == 0
+    doctor_payload = _json_output(doctor_result)
+    assert doctor_payload["command"] == "runtime-doctor"
+    assert any(item["name"] == "config" for item in doctor_payload["checks"])
+
+
+def test_contribution_report_sorts_low_contribution_torrents(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from seed_agent import cli
+
+    config_path = _config_file(tmp_path)
+
+    def fake_managed_torrents(config, *, store):
+        return [
+            ManagedTorrent(
+                name="large-zero",
+                hash="zero",
+                category="seed",
+                tags=["seed-agent"],
+                size_bytes=180 * 1024**3,
+                downloaded_bytes=180 * 1024**3,
+                uploaded_bytes=0,
+                state="stalledUP",
+                progress=1.0,
+                added_at=datetime.now(UTC),
+            ),
+            ManagedTorrent(
+                name="useful",
+                hash="useful",
+                category="seed",
+                tags=["seed-agent"],
+                size_bytes=20 * 1024**3,
+                downloaded_bytes=20 * 1024**3,
+                uploaded_bytes=40 * 1024**3,
+                state="uploading",
+                progress=1.0,
+                added_at=datetime.now(UTC),
+                metadata={"recent_upload_gb": 2.0},
+            ),
+        ], 0
+
+    monkeypatch.setattr(
+        cli,
+        "_managed_torrents_for_report_with_reconciliation",
+        fake_managed_torrents,
+    )
+
+    result = CliRunner().invoke(
+        cli.app,
+        ["contribution-report", "--config", str(config_path)],
+    )
+
+    assert result.exit_code == 0
+    payload = _json_output(result)
+    assert payload["command"] == "contribution-report"
+    assert payload["summary"]["zero_upload_large_count"] == 1
+    assert payload["lowest_contribution"][0]["name"] == "large-zero"
+
+
 def test_schedule_run_can_execute_intent_cycle_when_explicit(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -776,6 +997,7 @@ def test_schedule_run_can_execute_intent_cycle_when_explicit(
         *,
         execute: bool,
         search_ingested: bool = True,
+        run_id: str | None = None,
     ) -> dict[str, object]:
         seen_execute.append(execute)
         return {
@@ -969,6 +1191,7 @@ def test_schedule_run_can_prune_each_cycle(
         *,
         execute: bool,
         search_ingested: bool = True,
+        run_id: str | None = None,
     ) -> dict[str, object]:
         seen.append(("intent", execute))
         return {
@@ -1765,6 +1988,9 @@ def test_prune_dry_run_previews_live_torrents_without_mutation(
     assert payload["preview"][0]["name"] == "Managed Torrent"
     assert payload["preview"][0]["candidate_state"] == LifecycleState.ENQUEUED.value
     assert payload["preview"][0]["delete_files_on_delete"] is True
+    assert payload["cleanup_evidence"]["pause_count"] == 1
+    assert payload["cleanup_evidence"]["by_action"]["qb.cleanup.pause"] == 1
+    assert payload["cleanup_evidence"]["pause_samples"][0]["name"] == "Managed Torrent"
     assert downloader.calls == []
     row = store.get_candidate("demo-free:https://tracker.example/details.php?id=1")
     assert row is not None
@@ -2490,6 +2716,8 @@ def test_run_once_reports_discovery_warnings(
                 "site": "mt",
                 "error_type": "MTeamApiResponseError",
                 "message": "torrent/search failed: code=1 message=請求過於頻繁",
+                "endpoint": "torrent/search",
+                "rate_limited": True,
             }
         ],
     )
@@ -2501,10 +2729,12 @@ def test_run_once_reports_discovery_warnings(
     payload = _json_output(result)
     assert payload["discovery_warnings"] == [
         {
-            "site": "mt",
-            "error_type": "MTeamApiResponseError",
-            "message": "torrent/search failed: code=1 message=請求過於頻繁",
-        }
+                "site": "mt",
+                "error_type": "MTeamApiResponseError",
+                "message": "torrent/search failed: code=1 message=請求過於頻繁",
+                "endpoint": "torrent/search",
+                "rate_limited": True,
+            }
     ]
 
 

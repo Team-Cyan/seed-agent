@@ -4,6 +4,7 @@ import asyncio
 import errno
 import json
 import time
+import uuid
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -685,6 +686,111 @@ def runtime_status(
     _print_json(payload)
 
 
+@app.command(name="config-status")
+def config_status(
+    config: Annotated[Path, typer.Option("--config")] = DEFAULT_CONFIG,
+) -> None:
+    _print_json(_config_status_payload(config))
+
+
+@app.command(name="runtime-doctor")
+def runtime_doctor(
+    config: Annotated[Path, typer.Option("--config")] = DEFAULT_CONFIG,
+    heartbeat_file: Annotated[Path | None, typer.Option("--heartbeat-file")] = None,
+    max_staleness_minutes: Annotated[int, typer.Option("--max-staleness-minutes")] = 90,
+) -> None:
+    status = _runtime_status_payload(
+        config,
+        heartbeat_file=heartbeat_file,
+        max_staleness_minutes=max_staleness_minutes,
+    )
+    _print_json(
+        {
+            "command": "runtime-doctor",
+            "config": str(config),
+            "status": status.get("status"),
+            "checks": _runtime_doctor_checks(status),
+        }
+    )
+
+
+@app.command(name="scheduler-report")
+def scheduler_report(
+    config: Annotated[Path, typer.Option("--config")] = DEFAULT_CONFIG,
+    run_id: Annotated[str | None, typer.Option("--run-id")] = None,
+    limit: Annotated[int, typer.Option("--limit")] = 20,
+) -> None:
+    loaded = load_config(config)
+    store = StateStore(_state_path(loaded))
+    runs = store.list_scheduler_runs(limit=limit)
+    selected_run_id = run_id or (str(runs[0]["run_id"]) if runs else None)
+    payload = {
+        "command": "scheduler-report",
+        "config": str(config),
+        "state_path": str(_state_path(loaded)),
+        "backoff": _schedule_backoff_status(config),
+        "runs": runs,
+        "events": store.list_scheduler_run_events(run_id=selected_run_id, limit=100)
+        if selected_run_id
+        else [],
+        "want_search_runs": store.list_want_search_runs(limit=limit),
+    }
+    _print_json(payload)
+
+
+@app.command(name="tracker-api-report")
+def tracker_api_report(
+    config: Annotated[Path, typer.Option("--config")] = DEFAULT_CONFIG,
+    site: Annotated[str | None, typer.Option("--site")] = None,
+    endpoint: Annotated[str | None, typer.Option("--endpoint")] = None,
+    limit: Annotated[int, typer.Option("--limit")] = 50,
+) -> None:
+    loaded = load_config(config)
+    store = StateStore(_state_path(loaded))
+    events = store.list_tracker_api_events(site=site, endpoint=endpoint, limit=limit)
+    _print_json(
+        {
+            "command": "tracker-api-report",
+            "config": str(config),
+            "state_path": str(_state_path(loaded)),
+            "backoffs": store.list_tracker_backoffs(),
+            "events": events,
+            "summary": _tracker_api_event_summary(events),
+        }
+    )
+
+
+@app.command(name="contribution-report")
+def contribution_report(
+    config: Annotated[Path, typer.Option("--config")] = DEFAULT_CONFIG,
+    limit: Annotated[int, typer.Option("--limit")] = 50,
+) -> None:
+    loaded = load_config(config)
+    store = StateStore(_state_path(loaded))
+    torrents, missing_reconciled = _managed_torrents_for_report_with_reconciliation(
+        loaded,
+        store=store,
+    )
+    items = sorted(
+        (_torrent_contribution_item(torrent) for torrent in torrents),
+        key=lambda item: (
+            float(item.get("recent_upload_gb") or 0),
+            float(item.get("uploaded_gb") or 0),
+        ),
+    )
+    _print_json(
+        {
+            "command": "contribution-report",
+            "config": str(config),
+            "state_path": str(_state_path(loaded)),
+            "managed_count": len(torrents),
+            "missing_from_qb_reconciled": missing_reconciled,
+            "summary": _contribution_summary(items),
+            "lowest_contribution": items[: max(limit, 1)],
+        }
+    )
+
+
 @app.command(name="schedule-run")
 def schedule_run(
     config: Annotated[Path, typer.Option("--config")] = DEFAULT_CONFIG,
@@ -713,7 +819,30 @@ def schedule_run(
     cycle = 0
     while True:
         cycle += 1
+        run_id = _new_schedule_run_id()
+        loaded_for_run = load_config(config)
+        store_for_run = StateStore(_state_path(loaded_for_run))
         backoff = _schedule_backoff_status(config)
+        store_for_run.start_scheduler_run(
+            run_id=run_id,
+            command="schedule-run",
+            config=str(config),
+            execute=execute,
+            interval_minutes=interval_minutes,
+            prune_enabled=prune,
+            intent_enabled=intent,
+            intent_execute=intent_execute,
+            backoff_active=bool(backoff.get("active")),
+            backoff_until=str(backoff.get("until")) if backoff.get("until") else None,
+            summary={"cycle": cycle},
+        )
+        _record_schedule_phase(
+            store_for_run,
+            run_id=run_id,
+            phase="backoff_check",
+            event="active" if backoff.get("active") else "inactive",
+            payload={"schedule_backoff": backoff},
+        )
         if heartbeat_file is not None:
             _write_heartbeat(
                 heartbeat_file,
@@ -721,6 +850,7 @@ def schedule_run(
                 interval_minutes=interval_minutes,
                 payload={
                     "command": "schedule-run",
+                    "run_id": run_id,
                     "config": str(config),
                     "execute": execute,
                     "phase": "running",
@@ -730,25 +860,48 @@ def schedule_run(
                 },
             )
         if backoff.get("active"):
+            _record_schedule_phase(
+                store_for_run,
+                run_id=run_id,
+                phase="backoff_check",
+                event="skip",
+                message="schedule backoff active",
+                payload={"schedule_backoff": backoff},
+            )
             payload = _schedule_backoff_skip_payload(
                 config,
                 execute=execute,
                 intent_enabled=intent,
                 intent_execute=intent_execute,
                 backoff=backoff,
+                run_id=run_id,
             )
         else:
             prune_payload: dict[str, Any] | None = None
             if prune:
+                _record_schedule_phase(
+                    store_for_run,
+                    run_id=run_id,
+                    phase="prune",
+                    event="start",
+                )
                 prune_payload = _prune_payload(
                     config,
                     execute=execute,
                     free_window_min_remaining_minutes=interval_minutes,
                     completed_low_upload_requires_reclamation=True,
                 )
+                _record_schedule_phase(
+                    store_for_run,
+                    run_id=run_id,
+                    phase="prune",
+                    event="end",
+                    payload=_prune_payload_summary(prune_payload),
+                )
                 if "error" in prune_payload:
                     payload = {
                         "command": "schedule-run",
+                        "run_id": run_id,
                         "config": str(config),
                         "execute": execute,
                         "error": f"prune: {prune_payload['error']}",
@@ -760,6 +913,12 @@ def schedule_run(
                 payload = {}
 
             if "error" not in payload:
+                _record_schedule_phase(
+                    store_for_run,
+                    run_id=run_id,
+                    phase="pt_discovery",
+                    event="start",
+                )
                 payload = _run_once_payload(
                     config,
                     execute=execute,
@@ -770,16 +929,49 @@ def schedule_run(
                     prune=False,
                     capacity_prune=prune,
                 )
+                _record_schedule_phase(
+                    store_for_run,
+                    run_id=run_id,
+                    phase="pt_enqueue",
+                    event="end",
+                    payload={
+                        "discovered": payload.get("discovered"),
+                        "scored": payload.get("scored"),
+                        "accepted": payload.get("accepted"),
+                        "enqueued": payload.get("enqueued"),
+                        "discovery_warnings": payload.get("discovery_warnings"),
+                    },
+                )
                 if prune_payload is not None:
                     payload["prune"] = prune_payload
                 if _payload_has_mteam_rate_limit(payload):
+                    endpoint = _mteam_rate_limit_endpoint(payload)
                     payload["schedule_backoff"] = _record_schedule_rate_limit_backoff(
                         config,
+                        endpoint=endpoint,
                         reason="mteam request too frequent",
+                        run_id=run_id,
                     )
                     payload["skipped_by_backoff"] = True
+                    store_for_run.record_tracker_api_event(
+                        site="mteam",
+                        endpoint=endpoint,
+                        event="rate_limited",
+                        run_id=run_id,
+                        rate_limited=True,
+                        message="mteam request too frequent",
+                    )
+                    _record_schedule_phase(
+                        store_for_run,
+                        run_id=run_id,
+                        phase="pt_discovery",
+                        event="warning",
+                        message="mteam rate limited",
+                        payload={"schedule_backoff": payload["schedule_backoff"]},
+                    )
 
         payload["command"] = "schedule-run"
+        payload["run_id"] = run_id
         payload["cycle"] = cycle
         payload["interval_minutes"] = interval_minutes
         payload["scheduled_at"] = datetime.now(UTC).isoformat()
@@ -794,13 +986,29 @@ def schedule_run(
                 payload["intent"] = _intent_backoff_skip_payload(
                     execute=intent_execute,
                     backoff=payload["schedule_backoff"],
+                    run_id=run_id,
                 )
         elif intent and "error" not in payload:
             intent_search = _scheduled_intent_search_due()
+            _record_schedule_phase(
+                store_for_run,
+                run_id=run_id,
+                phase="intent_search" if intent_search else "intent_source_sync",
+                event="start",
+                payload={"search_enabled": intent_search},
+            )
             intent_payload = _intent_run_once_payload(
                 config,
                 execute=intent_execute,
                 search_ingested=intent_search,
+                run_id=run_id,
+            )
+            _record_schedule_phase(
+                store_for_run,
+                run_id=run_id,
+                phase="intent_search" if intent_search else "intent_source_sync",
+                event="end",
+                payload=_intent_payload_summary(intent_payload),
             )
             payload["intent"] = intent_payload
             payload["intent_search_enabled"] = intent_search
@@ -814,7 +1022,13 @@ def schedule_run(
                 payload=payload,
             )
             payload["heartbeat_file"] = str(heartbeat_file)
-        _print_json(_schedule_log_summary(payload))
+        summary = _schedule_log_summary(payload)
+        store_for_run.finish_scheduler_run(
+            run_id=run_id,
+            status=_schedule_run_status(summary),
+            summary=summary,
+        )
+        _print_json(summary)
 
         if "error" in payload and max_cycles is not None:
             raise typer.Exit(code=1)
@@ -828,6 +1042,49 @@ def _scheduled_intent_search_due(now: datetime | None = None) -> bool:
     return current.hour == 0
 
 
+def _new_schedule_run_id(now: datetime | None = None) -> str:
+    current = now or datetime.now(UTC)
+    return f"sched-{current.strftime('%Y%m%dT%H%M%SZ')}-{uuid.uuid4().hex[:8]}"
+
+
+def _record_schedule_phase(
+    store: StateStore,
+    *,
+    run_id: str,
+    phase: str,
+    event: str,
+    message: str | None = None,
+    payload: dict[str, Any] | None = None,
+) -> None:
+    event_payload: dict[str, Any] = {
+        "run_id": run_id,
+        "phase": phase,
+        "event": event,
+    }
+    if message is not None:
+        event_payload["message"] = message
+    if payload is not None:
+        event_payload["payload"] = payload
+    store.record_scheduler_event(
+        run_id=run_id,
+        phase=phase,
+        event=event,
+        message=message,
+        payload=payload,
+    )
+    _print_json(event_payload)
+
+
+def _schedule_run_status(summary: dict[str, Any]) -> str:
+    if summary.get("error"):
+        return "error"
+    if summary.get("skipped_by_backoff") and summary.get("schedule_backoff"):
+        return "skipped_backoff"
+    if _payload_has_mteam_rate_limit(summary):
+        return "rate_limited"
+    return "success"
+
+
 def _schedule_backoff_path(config_path: Path) -> Path:
     return _runtime_root(load_config(config_path)) / SCHEDULE_BACKOFF_FILE
 
@@ -837,6 +1094,9 @@ def _schedule_backoff_status(
     *,
     now: datetime | None = None,
 ) -> dict[str, Any]:
+    tracker_status = _tracker_backoff_status(config_path, now=now)
+    if tracker_status.get("active"):
+        return tracker_status
     path = _schedule_backoff_path(config_path)
     status: dict[str, Any] = {"active": False, "path": str(path)}
     if not path.exists():
@@ -869,7 +1129,9 @@ def _schedule_backoff_status(
 def _record_schedule_rate_limit_backoff(
     config_path: Path,
     *,
+    endpoint: str = "torrent/search",
     reason: str,
+    run_id: str | None = None,
     now: datetime | None = None,
 ) -> dict[str, Any]:
     current = now or datetime.now().astimezone()
@@ -894,7 +1156,56 @@ def _record_schedule_rate_limit_backoff(
         + "\n",
         encoding="utf-8",
     )
+    store = StateStore(_state_path(load_config(config_path)))
+    store.set_tracker_backoff(
+        site="mteam",
+        endpoint=endpoint,
+        until=until.isoformat(),
+        reason=reason,
+        source="schedule",
+        run_id=run_id,
+        created_at=current,
+    )
     return _schedule_backoff_status(config_path, now=current)
+
+
+def _tracker_backoff_status(
+    config_path: Path,
+    *,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    store = StateStore(_state_path(load_config(config_path)))
+    current = now or datetime.now().astimezone()
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=UTC)
+    active_rows: list[dict[str, Any]] = []
+    for row in store.list_tracker_backoffs():
+        if str(row.get("site")) != "mteam" or not bool(row.get("active")):
+            continue
+        until = _parse_schedule_backoff_datetime(row.get("until"))
+        if until is None:
+            continue
+        remaining_minutes = (until - current).total_seconds() / 60
+        if remaining_minutes <= 0:
+            continue
+        item = dict(row)
+        item["until"] = until.isoformat()
+        item["remaining_minutes"] = round(remaining_minutes, 2)
+        active_rows.append(item)
+    if not active_rows:
+        return {"active": False, "path": str(_schedule_backoff_path(config_path))}
+    primary = max(active_rows, key=lambda row: str(row.get("until") or ""))
+    return {
+        "active": True,
+        "path": str(_schedule_backoff_path(config_path)),
+        "site": primary.get("site"),
+        "endpoint": primary.get("endpoint"),
+        "created_at": primary.get("created_at"),
+        "until": primary.get("until"),
+        "reason": primary.get("reason"),
+        "remaining_minutes": primary.get("remaining_minutes"),
+        "tracker_backoffs": active_rows,
+    }
 
 
 def _next_local_midnight_at_or_after(value: datetime) -> datetime:
@@ -922,6 +1233,8 @@ def _payload_has_mteam_rate_limit(payload: dict[str, Any]) -> bool:
     messages: list[str] = []
     for warning in payload.get("discovery_warnings") or []:
         if isinstance(warning, dict):
+            if warning.get("rate_limited") is True:
+                return True
             messages.append(str(warning.get("message") or warning.get("error") or ""))
         else:
             messages.append(str(warning))
@@ -934,6 +1247,15 @@ def _payload_has_mteam_rate_limit(payload: dict[str, Any]) -> bool:
     )
 
 
+def _mteam_rate_limit_endpoint(payload: dict[str, Any]) -> str:
+    for warning in payload.get("discovery_warnings") or []:
+        if isinstance(warning, dict) and warning.get("rate_limited") is True:
+            endpoint = str(warning.get("endpoint") or "").strip()
+            if endpoint:
+                return endpoint
+    return "torrent/search"
+
+
 def _schedule_backoff_skip_payload(
     config_path: Path,
     *,
@@ -941,9 +1263,11 @@ def _schedule_backoff_skip_payload(
     intent_enabled: bool,
     intent_execute: bool,
     backoff: dict[str, Any],
+    run_id: str | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "command": "schedule-run",
+        "run_id": run_id,
         "config": str(config_path),
         "execute": execute,
         "discovered": 0,
@@ -959,6 +1283,7 @@ def _schedule_backoff_skip_payload(
         payload["intent"] = _intent_backoff_skip_payload(
             execute=intent_execute,
             backoff=backoff,
+            run_id=run_id,
         )
         payload["intent_search_enabled"] = False
     return payload
@@ -968,9 +1293,11 @@ def _intent_backoff_skip_payload(
     *,
     execute: bool,
     backoff: dict[str, Any],
+    run_id: str | None = None,
 ) -> dict[str, Any]:
     return {
         "command": "intent-run-once",
+        "run_id": run_id,
         "execute": execute,
         "search_enabled": False,
         "ingested": 0,
@@ -1046,6 +1373,7 @@ def _prune_payload(
     _write_audit_decisions(loaded, decisions)
     if execute:
         _persist_prune_state(store, decisions)
+    preview = _prune_preview(decisions, torrents, store)
     payload = {
         "command": "prune",
         "config": str(config_path),
@@ -1058,7 +1386,8 @@ def _prune_payload(
         "missing_from_qb_reconciled": missing_reconciled,
         "pool_usage": _pool_usage_summary(loaded, all_torrents),
         "decisions": [_decision_summary(item) for item in decisions],
-        "preview": _prune_preview(decisions, torrents, store),
+        "preview": preview,
+        "cleanup_evidence": _cleanup_decision_evidence(preview),
     }
     if batch_error is not None:
         payload["error"] = str(batch_error)
@@ -1223,6 +1552,7 @@ def _intent_run_once_payload(
     *,
     execute: bool,
     search_ingested: bool = True,
+    run_id: str | None = None,
 ) -> dict[str, Any]:
     loaded = load_config(config_path)
     store = StateStore(_state_path(loaded))
@@ -1280,6 +1610,7 @@ def _intent_run_once_payload(
     payload = {
         "command": "intent-run-once",
         "config": str(config_path),
+        "run_id": run_id,
         "execute": execute,
         "search_enabled": search_ingested,
         "ingested": len(result.ingested) if result is not None else 0,
@@ -1296,6 +1627,13 @@ def _intent_run_once_payload(
     if pause_reasons:
         payload["enqueue_paused_reasons"] = pause_reasons
     if result is not None:
+        _record_intent_search_runs(
+            store,
+            intents=result.searched,
+            run_id=run_id,
+            source="intent-run-once",
+            search_enabled=search_ingested,
+        )
         payload["intents"] = [_intent_summary(intent) for intent in result.searched]
         payload["selected"] = [_ranked_release_summary(item) for item in result.enqueue_selected]
     if source_warnings:
@@ -1303,6 +1641,57 @@ def _intent_run_once_payload(
     if batch_error is not None:
         payload["error"] = str(batch_error)
     return payload
+
+
+def _record_intent_search_runs(
+    store: StateStore,
+    *,
+    intents: list[ResourceIntent],
+    run_id: str | None,
+    source: str,
+    search_enabled: bool,
+    backoff: dict[str, Any] | None = None,
+    message: str | None = None,
+) -> None:
+    for intent in intents:
+        ranked = _stored_ranked_releases(store, intent.intent_id)
+        best = ranked[0] if ranked else None
+        row = store.get_intent(intent.intent_id) or {}
+        status = "searched" if search_enabled else "skipped"
+        if backoff and backoff.get("active"):
+            status = "skipped_backoff"
+        store.record_want_search_run(
+            intent_id=intent.intent_id,
+            run_id=run_id,
+            source=source,
+            status=status,
+            search_enabled=search_enabled,
+            results_count=len(ranked),
+            best_score=best.score if best is not None else None,
+            selected_release_id=str(row.get("selected_release_id"))
+            if row.get("selected_release_id") is not None
+            else None,
+            backoff_active=bool(backoff.get("active")) if backoff else False,
+            backoff_until=str(backoff.get("until")) if backoff and backoff.get("until") else None,
+            message=message,
+            payload={"state": row.get("state"), "title": intent.title},
+        )
+
+
+def _stored_ranked_releases(store: StateStore, intent_id: str) -> list[RankedRelease]:
+    ranked: list[RankedRelease] = []
+    for row in store.list_release_candidates(intent_id):
+        try:
+            loaded = json.loads(str(row.get("release_json") or "{}"))
+        except json.JSONDecodeError:
+            continue
+        if isinstance(loaded, dict) and "release" in loaded:
+            try:
+                ranked.append(RankedRelease.model_validate(loaded))
+            except ValueError:
+                continue
+    ranked.sort(key=lambda item: item.score, reverse=True)
+    return ranked
 
 
 def _filter_existing_enqueue_candidates(
@@ -1449,6 +1838,7 @@ def _write_heartbeat(
         "cycle": cycle,
         "interval_minutes": interval_minutes,
         "command": payload.get("command"),
+        "run_id": payload.get("run_id"),
         "config": payload.get("config"),
         "execute": payload.get("execute"),
         "phase": payload.get("phase"),
@@ -1655,6 +2045,180 @@ def _runtime_status_payload(
     return payload
 
 
+def _config_status_payload(config_path: Path) -> dict[str, Any]:
+    loaded = load_config(config_path)
+    state_path = _state_path(loaded)
+    store = StateStore(state_path)
+    return {
+        "command": "config-status",
+        "config": str(config_path),
+        "status": "ok",
+        "workspace_root": str(_workspace_root(loaded)),
+        "state_path": str(state_path),
+        "state_exists": state_path.exists(),
+        "tracker_sites": [
+            {
+                "name": site.name,
+                "type": site.type,
+                "enabled": site.enabled,
+                "discovery_mode": site.discovery_mode,
+                "api_key_ref": site.api_key_ref,
+                "has_api_key": bool(
+                    site.api_key_ref
+                    and _resolve_path(site.api_key_ref, loaded.config_dir).exists()
+                ),
+            }
+            for site in loaded.tracker_sites
+        ],
+        "schedule_backoff": _schedule_backoff_status(config_path),
+        "tracker_backoffs": store.list_tracker_backoffs(),
+        "pt_filters": loaded.pt_filters.model_dump(mode="json"),
+        "pt_scoring": loaded.pt_scoring.model_dump(mode="json"),
+        "seed_cleanup": loaded.seed_cleanup.model_dump(mode="json"),
+        "download_client": {
+            "type": loaded.download_client.type,
+            "target": loaded.download_client.target,
+            "default_category": loaded.download_client.default_category,
+            "budget_pools": [
+                pool.model_dump(mode="json")
+                for pool in loaded.download_client.budget_pools
+            ],
+            "category_policies": [
+                policy.model_dump(mode="json")
+                for policy in loaded.download_client.category_policies
+            ],
+        },
+    }
+
+
+def _runtime_doctor_checks(status: dict[str, Any]) -> list[dict[str, Any]]:
+    checks: list[dict[str, Any]] = []
+    checks.append(
+        _doctor_check(
+            "config",
+            status.get("status") == "ok",
+            str(status.get("error") or "config loaded"),
+        )
+    )
+    checks.append(
+        _doctor_check(
+            "state_db",
+            bool(status.get("state_exists")),
+            str(status.get("state_path") or "state db path unavailable"),
+        )
+    )
+    if "heartbeat" in status:
+        heartbeat = status.get("heartbeat")
+        checks.append(
+            _doctor_check(
+                "heartbeat",
+                isinstance(heartbeat, dict) and heartbeat.get("status") == "ok",
+                str(heartbeat.get("status") if isinstance(heartbeat, dict) else "missing"),
+            )
+        )
+    elif status.get("heartbeat_status"):
+        checks.append(
+            _doctor_check(
+                "heartbeat",
+                False,
+                str(status.get("heartbeat_status")),
+            )
+        )
+    download_client = status.get("download_client")
+    if isinstance(download_client, dict):
+        needs_secret = download_client.get("target") not in {None, "local"}
+        checks.append(
+            _doctor_check(
+                "downloader_credentials",
+                (not needs_secret) or bool(download_client.get("credential_file_present")),
+                "credential file present"
+                if download_client.get("credential_file_present")
+                else "credential file missing",
+            )
+        )
+    return checks
+
+
+def _doctor_check(name: str, ok: bool, message: str) -> dict[str, Any]:
+    return {"name": name, "status": "ok" if ok else "warning", "message": message}
+
+
+def _tracker_api_event_summary(events: list[dict[str, Any]]) -> dict[str, Any]:
+    by_site: dict[str, int] = {}
+    by_endpoint: dict[str, int] = {}
+    rate_limited = 0
+    for event in events:
+        site = str(event.get("site") or "unknown")
+        endpoint = str(event.get("endpoint") or "unknown")
+        by_site[site] = by_site.get(site, 0) + 1
+        by_endpoint[endpoint] = by_endpoint.get(endpoint, 0) + 1
+        if bool(event.get("rate_limited")):
+            rate_limited += 1
+    return {
+        "total": len(events),
+        "rate_limited": rate_limited,
+        "by_site": by_site,
+        "by_endpoint": by_endpoint,
+    }
+
+
+def _torrent_contribution_item(torrent: ManagedTorrent) -> dict[str, Any]:
+    downloaded = torrent.downloaded_bytes or torrent.size_bytes
+    ratio = torrent.uploaded_bytes / downloaded if downloaded else None
+    recent_upload = torrent.metadata.get("recent_upload_gb")
+    return {
+        "name": torrent.name,
+        "hash": torrent.hash,
+        "category": torrent.category,
+        "state": torrent.state,
+        "size_gb": round(torrent.size_bytes / 1024**3, 2),
+        "uploaded_gb": round(torrent.uploaded_bytes / 1024**3, 2),
+        "downloaded_gb": round(downloaded / 1024**3, 2) if downloaded else 0,
+        "ratio": round(ratio, 4) if ratio is not None else None,
+        "recent_upload_gb": round(float(recent_upload), 3)
+        if recent_upload is not None
+        else None,
+        "progress": torrent.metadata.get("progress"),
+        "upspeed": torrent.metadata.get("upspeed"),
+        "eta_seconds": torrent.metadata.get("eta_seconds"),
+        "no_upload_since_at": _metadata_datetime_string(
+            torrent.metadata.get("no_upload_since_at")
+        ),
+        "tags": list(torrent.tags),
+    }
+
+
+def _contribution_summary(items: list[dict[str, Any]]) -> dict[str, Any]:
+    total_size = sum(float(item.get("size_gb") or 0) for item in items)
+    total_uploaded = sum(float(item.get("uploaded_gb") or 0) for item in items)
+    zero_upload_large = [
+        item
+        for item in items
+        if float(item.get("uploaded_gb") or 0) <= 0 and float(item.get("size_gb") or 0) >= 100
+    ]
+    low_recent = [
+        item
+        for item in items
+        if item.get("recent_upload_gb") is not None
+        and float(item.get("recent_upload_gb") or 0) <= 0
+    ]
+    return {
+        "total_size_gb": round(total_size, 2),
+        "total_uploaded_gb": round(total_uploaded, 2),
+        "overall_ratio": round(total_uploaded / total_size, 4) if total_size else None,
+        "zero_upload_large_count": len(zero_upload_large),
+        "low_recent_upload_count": len(low_recent),
+    }
+
+
+def _metadata_datetime_string(value: Any) -> str | None:
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if value is None:
+        return None
+    return str(value)
+
+
 def _run(value: Any) -> Any:
     return asyncio.run(value)
 
@@ -1691,6 +2255,7 @@ def _print_error_payload(payload: dict[str, Any]) -> int:
 def _schedule_log_summary(payload: dict[str, Any]) -> dict[str, Any]:
     summary_keys = [
         "command",
+        "run_id",
         "config",
         "execute",
         "cycle",
@@ -1751,6 +2316,7 @@ def _intent_payload_summary(payload: object) -> dict[str, Any] | None:
         return None
     summary = {
         "command": payload.get("command"),
+        "run_id": payload.get("run_id"),
         "execute": payload.get("execute"),
         "search_enabled": payload.get("search_enabled"),
         "ingested": payload.get("ingested"),
@@ -2322,6 +2888,52 @@ def _prune_preview(
                 item["candidate_evidence"] = evidence_summary["candidate_evidence"]
         preview.append(item)
     return preview
+
+
+def _cleanup_decision_evidence(preview: list[dict[str, Any]]) -> dict[str, Any]:
+    by_action: dict[str, int] = {}
+    low_upload_large: list[dict[str, Any]] = []
+    deletion_candidates: list[dict[str, Any]] = []
+    pause_candidates: list[dict[str, Any]] = []
+    for item in preview:
+        action = str(item.get("action") or "unknown")
+        by_action[action] = by_action.get(action, 0) + 1
+        sample = _cleanup_evidence_sample(item)
+        if action.endswith(".delete"):
+            deletion_candidates.append(sample)
+        if action.endswith(".pause"):
+            pause_candidates.append(sample)
+        uploaded = float(item.get("uploaded_gb") or 0)
+        recent = item.get("recent_upload_gb")
+        recent_value = float(recent or 0) if recent is not None else None
+        size = float(item.get("size_gb") or 0)
+        if size >= 100 and uploaded <= 0 and (recent_value is None or recent_value <= 0):
+            low_upload_large.append(sample)
+    return {
+        "total": len(preview),
+        "by_action": by_action,
+        "delete_count": len(deletion_candidates),
+        "pause_count": len(pause_candidates),
+        "low_upload_large_count": len(low_upload_large),
+        "delete_samples": deletion_candidates[:10],
+        "pause_samples": pause_candidates[:10],
+        "low_upload_large_samples": low_upload_large[:10],
+    }
+
+
+def _cleanup_evidence_sample(item: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "hash": item.get("hash"),
+        "candidate_id": item.get("candidate_id"),
+        "name": item.get("name"),
+        "action": item.get("action"),
+        "reason": item.get("reason"),
+        "size_gb": item.get("size_gb"),
+        "uploaded_gb": item.get("uploaded_gb"),
+        "recent_upload_gb": item.get("recent_upload_gb"),
+        "ratio": item.get("ratio"),
+        "no_upload_since_at": item.get("no_upload_since_at"),
+    }
 
 
 def _runtime_activity_summary(torrents: list[ManagedTorrent]) -> dict[str, float | int]:

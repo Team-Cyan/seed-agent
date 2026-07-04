@@ -201,6 +201,27 @@ async def test_mteam_api_client_raises_for_nonzero_search_response() -> None:
 
     assert exc_info.value.code == "1"
     assert exc_info.value.message == "請求過於頻繁"
+    assert exc_info.value.rate_limited is True
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_mteam_api_client_raises_rate_limit_for_download_token_response() -> None:
+    respx.post("https://api.m-team.cc/api/torrent/genDlToken").mock(
+        return_value=httpx.Response(
+            200,
+            json={"code": "1", "message": "請求過於頻繁", "data": None},
+        )
+    )
+
+    client = MTeamApiClient(api_key="secret-api-key")
+
+    with pytest.raises(MTeamApiResponseError) as exc_info:
+        await client.fetch_download_url("1171443")
+
+    assert exc_info.value.endpoint == "torrent/genDlToken"
+    assert exc_info.value.code == "1"
+    assert exc_info.value.rate_limited is True
 
 
 @pytest.mark.asyncio

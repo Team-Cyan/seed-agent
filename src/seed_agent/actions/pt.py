@@ -11,6 +11,7 @@ from seed_agent.models import ManagedTorrent, ScoreBreakdown, TorrentCandidate
 from seed_agent.policies.scoring import score_candidate
 from seed_agent.sites.mteam import (
     MTeamApiDiscoveryOptions,
+    MTeamApiResponseError,
     has_deferred_download_url,
     resolve_deferred_download_url,
 )
@@ -29,13 +30,20 @@ class SiteDiscoveryWarning:
     site: str
     error_type: str
     message: str
+    endpoint: str | None = None
+    rate_limited: bool = False
 
 
 _LAST_DISCOVERY_WARNINGS: tuple[SiteDiscoveryWarning, ...] = ()
 
 
-def get_last_discovery_warnings() -> list[dict[str, str]]:
+def get_last_discovery_warnings() -> list[dict[str, Any]]:
     return [asdict(warning) for warning in _LAST_DISCOVERY_WARNINGS]
+
+
+def _append_runtime_warning(warning: SiteDiscoveryWarning) -> None:
+    global _LAST_DISCOVERY_WARNINGS
+    _LAST_DISCOVERY_WARNINGS = (*_LAST_DISCOVERY_WARNINGS, warning)
 
 
 async def discover_candidates(config: SeedAgentConfig) -> list[TorrentCandidate]:
@@ -53,11 +61,18 @@ async def discover_candidates(config: SeedAgentConfig) -> list[TorrentCandidate]
             _LAST_DISCOVERY_WARNINGS = tuple(warnings)
             raise result
         if isinstance(result, Exception):
+            rate_limited = bool(
+                isinstance(result, MTeamApiResponseError) and result.rate_limited
+            )
             warnings.append(
                 SiteDiscoveryWarning(
                     site=site.name,
                     error_type=type(result).__name__,
                     message=_runtime_error_summary(result),
+                    endpoint=result.endpoint
+                    if isinstance(result, MTeamApiResponseError)
+                    else None,
+                    rate_limited=rate_limited,
                 )
             )
             continue
@@ -167,10 +182,16 @@ async def resolve_deferred_download_urls(
         if site.type == "mteam"
     }
     resolved: list[ScoreBreakdown] = []
+    rate_limited = False
     for item in scored_list:
         candidate = item.candidate
         if not item.accepted or not has_deferred_download_url(candidate):
             resolved.append(item)
+            continue
+        if rate_limited:
+            resolved.append(
+                _reject_unresolved_download_url(item, "mteam api rate limited")
+            )
             continue
 
         api_key = api_keys.get(candidate.site)
@@ -183,6 +204,29 @@ async def resolve_deferred_download_urls(
                 candidate,
                 api_key=api_key,
             )
+        except MTeamApiResponseError as exc:
+            if exc.rate_limited:
+                rate_limited = True
+                _append_runtime_warning(
+                    SiteDiscoveryWarning(
+                        site=candidate.site,
+                        error_type=type(exc).__name__,
+                        message=_runtime_error_summary(exc),
+                        endpoint=exc.endpoint,
+                        rate_limited=True,
+                    )
+                )
+                resolved.append(
+                    _reject_unresolved_download_url(item, "mteam api rate limited")
+                )
+                continue
+            resolved.append(
+                _reject_unresolved_download_url(
+                    item,
+                    f"download_url unavailable from mteam api: {_error_summary(exc)}",
+                )
+            )
+            continue
         except Exception as exc:
             resolved.append(
                 _reject_unresolved_download_url(
