@@ -47,7 +47,12 @@ Expose the operator-facing command surface and safe summaries.
 - per-section web YAML editing for top-level config blocks while preserving a
   single physical runtime config file,
 - configured source-event ingestion during `intent-run-once`, including Douban
-  wanted-list and IMDb watchlist/list events,
+  wanted-list, IMDb watchlist/list, Letterboxd CSV, and Telegram polling
+  events,
+- rule/config portability through `config-export` and dry-run-first
+  `config-import --rules <file>`, with writes gated by `--execute`,
+- read-only product-expansion reports through `release-profiles`,
+  `reseed-report`, and `headroom-report`,
 - `schedule-run` runs the resource intent loop every cycle by default so
   configured Want List sources are refreshed, but scheduled torrent search only
   runs during the local midnight hour. Operators can still trigger filtered or
@@ -126,10 +131,14 @@ Expose the operator-facing command surface and safe summaries.
   explicit candidate-level action with a confirmation step. Candidate review UI
   should keep lower-match releases visibly distinct without making their force
   actions look disabled.
+- keep `config-import` dry-run by default and validate the merged config before
+  writing. Imported rule bundles should not contain secret values, only secret
+  refs.
 
 ## Verification
 
 - `uv run pytest -q tests/test_cli.py tests/test_cli_bootstrap.py tests/test_run_once.py`
+- `uv run pytest -q tests/test_downloader_contracts.py tests/test_search_contracts.py`
 - `uv run seed-agent --help`
 - `uv run seed-agent schedule-run --help`
 - `uv run seed-agent healthcheck --help`

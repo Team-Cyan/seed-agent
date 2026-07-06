@@ -178,6 +178,37 @@ by completion period, and unfinished work is ordered by current priority.
     reclamation is needed, while the explicit low-upload deletion policy remains
     available for normal prune callers.
 
+- Completed 2026-07 - Review-driven state inventory hardening
+  - Operator-facing SQLite schema inventory now includes scheduler runs,
+    scheduler phase events, tracker backoffs, tracker API events, and Want List
+    search history.
+  - State/audit module docs now describe those operational evidence tables.
+  - A schema inventory regression test compares the documented SQLite tables and
+    columns against the current `StateStore` schema.
+  - Roadmap follow-up planning now uses Apple `container` on the Mac mini as the
+    local deployment/debug gate before live Unraid checks.
+  - Focused integration coverage now asserts scheduler phase ordering with a
+    shared run ID and Web Want List search history persistence without touching
+    a downloader.
+
+- Completed 2026-07 - Review roadmap execution
+  - `site_history_score` now has a real state-derived feedback loop. The state
+    store aggregates candidate/runtime/tracker evidence by site with low-sample
+    fallback, `strategy-report` exposes the raw feedback inputs, and CLI/Web
+    scoring paths inject applied site history before enqueue decisions.
+  - Downloader contract coverage now fixes `add_url`, `list_torrents`, `pause`,
+    and `delete` semantics. qBittorrent remains the reference implementation,
+    and Transmission is available as the first second downloader via
+    `download_client.type: transmission`.
+  - SearchProvider contract coverage now covers result shape, empty results,
+    provider errors, and release persistence through the intent loop. Torznab is
+    available as a second non-M-Team provider for intent search.
+  - Want List sources now include Letterboxd CSV exports, and Telegram polling
+    can ingest updates through a local secret-backed bot token.
+  - Product-expansion CLI surfaces now cover `config-export`, dry-run-first
+    `config-import`, `release-profiles`, `reseed-report`, and
+    `headroom-report`.
+
 - Next P0 - Verify and harden Want List in the live Unraid preview
   - Rebuild the Unraid DockerMan container from the updated template and confirm
     `docker port seed-agent` publishes `8765/tcp`.
@@ -185,6 +216,22 @@ by completion period, and unfinished work is ordered by current priority.
     settings display correctly with no secret leaks.
   - Reconcile the Web UI provenance fields with live Unraid paths so wrong
     config/state/heartbeat mounts are easy to spot during operator checks.
+
+- Next P0 - Add scheduler and Web preview integration coverage
+  - Add fake downloader/provider fixtures that can run a scheduler cycle without
+    touching qBittorrent or a tracker.
+  - Cover `schedule-run --prune --intent` phase ordering, persistent run/event
+    recording, tracker backoff skip behavior, and heartbeat liveness. Scheduler
+    phase ordering and shared run IDs are covered; broader fake-provider cycle
+    coverage remains.
+  - Cover Web Want List refresh/search preview behavior so search remains
+    non-mutating and qB enqueue stays candidate-level and explicit. Search
+    history persistence and enqueue preview are covered; broader refresh/search
+    fixture consolidation remains.
+  - Verify scheduler/Web changes in a local Apple `container` deployment before
+    touching live Unraid.
+  - Keep the detailed task split in
+    `docs/plans/2026-07-06-deep-research-review-followups.md`.
 
 - Next P0 - Close the intent automation loop with real M-Team results
   - Run Douban and IMDb ingestion for configured public/export sources.
@@ -209,32 +256,6 @@ by completion period, and unfinished work is ordered by current priority.
   - Distinguish agent cleanup from external/manual qB deletions when upload
     history changes suddenly.
 
-- Next P1 - Reporting and feedback loop
-  - Turn tracker/account signals, downloader telemetry, historical outcomes,
-    and operator choices into real `site_history_score` inputs.
-  - Add read-only dashboard surfaces for audit, cleanup decisions, and intent
-    queues.
-
-- Next P2 - Additional sources and providers
-  - Add another non-Douban/IMDb rating/list source to validate source adapter
-    boundaries.
-  - Add an authenticated or push-style source runner only after local event
-    models prove stable.
-  - Add a second non-M-Team API provider to validate provider boundaries.
-
-- Next P2 - Downloader expansion
-  - Add Transmission as the first second-downloader adapter.
-  - Keep qBittorrent as the reference implementation until downloader contracts
-    are proven.
-
-- Later - Product expansion
-  - Rule import/export.
-  - Auto-reseed.
-  - Richer configurable release profiles built from composable search/source
-    knobs rather than a single hardcoded profile switch.
-  - Live-state enqueue headroom planning v2 after joined evidence proves which
-    qB runtime signals reliably predict good enqueue outcomes.
-
 - Deferred / intentionally not in scope
   - Dashboard-first product work.
   - Browser-login automation as a core M-Team strategy.
@@ -245,3 +266,4 @@ Reference:
 
 - `docs/architecture.md`
 - `docs/specs/2026-04-25-qb-category-policy-budgeting.md`
+- `docs/plans/2026-07-06-deep-research-review-followups.md`

@@ -24,6 +24,9 @@ Score discovered torrents or ranked releases using explicit policy weights and e
 - explanations should remain operator-readable,
 - scoring should not absorb site-specific parsing logic,
 - ranking should not bypass state/audit expectations.
+- `site_history_score` is injected from local state only when a site has enough
+  joined candidate/runtime samples. Low-sample sites keep the scorer's `0.5`
+  fallback.
 - generic PT candidates without `left_time_minutes` are still hard-rejected,
 - M-Team API candidates may omit discount expiry; if the adapter marks that case,
   scoring gives no left-time points but does not hard-reject an otherwise strong
@@ -50,7 +53,8 @@ Score discovered torrents or ranked releases using explicit policy weights and e
   without discount-score credit. Keep it false for freeleech-only discovery.
 - Use `seed-agent strategy-report --config <config>` before changing strategy
   knobs. It groups current candidates and linked qB runtime outcomes by demand,
-  ratio, size, and score.
+  ratio, size, and score, and shows the state-derived site-history feedback
+  inputs before they affect scoring.
 - When tuning seed-pool scoring, start from live qB outcomes instead of title
   guesses. Compare each executed candidate's enqueue-time `seeders`,
   `leechers`, seed/leecher ratio, size, and free window against later qB

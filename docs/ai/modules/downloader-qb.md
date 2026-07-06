@@ -1,12 +1,15 @@
-# qBittorrent Module
+# Downloader Module
 
 ## Purpose
 
-Own qBittorrent integration for enqueue, review, and cleanup-safe downloader actions.
+Own downloader integrations for enqueue, review, and cleanup-safe actions.
+qBittorrent remains the reference implementation.
 
 ## Primary Files
 
 - `src/seed_agent/downloaders/qbittorrent.py`
+- `src/seed_agent/downloaders/transmission.py`
+- `src/seed_agent/downloaders/base.py`
 - `src/seed_agent/actions/qb.py`
 - `src/seed_agent/cli.py`
 - `docs/specs/qbittorrent-web-api-contract.md`
@@ -22,6 +25,8 @@ support policy.
 ## Current Responsibilities
 
 - authenticate to qB Web API,
+- expose the shared `Downloader` protocol used by PT enqueue and intent
+  enqueue,
 - add torrents,
 - inspect managed torrents,
 - expose live runtime signals such as current upload/download speeds and
@@ -34,7 +39,10 @@ support policy.
   live,
 - keep enqueue-like CLI commands aligned on the same qB runtime view during
   dry-run and execute flows,
-- support pause/delete flows through explicit decisions.
+- support pause/delete flows through explicit decisions,
+- support Transmission RPC as a second downloader through
+  `download_client.type: transmission`, using Transmission labels to carry the
+  existing category/tag semantics.
 
 ## Expectations
 
@@ -68,7 +76,9 @@ support policy.
 - If a torrent is missing from qB after previously being linked in local state,
   record that absence locally but do not infer that seed-agent deleted it unless
   an executed `qb.cleanup.delete` audit entry exists for the same hash.
+- Transmission is contract-tested as a second implementation, but qBittorrent is
+  still the behavioral baseline for cleanup and live Unraid operations.
 
 ## Verification
 
-- `uv run pytest -q tests/test_qbittorrent.py tests/test_enqueue_action.py tests/test_prune_action.py`
+- `uv run pytest -q tests/test_downloader_contracts.py tests/test_qbittorrent.py tests/test_transmission.py tests/test_enqueue_action.py tests/test_prune_action.py`

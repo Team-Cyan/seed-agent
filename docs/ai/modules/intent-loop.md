@@ -20,6 +20,8 @@ Convert human requests into search/rank/reject/enqueue workflows.
   page is ambiguous,
 - ingest IMDb watchlist/list events from CSV exports or best-effort public page
   parsing,
+- ingest Letterboxd watchlist events from CSV exports,
+- ingest Telegram message updates through secret-backed polling,
 - merge Douban and IMDb source events into canonical Want List works through
   `douban:<subject_id>` and `imdb:<tt_id>` aliases,
 - normalize text,
@@ -36,9 +38,12 @@ Convert human requests into search/rank/reject/enqueue workflows.
   later search behavior,
 - preserve source evidence separately from canonical intent rows so repeated
   wants from different configured lists do not duplicate searches or downloads,
-- keep search providers modular,
+- keep search providers modular. M-Team remains the reference API provider;
+  Torznab is available as the first non-M-Team provider to validate the
+  `SearchProvider` boundary,
 - do not entangle source ingestion with downloader logic.
 
 ## Verification
 
 - `uv run pytest -q tests/test_intent_actions.py tests/test_intent_cli.py tests/test_intent_ranking.py tests/test_intent_run_once.py`
+- `uv run pytest -q tests/test_search_contracts.py tests/test_search_torznab.py tests/test_intent_sources.py`

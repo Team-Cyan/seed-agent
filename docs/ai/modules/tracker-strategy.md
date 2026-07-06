@@ -46,10 +46,15 @@ These examples are copy/merge material, not standalone runtime profiles:
    - candidate-evidence coverage,
    - upload count and average upload,
    - outcomes by original candidate leechers, size, and score.
-4. Adjust concrete knobs, not a profile field.
-5. Run `seed-agent run-once --config <config>` without `--execute`.
-6. Execute only after accepted candidates and qB runtime pause gates look sane.
-7. Re-run after several cycles before making stronger strategy changes.
+4. Inspect `site_history` in the same report. It should explain sample counts,
+   productive/missing/no-upload counts, active backoffs, and whether the score
+   is applied or still using the low-sample fallback.
+5. Run `seed-agent headroom-report --config <config>` to project accepted
+   candidate size against the default pool before changing enqueue gates.
+6. Adjust concrete knobs, not a coarse runtime profile switch.
+7. Run `seed-agent run-once --config <config>` without `--execute`.
+8. Execute only after accepted candidates and runtime pause gates look sane.
+9. Re-run after several cycles before making stronger strategy changes.
 
 ## Tuning Direction
 
