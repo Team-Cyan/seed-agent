@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import secrets
 import sqlite3
 from asyncio import run
 from datetime import UTC, datetime
@@ -107,6 +109,8 @@ def make_handler(config_path: Path) -> type[BaseHTTPRequestHandler]:
             self._send_json({"error": "not found"}, status=HTTPStatus.NOT_FOUND)
 
         def do_POST(self) -> None:
+            if not self._authorize_write_request():
+                return
             try:
                 self._do_post()
             except Exception as exc:
@@ -228,6 +232,12 @@ def make_handler(config_path: Path) -> type[BaseHTTPRequestHandler]:
         def log_message(self, format: str, *args: object) -> None:
             return
 
+        def _authorize_write_request(self) -> bool:
+            if _write_request_authorized(dict(self.headers.items())):
+                return True
+            self._send_json({"error": "unauthorized"}, status=HTTPStatus.UNAUTHORIZED)
+            return False
+
         def _read_json(self) -> dict[str, Any]:
             length = int(self.headers.get("Content-Length", "0"))
             if length == 0:
@@ -270,6 +280,18 @@ def make_handler(config_path: Path) -> type[BaseHTTPRequestHandler]:
             self._send_bytes(path.read_bytes(), content_type=content_type)
 
     return SeedAgentWebHandler
+
+
+def _write_request_authorized(headers: dict[str, str]) -> bool:
+    expected = os.environ.get("SEED_AGENT_WEB_TOKEN", "").strip()
+    if not expected:
+        return True
+    normalized = {key.lower(): value for key, value in headers.items()}
+    provided = normalized.get("x-seed-agent-token", "").strip()
+    authorization = normalized.get("authorization", "").strip()
+    if not provided and authorization.lower().startswith("bearer "):
+        provided = authorization.removeprefix("Bearer ").removeprefix("bearer ").strip()
+    return bool(provided) and secrets.compare_digest(provided, expected)
 
 
 def serve(config_path: Path, host: str, port: int) -> None:
@@ -643,6 +665,7 @@ def _enqueue_want_payload(
     from seed_agent.cli import (
         _build_release_download_resolver,
         _default_category_policy,
+        _downloader_status_summary,
         _enqueue_pause_reasons,
         _enqueue_runtime_context,
         _intent_category_policy,
@@ -663,17 +686,28 @@ def _enqueue_want_payload(
     try:
         default_policy = _default_category_policy(config)
         if execute:
-            downloader, live_torrents, paused, pool_usage, missing_reconciled = (
-                _enqueue_runtime_context(
-                    config,
-                    store=store,
-                    execute=execute,
-                )
+            (
+                downloader,
+                live_torrents,
+                downloader_status,
+                paused,
+                pool_usage,
+                missing_reconciled,
+            ) = _enqueue_runtime_context(
+                config,
+                store=store,
+                execute=execute,
             )
-            pause_reasons = _enqueue_pause_reasons(config, live_torrents, pool_usage)
+            pause_reasons = _enqueue_pause_reasons(
+                config,
+                live_torrents,
+                pool_usage,
+                downloader_status,
+            )
         else:
             downloader = _NullDownloader()
             live_torrents = []
+            downloader_status = None
             paused = False
             pool_usage = None
             missing_reconciled = 0
@@ -741,6 +775,12 @@ def _enqueue_want_payload(
     if pool_usage is not None:
         payload["default_pool_usage"] = _pool_usage_item_summary(pool_usage)
         payload["enqueue_paused_by_pool_policy"] = paused
+    if downloader_status is not None:
+        payload["downloader_status"] = _downloader_status_summary(
+            config,
+            downloader_status,
+            live_torrents,
+        )
     if pause_reasons:
         payload["enqueue_paused_reasons"] = pause_reasons
     return payload, HTTPStatus.OK

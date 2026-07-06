@@ -81,6 +81,10 @@ pt_filters:
   # still add accepted torrents but mark them paused by policy.
   # max_active_downloads: 3
   # max_total_amount_left_gb: 150
+  # min_free_disk_gb keeps this much downloader-reported free disk space
+  # unreserved after existing incomplete downloads. Useful when qB and media
+  # categories share the same physical volume.
+  # min_free_disk_gb: 500
   allow_hr: false
 pt_scoring:
   min_score_to_enqueue: 70

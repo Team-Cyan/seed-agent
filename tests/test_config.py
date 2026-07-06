@@ -289,12 +289,14 @@ def test_load_config_accepts_optional_runtime_enqueue_gates(tmp_path: Path) -> N
         **data["pt_filters"],
         "max_active_downloads": 3,
         "max_total_amount_left_gb": 150,
+        "min_free_disk_gb": 250,
     }
 
     config = SeedAgentConfig(**data)
 
     assert config.pt_filters.max_active_downloads == 3
     assert config.pt_filters.max_total_amount_left_gb == 150
+    assert config.pt_filters.min_free_disk_gb == 250
 
 
 def test_discovery_accepts_ratio_seed_pressure_config_name() -> None:

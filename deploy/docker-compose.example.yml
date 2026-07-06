@@ -23,6 +23,7 @@ services:
       SEED_AGENT_WEB_ENABLED: "true"
       SEED_AGENT_WEB_HOST: 0.0.0.0
       SEED_AGENT_WEB_PORT: "8765"
+      SEED_AGENT_WEB_TOKEN: ${SEED_AGENT_WEB_TOKEN:-}
     ports:
       - "8765:8765"
     volumes:

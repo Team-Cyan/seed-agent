@@ -10,6 +10,7 @@ from typing import Any
 
 import httpx
 
+from seed_agent.downloaders.base import DownloaderStatus
 from seed_agent.models import ManagedTorrent
 
 
@@ -100,6 +101,19 @@ class QbittorrentClient:
                 torrents = [torrent for torrent in torrents if tags.intersection(torrent.tags)]
             return torrents
 
+    async def get_status(self) -> DownloaderStatus:
+        async with self._client() as client:
+            response = await client.get("/api/v2/sync/maindata")
+            self._ensure_success(response, "qBittorrent request to /api/v2/sync/maindata")
+            payload = response.json()
+            if not isinstance(payload, dict):
+                raise QbittorrentError("qBittorrent status response is not an object")
+            server_state = payload.get("server_state")
+            if not isinstance(server_state, dict):
+                return DownloaderStatus()
+            free_space = _optional_int_value(server_state.get("free_space_on_disk"))
+            return DownloaderStatus(free_space_bytes=free_space)
+
     async def pause(self, hash: str) -> None:
         async with self._client() as client:
             await self._post_form(client, "/api/v2/torrents/stop", {"hashes": hash})
@@ -162,6 +176,13 @@ def _optional_int(value: object) -> int | None:
     if isinstance(value, int):
         return value
     return None
+
+
+def _optional_int_value(value: object) -> int | None:
+    try:
+        return int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
 
 
 def _looks_like_info_hash(value: str) -> bool:

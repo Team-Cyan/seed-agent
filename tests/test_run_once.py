@@ -7,7 +7,14 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from seed_agent.config import DiscoveryConfig, ScoringConfig, SeedAgentConfig
-from seed_agent.models import Decision, LifecycleState, ScoreBreakdown, TorrentCandidate
+from seed_agent.downloaders.base import DownloaderStatus
+from seed_agent.models import (
+    Decision,
+    LifecycleState,
+    ManagedTorrent,
+    ScoreBreakdown,
+    TorrentCandidate,
+)
 from seed_agent.state import StateStore
 
 
@@ -854,6 +861,89 @@ def test_run_once_dry_run_uses_raw_amount_left_for_runtime_gate(
     assert payload["enqueue_paused_reasons"] == [
         "remaining download budget reserved for higher-score candidates (1.0004 GiB / max 1.0)"
     ]
+
+
+def test_run_once_pauses_when_existing_download_liability_exceeds_free_disk(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from seed_agent import cli
+
+    monkeypatch.chdir(tmp_path)
+    config_path = _config_file(tmp_path, secret_ref="local/secrets/qb.yaml")
+    config = _config(secret_ref="local/secrets/qb.yaml")
+
+    async def fake_discover_candidates(config: SeedAgentConfig):
+        return [_candidate()]
+
+    def fake_score_candidates(candidates, discovery_config, scoring_config):
+        return [_scored(candidate=candidates[0])]
+
+    async def fake_enqueue_candidates(
+        scored,
+        downloader,
+        policy,
+        execute,
+        *,
+        paused=False,
+        pool_usage=None,
+        pause_reasons=None,
+    ):
+        assert paused is True
+        assert pause_reasons == [
+            "free disk 15.0 GiB below existing remaining download 20.0 GiB"
+        ]
+        return []
+
+    class FakeDownloader:
+        async def get_status(self) -> DownloaderStatus:
+            return DownloaderStatus(free_space_bytes=15 * 1024**3)
+
+        async def list_torrents(self, category: str | None = None, tags: set[str] | None = None):
+            return [
+                ManagedTorrent(
+                    hash="seed-active",
+                    name="Managed Torrent",
+                    category="seed",
+                    tags={"seed-agent", "seed"},
+                    state="stalledDL",
+                    size_bytes=30 * 1024**3,
+                    uploaded_bytes=0,
+                    downloaded_bytes=10 * 1024**3,
+                    added_at=datetime.now(UTC),
+                    last_activity_at=datetime.now(UTC),
+                    metadata={"dlspeed_bps": 0, "amount_left_bytes": 20 * 1024**3},
+                )
+            ]
+
+        async def pause(self, hash: str) -> None:
+            return None
+
+        async def delete(self, hash: str, delete_files: bool) -> None:
+            return None
+
+        async def add_url(
+            self, url: str, category: str, tags: list[str], *, paused: bool = False
+        ) -> str | None:
+            return None
+
+    monkeypatch.setattr(cli, "load_config", lambda path: config)
+    monkeypatch.setattr(cli, "discover_candidates", fake_discover_candidates)
+    monkeypatch.setattr(cli, "score_candidates", fake_score_candidates)
+    monkeypatch.setattr(cli, "enqueue_candidates", fake_enqueue_candidates)
+    monkeypatch.setattr(cli, "_maybe_build_downloader", lambda loaded: FakeDownloader())
+
+    result = CliRunner().invoke(cli.app, ["run-once", "--config", str(config_path)])
+
+    assert result.exit_code == 0
+    payload = _json_output(result)
+    assert payload["enqueue_paused_by_pool_policy"] is True
+    assert payload["enqueue_paused_reasons"] == [
+        "free disk 15.0 GiB below existing remaining download 20.0 GiB"
+    ]
+    assert payload["downloader_status"]["free_space_gb"] == 15.0
+    assert payload["downloader_status"]["existing_download_liability_gb"] == 20.0
+    assert payload["downloader_status"]["available_for_new_downloads_gb"] == 0.0
+    assert payload["downloader_status"]["over_existing_liability"] is True
 
 
 def test_run_once_capacity_prune_refreshes_runtime_before_enqueue(

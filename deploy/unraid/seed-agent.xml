@@ -10,7 +10,7 @@
   <Support>https://github.com/Team-Cyan/seed-agent/issues</Support>
   <Project>https://github.com/Team-Cyan/seed-agent</Project>
   <ReadMe>https://github.com/Team-Cyan/seed-agent#readme</ReadMe>
-  <Overview>Docker-first PT automation for qBittorrent and M-Team, designed for long-running NAS deployment with mounted config, local secrets, audit, and state.</Overview>
+  <Overview>Docker-first PT automation for PT downloaders and M-Team, designed for long-running NAS deployment with mounted config, local secrets, audit, and state.</Overview>
   <Category>Downloaders:Tools:Utilities</Category>
   <WebUI>http://[IP]:[PORT:8765]</WebUI>
   <TemplateURL>https://raw.githubusercontent.com/Team-Cyan/seed-agent/main/deploy/unraid/seed-agent.xml</TemplateURL>
@@ -42,6 +42,7 @@
   <Config Name="Enable Web UI" Target="SEED_AGENT_WEB_ENABLED" Default="true" Mode="" Description="Start the settings Web UI next to the scheduler so DockerMan's WebUI button can open it." Type="Variable" Display="always" Required="true" Mask="false">true</Config>
   <Config Name="Web UI Host" Target="SEED_AGENT_WEB_HOST" Default="0.0.0.0" Mode="" Description="Bind address for the in-container Web UI server. Keep 0.0.0.0 for Docker bridge publishing." Type="Variable" Display="advanced" Required="true" Mask="false">0.0.0.0</Config>
   <Config Name="Web UI Internal Port" Target="SEED_AGENT_WEB_PORT" Default="8765" Mode="" Description="Internal Web UI port inside the container. Keep this aligned with the container side of the port mapping." Type="Variable" Display="advanced" Required="true" Mask="false">8765</Config>
+  <Config Name="Web UI Write Token" Target="SEED_AGENT_WEB_TOKEN" Default="" Mode="" Description="Optional token required for Web UI write/search/enqueue POST requests when non-empty. Keep empty for trusted local-only deployments." Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
   <Config Name="WebUI Host Port" Target="8765" Default="8765" Mode="tcp" Description="Host port for DockerMan's WebUI button. Change only the host side if 8765 is already in use." Type="Port" Display="always" Required="true" Mask="false">8765</Config>
   <TailscaleStateDir/>
 </Container>

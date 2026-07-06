@@ -247,6 +247,26 @@ async def test_list_torrents_accepts_empty_204_login_with_session_cookie() -> No
 
 @pytest.mark.asyncio
 @respx.mock
+async def test_get_status_reads_free_space_from_server_state() -> None:
+    respx.post("https://qb.example/api/v2/auth/login").mock(
+        return_value=httpx.Response(200, text="Ok.")
+    )
+    status_route = respx.get("https://qb.example/api/v2/sync/maindata").mock(
+        return_value=httpx.Response(
+            200,
+            json={"server_state": {"free_space_on_disk": 123456789}},
+        )
+    )
+    client = QbittorrentClient("https://qb.example", "alice", "secret")
+
+    status = await client.get_status()
+
+    assert status.free_space_bytes == 123456789
+    assert status_route.called
+
+
+@pytest.mark.asyncio
+@respx.mock
 async def test_list_torrents_treats_negative_completion_time_as_unknown() -> None:
     respx.post("https://qb.example/api/v2/auth/login").mock(
         return_value=httpx.Response(200, text="Ok.")

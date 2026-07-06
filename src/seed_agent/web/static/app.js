@@ -575,6 +575,7 @@ const settingsPanelsByLanguage = {
         ["最大体积 GB", "max_size_gb", "optional-number", "候选硬大小上限；留空表示不限制。"],
         ["最大活动下载数", "max_active_downloads", "optional-number", "超过后将候选转为暂停添加。"],
         ["最大剩余下载量 GB", "max_total_amount_left_gb", "optional-number", "剩余下载总量超过后暂停添加。"],
+        ["保留磁盘空间 GB", "min_free_disk_gb", "optional-number", "下载器真实剩余空间扣除既有未完成下载后低于此值时暂停添加。"],
       ],
     },
     seed_cleanup: {
@@ -632,6 +633,7 @@ const settingsPanelsByLanguage = {
         ["Maximum size GB", "max_size_gb", "optional-number", "Hard candidate size cap; empty means no limit."],
         ["Maximum active downloads", "max_active_downloads", "optional-number", "Above this, candidates are added paused."],
         ["Maximum remaining download GB", "max_total_amount_left_gb", "optional-number", "Above this remaining-download total, candidates are added paused."],
+        ["Minimum free disk GB", "min_free_disk_gb", "optional-number", "Reserve this much downloader-reported free disk after existing incomplete downloads."],
       ],
     },
     seed_cleanup: {

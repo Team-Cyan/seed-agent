@@ -3419,6 +3419,64 @@ def test_headroom_report_projects_accepted_candidate_size(
     assert payload["headroom_v2"]["recommended_enqueue_mode"] == "normal"
 
 
+def test_headroom_report_flags_disk_headroom_after_existing_liability(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from seed_agent import cli
+    from seed_agent.downloaders.base import DownloaderStatus
+
+    monkeypatch.chdir(tmp_path)
+    config_path = _config_file(tmp_path)
+    config = _config()
+    candidate = _candidate(size_bytes=10 * 1024**3)
+
+    async def fake_discover_candidates(config: SeedAgentConfig):
+        return [candidate]
+
+    def fake_score_candidates(candidates, discovery_config, scoring_config):
+        return [_scored(candidate=candidate, score=95)]
+
+    class FakeDownloader:
+        async def get_status(self) -> DownloaderStatus:
+            return DownloaderStatus(free_space_bytes=15 * 1024**3)
+
+        async def list_torrents(self, category: str | None = None, tags: set[str] | None = None):
+            return [
+                _managed_incomplete_torrent(
+                    hash="seed-active",
+                    size_bytes=8 * 1024**3,
+                    downloaded_bytes=0,
+                    metadata={"amount_left_bytes": 8 * 1024**3},
+                )
+            ]
+
+        async def add_url(
+            self, url: str, category: str, tags: list[str], *, paused: bool = False
+        ) -> str | None:
+            return None
+
+        async def pause(self, hash: str) -> None:
+            return None
+
+        async def delete(self, hash: str, delete_files: bool) -> None:
+            return None
+
+    monkeypatch.setattr(cli, "load_config", lambda path: config)
+    monkeypatch.setattr(cli, "discover_candidates", fake_discover_candidates)
+    monkeypatch.setattr(cli, "score_candidates", fake_score_candidates)
+    monkeypatch.setattr(cli, "_maybe_build_downloader", lambda loaded: FakeDownloader())
+
+    result = CliRunner().invoke(cli.app, ["headroom-report", "--config", str(config_path)])
+
+    assert result.exit_code == 0
+    payload = _json_output(result)
+    assert payload["headroom_v2"]["over_budget_after_accepts"] is False
+    assert payload["headroom_v2"]["over_disk_after_accepts"] is True
+    assert payload["headroom_v2"]["recommended_enqueue_mode"] == "add_paused"
+    assert payload["downloader_status"]["available_for_new_downloads_gb"] == 7.0
+
+
 def test_run_once_invoke_with_execute_flag(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     from seed_agent import cli
 

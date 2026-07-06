@@ -186,6 +186,7 @@ class DiscoveryConfig(BaseModel):
     size_partial_max_gb: float = 150.0
     max_active_downloads: int | None = None
     max_total_amount_left_gb: float | None = None
+    min_free_disk_gb: float | None = None
 
     @field_validator("discounts", mode="before")
     @classmethod
@@ -209,6 +210,7 @@ class DiscoveryConfig(BaseModel):
             "target_seed_leecher_ratio",
             "max_active_downloads",
             "max_total_amount_left_gb",
+            "min_free_disk_gb",
         ):
             value = getattr(self, field_name)
             if value is not None and value < 0:

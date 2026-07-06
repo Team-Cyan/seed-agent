@@ -205,6 +205,33 @@ def test_http_status_payloads_expose_runtime_provenance(tmp_path: Path) -> None:
     assert health_payload["heartbeat_file"] == str(heartbeat_path)
 
 
+def test_http_post_can_require_web_token(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    config_path = _write_minimal_config(tmp_path)
+    monkeypatch.setenv("SEED_AGENT_WEB_TOKEN", "local-token")
+
+    with _running_server(config_path) as base_url:
+        blocked = _request_json(
+            base_url,
+            "POST",
+            "/api/trackers/validate",
+            {"type": "mteam", "name": "mt"},
+            expected_status=401,
+        )
+        allowed = _request_json(
+            base_url,
+            "POST",
+            "/api/trackers/validate",
+            {"type": "mteam", "name": "mt"},
+            headers={"X-Seed-Agent-Token": "local-token"},
+        )
+
+    assert blocked["error"] == "unauthorized"
+    assert "status" in allowed
+
+
 def test_http_ops_payload_exposes_scheduler_and_tracker_state(tmp_path: Path) -> None:
     config_path = _write_minimal_config(tmp_path)
     store = StateStore(tmp_path / ".seed-agent" / "state.db")
@@ -1944,11 +1971,14 @@ def _request_json(
     path: str,
     body: dict[str, Any] | None = None,
     expected_status: int = 200,
+    headers: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     connection = HTTPConnection(base_url)
     raw_body = None if body is None else json.dumps(body).encode("utf-8")
-    headers = {"Content-Type": "application/json"} if raw_body is not None else {}
-    connection.request(method, path, body=raw_body, headers=headers)
+    request_headers = dict(headers or {})
+    if raw_body is not None:
+        request_headers.setdefault("Content-Type", "application/json")
+    connection.request(method, path, body=raw_body, headers=request_headers)
     response = connection.getresponse()
     data = json.loads(response.read().decode("utf-8"))
     connection.close()
