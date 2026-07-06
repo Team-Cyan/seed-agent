@@ -211,3 +211,46 @@ tracker_sites:
 
     assert len(providers) == 1
     assert isinstance(providers[0], MTeamSearchProvider)
+
+
+def test_build_search_providers_uses_torznab_provider(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from seed_agent import cli
+    from seed_agent.search.torznab import TorznabSearchProvider
+
+    monkeypatch.chdir(tmp_path)
+    secret = tmp_path / "local" / "secrets" / "torznab-api-key.txt"
+    secret.parent.mkdir(parents=True)
+    secret.write_text("secret-api-key", encoding="utf-8")
+    config_path = _write_config(tmp_path)
+    config_path.write_text(
+        config_path.read_text(encoding="utf-8").replace(
+            """
+tracker_sites:
+  - name: demo-free
+    type: nexusphp
+    enabled: true
+    rss_url: https://tracker.example/rss.php
+    cookie_ref: null
+""",
+            """
+tracker_sites:
+  - name: torznab-demo
+    type: torznab
+    enabled: true
+    rss_url: https://indexer.example/api
+    api_key_ref: local/secrets/torznab-api-key.txt
+""",
+        ),
+        encoding="utf-8",
+    )
+    loaded = cli.load_config(config_path)
+
+    providers = cli._build_search_providers(loaded)
+
+    assert len(providers) == 1
+    assert isinstance(providers[0], TorznabSearchProvider)
+    assert providers[0].site == "torznab-demo"
+    assert providers[0].api_key == "secret-api-key"

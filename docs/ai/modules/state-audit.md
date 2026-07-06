@@ -19,6 +19,9 @@ Persist local lifecycle knowledge and durable decision evidence.
   finite free window is known,
 - persist enqueue-time candidate snapshots such as size, seeders/leechers,
   discount, left time, and score reasons so later qB outcomes can be explained,
+- persist scheduler runs, scheduler phase events, tracker backoffs, tracker API
+  events, and Want List search runs so operator reports and Web ops surfaces can
+  explain recent unattended behavior,
 - persist `9999-12-31T23:59:59+00:00` for API candidates whose FREE window is
   explicitly unlimited,
 - prune stale unqueued candidate rows after the configured retention window,

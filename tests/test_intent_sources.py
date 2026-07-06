@@ -11,7 +11,8 @@ from seed_agent.sources.douban import (
 )
 from seed_agent.sources.file_inbox import read_file_inbox
 from seed_agent.sources.imdb import parse_imdb_watchlist_csv, parse_imdb_watchlist_html
-from seed_agent.sources.telegram import parse_telegram_update
+from seed_agent.sources.letterboxd import parse_letterboxd_watchlist_csv
+from seed_agent.sources.telegram import parse_telegram_update, poll_telegram_updates
 from seed_agent.sources.wechat_bridge import parse_wechat_bridge_event
 
 
@@ -68,6 +69,51 @@ def test_telegram_parser_extracts_message_without_secret_fields() -> None:
 
 def test_telegram_parser_ignores_non_text_updates() -> None:
     assert parse_telegram_update({"update_id": 1, "message": {"photo": []}}) is None
+
+
+def test_telegram_polling_reads_updates_and_filters_allowed_chats() -> None:
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    def fake_fetcher(bot_token: str, params: dict[str, object]) -> dict[str, object]:
+        calls.append((bot_token, params))
+        return {
+            "ok": True,
+            "result": [
+                {
+                    "update_id": 100,
+                    "message": {
+                        "message_id": 42,
+                        "date": 1776816000,
+                        "chat": {"id": 12345, "type": "private"},
+                        "text": "download Inception 2010 1080p",
+                    },
+                },
+                {
+                    "update_id": 101,
+                    "message": {
+                        "message_id": 43,
+                        "date": 1776816001,
+                        "chat": {"id": 99999, "type": "private"},
+                        "text": "ignore me",
+                    },
+                },
+            ],
+        }
+
+    events = poll_telegram_updates(
+        bot_token="secret-token",
+        offset=100,
+        timeout_seconds=3,
+        allowed_chat_ids={"12345"},
+        fetcher=fake_fetcher,
+    )
+
+    assert calls == [("secret-token", {"timeout": 3, "offset": 100})]
+    assert len(events) == 1
+    assert events[0].source == IntentSource.TELEGRAM
+    assert events[0].source_event_id == "telegram:12345:42"
+    assert events[0].metadata["chat_id"] == "12345"
+    assert "secret-token" not in str(events[0].metadata)
 
 
 def test_wechat_bridge_parser_extracts_message() -> None:
@@ -303,6 +349,35 @@ def test_imdb_watchlist_parses_public_html_fixture() -> None:
     assert events[0].raw_text == "The Shawshank Redemption 1994"
     assert events[0].metadata["external_ids"] == {"imdb": "tt0111161"}
     assert events[0].metadata["source_label"] == "IMDb-经典"
+
+
+def test_letterboxd_watchlist_parses_csv_export() -> None:
+    csv_text = "\n".join(
+        [
+            "Date,Name,Year,Letterboxd URI",
+            "2025-02-01,The Substance,2024,https://boxd.it/Fy0G",
+            "2025-02-02,No Year Movie,,https://boxd.it/demo",
+        ]
+    )
+
+    events = parse_letterboxd_watchlist_csv(
+        csv_text,
+        source_config_id="letterboxd-watchlist",
+        label="Watchlist",
+    )
+
+    assert [event.source for event in events] == [
+        IntentSource.LETTERBOXD,
+        IntentSource.LETTERBOXD,
+    ]
+    assert events[0].raw_text == "The Substance 2024"
+    assert events[0].source_event_id == "letterboxd:https://boxd.it/Fy0G"
+    assert events[0].metadata["media_type"] == "movie"
+    assert events[0].metadata["url"] == "https://boxd.it/Fy0G"
+    assert events[0].metadata["source_config_id"] == "letterboxd-watchlist"
+    assert events[0].metadata["source_label"] == "Letterboxd-Watchlist"
+    assert events[0].requested_at == datetime(2025, 2, 1, tzinfo=UTC)
+    assert events[1].raw_text == "No Year Movie"
 
 
 def test_build_douban_wish_url_accepts_profile_url_or_user_name() -> None:

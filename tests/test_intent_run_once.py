@@ -227,6 +227,58 @@ def test_intent_run_once_ingests_configured_douban_source(
     assert rows[0]["source"] == IntentSource.DOUBAN_WANTED.value
 
 
+def test_intent_run_once_ingests_configured_letterboxd_source(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from seed_agent import cli
+    from seed_agent.models import IntentSource
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli, "_build_search_providers", lambda config: [_FakeSearchProvider()])
+    config_path = _write_config(tmp_path)
+    export = tmp_path / "local" / "inbox" / "letterboxd-watchlist.csv"
+    export.write_text(
+        "Date,Name,Year,Letterboxd URI\n"
+        "2025-02-01,Inception,2010,https://boxd.it/demo\n",
+        encoding="utf-8",
+    )
+    content = config_path.read_text(encoding="utf-8").replace(
+        """
+want_sources:
+  douban_wanted:
+    enabled: false
+    export_ref: null
+""",
+        """
+want_sources:
+  douban_wanted:
+    enabled: false
+    export_ref: null
+  want_lists:
+    - provider: letterboxd
+      id: letterboxd-watchlist
+      label: Watchlist
+      enabled: true
+      export_ref: local/inbox/letterboxd-watchlist.csv
+""",
+    )
+    config_path.write_text(content, encoding="utf-8")
+
+    result = CliRunner().invoke(
+        cli.app,
+        ["intent-run-once", "--config", str(config_path)],
+    )
+
+    assert result.exit_code == 0
+    payload = _json_output(result)
+    assert payload["ingested"] == 1
+    store = StateStore(tmp_path / ".seed-agent" / "state.db")
+    rows = store.list_intents_by_state(IntentState.SEARCHED)
+    assert len(rows) == 1
+    assert rows[0]["source"] == IntentSource.LETTERBOXD.value
+
+
 def test_intent_run_once_dry_run_reports_runtime_activity_when_qb_visible(
     tmp_path: Path,
     monkeypatch,

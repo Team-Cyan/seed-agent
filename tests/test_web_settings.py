@@ -381,6 +381,77 @@ def test_http_wants_search_runs_filtered_search_without_downloader(
     assert search_runs[0]["results_count"] == 0
 
 
+def test_http_wants_search_records_ranked_release_history_without_downloader(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from seed_agent.web import app as web_app
+
+    class FakeSearchProvider:
+        async def search(self, intent):
+            return [
+                ReleaseCandidate(
+                    release_id="demo:https://tracker.example/details/1",
+                    site="demo",
+                    title="葬送的芙莉莲 2023 S01 1080p",
+                    source_url="https://tracker.example/details/1",
+                    download_url="https://tracker.example/download/1",
+                    size_bytes=12 * 1024**3,
+                    seeders=20,
+                    leechers=8,
+                    discount=Discount.FREE,
+                )
+            ]
+
+    config_path = _write_minimal_config(tmp_path)
+    store = StateStore(tmp_path / ".seed-agent" / "state.db")
+    intent = ingest_events(
+        [
+            SourceIntentEvent(
+                source=IntentSource.DOUBAN_WANTED,
+                raw_text="葬送的芙莉莲 2023",
+                source_event_id="douban:35797709",
+                requested_at=datetime(2025, 1, 2, tzinfo=UTC),
+                metadata={
+                    "media_type": "anime",
+                    "external_ids": {"douban": "35797709"},
+                    "source_config_id": "douban-me",
+                    "source_label": "豆瓣-我",
+                },
+            )
+        ],
+        store,
+    )[0][0]
+    monkeypatch.setattr(
+        web_app,
+        "_build_want_search_providers",
+        lambda config: [FakeSearchProvider()],
+    )
+
+    with _running_server(config_path) as base_url:
+        payload = _request_json(
+            base_url,
+            "POST",
+            "/api/wants/search",
+            {"source": "douban-me", "media_type": "anime"},
+        )
+
+    ranked = store.list_release_candidates(intent.intent_id)
+    search_runs = store.list_want_search_runs(intent_id=intent.intent_id)
+    row = store.get_intent(intent.intent_id)
+
+    assert payload["searched"] == 1
+    assert len(ranked) == 1
+    assert ranked[0]["release_id"] == "demo:https://tracker.example/details/1"
+    assert len(search_runs) == 1
+    assert search_runs[0]["status"] == "searched"
+    assert search_runs[0]["results_count"] == 1
+    assert search_runs[0]["best_score"] == ranked[0]["score"]
+    assert row is not None
+    assert row["selected_release_id"] is None
+    assert row["state"] == IntentState.CONFIRMATION_REQUIRED.value
+
+
 def test_http_wants_search_skips_enqueued_wants(
     tmp_path: Path,
     monkeypatch,

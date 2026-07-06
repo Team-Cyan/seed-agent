@@ -79,6 +79,7 @@ SITE_PROFILES = {
     # M-Team RSS exposes title/detail/download reliably, but peer stats and size are
     # not part of the feed shape. Keep the candidate usable and annotate sparsity.
     "mteam": SiteProfile(site_type="mteam", require_size=False, require_peer_stats=False),
+    "torznab": SiteProfile(site_type="torznab", require_size=False, require_peer_stats=False),
 }
 
 

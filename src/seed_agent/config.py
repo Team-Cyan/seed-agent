@@ -144,7 +144,7 @@ class SiteConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     name: str
-    type: Literal["nexusphp", "mteam"]
+    type: Literal["nexusphp", "mteam", "torznab"]
     enabled: bool = True
     rss_url: str
     cookie_ref: str | None = None
@@ -271,7 +271,7 @@ class DownloaderConfig(BaseModel):
 
     VALID_MEDIA_CATEGORY_KEYS: ClassVar[set[str]] = {"movie", "tv", "anime"}
 
-    type: Literal["qbittorrent"]
+    type: Literal["qbittorrent", "transmission"]
     target: str
     default_category: str
     category_policies: list[CategoryPolicyConfig] = Field(default_factory=list)
@@ -424,6 +424,27 @@ class SearchConfig(BaseModel):
         return self
 
 
+class ReleaseProfileConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    default_resolution: str | None = None
+    series_search_mode: Literal["season", "episode"] | None = None
+    quality_tag_scores: dict[str, int] = Field(default_factory=dict)
+    site_priority: dict[str, int] = Field(default_factory=dict)
+    source_ids: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_profile(self) -> ReleaseProfileConfig:
+        unknown_keys = set(self.quality_tag_scores) - quality_tag_group_keys()
+        if unknown_keys:
+            raise ValueError(
+                "unknown quality tag score keys: " + ", ".join(sorted(unknown_keys))
+            )
+        if len(self.source_ids) != len(set(self.source_ids)):
+            raise ValueError("source_ids must not contain duplicates")
+        return self
+
+
 class SecretSourceConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
@@ -449,7 +470,7 @@ class DoubanWantedSourceConfig(BaseModel):
 class WantListSourceConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
-    provider: Literal["douban", "imdb"]
+    provider: Literal["douban", "imdb", "letterboxd"]
     id: str
     label: str
     enabled: bool = True
@@ -470,6 +491,8 @@ class WantListSourceConfig(BaseModel):
             raise ValueError("douban want list requires user_name or export_ref")
         if self.enabled and self.provider == "imdb" and not (self.watchlist_url or self.export_ref):
             raise ValueError("imdb want list requires watchlist_url or export_ref")
+        if self.enabled and self.provider == "letterboxd" and not self.export_ref:
+            raise ValueError("letterboxd want list requires export_ref")
         return self
 
 
@@ -513,6 +536,7 @@ class SeedAgentConfig(BaseModel):
     seed_cleanup: CleanupConfig
     want_decision: IntentConfig = Field(default_factory=IntentConfig)
     release_preferences: SearchConfig = Field(default_factory=SearchConfig)
+    release_profiles: dict[str, ReleaseProfileConfig] = Field(default_factory=dict)
     want_sources: SourcesConfig = Field(default_factory=SourcesConfig)
     local_state: StateConfig = Field(default_factory=StateConfig)
     _config_dir: Path | None = PrivateAttr(default=None)

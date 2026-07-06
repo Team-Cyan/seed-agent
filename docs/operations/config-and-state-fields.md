@@ -151,6 +151,14 @@ page labels.
 - `reject_hr_by_default`
 - `quality_tag_scores`
 
+`release_profiles`
+
+- `release_profiles.<name>.default_resolution`
+- `release_profiles.<name>.series_search_mode`
+- `release_profiles.<name>.quality_tag_scores`
+- `release_profiles.<name>.site_priority`
+- `release_profiles.<name>.source_ids`
+
 `want_sources`
 
 - `telegram.enabled`
@@ -256,3 +264,83 @@ page labels.
 - `no_upload_since_at`
 - `seen_at`
 - `updated_at`
+
+`scheduler_runs`
+
+- `run_id`
+- `started_at`
+- `finished_at`
+- `status`
+- `command`
+- `config`
+- `execute`
+- `interval_minutes`
+- `prune_enabled`
+- `intent_enabled`
+- `intent_execute`
+- `backoff_active`
+- `backoff_until`
+- `discovered`
+- `scored`
+- `accepted`
+- `enqueued`
+- `intent_ingested`
+- `intent_searched`
+- `intent_ranked`
+- `intent_enqueue_candidates`
+- `warning_count`
+- `error`
+- `summary_json`
+
+`scheduler_run_events`
+
+- `id`
+- `run_id`
+- `phase`
+- `event`
+- `created_at`
+- `message`
+- `payload_json`
+
+`tracker_backoffs`
+
+- `site`
+- `endpoint`
+- `active`
+- `created_at`
+- `until`
+- `reason`
+- `source`
+- `run_id`
+
+`tracker_api_events`
+
+- `id`
+- `site`
+- `endpoint`
+- `event`
+- `created_at`
+- `run_id`
+- `status_code`
+- `api_code`
+- `rate_limited`
+- `message`
+- `request_json`
+- `response_json`
+
+`want_search_runs`
+
+- `id`
+- `intent_id`
+- `run_id`
+- `source`
+- `searched_at`
+- `status`
+- `search_enabled`
+- `results_count`
+- `best_score`
+- `selected_release_id`
+- `backoff_active`
+- `backoff_until`
+- `message`
+- `payload_json`

@@ -552,6 +552,91 @@ def test_state_store_clears_missing_marker_when_torrent_reappears(tmp_path: Path
     assert runtime["missing_from_qb_reason"] is None
 
 
+def test_state_store_site_history_scores_fall_back_for_low_sample_site(
+    tmp_path: Path,
+) -> None:
+    store = StateStore(tmp_path / "state.sqlite3")
+    for index in range(2):
+        torrent_hash = f"low-sample-{index}"
+        store.upsert_candidate(
+            stable_id=f"demo:low-sample-{index}",
+            title=f"Low Sample {index}",
+            site="demo",
+            state=LifecycleState.SEEDING,
+            score=80,
+            torrent_hash=torrent_hash,
+        )
+        store._upsert_torrent_runtime(  # type: ignore[attr-defined]
+            torrent_hash,
+            uploaded_bytes=5 * 1024**3,
+            downloaded_bytes=10 * 1024**3,
+            seen_at=datetime.now(UTC).isoformat(),
+        )
+
+    history = store.site_history_scores(min_samples=3)
+
+    assert history["demo"]["samples"] == 2
+    assert history["demo"]["applied"] is False
+    assert history["demo"]["confidence"] == "low_sample"
+    assert history["demo"]["score"] == 0.5
+
+
+def test_state_store_site_history_scores_join_runtime_and_tracker_signals(
+    tmp_path: Path,
+) -> None:
+    store = StateStore(tmp_path / "state.sqlite3")
+    now = datetime.now(UTC).isoformat()
+    fixtures = [
+        ("productive", LifecycleState.SEEDING, 4 * 1024**3, 10 * 1024**3, None, None),
+        ("idle", LifecycleState.SEEDING, 0, 10 * 1024**3, now, None),
+        ("missing", LifecycleState.DELETED, 0, 10 * 1024**3, None, now),
+    ]
+    for suffix, state, uploaded, downloaded, no_upload_since_at, missing_at in fixtures:
+        torrent_hash = f"history-{suffix}"
+        store.upsert_candidate(
+            stable_id=f"demo:{suffix}",
+            title=f"History {suffix}",
+            site="demo",
+            state=state,
+            score=80,
+            torrent_hash=torrent_hash,
+        )
+        store._upsert_torrent_runtime(  # type: ignore[attr-defined]
+            torrent_hash,
+            uploaded_bytes=uploaded,
+            downloaded_bytes=downloaded,
+            no_upload_since_at=no_upload_since_at,
+            missing_from_qb_at=missing_at,
+            seen_at=now,
+        )
+    store.record_tracker_api_event(
+        site="demo",
+        endpoint="torrent/search",
+        event="response_error",
+        rate_limited=True,
+        created_at=datetime.now(UTC),
+    )
+    store.set_tracker_backoff(
+        site="demo",
+        endpoint="torrent/search",
+        until=(datetime.now(UTC) + timedelta(hours=1)).isoformat(),
+        reason="rate limited",
+    )
+
+    history = store.site_history_scores(min_samples=3)
+
+    assert history["demo"]["samples"] == 3
+    assert history["demo"]["applied"] is True
+    assert history["demo"]["confidence"] == "sufficient"
+    assert history["demo"]["productive_count"] == 1
+    assert history["demo"]["no_upload_count"] == 1
+    assert history["demo"]["missing_count"] == 1
+    assert history["demo"]["rate_limited_events"] == 1
+    assert history["demo"]["active_backoffs"] == 1
+    assert history["demo"]["throttle_penalty"] == 0.07
+    assert history["demo"]["score"] == 0.41
+
+
 def test_state_store_applies_runtime_with_batched_sqlite_access(tmp_path: Path) -> None:
     store = StateStore(tmp_path / "state.sqlite3")
     torrents = [

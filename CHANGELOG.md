@@ -4,6 +4,25 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.14.0 - 2026-07-06
+
+### Added
+
+- Added SQLite-backed site history scoring feedback for tracker and Want List
+  candidate ranking, with strategy report evidence and Web/CLI coverage.
+- Added Transmission downloader and Torznab search provider adapters with
+  contract tests.
+- Added Letterboxd and Telegram Want List source ingestion paths.
+- Added CLI tools for config import/export, release profile inspection, reseed
+  reporting, and disk headroom reporting.
+- Added Apple Container local debugging guidance plus schema/docs parity tests
+  for the SQLite state inventory.
+
+### Changed
+
+- Updated the review roadmap and AI module docs to reflect the completed local
+  container-first roadmap execution.
+
 ## 0.13.0 - 2026-07-04
 
 ### Added

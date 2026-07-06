@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -171,6 +171,32 @@ def score_candidates(
     ]
 
 
+def apply_site_history_feedback(
+    candidates: Sequence[TorrentCandidate] | Iterable[TorrentCandidate],
+    site_history: Mapping[str, Mapping[str, Any]],
+) -> list[TorrentCandidate]:
+    updated: list[TorrentCandidate] = []
+    for candidate in candidates:
+        if "site_history_score" in candidate.metadata:
+            updated.append(candidate)
+            continue
+        feedback = site_history.get(candidate.site)
+        if not feedback or not feedback.get("applied"):
+            updated.append(candidate)
+            continue
+        metadata = dict(candidate.metadata)
+        metadata.update(
+            {
+                "site_history_score": feedback.get("score", 0.5),
+                "site_history_source": "state_feedback",
+                "site_history_samples": feedback.get("samples", 0),
+                "site_history_window_days": feedback.get("window_days"),
+            }
+        )
+        updated.append(candidate.model_copy(update={"metadata": metadata}))
+    return updated
+
+
 async def resolve_deferred_download_urls(
     scored: Sequence[ScoreBreakdown] | Iterable[ScoreBreakdown],
     config: SeedAgentConfig,
@@ -292,6 +318,7 @@ def strategy_report(
     managed_torrents: Sequence[ManagedTorrent] | Iterable[ManagedTorrent],
     *,
     managed_summaries: Sequence[dict[str, Any]] | Iterable[dict[str, Any]] | None = None,
+    site_history: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> dict[str, object]:
     scored_list = list(scored)
     managed_list = list(managed_torrents)
@@ -300,6 +327,7 @@ def strategy_report(
     return {
         "candidate_distribution": _candidate_distribution(scored_list),
         "runtime_outcomes": _runtime_outcomes(managed_list, summary_list),
+        "site_history": dict(site_history or {}),
     }
 
 

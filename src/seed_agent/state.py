@@ -28,6 +28,7 @@ GIB = 1024**3
 _UNSET = object()
 SQLITE_TIMEOUT_SECONDS = 30.0
 SQLITE_BUSY_TIMEOUT_MS = 30_000
+SITE_HISTORY_MIN_SAMPLES = 3
 
 
 class StateStore:
@@ -443,6 +444,122 @@ class StateStore:
         with self._connect(row_factory=sqlite3.Row) as conn:
             rows = conn.execute(query, params).fetchall()
         return [dict(row) for row in rows]
+
+    def site_history_scores(
+        self,
+        *,
+        window_days: int = 30,
+        min_samples: int = SITE_HISTORY_MIN_SAMPLES,
+    ) -> dict[str, dict[str, Any]]:
+        cutoff = (_utc_now_datetime() - timedelta(days=max(window_days, 1))).isoformat()
+        with self._connect(row_factory=sqlite3.Row) as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    c.site,
+                    c.stable_id,
+                    c.state,
+                    c.torrent_hash,
+                    c.updated_at AS candidate_updated_at,
+                    tr.uploaded_bytes,
+                    tr.downloaded_bytes,
+                    tr.missing_from_qb_at,
+                    tr.no_upload_since_at,
+                    tr.paused_at,
+                    tr.seen_at,
+                    tr.updated_at AS runtime_updated_at
+                FROM candidates c
+                JOIN torrent_runtime tr ON tr.torrent_hash = c.torrent_hash
+                WHERE c.torrent_hash IS NOT NULL
+                  AND (
+                    c.updated_at >= ?
+                    OR tr.updated_at >= ?
+                    OR tr.seen_at >= ?
+                  )
+                ORDER BY c.site ASC, c.updated_at DESC, c.stable_id ASC
+                """,
+                (cutoff, cutoff, cutoff),
+            ).fetchall()
+            rate_limited_rows = conn.execute(
+                """
+                SELECT site, COUNT(*) AS count
+                FROM tracker_api_events
+                WHERE rate_limited = 1 AND created_at >= ?
+                GROUP BY site
+                """,
+                (cutoff,),
+            ).fetchall()
+            backoff_rows = conn.execute(
+                """
+                SELECT site, COUNT(*) AS count
+                FROM tracker_backoffs
+                WHERE active = 1
+                GROUP BY site
+                """
+            ).fetchall()
+
+        rate_limited_counts = {
+            str(row["site"]): int(row["count"]) for row in rate_limited_rows
+        }
+        active_backoff_counts = {
+            str(row["site"]): int(row["count"]) for row in backoff_rows
+        }
+        grouped: dict[str, dict[str, Any]] = {}
+        seen_hashes: set[tuple[str, str]] = set()
+        for row in rows:
+            site = str(row["site"])
+            torrent_hash = str(row["torrent_hash"])
+            identity = (site, torrent_hash)
+            if identity in seen_hashes:
+                continue
+            seen_hashes.add(identity)
+            uploaded = _int_value(row["uploaded_bytes"])
+            downloaded = _int_value(row["downloaded_bytes"])
+            upload_ratio = uploaded / downloaded if downloaded > 0 else None
+            entry = grouped.setdefault(
+                site,
+                {
+                    "site": site,
+                    "window_days": max(window_days, 1),
+                    "min_samples": max(min_samples, 1),
+                    "samples": 0,
+                    "productive_count": 0,
+                    "no_upload_count": 0,
+                    "missing_count": 0,
+                    "paused_count": 0,
+                    "total_uploaded_gb": 0.0,
+                    "upload_ratios": [],
+                },
+            )
+            entry["samples"] += 1
+            entry["total_uploaded_gb"] += uploaded / GIB
+            if upload_ratio is not None:
+                entry["upload_ratios"].append(upload_ratio)
+            if uploaded >= GIB or (upload_ratio is not None and upload_ratio >= 0.25):
+                entry["productive_count"] += 1
+            if row["no_upload_since_at"] is not None:
+                entry["no_upload_count"] += 1
+            if (
+                row["missing_from_qb_at"] is not None
+                or row["state"] == LifecycleState.DELETED.value
+            ):
+                entry["missing_count"] += 1
+            if row["paused_at"] is not None or row["state"] == LifecycleState.PAUSED.value:
+                entry["paused_count"] += 1
+
+        for site, rate_limited_count in rate_limited_counts.items():
+            grouped.setdefault(site, _empty_site_history_entry(site, window_days, min_samples))
+            grouped[site]["rate_limited_events"] = rate_limited_count
+        for site, active_backoffs in active_backoff_counts.items():
+            grouped.setdefault(site, _empty_site_history_entry(site, window_days, min_samples))
+            grouped[site]["active_backoffs"] = active_backoffs
+
+        summaries: dict[str, dict[str, Any]] = {}
+        for site, entry in grouped.items():
+            entry.setdefault("rate_limited_events", rate_limited_counts.get(site, 0))
+            entry.setdefault("active_backoffs", active_backoff_counts.get(site, 0))
+            summaries[site] = _site_history_summary(entry)
+        return summaries
 
     def upsert_candidate(
         self,
@@ -1745,6 +1862,88 @@ class StateStore:
             if column in columns:
                 continue
             conn.execute(f"ALTER TABLE torrent_runtime ADD COLUMN {column} {column_type}")
+
+
+def _empty_site_history_entry(
+    site: str,
+    window_days: int,
+    min_samples: int,
+) -> dict[str, Any]:
+    return {
+        "site": site,
+        "window_days": max(window_days, 1),
+        "min_samples": max(min_samples, 1),
+        "samples": 0,
+        "productive_count": 0,
+        "no_upload_count": 0,
+        "missing_count": 0,
+        "paused_count": 0,
+        "total_uploaded_gb": 0.0,
+        "upload_ratios": [],
+        "rate_limited_events": 0,
+        "active_backoffs": 0,
+    }
+
+
+def _site_history_summary(entry: dict[str, Any]) -> dict[str, Any]:
+    samples = int(entry["samples"])
+    min_samples = int(entry["min_samples"])
+    productive = int(entry["productive_count"])
+    no_upload = int(entry["no_upload_count"])
+    missing = int(entry["missing_count"])
+    paused = int(entry["paused_count"])
+    rate_limited_events = int(entry.get("rate_limited_events") or 0)
+    active_backoffs = int(entry.get("active_backoffs") or 0)
+    upload_ratios = [float(value) for value in entry.get("upload_ratios", [])]
+    throttle_penalty = min(
+        0.10,
+        (rate_limited_events * 0.02) + (active_backoffs * 0.05),
+    )
+    applied = samples >= min_samples
+    if applied:
+        score = _clamp_float(
+            0.5
+            + ((productive / samples) * 0.35)
+            - ((no_upload / samples) * 0.20)
+            - ((missing / samples) * 0.20)
+            - ((paused / samples) * 0.10)
+            - throttle_penalty
+        )
+        confidence = "sufficient"
+    else:
+        score = 0.5
+        confidence = "low_sample"
+    return {
+        "site": entry["site"],
+        "window_days": entry["window_days"],
+        "samples": samples,
+        "min_samples": min_samples,
+        "applied": applied,
+        "confidence": confidence,
+        "score": round(score, 2),
+        "productive_count": productive,
+        "no_upload_count": no_upload,
+        "missing_count": missing,
+        "paused_count": paused,
+        "total_uploaded_gb": round(float(entry["total_uploaded_gb"]), 2),
+        "avg_upload_ratio": round(sum(upload_ratios) / len(upload_ratios), 2)
+        if upload_ratios
+        else None,
+        "rate_limited_events": rate_limited_events,
+        "active_backoffs": active_backoffs,
+        "throttle_penalty": round(throttle_penalty, 2),
+    }
+
+
+def _int_value(value: Any) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _clamp_float(value: float) -> float:
+    return max(0.0, min(value, 1.0))
 
 
 def _utc_now() -> str:

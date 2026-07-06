@@ -581,12 +581,40 @@ def test_mteam_api_discovery_requires_api_key_ref() -> None:
         SeedAgentConfig(**data)
 
 
+def test_torznab_site_type_accepts_api_key_ref_without_mteam_api_discovery() -> None:
+    data = _valid_config_data("local/secrets/qb.yaml")
+    data["tracker_sites"] = [
+        {
+            "name": "torznab-demo",
+            "type": "torznab",
+            "enabled": True,
+            "rss_url": "https://indexer.example/api",
+            "api_key_ref": "local/secrets/torznab-api-key.txt",
+        }
+    ]
+
+    config = SeedAgentConfig(**data)
+
+    assert config.tracker_sites[0].type == "torznab"
+    assert config.tracker_sites[0].api_key_ref == "local/secrets/torznab-api-key.txt"
+
+
 def test_invalid_downloader_type_raises_validation_error() -> None:
     data = _valid_config_data("local/secrets/qb.yaml")
     data["download_client"] = {**data["download_client"], "type": "qbittorrentx"}
 
     with pytest.raises(ValidationError, match="qbittorrent"):
         SeedAgentConfig(**data)
+
+
+def test_transmission_downloader_type_uses_existing_policy_shape() -> None:
+    data = _valid_config_data("local/secrets/transmission.yaml")
+    data["download_client"] = {**data["download_client"], "type": "transmission"}
+
+    config = SeedAgentConfig(**data)
+
+    assert config.download_client.type == "transmission"
+    assert config.download_client.default_category == "seed"
 
 
 def test_discovery_numeric_fields_reject_strings() -> None:

@@ -16,7 +16,11 @@ from seed_agent.actions.intent import (
     rank_intent,
     search_intent,
 )
-from seed_agent.actions.pt import _discover_site_candidates, score_candidates
+from seed_agent.actions.pt import (
+    _discover_site_candidates,
+    apply_site_history_feedback,
+    score_candidates,
+)
 from seed_agent.actions.qb import MutationBatchError
 from seed_agent.audit import redact_payload
 from seed_agent.config import (
@@ -334,6 +338,7 @@ def _dry_run_payload(
         site = tracker_draft_to_config(draft)
         config = load_config(config_path)
         candidates = run(_discover_site_candidates(site, config.config_dir, config.pt_filters))
+        candidates = _apply_site_history_feedback(candidates, root)
         scored = score_candidates(candidates, config.pt_filters, config.pt_scoring)
     except Exception as exc:
         return {
@@ -373,6 +378,14 @@ def _state_summary_payload(config_path: Path, root: Path) -> dict[str, Any]:
         payload["release_candidates"] = {"total": _table_count(conn, "release_candidates")}
         payload["torrent_runtime"] = {"total": _table_count(conn, "torrent_runtime")}
     return payload
+
+
+def _apply_site_history_feedback(candidates: list[Any], root: Path) -> list[Any]:
+    state_path = _state_db_path(root)
+    if not state_path.exists():
+        return candidates
+    store = StateStore(state_path)
+    return apply_site_history_feedback(candidates, store.site_history_scores())
 
 
 def _pools_payload(config_path: Path) -> dict[str, Any]:
@@ -1103,6 +1116,8 @@ def _want_source_label(source: str, metadata: dict[str, Any]) -> str:
         return f"豆瓣 / {user_name}" if user_name else "豆瓣"
     if source == IntentSource.IMDB_WATCHLIST.value:
         return "IMDb"
+    if source == IntentSource.LETTERBOXD.value:
+        return "Letterboxd"
     if source == IntentSource.MANUAL.value:
         return "Manual"
     return source or "unknown"
@@ -1165,6 +1180,7 @@ def _want_timestamp_precision(
     source_is_date_only = source in {
         IntentSource.DOUBAN_WANTED.value,
         IntentSource.IMDB_WATCHLIST.value,
+        IntentSource.LETTERBOXD.value,
     }
     if source_is_date_only and (
         "T00:00:00" in text or " 00:00:00" in text

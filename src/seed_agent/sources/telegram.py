@@ -1,12 +1,45 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
+
+import httpx
 
 from seed_agent.models import IntentSource
 from seed_agent.sources.base import SourceIntentEvent
 
 MESSAGE_KEYS = ("message", "edited_message", "channel_post", "edited_channel_post")
+FetchTelegramUpdates = Callable[[str, dict[str, object]], dict[str, Any]]
+
+
+def poll_telegram_updates(
+    *,
+    bot_token: str,
+    offset: int | None = None,
+    timeout_seconds: int = 0,
+    allowed_chat_ids: set[str] | None = None,
+    fetcher: FetchTelegramUpdates | None = None,
+) -> list[SourceIntentEvent]:
+    params: dict[str, object] = {"timeout": max(timeout_seconds, 0)}
+    if offset is not None:
+        params["offset"] = offset
+    payload = (fetcher or _fetch_updates)(bot_token, params)
+    updates = payload.get("result") if isinstance(payload, dict) else None
+    if not isinstance(updates, list):
+        return []
+    events: list[SourceIntentEvent] = []
+    for update in updates:
+        if not isinstance(update, dict):
+            continue
+        event = parse_telegram_update(update)
+        if event is None:
+            continue
+        chat_id = event.metadata.get("chat_id")
+        if allowed_chat_ids and str(chat_id) not in allowed_chat_ids:
+            continue
+        events.append(event)
+    return events
 
 
 def parse_telegram_update(payload: dict[str, Any]) -> SourceIntentEvent | None:
@@ -59,3 +92,13 @@ def _unix_datetime(value: object) -> datetime | None:
         return None
     return datetime.fromtimestamp(value, tz=UTC)
 
+
+def _fetch_updates(bot_token: str, params: dict[str, object]) -> dict[str, Any]:
+    response = httpx.get(
+        f"https://api.telegram.org/bot{bot_token}/getUpdates",
+        params=params,
+        timeout=30.0,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    return payload if isinstance(payload, dict) else {}

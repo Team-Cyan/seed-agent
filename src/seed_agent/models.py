@@ -65,6 +65,7 @@ class IntentSource(StrEnum):
     WECHAT_BRIDGE = "wechat_bridge"
     DOUBAN_WANTED = "douban_wanted"
     IMDB_WATCHLIST = "imdb_watchlist"
+    LETTERBOXD = "letterboxd"
     SUBSCRIPTION = "subscription"
 
 

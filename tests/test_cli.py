@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+import yaml
 from typer.testing import CliRunner
 
 from seed_agent.config import DiscoveryConfig, ScoringConfig, SeedAgentConfig
@@ -1229,6 +1230,124 @@ def test_schedule_run_can_prune_each_cycle(
     assert payload["prune"]["command"] == "prune"
 
 
+def test_schedule_run_persists_phase_order_with_shared_run_id(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from seed_agent import cli
+
+    config_path = _config_file(tmp_path)
+    intent_run_ids: list[str | None] = []
+
+    def fake_prune_payload(
+        config_path_value: Path,
+        *,
+        execute: bool,
+        free_window_min_remaining_minutes: int | None = None,
+        force_space_reclamation: bool = False,
+        completed_low_upload_requires_reclamation: bool = False,
+    ) -> dict[str, object]:
+        return {
+            "command": "prune",
+            "config": str(config_path_value),
+            "execute": execute,
+            "force_space_reclamation": force_space_reclamation,
+            "completed_low_upload_requires_reclamation": (
+                completed_low_upload_requires_reclamation
+            ),
+            "managed_count": 2,
+            "pool_usage": {},
+            "decisions": [],
+            "preview": [],
+        }
+
+    def fake_run_once_payload(
+        config_path_value: Path,
+        *,
+        execute: bool,
+        min_free_window_minutes: int | None,
+        require_known_free_window: bool,
+        prune: bool,
+        prune_free_window_min_remaining_minutes: int | None = None,
+        capacity_prune: bool = False,
+    ) -> dict[str, object]:
+        assert prune is False
+        assert capacity_prune is True
+        return {
+            "command": "run-once",
+            "config": str(config_path_value),
+            "execute": execute,
+            "discovered": 3,
+            "scored": 2,
+            "accepted": 1,
+            "enqueued": 0,
+            "scores": [],
+            "decisions": [],
+        }
+
+    def fake_intent_run_once_payload(
+        config_path_value: Path,
+        *,
+        execute: bool,
+        search_ingested: bool = True,
+        run_id: str | None = None,
+    ) -> dict[str, object]:
+        intent_run_ids.append(run_id)
+        return {
+            "command": "intent-run-once",
+            "config": str(config_path_value),
+            "execute": execute,
+            "search_enabled": search_ingested,
+            "ingested": 1,
+            "searched": 0,
+            "ranked": 0,
+            "enqueue_candidates": 0,
+            "decisions": [],
+        }
+
+    monkeypatch.setattr(cli, "_prune_payload", fake_prune_payload)
+    monkeypatch.setattr(cli, "_run_once_payload", fake_run_once_payload)
+    monkeypatch.setattr(cli, "_intent_run_once_payload", fake_intent_run_once_payload)
+    monkeypatch.setattr(cli, "_scheduled_intent_search_due", lambda now=None: False)
+
+    result = CliRunner().invoke(
+        cli.app,
+        [
+            "schedule-run",
+            "--config",
+            str(config_path),
+            "--prune",
+            "--max-cycles",
+            "1",
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = _json_output(result)
+    run_id = payload["run_id"]
+    assert intent_run_ids == [run_id]
+
+    store = StateStore(tmp_path / ".seed-agent" / "state.db")
+    runs = store.list_scheduler_runs()
+    assert runs[0]["run_id"] == run_id
+    assert runs[0]["status"] == "success"
+    assert runs[0]["discovered"] == 3
+    assert runs[0]["intent_ingested"] == 1
+
+    events = sorted(
+        store.list_scheduler_run_events(run_id=run_id, limit=20),
+        key=lambda row: row["id"],
+    )
+    assert [(row["phase"], row["event"]) for row in events] == [
+        ("backoff_check", "inactive"),
+        ("prune", "start"),
+        ("prune", "end"),
+        ("pt_discovery", "start"),
+        ("pt_enqueue", "end"),
+        ("intent_source_sync", "start"),
+        ("intent_source_sync", "end"),
+    ]
+
+
 def test_schedule_run_prune_uses_interval_as_free_window_horizon(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1382,6 +1501,69 @@ def test_run_once_persists_candidate_snapshot_fields(
     assert row["left_time_minutes"] == 360
     assert row["score"] == 93
     assert row["score_reasons"] == ["discount free accepted", "site_history 0.5"]
+
+
+def test_run_once_applies_site_history_feedback_before_scoring(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from seed_agent import cli
+
+    monkeypatch.chdir(tmp_path)
+
+    config_path = _config_file(tmp_path)
+    config = _config(secret_ref="local/secrets/qb.yaml")
+    candidate = _candidate()
+    store = StateStore(tmp_path / ".seed-agent" / "state.db")
+    for index in range(3):
+        torrent_hash = f"productive-{index}"
+        store.upsert_candidate(
+            stable_id=f"demo-free:productive-{index}",
+            title=f"Productive {index}",
+            site="demo-free",
+            state=LifecycleState.SEEDING,
+            score=90,
+            torrent_hash=torrent_hash,
+        )
+        store._upsert_torrent_runtime(  # type: ignore[attr-defined]
+            torrent_hash,
+            uploaded_bytes=4 * 1024**3,
+            downloaded_bytes=10 * 1024**3,
+            seen_at=datetime.now(UTC).isoformat(),
+        )
+
+    async def fake_discover_candidates(config: SeedAgentConfig):
+        return [candidate]
+
+    seen_metadata: list[dict[str, object]] = []
+
+    def fake_score_candidates(candidates, discovery_config, scoring_config):
+        scored_candidate = candidates[0]
+        seen_metadata.append(dict(scored_candidate.metadata))
+        return [
+            _scored(
+                candidate=scored_candidate,
+                score=95,
+                reasons=["discount free accepted", "site_history 0.85"],
+            )
+        ]
+
+    class FakeDownloader:
+        async def list_torrents(
+            self, category: str | None = None, tags: set[str] | None = None
+        ) -> list[ManagedTorrent]:
+            return []
+
+    monkeypatch.setattr(cli, "load_config", lambda path: config)
+    monkeypatch.setattr(cli, "discover_candidates", fake_discover_candidates)
+    monkeypatch.setattr(cli, "score_candidates", fake_score_candidates)
+    monkeypatch.setattr(cli, "build_downloader", lambda loaded: FakeDownloader())
+
+    result = CliRunner().invoke(cli.app, ["run-once", "--config", str(config_path)])
+
+    assert result.exit_code == 0
+    assert seen_metadata[0]["site_history_score"] == 0.85
+    assert seen_metadata[0]["site_history_source"] == "state_feedback"
+    assert seen_metadata[0]["site_history_samples"] == 3
 
 
 def test_healthcheck_reports_recent_heartbeat(tmp_path: Path) -> None:
@@ -2555,7 +2737,8 @@ def test_strategy_report_cli_reports_candidate_distribution_and_runtime_outcomes
             candidate=candidate,
         )
     ]
-    StateStore(tmp_path / ".seed-agent" / "state.db").upsert_candidate(
+    store = StateStore(tmp_path / ".seed-agent" / "state.db")
+    store.upsert_candidate(
         stable_id=candidate.stable_id,
         title=candidate.title,
         site=candidate.site,
@@ -2569,6 +2752,28 @@ def test_strategy_report_cli_reports_candidate_distribution_and_runtime_outcomes
         left_time_minutes=candidate.left_time_minutes,
         score_reasons=["strategy evidence"],
     )
+    store._upsert_torrent_runtime(  # type: ignore[attr-defined]
+        "strategy-hash",
+        uploaded_bytes=80 * 1024**3,
+        downloaded_bytes=220 * 1024**3,
+        seen_at=datetime.now(UTC).isoformat(),
+    )
+    for index in range(2):
+        torrent_hash = f"strategy-extra-{index}"
+        store.upsert_candidate(
+            stable_id=f"demo-free:strategy-extra-{index}",
+            title=f"Strategy Extra {index}",
+            site="demo-free",
+            state=LifecycleState.SEEDING,
+            score=80,
+            torrent_hash=torrent_hash,
+        )
+        store._upsert_torrent_runtime(  # type: ignore[attr-defined]
+            torrent_hash,
+            uploaded_bytes=2 * 1024**3,
+            downloaded_bytes=10 * 1024**3,
+            seen_at=datetime.now(UTC).isoformat(),
+        )
 
     async def fake_discover_candidates(config: SeedAgentConfig):
         return [candidate]
@@ -2610,6 +2815,10 @@ def test_strategy_report_cli_reports_candidate_distribution_and_runtime_outcomes
     assert outcomes["managed_torrents"] == 1
     assert outcomes["with_candidate_evidence"] == 1
     assert outcomes["by_candidate_leechers"]["25+"]["avg_uploaded_gb"] == 80.0
+    site_history = payload["report"]["site_history"]["demo-free"]
+    assert site_history["applied"] is True
+    assert site_history["samples"] == 3
+    assert site_history["score"] > 0.5
 
 
 def test_run_once_dry_run_reports_runtime_activity_and_default_pool_usage(
@@ -2990,6 +3199,224 @@ seed_cleanup:
     assert downloader.base_url == "http://qb.local:8080"
     assert downloader.username == "alice"
     assert downloader.password == "secret"
+
+
+def test_build_downloader_accepts_transmission_secret(tmp_path: Path) -> None:
+    from seed_agent.cli import build_downloader
+    from seed_agent.config import load_config
+    from seed_agent.downloaders.transmission import TransmissionClient
+
+    secret_dir = tmp_path / "local" / "secrets"
+    secret_dir.mkdir(parents=True)
+    (secret_dir / "transmission.yaml").write_text(
+        "base_url: http://transmission.local:9091\nusername: alice\npassword: secret\n",
+        encoding="utf-8",
+    )
+    config_path = _config_file(tmp_path, secret_ref="local/secrets/transmission.yaml")
+    config_path.write_text(
+        config_path.read_text(encoding="utf-8").replace(
+            "type: qbittorrent",
+            "type: transmission",
+        ),
+        encoding="utf-8",
+    )
+
+    downloader = build_downloader(load_config(config_path))
+
+    assert isinstance(downloader, TransmissionClient)
+    assert downloader.base_url == "http://transmission.local:9091"
+    assert downloader.username == "alice"
+    assert downloader.password == "secret"
+
+
+def test_read_configured_source_events_polls_telegram_secret(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from seed_agent import cli
+    from seed_agent.models import IntentSource
+    from seed_agent.sources.base import SourceIntentEvent
+
+    config_path = _config_file(tmp_path)
+    secret = tmp_path / "local" / "secrets" / "telegram.yaml"
+    secret.parent.mkdir(parents=True)
+    secret.write_text(
+        "bot_token: secret-token\noffset: 100\ntimeout_seconds: 3\nallowed_chat_ids: 12345,999\n",
+        encoding="utf-8",
+    )
+    config_path.write_text(
+        config_path.read_text(encoding="utf-8")
+        + """
+want_sources:
+  telegram:
+    enabled: true
+    secret_ref: local/secrets/telegram.yaml
+""",
+        encoding="utf-8",
+    )
+    calls: list[dict[str, object]] = []
+
+    def fake_poll(**kwargs):
+        calls.append(kwargs)
+        return [
+            SourceIntentEvent(
+                source=IntentSource.TELEGRAM,
+                raw_text="Inception 2010",
+                source_event_id="telegram:12345:42",
+            )
+        ]
+
+    monkeypatch.setattr(cli, "poll_telegram_updates", fake_poll)
+
+    events = cli._read_configured_source_events(cli.load_config(config_path))
+
+    assert [event.source for event in events] == [IntentSource.TELEGRAM]
+    assert calls == [
+        {
+            "bot_token": "secret-token",
+            "offset": 100,
+            "timeout_seconds": 3,
+            "allowed_chat_ids": {"12345", "999"},
+        }
+    ]
+
+
+def test_config_export_and_import_dry_run_report_changed_sections(tmp_path: Path) -> None:
+    from seed_agent.cli import app
+
+    config_path = _config_file(tmp_path)
+    rules_path = tmp_path / "rules.yaml"
+    export_result = CliRunner().invoke(
+        app,
+        ["config-export", "--config", str(config_path), "--output", str(rules_path)],
+    )
+
+    assert export_result.exit_code == 0
+    exported = yaml.safe_load(rules_path.read_text(encoding="utf-8"))
+    exported["pt_filters"]["min_leechers"] = 12
+    rules_path.write_text(yaml.safe_dump(exported, sort_keys=False), encoding="utf-8")
+
+    import_result = CliRunner().invoke(
+        app,
+        ["config-import", "--config", str(config_path), "--rules", str(rules_path)],
+    )
+
+    assert import_result.exit_code == 0
+    payload = _json_output(import_result)
+    assert payload["status"] == "dry_run"
+    assert payload["changed_sections"] == ["pt_filters"]
+    assert "min_leechers: 8" in config_path.read_text(encoding="utf-8")
+
+
+def test_config_import_execute_writes_validated_rules(tmp_path: Path) -> None:
+    from seed_agent.cli import app
+
+    config_path = _config_file(tmp_path)
+    exported = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    exported["pt_filters"]["min_leechers"] = 12
+    rules_path = tmp_path / "rules.yaml"
+    rules_path.write_text(yaml.safe_dump({"rules": exported}, sort_keys=False), encoding="utf-8")
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "config-import",
+            "--config",
+            str(config_path),
+            "--rules",
+            str(rules_path),
+            "--execute",
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = _json_output(result)
+    assert payload["status"] == "applied"
+    assert "min_leechers: 12" in config_path.read_text(encoding="utf-8")
+
+
+def test_release_profiles_command_resolves_profile_overrides(tmp_path: Path) -> None:
+    from seed_agent.cli import app
+
+    config_path = _config_file(tmp_path)
+    config_path.write_text(
+        config_path.read_text(encoding="utf-8")
+        + """
+release_profiles:
+  remux:
+    default_resolution: 2160p
+    quality_tag_scores:
+      remux: 20
+    source_ids: ["letterboxd-watchlist"]
+""",
+        encoding="utf-8",
+    )
+
+    result = CliRunner().invoke(app, ["release-profiles", "--config", str(config_path)])
+
+    assert result.exit_code == 0
+    payload = _json_output(result)
+    assert payload["profiles"]["remux"]["default_resolution"] == "2160p"
+    assert payload["profiles"]["remux"]["quality_tag_scores"]["remux"] == 20
+    assert payload["profiles"]["remux"]["source_ids"] == ["letterboxd-watchlist"]
+
+
+def test_reseed_report_lists_high_score_missing_candidates(tmp_path: Path) -> None:
+    from seed_agent.cli import app
+
+    config_path = _config_file(tmp_path)
+    store = StateStore(tmp_path / ".seed-agent" / "state.db")
+    store.upsert_candidate(
+        stable_id="demo-free:missing",
+        title="Missing Torrent",
+        site="demo-free",
+        state=LifecycleState.DELETED,
+        score=91,
+        torrent_hash="missing-hash",
+    )
+    store._upsert_torrent_runtime(  # type: ignore[attr-defined]
+        "missing-hash",
+        missing_from_qb_at=datetime.now(UTC).isoformat(),
+        missing_from_qb_reason="missing from live list",
+    )
+
+    result = CliRunner().invoke(app, ["reseed-report", "--config", str(config_path)])
+
+    assert result.exit_code == 0
+    payload = _json_output(result)
+    assert payload["eligible_count"] == 1
+    assert payload["candidates"][0]["reason"] == "missing_from_downloader"
+
+
+def test_headroom_report_projects_accepted_candidate_size(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from seed_agent import cli
+
+    monkeypatch.chdir(tmp_path)
+    config_path = _config_file(tmp_path)
+    config = _config()
+    candidate = _candidate(size_bytes=10 * 1024**3)
+
+    async def fake_discover_candidates(config: SeedAgentConfig):
+        return [candidate]
+
+    def fake_score_candidates(candidates, discovery_config, scoring_config):
+        return [_scored(candidate=candidate, score=95)]
+
+    monkeypatch.setattr(cli, "load_config", lambda path: config)
+    monkeypatch.setattr(cli, "discover_candidates", fake_discover_candidates)
+    monkeypatch.setattr(cli, "score_candidates", fake_score_candidates)
+    monkeypatch.setattr(cli, "_maybe_build_downloader", lambda loaded: None)
+
+    result = CliRunner().invoke(cli.app, ["headroom-report", "--config", str(config_path)])
+
+    assert result.exit_code == 0
+    payload = _json_output(result)
+    assert payload["accepted"] == 1
+    assert payload["accepted_size_gb"] == 10.0
+    assert payload["headroom_v2"]["recommended_enqueue_mode"] == "normal"
 
 
 def test_run_once_invoke_with_execute_flag(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

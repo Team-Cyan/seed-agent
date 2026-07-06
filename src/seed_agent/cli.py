@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Annotated, Any
 
 import typer
+import yaml
 
 from seed_agent import __version__
 from seed_agent.actions.intent import (
@@ -25,6 +26,7 @@ from seed_agent.actions.intent import (
 )
 from seed_agent.actions.pt import (
     SiteDiscoveryConfigError,
+    apply_site_history_feedback,
     discover_candidates,
     get_last_discovery_warnings,
     resolve_deferred_download_urls,
@@ -42,7 +44,9 @@ from seed_agent.config import (
     load_config,
     load_downloader_secret,
 )
+from seed_agent.downloaders.base import Downloader
 from seed_agent.downloaders.qbittorrent import QbittorrentClient
+from seed_agent.downloaders.transmission import TransmissionClient
 from seed_agent.models import (
     Decision,
     IntentKind,
@@ -63,9 +67,12 @@ from seed_agent.search.mteam import (
     resolve_mteam_release_download_url,
 )
 from seed_agent.search.rss import RssSearchProvider
+from seed_agent.search.torznab import TorznabSearchProvider
 from seed_agent.sources.base import SourceIntentEvent
 from seed_agent.sources.douban import fetch_douban_wanted_user, read_douban_wanted
 from seed_agent.sources.imdb import fetch_imdb_watchlist, read_imdb_watchlist_csv
+from seed_agent.sources.letterboxd import read_letterboxd_watchlist_csv
+from seed_agent.sources.telegram import poll_telegram_updates
 from seed_agent.state import STATE_PRIORITY, StateStore
 
 ReleaseDownloadResolver = Callable[[ReleaseCandidate], Awaitable[ReleaseCandidate | None]]
@@ -75,6 +82,17 @@ DEFAULT_CONFIG = Path("config/example.yaml")
 SCHEDULE_BACKOFF_FILE = "schedule-backoff.json"
 MTEAM_RATE_LIMIT_MARKERS = ("請求過於頻繁", "请求过于频繁")
 MTEAM_RATE_LIMIT_BACKOFF_HOURS = 24
+CONFIG_RULE_SECTIONS = (
+    "pt_filters",
+    "pt_scoring",
+    "seed_cleanup",
+    "download_client",
+    "want_decision",
+    "release_preferences",
+    "release_profiles",
+    "want_sources",
+    "local_state",
+)
 
 
 @app.callback(invoke_without_command=True)
@@ -197,6 +215,7 @@ def score(
 ) -> None:
     loaded = load_config(config)
     candidates = _discover_candidates(loaded)
+    candidates = _apply_site_history_feedback_for_config(candidates, loaded)
     scored = score_candidates(candidates, loaded.pt_filters, loaded.pt_scoring)
     payload = {
         "command": "score",
@@ -225,6 +244,7 @@ def enqueue(
     loaded = load_config(config)
     store = StateStore(_state_path(loaded))
     candidates = _discover_candidates(loaded)
+    candidates = _apply_site_history_feedback_from_store(candidates, store)
     scored = score_candidates(candidates, loaded.pt_filters, loaded.pt_scoring)
     scored = _apply_free_window_safety(
         scored,
@@ -565,6 +585,7 @@ def daily_report_command(
     loaded = load_config(config)
     store = StateStore(_state_path(loaded))
     candidates = _discover_candidates(loaded)
+    candidates = _apply_site_history_feedback_from_store(candidates, store)
     scored = score_candidates(candidates, loaded.pt_filters, loaded.pt_scoring)
     managed_torrents, missing_reconciled = _managed_torrents_for_report_with_reconciliation(
         loaded, store=store
@@ -598,6 +619,8 @@ def strategy_report_command(
     loaded = load_config(config)
     store = StateStore(_state_path(loaded))
     candidates = _discover_candidates(loaded)
+    site_history = store.site_history_scores()
+    candidates = apply_site_history_feedback(candidates, site_history)
     scored = score_candidates(candidates, loaded.pt_filters, loaded.pt_scoring)
     downloader = _maybe_build_downloader(loaded)
     managed_torrents = _load_policy_torrents(downloader, loaded) if downloader is not None else []
@@ -617,6 +640,7 @@ def strategy_report_command(
             scored,
             managed_torrents,
             managed_summaries=managed_summaries,
+            site_history=site_history,
         ),
         "managed_torrents": managed_summaries,
     }
@@ -756,6 +780,141 @@ def tracker_api_report(
             "backoffs": store.list_tracker_backoffs(),
             "events": events,
             "summary": _tracker_api_event_summary(events),
+        }
+    )
+
+
+@app.command(name="config-export")
+def config_export(
+    config: Annotated[Path, typer.Option("--config")] = DEFAULT_CONFIG,
+    output: Annotated[Path | None, typer.Option("--output")] = None,
+) -> None:
+    loaded = load_config(config)
+    payload = {
+        "command": "config-export",
+        "config": str(config),
+        "rules": _config_rules_payload(loaded),
+    }
+    if output is not None:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(
+            yaml.safe_dump(payload["rules"], sort_keys=False, allow_unicode=True),
+            encoding="utf-8",
+        )
+        payload["output"] = str(output)
+    _print_json(payload)
+
+
+@app.command(name="config-import")
+def config_import(
+    rules: Annotated[Path, typer.Option("--rules")],
+    config: Annotated[Path, typer.Option("--config")] = DEFAULT_CONFIG,
+    execute: Annotated[bool, typer.Option("--execute")] = False,
+) -> None:
+    current = _load_yaml_mapping(config)
+    current_rules = _config_rules_payload(load_config(config))
+    incoming_raw = _load_yaml_mapping(rules)
+    incoming = (
+        incoming_raw.get("rules")
+        if isinstance(incoming_raw.get("rules"), dict)
+        else incoming_raw
+    )
+    updates = {
+        key: incoming[key]
+        for key in CONFIG_RULE_SECTIONS
+        if key in incoming and current_rules.get(key) != incoming[key]
+    }
+    merged = {**current, **updates}
+    SeedAgentConfig(**merged)
+    if execute and updates:
+        config.write_text(
+            yaml.safe_dump(merged, sort_keys=False, allow_unicode=True),
+            encoding="utf-8",
+        )
+    _print_json(
+        {
+            "command": "config-import",
+            "config": str(config),
+            "rules": str(rules),
+            "execute": execute,
+            "changed_sections": sorted(updates),
+            "status": "applied" if execute else "dry_run",
+        }
+    )
+
+
+@app.command(name="release-profiles")
+def release_profiles(
+    config: Annotated[Path, typer.Option("--config")] = DEFAULT_CONFIG,
+) -> None:
+    loaded = load_config(config)
+    _print_json(
+        {
+            "command": "release-profiles",
+            "config": str(config),
+            "current": _current_release_profile(loaded),
+            "profiles": {
+                name: _resolved_release_profile(loaded, profile.model_dump(mode="json"))
+                for name, profile in loaded.release_profiles.items()
+            },
+        }
+    )
+
+
+@app.command(name="reseed-report")
+def reseed_report(
+    config: Annotated[Path, typer.Option("--config")] = DEFAULT_CONFIG,
+    limit: Annotated[int, typer.Option("--limit")] = 50,
+) -> None:
+    loaded = load_config(config)
+    store = StateStore(_state_path(loaded))
+    candidates = _reseed_candidates(store, loaded)
+    _print_json(
+        {
+            "command": "reseed-report",
+            "config": str(config),
+            "state_path": str(_state_path(loaded)),
+            "eligible_count": len(candidates),
+            "candidates": candidates[: max(limit, 1)],
+        }
+    )
+
+
+@app.command(name="headroom-report")
+def headroom_report(
+    config: Annotated[Path, typer.Option("--config")] = DEFAULT_CONFIG,
+) -> None:
+    loaded = load_config(config)
+    store = StateStore(_state_path(loaded))
+    candidates = _discover_candidates(loaded)
+    candidates = _apply_site_history_feedback_from_store(candidates, store)
+    scored = score_candidates(candidates, loaded.pt_filters, loaded.pt_scoring)
+    downloader = _maybe_build_downloader(loaded)
+    live_torrents = _load_policy_torrents(downloader, loaded) if downloader is not None else []
+    default_pool_usage = _pool_usage_for_policy(
+        loaded,
+        live_torrents,
+        _default_category_policy(loaded),
+    )
+    accepted = [item for item in scored if item.accepted]
+    accepted_size_bytes = sum(item.candidate.size_bytes for item in accepted)
+    headroom_bytes = default_pool_usage.max_size_bytes - default_pool_usage.size_bytes
+    _print_json(
+        {
+            "command": "headroom-report",
+            "config": str(config),
+            "discovered": len(candidates),
+            "accepted": len(accepted),
+            "accepted_size_gb": round(accepted_size_bytes / 1024**3, 2),
+            "default_pool_usage": _pool_usage_item_summary(default_pool_usage),
+            "runtime_activity": _runtime_activity_summary(live_torrents),
+            "headroom_v2": {
+                "headroom_gb": round(headroom_bytes / 1024**3, 2),
+                "over_budget_after_accepts": accepted_size_bytes > headroom_bytes,
+                "recommended_enqueue_mode": "add_paused"
+                if accepted_size_bytes > headroom_bytes
+                else "normal",
+            },
         }
     )
 
@@ -1420,6 +1579,7 @@ def _run_once_payload(
             **_candidate_snapshot_kwargs(candidate),
         )
 
+    candidates = _apply_site_history_feedback_from_store(candidates, store)
     scored = score_candidates(candidates, loaded.pt_filters, loaded.pt_scoring)
     scored = _apply_free_window_safety(
         scored,
@@ -2091,6 +2251,106 @@ def _config_status_payload(config_path: Path) -> dict[str, Any]:
     }
 
 
+def _config_rules_payload(config: SeedAgentConfig) -> dict[str, Any]:
+    dumped = config.model_dump(mode="json")
+    return {key: dumped[key] for key in CONFIG_RULE_SECTIONS if key in dumped}
+
+
+def _load_yaml_mapping(path: Path) -> dict[str, Any]:
+    loaded = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    if not isinstance(loaded, dict):
+        raise typer.BadParameter(f"expected YAML mapping: {path}")
+    return dict(loaded)
+
+
+def _current_release_profile(config: SeedAgentConfig) -> dict[str, Any]:
+    return {
+        "default_resolution": config.want_decision.default_resolution,
+        "series_search_mode": config.want_decision.series_search_mode,
+        "quality_tag_scores": config.release_preferences.quality_tag_scores,
+        "site_priority": config.release_preferences.site_priority,
+        "source_ids": [
+            source.id for source in config.want_sources.want_lists if source.enabled
+        ],
+    }
+
+
+def _resolved_release_profile(
+    config: SeedAgentConfig,
+    profile: dict[str, Any],
+) -> dict[str, Any]:
+    current = _current_release_profile(config)
+    return {
+        "default_resolution": profile.get("default_resolution")
+        or current["default_resolution"],
+        "series_search_mode": profile.get("series_search_mode")
+        or current["series_search_mode"],
+        "quality_tag_scores": {
+            **dict(current["quality_tag_scores"]),
+            **dict(profile.get("quality_tag_scores") or {}),
+        },
+        "site_priority": {
+            **dict(current["site_priority"]),
+            **dict(profile.get("site_priority") or {}),
+        },
+        "source_ids": profile.get("source_ids") or current["source_ids"],
+    }
+
+
+def _reseed_candidates(
+    store: StateStore,
+    config: SeedAgentConfig,
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for state in (LifecycleState.DELETED, LifecycleState.PAUSED, LifecycleState.COLD):
+        rows.extend(store.list_by_state(state))
+    candidates: list[dict[str, Any]] = []
+    for row in rows:
+        score = row.get("score")
+        if not isinstance(score, int) or score < config.pt_scoring.min_score_to_enqueue:
+            continue
+        torrent_hash = row.get("torrent_hash")
+        runtime = (
+            store.get_torrent_runtime(str(torrent_hash))
+            if torrent_hash is not None
+            else None
+        )
+        reason = _reseed_reason(row, runtime)
+        candidates.append(
+            {
+                "candidate_id": row["stable_id"],
+                "site": row["site"],
+                "title": row["title"],
+                "state": row["state"],
+                "score": score,
+                "torrent_hash": torrent_hash,
+                "reason": reason,
+                "missing_from_downloader": bool(
+                    runtime and runtime.get("missing_from_qb_at")
+                ),
+                "no_upload_since_at": runtime.get("no_upload_since_at")
+                if runtime
+                else None,
+                "updated_at": row["updated_at"],
+            }
+        )
+    return sorted(
+        candidates,
+        key=lambda item: (-int(item["score"]), str(item["updated_at"])),
+    )
+
+
+def _reseed_reason(
+    row: dict[str, Any],
+    runtime: dict[str, Any] | None,
+) -> str:
+    if runtime and runtime.get("missing_from_qb_at"):
+        return "missing_from_downloader"
+    if runtime and runtime.get("no_upload_since_at"):
+        return "stalled_no_upload"
+    return f"state_{row['state']}"
+
+
 def _runtime_doctor_checks(status: dict[str, Any]) -> list[dict[str, Any]]:
     checks: list[dict[str, Any]] = []
     checks.append(
@@ -2221,6 +2481,23 @@ def _metadata_datetime_string(value: Any) -> str | None:
 
 def _run(value: Any) -> Any:
     return asyncio.run(value)
+
+
+def _apply_site_history_feedback_for_config(
+    candidates: list[TorrentCandidate],
+    config: SeedAgentConfig,
+) -> list[TorrentCandidate]:
+    state_path = _state_path(config)
+    if not state_path.exists():
+        return candidates
+    return _apply_site_history_feedback_from_store(candidates, StateStore(state_path))
+
+
+def _apply_site_history_feedback_from_store(
+    candidates: list[TorrentCandidate],
+    store: StateStore,
+) -> list[TorrentCandidate]:
+    return apply_site_history_feedback(candidates, store.site_history_scores())
 
 
 def _discover_candidates(config: SeedAgentConfig) -> list[TorrentCandidate]:
@@ -2567,7 +2844,7 @@ def _intent_category_policy(
 
 
 def _load_policy_torrents(
-    downloader: QbittorrentClient | _NullDownloader,
+    downloader: Downloader | _NullDownloader,
     config: SeedAgentConfig,
     *,
     policies: list[CategoryPolicyConfig] | None = None,
@@ -2603,7 +2880,7 @@ def _pool_usage_summary(
 
 def _default_category_budget_state(
     config: SeedAgentConfig,
-    downloader: QbittorrentClient | _NullDownloader | None = None,
+    downloader: Downloader | _NullDownloader | None = None,
 ) -> tuple[bool, PoolUsage | None]:
     if downloader is None:
         downloader = _maybe_build_downloader(config)
@@ -2639,7 +2916,7 @@ def _enqueue_runtime_context(
     *,
     store: StateStore,
     execute: bool,
-) -> tuple[QbittorrentClient | _NullDownloader, list[ManagedTorrent], bool, PoolUsage | None, int]:
+) -> tuple[Downloader | _NullDownloader, list[ManagedTorrent], bool, PoolUsage | None, int]:
     live_downloader = build_downloader(config) if execute else _maybe_build_downloader(config)
     if live_downloader is None:
         return _NullDownloader(), [], False, None, 0
@@ -2653,7 +2930,7 @@ def _enqueue_runtime_context(
 
 async def _enqueue_candidate_batches_action(
     batches: list[tuple[list[ScoreBreakdown], bool, list[str]]],
-    downloader: QbittorrentClient | _NullDownloader,
+    downloader: Downloader | _NullDownloader,
     policy: CategoryPolicyConfig,
     execute: bool,
     *,
@@ -2981,7 +3258,7 @@ def _runtime_activity_summary(torrents: list[ManagedTorrent]) -> dict[str, float
     }
 
 
-def _maybe_build_downloader(config: SeedAgentConfig) -> QbittorrentClient | None:
+def _maybe_build_downloader(config: SeedAgentConfig) -> Downloader | None:
     secret_ref = config.download_client.secret_ref
     if not secret_ref:
         return None
@@ -2990,14 +3267,22 @@ def _maybe_build_downloader(config: SeedAgentConfig) -> QbittorrentClient | None
         return None
     secret = load_downloader_secret(secret_path)
     base_url = secret.get("base_url")
+    if not base_url:
+        return None
+    if config.download_client.type == "transmission":
+        return TransmissionClient(
+            base_url=base_url,
+            username=secret.get("username"),
+            password=secret.get("password"),
+        )
     username = secret.get("username")
     password = secret.get("password")
-    if not base_url or not username or not password:
+    if not username or not password:
         return None
     return QbittorrentClient(base_url=base_url, username=username, password=password)
 
 
-def build_downloader(config: SeedAgentConfig) -> QbittorrentClient:
+def build_downloader(config: SeedAgentConfig) -> Downloader:
     secret_ref = config.download_client.secret_ref
     if not secret_ref:
         raise typer.BadParameter("missing downloader secret")
@@ -3015,6 +3300,16 @@ def _build_search_providers(config: SeedAgentConfig) -> list[SearchProvider]:
     for site in config.enabled_sites:
         api_key = _read_secret_ref(site.api_key_ref, config.config_dir)
         cookie = _read_cookie_ref(site.cookie_ref, config.config_dir)
+        if site.type == "torznab":
+            providers.append(
+                TorznabSearchProvider(
+                    url=site.rss_url,
+                    site=site.name,
+                    api_key=api_key,
+                    max_results=config.release_preferences.max_results_per_site,
+                )
+            )
+            continue
         if site.type == "mteam" and site.discovery_mode == "api" and api_key:
             providers.append(
                 MTeamSearchProvider(
@@ -3043,6 +3338,8 @@ def _build_search_providers(config: SeedAgentConfig) -> list[SearchProvider]:
 
 def _read_configured_source_events(config: SeedAgentConfig) -> list[SourceIntentEvent]:
     events: list[SourceIntentEvent] = []
+    if config.want_sources.telegram.enabled:
+        events.extend(_read_configured_telegram_events(config))
     for source in config.want_sources.want_lists:
         if not source.enabled:
             continue
@@ -3086,6 +3383,18 @@ def _read_configured_source_events(config: SeedAgentConfig) -> list[SourceIntent
                         label=source.label,
                     )
                 )
+            continue
+        if source.provider == "letterboxd":
+            if source.export_ref:
+                export_path = _resolve_path(source.export_ref, config.config_dir)
+                if export_path is not None:
+                    events.extend(
+                        read_letterboxd_watchlist_csv(
+                            export_path,
+                            source_config_id=source.id,
+                            label=source.label,
+                        )
+                    )
     douban = config.want_sources.douban_wanted
     if not douban.enabled:
         return events
@@ -3096,6 +3405,39 @@ def _read_configured_source_events(config: SeedAgentConfig) -> list[SourceIntent
     if douban.user_name:
         events.extend(fetch_douban_wanted_user(douban.user_name, max_pages=douban.max_pages))
     return events
+
+
+def _read_configured_telegram_events(config: SeedAgentConfig) -> list[SourceIntentEvent]:
+    secret_ref = config.want_sources.telegram.secret_ref
+    if not secret_ref:
+        return []
+    secret_path = _resolve_path(secret_ref, config.config_dir)
+    if secret_path is None or not secret_path.is_file():
+        return []
+    secret = load_downloader_secret(secret_path)
+    bot_token = secret.get("bot_token") or secret.get("token")
+    if not bot_token:
+        return []
+    return poll_telegram_updates(
+        bot_token=bot_token,
+        offset=_optional_int(secret.get("offset")),
+        timeout_seconds=_optional_int(secret.get("timeout_seconds")) or 0,
+        allowed_chat_ids=_csv_set(secret.get("allowed_chat_ids")),
+    )
+
+
+def _optional_int(value: object) -> int | None:
+    try:
+        return int(str(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def _csv_set(value: object) -> set[str] | None:
+    if value is None:
+        return None
+    parts = {part.strip() for part in str(value).split(",") if part.strip()}
+    return parts or None
 
 
 def _build_release_download_resolver(config: SeedAgentConfig) -> ReleaseDownloadResolver | None:

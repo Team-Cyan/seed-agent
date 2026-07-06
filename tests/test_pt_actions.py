@@ -106,6 +106,24 @@ def test_score_candidates_returns_structured_breakdown() -> None:
     assert scored[0].candidate_id == _candidate().stable_id
 
 
+def test_apply_site_history_feedback_sets_candidate_metadata_when_available() -> None:
+    from seed_agent.actions.pt import apply_site_history_feedback
+
+    explicit = _candidate(
+        source_url="https://tracker.example/details.php?id=2",
+        metadata={"site_history_score": 0.9},
+    )
+    updated = apply_site_history_feedback(
+        [_candidate(), explicit],
+        {"demo-free": {"applied": True, "score": 0.72, "samples": 4, "window_days": 30}},
+    )
+
+    assert updated[0].metadata["site_history_score"] == 0.72
+    assert updated[0].metadata["site_history_source"] == "state_feedback"
+    assert updated[0].metadata["site_history_samples"] == 4
+    assert updated[1].metadata["site_history_score"] == 0.9
+
+
 @pytest.mark.asyncio
 async def test_discover_candidates_skips_disabled_sites_and_calls_enabled_site(monkeypatch) -> None:
     from seed_agent.actions import pt as pt_actions
@@ -1179,7 +1197,19 @@ def test_strategy_report_groups_tracker_signals_and_runtime_outcomes() -> None:
         }
     ]
 
-    report = strategy_report(scored, managed, managed_summaries=managed_summaries)
+    report = strategy_report(
+        scored,
+        managed,
+        managed_summaries=managed_summaries,
+        site_history={
+            "demo-free": {
+                "site": "demo-free",
+                "samples": 3,
+                "score": 0.72,
+                "applied": True,
+            }
+        },
+    )
 
     assert report["candidate_distribution"]["total_scored"] == 2
     assert report["candidate_distribution"]["accepted"] == 1
@@ -1191,3 +1221,4 @@ def test_strategy_report_groups_tracker_signals_and_runtime_outcomes() -> None:
     assert report["runtime_outcomes"]["uploaded_count"] == 1
     assert report["runtime_outcomes"]["avg_uploaded_gb"] == 80.0
     assert report["runtime_outcomes"]["by_candidate_leechers"]["25+"]["avg_uploaded_gb"] == 80.0
+    assert report["site_history"]["demo-free"]["score"] == 0.72

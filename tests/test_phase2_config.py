@@ -124,6 +124,13 @@ def _phase2_data() -> dict[str, object]:
                         "watchlist_url": "https://www.imdb.com/user/p.demo/watchlist/",
                         "export_ref": "local/inbox/imdb-weekend.csv",
                     },
+                    {
+                        "provider": "letterboxd",
+                        "id": "letterboxd-watchlist",
+                        "label": "Watchlist",
+                        "enabled": True,
+                        "export_ref": "local/inbox/letterboxd-watchlist.csv",
+                    },
                 ],
                 "subscription": {
                     "enabled": False,
@@ -157,6 +164,8 @@ def test_phase2_config_accepts_intent_search_and_source_sections() -> None:
     assert config.want_sources.want_lists[0].label == "我"
     assert config.want_sources.want_lists[1].provider == "imdb"
     assert config.want_sources.want_lists[1].watchlist_url == "https://www.imdb.com/user/p.demo/watchlist/"
+    assert config.want_sources.want_lists[2].provider == "letterboxd"
+    assert config.want_sources.want_lists[2].export_ref == "local/inbox/letterboxd-watchlist.csv"
 
 
 def test_phase2_config_defaults_keep_phase1_configs_loadable() -> None:
@@ -271,6 +280,11 @@ want_sources:
       enabled: true
       watchlist_url: https://www.imdb.com/user/p.demo/watchlist/
       export_ref: local/inbox/imdb-weekend.csv
+    - provider: letterboxd
+      id: letterboxd-watchlist
+      label: Watchlist
+      enabled: true
+      export_ref: local/inbox/letterboxd-watchlist.csv
   subscription:
     enabled: false
     rules_ref: config/subscriptions.yaml
@@ -288,6 +302,7 @@ want_sources:
     assert config.want_sources.want_lists[0].provider == "douban"
     assert config.want_sources.want_lists[1].provider == "imdb"
     assert config.want_sources.want_lists[1].export_ref == "local/inbox/imdb-weekend.csv"
+    assert config.want_sources.want_lists[2].provider == "letterboxd"
     assert config.want_sources.subscription.rules_ref == "config/subscriptions.yaml"
     assert config.download_client.default_category == "seed"
 
@@ -365,4 +380,19 @@ def test_phase2_config_rejects_source_specific_wrong_ref_fields() -> None:
     }
 
     with pytest.raises(ValidationError, match="secret_ref"):
+        SeedAgentConfig(**data)
+
+    data = _phase2_data()
+    sources = dict(data["want_sources"])  # type: ignore[arg-type]
+    sources["want_lists"] = [
+        {
+            "provider": "letterboxd",
+            "id": "letterboxd-empty",
+            "label": "Empty",
+            "enabled": True,
+        }
+    ]
+    data["want_sources"] = sources
+
+    with pytest.raises(ValidationError, match="letterboxd want list requires export_ref"):
         SeedAgentConfig(**data)
