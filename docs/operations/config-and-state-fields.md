@@ -91,6 +91,7 @@ page labels.
 - `size_partial_max_gb`
 - `max_active_downloads`
 - `max_total_amount_left_gb`
+- `min_free_disk_gb`
 
 `pt_scoring`
 

@@ -178,6 +178,11 @@ SEED_AGENT_WEB_PORT=8765
 WebUI=http://[IP]:[PORT:8765]
 ```
 
+If the Web UI is exposed beyond a trusted local network, add
+`SEED_AGENT_WEB_TOKEN` to the DockerMan template. Non-empty values require
+write/search/enqueue `POST` calls to include `X-Seed-Agent-Token` or
+`Authorization: Bearer`.
+
 If the Docker page shows the container as healthy but the WebUI button opens an
 unavailable page, check these live facts before changing application config:
 

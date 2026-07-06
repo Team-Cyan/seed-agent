@@ -10,7 +10,7 @@ It is:
 - a Docker image and Compose-oriented runtime,
 - a config-first strategy runner,
 - a CLI-first operator tool,
-- an auditable automation layer over PT discovery and qBittorrent actions,
+- an auditable automation layer over PT discovery and downloader actions,
 - a future platform for intent-driven acquisition workflows.
 
 It is not:
@@ -27,14 +27,14 @@ The current architecture has two shipped loops:
 1. PT upload strategy loop
    - discover candidates,
    - score them,
-   - enqueue them to qBittorrent,
+   - enqueue them to the configured downloader,
    - review managed torrents,
    - prune cold managed torrents,
    - record audit decisions.
 
 2. Resource intent loop
    - ingest or add intents,
-   - sync configured Douban and IMDb Want List sources,
+   - sync configured Douban, IMDb, Letterboxd, and Telegram Want List sources,
    - merge repeated wants by reliable external ID aliases,
    - search candidate releases,
    - rank releases,
@@ -84,15 +84,20 @@ Important nuance:
 - M-Team API discovery is the preferred authenticated path when an API key is configured.
 - Intent search can be Remux-first through generic search keywords and can
   prefer season packs or individual episodes through `want_decision.series_search_mode`.
+- Torznab is available as the first non-M-Team intent search provider, while
+  M-Team remains the reference authenticated tracker API path.
 
 ## Current Downloader Story
 
-- qBittorrent is the only implemented downloader.
+- qBittorrent is the live operations baseline and reference downloader.
+- Transmission is available as a contract-tested second downloader through
+  `download_client.type: transmission`.
 - Mutations should stay dry-run first.
-- qBittorrent state remains the operational source of truth.
+- Downloader state remains the operational source of truth.
 - `seed-agent` local state explains policy and intent lifecycle.
 - Category policies separate mutable seed pools from add-only media pools.
-- Logical budget pools affect enqueue pause behavior and cleanup visibility.
+- Logical budget pools and downloader-reported free disk headroom affect enqueue
+  pause behavior and cleanup visibility.
 - A `mutable` qB category is the operator-granted management boundary. When the
   user explicitly authorizes the seed category, current and future torrents in
   that category may be managed by the agent; tags remain audit/search metadata,

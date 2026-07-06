@@ -4,6 +4,27 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.14.1 - 2026-07-06
+
+### Added
+
+- Added qBittorrent free-disk status reporting to enqueue planning and
+  `headroom-report`, so existing incomplete downloads can pause new accepted
+  candidates even when the logical budget pool is still below its limit.
+- Added optional `SEED_AGENT_WEB_TOKEN` protection for Web UI write/search/enqueue
+  POST requests.
+- Added GitHub Release automation from versioned changelog sections.
+- Added docs parity coverage for the current downloader/search/source support
+  matrix.
+
+### Changed
+
+- Updated README, architecture, AI docs, Compose, Unraid, and operator docs to
+  reflect Transmission, Torznab, Letterboxd, Telegram polling, Web write-token,
+  and disk headroom support.
+- CI now also runs on `main` pushes and includes a strict local dependency
+  audit.
+
 ## 0.14.0 - 2026-07-06
 
 ### Added

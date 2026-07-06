@@ -3,12 +3,12 @@
 ARG AGENT_PYTHON_UV_BASE=ghcr.io/astral-sh/uv:python3.14-trixie
 FROM ${AGENT_PYTHON_UV_BASE}
 
-ARG VERSION=0.14.0
+ARG VERSION=0.14.1
 ARG REVISION=unknown
 ARG BUILD_DATE=unknown
 
 LABEL org.opencontainers.image.title="seed-agent" \
-    org.opencontainers.image.description="Docker-first PT automation for NAS and homelab qBittorrent operations" \
+    org.opencontainers.image.description="Docker-first PT automation for NAS and homelab downloader operations" \
     org.opencontainers.image.url="https://github.com/Team-Cyan/seed-agent" \
     org.opencontainers.image.source="https://github.com/Team-Cyan/seed-agent" \
     org.opencontainers.image.icon="https://raw.githubusercontent.com/Team-Cyan/seed-agent/main/docs/assets/seed-agent-icon-transparent.png" \

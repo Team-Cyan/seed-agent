@@ -103,6 +103,40 @@ These projects are references, not implementation templates. Use them to borrow 
   - `genDlToken` endpoint shape,
   - filtering ideas for FREE torrents.
 
+## Later Kernel References
+
+### `autobrr`
+
+- Source: https://github.com/autobrr/autobrr
+- Refer to for:
+  - event/filter/action separation,
+  - client-agnostic action wiring,
+  - explainable rule matching for automated acquisition.
+- Do not copy:
+  - full announce-driven product scope before `seed-agent` provider contracts
+    remain stable under current scheduler/Web flows.
+
+### `Prowlarr`
+
+- Source: https://github.com/Prowlarr/Prowlarr
+- Refer to for:
+  - indexer management boundaries,
+  - Torznab-like provider proxy patterns,
+  - capability and health modeling for search providers.
+- Do not copy:
+  - full indexer-manager ownership into the core PT strategy loop.
+
+### `cross-seed`
+
+- Source: https://github.com/cross-seed/cross-seed
+- Refer to for:
+  - conservative file-to-torrent matching,
+  - read-only reseed evaluation before execution,
+  - Torznab-backed discovery for equivalent torrents.
+- Do not copy:
+  - automatic cross-seed execution without exact candidate evidence and
+    operator-confirmed mutation boundaries.
+
 ## Troubleshooting Guidance
 
 If the repo gets stuck on a site integration, search these references for:

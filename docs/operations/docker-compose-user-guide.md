@@ -119,13 +119,16 @@ Main env vars:
 - `SEED_AGENT_WEB_ENABLED=true`
 - `SEED_AGENT_WEB_HOST=0.0.0.0`
 - `SEED_AGENT_WEB_PORT=8765`
+- optional `SEED_AGENT_WEB_TOKEN=<local-token>` for write/search/enqueue POST
+  protection when the Web UI is reachable outside a trusted local network
 
 The example publishes host port `8765` to the container's Web UI port. That lets
 one long-running container serve the settings UI while `schedule-run` remains
 the foreground process.
 
 The Compose file reads `SEED_AGENT_IMAGE` from `deploy/seed-agent.env`, so you can switch
-between GHCR, Docker Hub, and a private registry without editing YAML.
+between GHCR, Docker Hub, and a private registry without editing YAML. It also
+passes optional `SEED_AGENT_WEB_TOKEN` from the same env file.
 
 ## 5. Start The App
 

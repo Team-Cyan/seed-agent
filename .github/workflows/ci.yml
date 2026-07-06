@@ -1,6 +1,9 @@
 name: CI
 
 on:
+  push:
+    branches:
+      - main
   pull_request:
   workflow_dispatch:
 
@@ -30,6 +33,9 @@ jobs:
 
       - name: Test
         run: uv run pytest -q
+
+      - name: Dependency audit
+        run: uv run --with pip-audit pip-audit --strict --local
 
       - name: Validate Compose example
         run: docker compose --env-file deploy/seed-agent.env.example -f deploy/docker-compose.example.yml config

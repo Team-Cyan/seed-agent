@@ -17,7 +17,8 @@ Use this guide when tuning tracker candidate selection from live evidence.
   - `pt_scoring.weights`,
   - `pt_scoring.min_score_to_enqueue`,
   - qB runtime gates such as `pt_filters.max_active_downloads` and
-    `pt_filters.max_total_amount_left_gb`.
+    `pt_filters.max_total_amount_left_gb`,
+  - downloader free-disk reserve through `pt_filters.min_free_disk_gb`.
 - Keep FREE/2xFREE, H&R protection, dry-run first, and mutable-category cleanup
   boundaries unless the operator explicitly changes them.
 
@@ -50,7 +51,8 @@ These examples are copy/merge material, not standalone runtime profiles:
    productive/missing/no-upload counts, active backoffs, and whether the score
    is applied or still using the low-sample fallback.
 5. Run `seed-agent headroom-report --config <config>` to project accepted
-   candidate size against the default pool before changing enqueue gates.
+   candidate size against both the default budget pool and the downloader's
+   reported free disk headroom before changing enqueue gates.
 6. Adjust concrete knobs, not a coarse runtime profile switch.
 7. Run `seed-agent run-once --config <config>` without `--execute`.
 8. Execute only after accepted candidates and runtime pause gates look sane.
@@ -76,6 +78,8 @@ For space saving:
 - keep `max_size_gb` enabled,
 - lower `preferred_size_max_gb` and `size_partial_max_gb`,
 - keep `max_active_downloads` and `max_total_amount_left_gb` conservative,
+- set `min_free_disk_gb` when the downloader shares a physical volume with
+  add-only media categories or other services,
 - keep `min_score_to_enqueue` higher.
 
 ## Evidence Caveat

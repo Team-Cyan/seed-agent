@@ -57,7 +57,7 @@ jobs:
             type=sha,format=short,prefix=sha-
           labels: |
             org.opencontainers.image.title=seed-agent
-            org.opencontainers.image.description=Docker-first PT automation for NAS and homelab qBittorrent operations
+            org.opencontainers.image.description=Docker-first PT automation for NAS and homelab downloader operations
             org.opencontainers.image.icon=https://raw.githubusercontent.com/Team-Cyan/seed-agent/main/docs/assets/seed-agent-icon-transparent.png
             org.opencontainers.image.version=${{ steps.release.outputs.version }}
 

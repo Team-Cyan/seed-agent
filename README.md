@@ -7,8 +7,9 @@
 `seed-agent` is a Docker-first self-hosted PT automation app for NAS and homelab deployments.
 
 It is designed to run as a long-lived container, keep its state on mounted
-storage, and manage PT discovery plus qBittorrent actions through versioned
-config files and local secret files.
+storage, and manage PT discovery plus downloader actions through versioned
+config files and local secret files. qBittorrent remains the reference
+downloader, and Transmission is available as a second contract-tested adapter.
 
 Current image:
 
@@ -33,7 +34,7 @@ Today `seed-agent` focuses on two loops:
 1. PT upload strategy loop
    - discover candidate torrents,
    - score them,
-   - enqueue accepted candidates to qBittorrent,
+   - enqueue accepted candidates to the configured downloader,
    - review managed torrents,
    - prune cold managed torrents,
    - keep an audit trail for downloader mutations.
@@ -52,15 +53,16 @@ The default deployment shape for self-hosted use is a Docker container running
 | Area | Status | Notes |
 | --- | --- | --- |
 | Docker deployment | Supported | Compose, Unraid template, Kubernetes CronJob example, heartbeat, and healthcheck are present. |
-| qBittorrent downloader | Supported | The only implemented downloader; category policy is the cleanup authority boundary, and Want List media types can be routed to configured qB categories. |
-| Transmission downloader | Planned | Candidate for the first second-downloader adapter. |
+| qBittorrent downloader | Supported | Reference downloader for live Unraid operations; category policy is the cleanup authority boundary, and Want List media types can be routed to configured qB categories. |
+| Transmission downloader | Supported | Contract-tested second downloader through `download_client.type: transmission`; qBittorrent remains the live operations baseline. |
 | NexusPHP-style RSS | Supported | RSS remains useful for fallback flows and non-M-Team sites. |
 | M-Team RSS | Supported | Available as fallback and compatibility path. |
 | M-Team API discovery/search | Supported | Preferred authenticated path when `api_key_ref` is configured, including intent search with Douban/IMDb ID lookup, broad keyword fallback, M-Team tag capture, and execute-time deferred download-token resolution. |
+| Torznab search | Supported | First non-M-Team search provider for the `SearchProvider` contract. |
 | Resource intent loop | Supported | Local intent add, inbox/Douban/IMDb Want List ingestion, search, ranking, rejection, explicit candidate enqueue, and default dry-run CLI enqueue are implemented. |
 | Want List | Supported | Web UI page shows canonical Douban/IMDb wants with source/type filters, mobile cards, added time, merged source evidence, release/search status, preview-first refresh/search, and candidate review with explicit qB enqueue actions. |
 | Web Settings UI | WIP | Local configuration UI exists for grouped safe settings edits with schema validation, diff previews, per-section YAML editing, visual downloader category/budget routing, sticky save actions, mobile navigation, read-only status, runtime provenance, and Want List. |
-| Read-only dashboard/API | Partial | State summary, heartbeat health, budget pools, and Want List are exposed; richer audit/cleanup dashboards remain planned. |
+| Read-only operations API | Partial | State summary, heartbeat health, scheduler/tracker backoff evidence, budget pools, and Want List are exposed; richer audit/cleanup dashboards remain planned. |
 
 ## Roadmap Snapshot
 
@@ -70,19 +72,20 @@ first Web UI Want List. The next product work stays grounded in qB live state,
 conservative enqueue/prune decisions, and better reporting before wider
 dashboard or multi-downloader expansion.
 
-Medium-term work should validate extensibility with Transmission and a second
-non-M-Team API provider, then turn tracker/account signals, downloader telemetry,
-historical outcomes, and operator choices into real scoring feedback.
+Medium-term work should keep hardening provider/downloader contracts, then turn
+tracker/account signals, downloader telemetry, historical outcomes, and
+operator choices into explainable scoring feedback.
 
 ## Source Adapter Status
 
 | Source | Status | Current boundary |
 | --- | --- | --- |
 | file inbox | Wired | JSONL inbox ingestion is the supported local source path. |
-| Telegram | Parser skeleton | Parses Telegram update payloads; no bot loop or hosted receiver is shipped. |
+| Telegram | Wired | Polls Telegram updates through a local secret-backed bot token and converts messages into source events. |
 | WeChat bridge | Parser skeleton | Parses bridge payloads; no personal-account automation is shipped. |
 | Douban wanted | Wired | Reads one or more public Douban wanted pages or local wanted-list export JSON files. |
 | IMDb watchlist/list | Wired | Reads IMDb watchlist/list CSV exports and best-effort public page data when reachable. |
+| Letterboxd watchlist | Wired | Reads Letterboxd CSV exports as Want List source events. |
 | subscription | Planned | Config shape exists for future rules, but no subscription runner is shipped. |
 
 ## Quick Start
@@ -158,6 +161,8 @@ Key environment variables:
 - `SEED_AGENT_WEB_ENABLED=true`
 - `SEED_AGENT_WEB_HOST=0.0.0.0`
 - `SEED_AGENT_WEB_PORT=8765`
+- optional `SEED_AGENT_WEB_TOKEN=<local-token>` for Web UI write/search/enqueue
+  POST protection beyond trusted-local deployments
 
 The example publishes `8765:8765`, so the same container can run the scheduler
 and the settings Web UI. Open `http://127.0.0.1:8765` for local
@@ -234,12 +239,15 @@ Recommended unattended protections:
 - `SEED_AGENT_REQUIRE_KNOWN_FREE_WINDOW=true`
 - `pt_filters.max_active_downloads`
 - `pt_filters.max_total_amount_left_gb`
+- `pt_filters.min_free_disk_gb`
 
 These guards help avoid:
 
 - enqueueing candidates with too little remaining free time,
 - enqueueing when the downloader is already congested,
-- starting new work while a shared budget pool is already saturated.
+- starting new work while a shared budget pool is already saturated,
+- starting new work when existing incomplete downloads already exceed the
+  downloader's reported free disk headroom.
 
 ## qB Category Model
 

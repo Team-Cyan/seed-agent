@@ -22,10 +22,13 @@ def test_readme_exposes_support_matrix_and_source_status() -> None:
     assert "## Roadmap Snapshot" in readme
     assert "## Source Adapter Status" in readme
     assert "| Web Settings UI | WIP |" in readme
+    assert "| Transmission downloader | Supported |" in readme
+    assert "| Torznab search | Supported |" in readme
     assert "| file inbox | Wired |" in readme
-    assert "| Telegram | Parser skeleton |" in readme
+    assert "| Telegram | Wired |" in readme
     assert "| WeChat bridge | Parser skeleton |" in readme
     assert "| Douban wanted | Wired |" in readme
+    assert "| Letterboxd watchlist | Wired |" in readme
 
 
 def test_ci_workflow_has_python_and_docker_smoke_gates() -> None:
@@ -36,6 +39,7 @@ def test_ci_workflow_has_python_and_docker_smoke_gates() -> None:
 
     assert "uv run ruff check ." in step_text
     assert "uv run pytest -q" in step_text
+    assert "uv run --with pip-audit pip-audit --strict --local" in step_text
     assert "docker compose --env-file deploy/seed-agent.env.example" in step_text
     assert "docker build -t seed-agent:ci ." in step_text
     assert "seed-agent:ci healthcheck --config /app/config/example.yaml" in step_text

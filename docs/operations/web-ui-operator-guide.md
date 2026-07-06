@@ -18,6 +18,20 @@ operations.
 | Want List search | Refresh configured sources, search/rank candidates for the current filters, and store release candidates. | Preview-first search | It may read runtime config, source state, and tracker/downloader-adjacent metadata needed for ranking. It does not add tasks to qBittorrent. |
 | Want List candidate enqueue | Add exactly one selected release candidate through the shared intent enqueue path. | Explicit qB mutation | This is the only current Web UI qB enqueue surface. Use it only after reviewing the candidate modal preview and in-modal confirmation. |
 
+## Optional Write Token
+
+By default the Web UI assumes a trusted local bind or LAN-only deployment. If
+the Web UI is reachable outside a trusted local network, set
+`SEED_AGENT_WEB_TOKEN` on the Web process. When this variable is non-empty, every
+Web API write/search/enqueue `POST` must include either:
+
+- `X-Seed-Agent-Token: <token>`
+- `Authorization: Bearer <token>`
+
+Read-only `GET` endpoints stay available so health and status checks can remain
+simple. Do not put this token in committed config files; keep it in local env or
+the host's secret manager.
+
 ## Web UI Vs CLI
 
 Use the Web UI when the work is interactive and narrow:
@@ -114,5 +128,7 @@ cases:
   mounted files.
 - Keep secrets in `local/secrets/*`; do not paste raw tokens into shared docs or
   committed config.
+- Set `SEED_AGENT_WEB_TOKEN` before exposing the Web UI through a reverse proxy
+  or any non-trusted network.
 - For unattended acquisition, prefer scheduler config plus CLI flags. The Web UI
   is best for inspection, config edits, and explicit single-candidate decisions.

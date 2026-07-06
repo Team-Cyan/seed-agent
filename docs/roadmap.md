@@ -209,13 +209,36 @@ by completion period, and unfinished work is ordered by current priority.
     `config-import`, `release-profiles`, `reseed-report`, and
     `headroom-report`.
 
-- Next P0 - Verify and harden Want List in the live Unraid preview
-  - Rebuild the Unraid DockerMan container from the updated template and confirm
-    `docker port seed-agent` publishes `8765/tcp`.
-  - Open the DockerMan WebUI button and confirm Douban/IMDb Want List source
-    settings display correctly with no secret leaks.
-  - Reconcile the Web UI provenance fields with live Unraid paths so wrong
-    config/state/heartbeat mounts are easy to spot during operator checks.
+- Completed 2026-07 - Deep research P0-to-later hardening
+  - Downloader status now exposes qB free disk headroom, and enqueue-like flows
+    pause accepted candidates when existing incomplete downloads already exceed
+    downloader-reported available disk.
+  - `headroom-report` now projects accepted candidates against both logical
+    budget pools and downloader free disk headroom.
+  - Current docs now match implemented Transmission, Torznab, Letterboxd, and
+    Telegram support, with a docs parity regression test for the support matrix.
+  - CI now runs on `main` pushes and includes a strict local dependency audit.
+  - Tag pushes can create or update GitHub Releases from the matching
+    `CHANGELOG.md` section.
+  - Web UI write/search/enqueue POST requests can be protected with optional
+    `SEED_AGENT_WEB_TOKEN`; local trusted deployments remain unchanged when it
+    is unset.
+  - Compose, Unraid DockerMan, and operator docs now expose the optional Web
+    write token and the disk reserve setting.
+  - A provider-kernel roadmap spec captures later autobrr/Prowlarr/cross-seed
+    lessons without expanding current scope into a broad plugin framework.
+
+- Next P0 - Live Unraid stopgap and preview verification
+  - Current read-only qB evidence shows the physical disk is overcommitted even
+    though the logical `downloads` pool is still under 10 TiB; new local
+    headroom planning reports this as `over_existing_liability`.
+  - Pause, do not delete, unfinished `seed` category qB tasks before any live
+    deployment if the operator authorizes a stopgap mutation.
+  - Restore SSH access before host-level Unraid checks such as DockerMan
+    container rebuild, `docker port seed-agent`, and live template provenance.
+  - After qB is stable, rebuild/update the DockerMan-managed container from the
+    updated template, confirm `8765/tcp` publishing, and verify the WebUI button
+    and runtime provenance paths.
 
 - Next P0 - Add scheduler and Web preview integration coverage
   - Add fake downloader/provider fixtures that can run a scheduler cycle without
@@ -255,6 +278,8 @@ by completion period, and unfinished work is ordered by current priority.
   - Tune cleanup thresholds against real upload outcomes from joined reports.
   - Distinguish agent cleanup from external/manual qB deletions when upload
     history changes suddenly.
+  - Prefer read-only contribution and headroom reports before changing cleanup
+    thresholds or executing deletions.
 
 - Deferred / intentionally not in scope
   - Dashboard-first product work.
@@ -266,4 +291,5 @@ Reference:
 
 - `docs/architecture.md`
 - `docs/specs/2026-04-25-qb-category-policy-budgeting.md`
+- `docs/specs/2026-07-06-provider-kernel-roadmap.md`
 - `docs/plans/2026-07-06-deep-research-review-followups.md`

@@ -11,7 +11,7 @@ Keep these files on the same version before tagging a release:
 - `pyproject.toml`
 - `src/seed_agent/__init__.py`
 
-The current release line is `0.13.0`.
+The current release line is `0.14.1`.
 
 ## Version Bump Policy
 
@@ -45,6 +45,13 @@ Version tags such as `v0.1.3` also publish:
 - `ghcr.io/team-cyan/seed-agent:0.1`
 
 The image name must stay lowercase for registry compatibility.
+
+## GitHub Releases
+
+Tag pushes also run the `GitHub Release` workflow. It validates that the tag
+matches `VERSION`, extracts the matching `CHANGELOG.md` section, and creates or
+updates the GitHub Release for that tag. Keep the changelog section in place
+before pushing a release tag so the generated release notes are complete.
 
 ## Archival Release Branches
 
@@ -86,6 +93,8 @@ git push origin v0.1.3
 
 7. Confirm the GitHub Actions run publishes the GHCR image and that the package
    page shows the expected tags.
+8. Confirm the GitHub Release for the tag exists and includes the expected
+   changelog notes.
 
 ## Release Boundaries
 

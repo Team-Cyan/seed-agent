@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "seed-agent"
-version = "0.14.0"
-description = "Docker-first PT automation for NAS and homelab qBittorrent operations"
+version = "0.14.1"
+description = "Docker-first PT automation for NAS and homelab downloader operations"
 readme = "README.md"
 requires-python = ">=3.14"
 license = "MIT"
