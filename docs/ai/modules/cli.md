@@ -78,6 +78,10 @@ Expose the operator-facing command surface and safe summaries.
   state, action, reason, and whether delete actions remove files,
 - `review`, `daily-report`, `prune`, `run-once`, and scheduler-backed runs
   report how many known active torrents were reconciled as missing from qB,
+- `tracker-source-backfill` can reconcile qB-only live torrents back to tracker
+  source evidence. It is API-budgeted, supports category/limit scoping, stays
+  dry-run unless `--execute` is passed, and currently uses conservative
+  title-plus-size matching for M-Team,
 - discovery-backed command payloads include `discovery_warnings` when an
   enabled site fails at runtime while other sites or flows continue,
 - `intent-run-once` payloads include `source_warnings` when configured Want
@@ -144,3 +148,4 @@ Expose the operator-facing command surface and safe summaries.
 - `uv run seed-agent healthcheck --help`
 - `uv run seed-agent web --help`
 - `uv run seed-agent intent-run-once --config <config>`
+- `uv run seed-agent tracker-source-backfill --config <config> --category seed --limit 1 --max-api-requests 2`

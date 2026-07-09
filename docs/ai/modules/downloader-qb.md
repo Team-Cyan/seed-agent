@@ -31,6 +31,8 @@ support policy.
 - inspect managed torrents,
 - expose live runtime signals such as current upload/download speeds and
   remaining download volume,
+- preserve qB's current tracker URL in managed torrent metadata so diagnostics
+  can infer source-site hints when tags or SQLite evidence are missing,
 - expose joined operator evidence that links enqueue-time candidate signals with
   later qB runtime outcomes in `review`, `daily-report`, and prune previews,
 - reconcile known active hashes that are absent from a real qB live listing into

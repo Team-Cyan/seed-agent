@@ -215,6 +215,10 @@ by completion period, and unfinished work is ordered by current priority.
     downloader-reported available disk.
   - `headroom-report` now projects accepted candidates against both logical
     budget pools and downloader free disk headroom.
+  - qB-only live torrents can now be backfilled to tracker source evidence with
+    a dry-run-first, API-budgeted `tracker-source-backfill` command. M-Team
+    runtime/profile examples use `mteam` as the site identifier while retaining
+    compatibility with older `site:mt` hints.
   - Current docs now match implemented Transmission, Torznab, Letterboxd, and
     Telegram support, with a docs parity regression test for the support matrix.
   - CI now runs on `main` pushes and includes a strict local dependency audit.

@@ -4,6 +4,19 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.15.0 - 2026-07-10
+
+### Added
+
+- Added `tracker-source-backfill` for dry-run-first, API-budgeted recovery of
+  tracker source evidence for qB-only live torrents, with conservative M-Team
+  title and size matching.
+
+### Changed
+
+- Standardized M-Team profile/example site identifiers on `mteam` while keeping
+  compatibility with older `site:mt` hints and tracker URL inference.
+
 ## 0.14.1 - 2026-07-06
 
 ### Added

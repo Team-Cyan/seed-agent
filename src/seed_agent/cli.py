@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import errno
 import json
+import re
 import time
 import uuid
 from collections.abc import Awaitable, Callable
@@ -68,6 +69,13 @@ from seed_agent.search.mteam import (
 )
 from seed_agent.search.rss import RssSearchProvider
 from seed_agent.search.torznab import TorznabSearchProvider
+from seed_agent.sites.mteam import (
+    MTeamApiDiscoveryOptions,
+    MTeamApiResponseError,
+)
+from seed_agent.sites.mteam import (
+    fetch_api_candidates as fetch_mteam_api_candidates,
+)
 from seed_agent.sources.base import SourceIntentEvent
 from seed_agent.sources.douban import fetch_douban_wanted_user, read_douban_wanted
 from seed_agent.sources.imdb import fetch_imdb_watchlist, read_imdb_watchlist_csv
@@ -816,6 +824,27 @@ def tracker_api_report(
             "summary": _tracker_api_event_summary(events),
         }
     )
+
+
+@app.command(name="tracker-source-backfill")
+def tracker_source_backfill(
+    config: Annotated[Path, typer.Option("--config")] = DEFAULT_CONFIG,
+    execute: Annotated[bool, typer.Option("--execute")] = False,
+    limit: Annotated[int | None, typer.Option("--limit", min=1)] = None,
+    category: Annotated[str | None, typer.Option("--category")] = None,
+    max_api_requests: Annotated[int, typer.Option("--max-api-requests", min=1)] = 20,
+) -> None:
+    loaded = load_config(config)
+    payload = _tracker_source_backfill_payload(
+        loaded,
+        execute=execute,
+        limit=limit,
+        category=category,
+        max_api_requests=max_api_requests,
+    )
+    _print_json(payload)
+    if "error" in payload:
+        raise typer.Exit(code=1)
 
 
 @app.command(name="config-export")
@@ -2519,6 +2548,384 @@ def _tracker_api_event_summary(events: list[dict[str, Any]]) -> dict[str, Any]:
         "by_site": by_site,
         "by_endpoint": by_endpoint,
     }
+
+
+def _tracker_source_backfill_payload(
+    config: SeedAgentConfig,
+    *,
+    execute: bool,
+    limit: int | None,
+    category: str | None,
+    max_api_requests: int,
+) -> dict[str, Any]:
+    store = StateStore(_state_path(config))
+    downloader = _maybe_build_downloader(config)
+    if downloader is None:
+        return {
+            "command": "tracker-source-backfill",
+            "execute": execute,
+            "error": "qB secret missing or unreadable",
+        }
+    torrents = _load_policy_torrents(downloader, config)
+    if category is not None:
+        torrents = [torrent for torrent in torrents if torrent.category == category]
+    torrents, missing_reconciled = _apply_live_torrent_state(store, torrents)
+    candidate_reconciliation = _persist_live_torrent_candidates(store, torrents)
+    candidates = _qb_only_backfill_targets(store, torrents)
+    if limit is not None:
+        candidates = candidates[:limit]
+    request_budget = {"remaining": max_api_requests, "used": 0}
+    results = _run(
+        _backfill_tracker_sources(
+            config,
+            store,
+            candidates,
+            execute=execute,
+            request_budget=request_budget,
+        )
+    )
+    return {
+        "command": "tracker-source-backfill",
+        "execute": execute,
+        "state_path": str(_state_path(config)),
+        "live_torrent_count": len(torrents),
+        "category": category,
+        "missing_from_qb_reconciled": missing_reconciled,
+        "candidate_reconciliation": candidate_reconciliation,
+        "qbonly_candidates": len(candidates),
+        "api_requests_used": request_budget["used"],
+        "api_requests_remaining": request_budget["remaining"],
+        "max_api_requests": max_api_requests,
+        "summary": _tracker_source_backfill_summary(results),
+        "results": results,
+    }
+
+
+def _qb_only_backfill_targets(
+    store: StateStore,
+    torrents: list[ManagedTorrent],
+) -> list[ManagedTorrent]:
+    targets: list[ManagedTorrent] = []
+    for torrent in torrents:
+        if not torrent.hash:
+            continue
+        rows = store.list_by_torrent_hash(torrent.hash)
+        if not rows:
+            continue
+        if any(row.get("site") != "qb" for row in rows):
+            continue
+        targets.append(torrent)
+    targets.sort(key=lambda item: (item.added_at, item.name), reverse=True)
+    return targets
+
+
+async def _backfill_tracker_sources(
+    config: SeedAgentConfig,
+    store: StateStore,
+    torrents: list[ManagedTorrent],
+    *,
+    execute: bool,
+    request_budget: dict[str, int],
+) -> list[dict[str, Any]]:
+    results: list[dict[str, Any]] = []
+    for torrent in torrents:
+        if request_budget["remaining"] <= 0:
+            results.append(
+                _tracker_source_result(
+                    torrent,
+                    "skipped",
+                    reason="api request budget exhausted",
+                )
+            )
+            continue
+        site_name = _infer_tracker_site(torrent)
+        if site_name is None:
+            results.append(_tracker_source_result(torrent, "skipped", reason="site unknown"))
+            continue
+        site = _configured_site_for_inferred_tracker(config, site_name)
+        if site is None:
+            results.append(
+                _tracker_source_result(
+                    torrent,
+                    "skipped",
+                    site=site_name,
+                    reason="site not configured",
+                )
+            )
+            continue
+        site_name = site.name
+        if site.type != "mteam":
+            results.append(
+                _tracker_source_result(
+                    torrent,
+                    "skipped",
+                    site=site_name,
+                    reason=f"unsupported tracker type {site.type}",
+                )
+            )
+            continue
+        api_key = _read_secret_ref(site.api_key_ref, config.config_dir)
+        if not api_key:
+            results.append(
+                _tracker_source_result(
+                    torrent,
+                    "skipped",
+                    site=site_name,
+                    reason="missing mteam api key",
+                )
+            )
+            continue
+        match_result = await _find_mteam_match_for_torrent(
+            site_name=site.name,
+            site_mode=site.api_discovery.mode if site.api_discovery is not None else None,
+            api_key=api_key,
+            api_key_header=site.auth_header or "x-api-key",
+            torrent=torrent,
+            request_budget=request_budget,
+        )
+        result = _tracker_source_result(
+            torrent,
+            str(match_result["status"]),
+            site=site_name,
+            reason=match_result.get("reason"),
+            match=match_result.get("match"),
+        )
+        if execute and match_result["status"] == "matched":
+            candidate = match_result["candidate"]
+            assert isinstance(candidate, TorrentCandidate)
+            store.upsert_candidate(
+                candidate.stable_id,
+                candidate.title,
+                candidate.site,
+                _lifecycle_state_from_torrent(torrent),
+                score=None,
+                torrent_hash=torrent.hash,
+                free_window_expires_at=_candidate_free_window_expires_at(candidate),
+                **_candidate_snapshot_kwargs(
+                    candidate,
+                    score_reasons=["tracker source backfill matched live qB torrent"],
+                ),
+            )
+            result["updated"] = True
+        else:
+            result["updated"] = False
+        results.append(result)
+    return results
+
+
+def _tracker_source_result(
+    torrent: ManagedTorrent,
+    status: str,
+    *,
+    site: str | None = None,
+    reason: object = None,
+    match: object = None,
+) -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "hash": torrent.hash,
+        "name": torrent.name,
+        "category": torrent.category,
+        "size_gb": round(torrent.size_bytes / 1024**3, 2),
+        "status": status,
+    }
+    if site is not None:
+        result["site"] = site
+    if reason:
+        result["reason"] = str(reason)
+    if match is not None:
+        result["match"] = match
+    return result
+
+
+def _tracker_source_backfill_summary(results: list[dict[str, Any]]) -> dict[str, int]:
+    summary: dict[str, int] = {}
+    for result in results:
+        status = str(result.get("status") or "unknown")
+        summary[status] = summary.get(status, 0) + 1
+        if result.get("updated"):
+            summary["updated"] = summary.get("updated", 0) + 1
+    return summary
+
+
+def _infer_tracker_site(torrent: ManagedTorrent) -> str | None:
+    for tag in torrent.tags:
+        if tag.startswith("site:") and len(tag) > len("site:"):
+            return tag.split(":", 1)[1].strip() or None
+    tracker = str(torrent.metadata.get("tracker") or "")
+    if "m-team" in tracker or "mteam" in tracker:
+        return "mt"
+    return None
+
+
+def _configured_site_for_inferred_tracker(config: SeedAgentConfig, site_name: str) -> Any | None:
+    direct = next((item for item in config.enabled_sites if item.name == site_name), None)
+    if direct is not None:
+        return direct
+    if site_name in {"mteam", "mt"}:
+        return next((item for item in config.enabled_sites if item.type == "mteam"), None)
+    return None
+
+
+async def _find_mteam_match_for_torrent(
+    *,
+    site_name: str,
+    site_mode: str | None,
+    api_key: str,
+    api_key_header: str,
+    torrent: ManagedTorrent,
+    request_budget: dict[str, int],
+) -> dict[str, Any]:
+    matches: list[TorrentCandidate] = []
+    searched_keywords: list[str] = []
+    for keyword in _mteam_backfill_keywords(torrent.name):
+        for mode in _mteam_backfill_modes(site_mode):
+            if request_budget["remaining"] <= 0:
+                return {
+                    "status": "skipped",
+                    "reason": "api request budget exhausted",
+                    "searched": searched_keywords,
+                }
+            request_budget["remaining"] -= 1
+            request_budget["used"] += 1
+            searched_keywords.append(f"{mode or 'all'}:{keyword}")
+            try:
+                candidates = await fetch_mteam_api_candidates(
+                    site=site_name,
+                    api_key=api_key,
+                    api_key_header=api_key_header,
+                    options=MTeamApiDiscoveryOptions(
+                        mode=mode,
+                        keyword=keyword,
+                        only_free=False,
+                        discount=None,
+                        sort_field="created_date",
+                        sort_order="desc",
+                        page_size=20,
+                        max_pages=1,
+                        max_seeders=None,
+                    ),
+                )
+            except MTeamApiResponseError as exc:
+                if exc.rate_limited:
+                    request_budget["remaining"] = 0
+                    return {
+                        "status": "rate_limited",
+                        "reason": exc.message,
+                        "searched": searched_keywords,
+                    }
+                return {
+                    "status": "error",
+                    "reason": str(exc),
+                    "searched": searched_keywords,
+                }
+            except Exception as exc:
+                return {
+                    "status": "error",
+                    "reason": str(exc),
+                    "searched": searched_keywords,
+                }
+            matches.extend(_matching_mteam_candidates(torrent, candidates))
+        unique = _unique_candidates(matches)
+        if len(unique) == 1:
+            candidate = unique[0]
+            return {
+                "status": "matched",
+                "candidate": candidate,
+                "match": _candidate_match_summary(candidate),
+            }
+        if len(unique) > 1:
+            return {
+                "status": "ambiguous",
+                "reason": "multiple title/size matches",
+                "matches": [_candidate_match_summary(item) for item in unique[:5]],
+            }
+    return {
+        "status": "not_found",
+        "reason": "no unique title/size match",
+        "searched": searched_keywords,
+    }
+
+
+def _mteam_backfill_keywords(name: str) -> list[str]:
+    stripped = _strip_torrent_name_suffix(name)
+    keywords = [stripped]
+    code_match = re.search(r"\b([A-Z]{2,8}-\d{2,6})\b", stripped, flags=re.IGNORECASE)
+    if code_match:
+        keywords.insert(0, code_match.group(1).upper())
+    compact = " ".join(part for part in re.split(r"[\W_]+", stripped) if part)
+    if compact and compact not in keywords:
+        keywords.append(compact)
+    deduped: list[str] = []
+    for keyword in keywords:
+        clean = keyword.strip()
+        if clean and clean not in deduped:
+            deduped.append(clean)
+    return deduped[:3]
+
+
+def _mteam_backfill_modes(site_mode: str | None) -> list[str | None]:
+    modes: list[str | None] = []
+    if site_mode:
+        modes.append(site_mode)
+    modes.append(None)
+    deduped: list[str | None] = []
+    for mode in modes:
+        if mode not in deduped:
+            deduped.append(mode)
+    return deduped
+
+
+def _matching_mteam_candidates(
+    torrent: ManagedTorrent,
+    candidates: list[TorrentCandidate],
+) -> list[TorrentCandidate]:
+    torrent_title = _backfill_title_key(torrent.name)
+    return [
+        candidate
+        for candidate in candidates
+        if _backfill_title_key(candidate.title) == torrent_title
+        and _size_close_enough(candidate.size_bytes, torrent.size_bytes)
+    ]
+
+
+def _unique_candidates(candidates: list[TorrentCandidate]) -> list[TorrentCandidate]:
+    unique: dict[str, TorrentCandidate] = {}
+    for candidate in candidates:
+        unique.setdefault(candidate.stable_id, candidate)
+    return list(unique.values())
+
+
+def _candidate_match_summary(candidate: TorrentCandidate) -> dict[str, Any]:
+    return {
+        "candidate_id": candidate.stable_id,
+        "title": candidate.title,
+        "discount": candidate.discount.value,
+        "left_time_minutes": candidate.left_time_minutes,
+        "size_gb": round(candidate.size_bytes / 1024**3, 2),
+        "seeders": candidate.seeders,
+        "leechers": candidate.leechers,
+        "mteam_torrent_id": candidate.metadata.get("mteam_torrent_id"),
+    }
+
+
+def _strip_torrent_name_suffix(name: str) -> str:
+    stripped = name.strip()
+    for suffix in (".!qB", ".mkv", ".mp4", ".ts", ".m2ts", ".iso"):
+        if stripped.casefold().endswith(suffix.casefold()):
+            return stripped[: -len(suffix)].strip()
+    return stripped
+
+
+def _backfill_title_key(name: str) -> str:
+    stripped = _strip_torrent_name_suffix(name)
+    return " ".join(part for part in re.split(r"[\W_]+", stripped.casefold()) if part)
+
+
+def _size_close_enough(left: int, right: int) -> bool:
+    if left == right:
+        return True
+    tolerance = max(64 * 1024 * 1024, int(max(left, right) * 0.01))
+    return abs(left - right) <= tolerance
 
 
 def _torrent_contribution_item(torrent: ManagedTorrent) -> dict[str, Any]:

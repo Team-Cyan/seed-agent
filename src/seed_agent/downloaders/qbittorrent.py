@@ -219,6 +219,9 @@ def _torrent_from_row(row: dict[str, Any]) -> ManagedTorrent:
     dlspeed = row.get("dlspeed")
     if dlspeed is not None:
         metadata["dlspeed_bps"] = int(dlspeed)
+    tracker = _normalize_optional_str(row.get("tracker"))
+    if tracker is not None:
+        metadata["tracker"] = tracker
     amount_left = row.get("amount_left")
     if amount_left is not None:
         metadata["amount_left_bytes"] = int(amount_left)

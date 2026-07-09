@@ -2,7 +2,7 @@
 # Copy selected blocks into your real config; this is not a standalone config.
 
 tracker_sites:
-  - name: mt
+  - name: mteam
     type: mteam
     discovery_mode: api
     api_discovery:
