@@ -293,6 +293,29 @@ def test_keeps_active_seed_after_no_upload_observation_window() -> None:
     assert "completed seed" in decision.reason
 
 
+def test_deletes_incomplete_torrent_when_free_window_expires_before_next_check() -> None:
+    from seed_agent.policies.cleanup import classify_cleanup
+
+    now = datetime.now(UTC)
+    decision = classify_cleanup(
+        _torrent(
+            state="downloading",
+            downloaded_bytes=10 * 1024**3,
+            metadata={
+                "amount_left_bytes": 5 * 1024**3,
+                "free_window_expires_at": (now + timedelta(minutes=30)).isoformat(),
+                "free_window_min_remaining_minutes": 60,
+            },
+        ),
+        _cleanup(),
+        managed_category="pt-auto",
+        managed_tags={"seed-agent", "pt-auto"},
+    )
+
+    assert decision.action == "delete"
+    assert "incomplete free window expires before next check" in decision.reason
+
+
 def test_deletes_completed_seed_with_low_upload_when_policy_enabled() -> None:
     from seed_agent.policies.cleanup import classify_cleanup
 

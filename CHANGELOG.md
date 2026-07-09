@@ -4,6 +4,23 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.16.0 - 2026-07-10
+
+### Added
+
+- Added scheduler-level tracker source backfill before prune/discovery, bounded
+  by explicit limit and API request options.
+- Added standalone quality scoring methods for existing-torrent retention and
+  new-candidate capacity ordering.
+
+### Changed
+
+- Managed incomplete torrents whose known free window expires before the next
+  scheduled check are now deleted with files instead of only paused.
+- Capacity planning now orders accepted candidates through the shared candidate
+  value method, while cleanup orders low-quality existing torrents through the
+  shared retention quality method.
+
 ## 0.15.0 - 2026-07-10
 
 ### Added

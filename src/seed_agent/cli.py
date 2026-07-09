@@ -62,6 +62,7 @@ from seed_agent.models import (
     safe_url_identity,
 )
 from seed_agent.policies.category_policy import PoolUsage, usage_by_pool
+from seed_agent.policies.quality import candidate_value_score
 from seed_agent.search.base import SearchProvider
 from seed_agent.search.mteam import (
     MTeamSearchProvider,
@@ -1044,6 +1045,18 @@ def schedule_run(
         bool, typer.Option("--require-known-free-window/--allow-unknown-free-window")
     ] = True,
     prune: Annotated[bool, typer.Option("--prune/--no-prune")] = False,
+    tracker_backfill: Annotated[
+        bool, typer.Option("--tracker-backfill/--no-tracker-backfill")
+    ] = True,
+    tracker_backfill_limit: Annotated[
+        int | None, typer.Option("--tracker-backfill-limit", min=1)
+    ] = 10,
+    tracker_backfill_category: Annotated[
+        str | None, typer.Option("--tracker-backfill-category")
+    ] = None,
+    tracker_backfill_max_api_requests: Annotated[
+        int, typer.Option("--tracker-backfill-max-api-requests", min=1)
+    ] = 6,
     intent: Annotated[bool, typer.Option("--intent/--no-intent")] = True,
     intent_execute: Annotated[
         bool,
@@ -1118,8 +1131,64 @@ def schedule_run(
                 run_id=run_id,
             )
         else:
+            tracker_backfill_payload: dict[str, Any] | None = None
+            payload: dict[str, Any] = {}
+            if tracker_backfill:
+                _record_schedule_phase(
+                    store_for_run,
+                    run_id=run_id,
+                    phase="tracker_source_backfill",
+                    event="start",
+                    payload={
+                        "category": tracker_backfill_category,
+                        "limit": tracker_backfill_limit,
+                        "max_api_requests": tracker_backfill_max_api_requests,
+                    },
+                )
+                tracker_backfill_payload = _tracker_source_backfill_payload(
+                    loaded_for_run,
+                    execute=execute,
+                    limit=tracker_backfill_limit,
+                    category=tracker_backfill_category,
+                    max_api_requests=tracker_backfill_max_api_requests,
+                )
+                _record_schedule_phase(
+                    store_for_run,
+                    run_id=run_id,
+                    phase="tracker_source_backfill",
+                    event="end",
+                    payload=_tracker_source_backfill_payload_summary(
+                        tracker_backfill_payload
+                    ),
+                )
+                payload["tracker_source_backfill"] = tracker_backfill_payload
+                if _tracker_source_backfill_has_rate_limit(tracker_backfill_payload):
+                    payload["schedule_backoff"] = _record_schedule_rate_limit_backoff(
+                        config,
+                        endpoint="torrent/search",
+                        reason="mteam request too frequent",
+                        run_id=run_id,
+                    )
+                    payload["skipped_by_backoff"] = True
+                    store_for_run.record_tracker_api_event(
+                        site="mteam",
+                        endpoint="torrent/search",
+                        event="rate_limited",
+                        run_id=run_id,
+                        rate_limited=True,
+                        message="mteam request too frequent",
+                    )
+                    _record_schedule_phase(
+                        store_for_run,
+                        run_id=run_id,
+                        phase="tracker_source_backfill",
+                        event="warning",
+                        message="mteam rate limited",
+                        payload={"schedule_backoff": payload["schedule_backoff"]},
+                    )
+
             prune_payload: dict[str, Any] | None = None
-            if prune:
+            if prune and "schedule_backoff" not in payload:
                 _record_schedule_phase(
                     store_for_run,
                     run_id=run_id,
@@ -1140,20 +1209,20 @@ def schedule_run(
                     payload=_prune_payload_summary(prune_payload),
                 )
                 if "error" in prune_payload:
-                    payload = {
-                        "command": "schedule-run",
-                        "run_id": run_id,
-                        "config": str(config),
-                        "execute": execute,
-                        "error": f"prune: {prune_payload['error']}",
-                        "prune": prune_payload,
-                    }
+                    payload.update(
+                        {
+                            "command": "schedule-run",
+                            "run_id": run_id,
+                            "config": str(config),
+                            "execute": execute,
+                            "error": f"prune: {prune_payload['error']}",
+                            "prune": prune_payload,
+                        }
+                    )
                 else:
-                    payload = {}
-            else:
-                payload = {}
+                    payload.setdefault("prune", prune_payload)
 
-            if "error" not in payload:
+            if "error" not in payload and "schedule_backoff" not in payload:
                 _record_schedule_phase(
                     store_for_run,
                     run_id=run_id,
@@ -1170,6 +1239,8 @@ def schedule_run(
                     prune=False,
                     capacity_prune=prune,
                 )
+                if tracker_backfill_payload is not None:
+                    payload["tracker_source_backfill"] = tracker_backfill_payload
                 _record_schedule_phase(
                     store_for_run,
                     run_id=run_id,
@@ -1219,6 +1290,10 @@ def schedule_run(
         payload["min_free_window_minutes"] = min_free_window_minutes
         payload["require_known_free_window"] = require_known_free_window if execute else False
         payload["prune_enabled"] = prune
+        payload["tracker_backfill_enabled"] = tracker_backfill
+        payload["tracker_backfill_limit"] = tracker_backfill_limit
+        payload["tracker_backfill_category"] = tracker_backfill_category
+        payload["tracker_backfill_max_api_requests"] = tracker_backfill_max_api_requests
         payload["intent_enabled"] = intent
         payload["intent_execute"] = intent_execute
         if payload.get("schedule_backoff", {}).get("active"):
@@ -2747,6 +2822,19 @@ def _tracker_source_backfill_summary(results: list[dict[str, Any]]) -> dict[str,
     return summary
 
 
+def _tracker_source_backfill_has_rate_limit(payload: dict[str, Any]) -> bool:
+    summary = payload.get("summary")
+    if isinstance(summary, dict) and int(summary.get("rate_limited") or 0) > 0:
+        return True
+    for result in payload.get("results") or []:
+        if isinstance(result, dict) and result.get("status") == "rate_limited":
+            return True
+        reason = str(result.get("reason") if isinstance(result, dict) else "")
+        if any(marker in reason for marker in MTEAM_RATE_LIMIT_MARKERS):
+            return True
+    return False
+
+
 def _infer_tracker_site(torrent: ManagedTorrent) -> str | None:
     for tag in torrent.tags:
         if tag.startswith("site:") and len(tag) > len("site:"):
@@ -3047,6 +3135,10 @@ def _schedule_log_summary(payload: dict[str, Any]) -> dict[str, Any]:
         "min_free_window_minutes",
         "require_known_free_window",
         "prune_enabled",
+        "tracker_backfill_enabled",
+        "tracker_backfill_limit",
+        "tracker_backfill_category",
+        "tracker_backfill_max_api_requests",
         "intent_enabled",
         "intent_execute",
         "intent_search_enabled",
@@ -3071,6 +3163,11 @@ def _schedule_log_summary(payload: dict[str, Any]) -> dict[str, Any]:
         prune_summary = _prune_payload_summary(prune_payload)
         if prune_summary is not None:
             summary[key] = prune_summary
+    tracker_backfill_summary = _tracker_source_backfill_payload_summary(
+        payload.get("tracker_source_backfill")
+    )
+    if tracker_backfill_summary is not None:
+        summary["tracker_source_backfill"] = tracker_backfill_summary
     intent_summary = _intent_payload_summary(payload.get("intent"))
     if intent_summary is not None:
         summary["intent"] = intent_summary
@@ -3091,6 +3188,25 @@ def _prune_payload_summary(payload: object) -> dict[str, Any] | None:
         "decisions_count": len(payload.get("decisions") or []),
         "preview_count": len(payload.get("preview") or []),
         "pool_usage": payload.get("pool_usage"),
+    }
+
+
+def _tracker_source_backfill_payload_summary(
+    payload: object,
+) -> dict[str, Any] | None:
+    if not isinstance(payload, dict):
+        return None
+    return {
+        "command": payload.get("command"),
+        "execute": payload.get("execute"),
+        "category": payload.get("category"),
+        "live_torrent_count": payload.get("live_torrent_count"),
+        "qbonly_candidates": payload.get("qbonly_candidates"),
+        "api_requests_used": payload.get("api_requests_used"),
+        "api_requests_remaining": payload.get("api_requests_remaining"),
+        "max_api_requests": payload.get("max_api_requests"),
+        "summary": payload.get("summary"),
+        "error": payload.get("error"),
     }
 
 
@@ -3488,7 +3604,7 @@ def _enqueue_candidate_batches(
 ) -> list[tuple[list[ScoreBreakdown], bool, list[str]]]:
     accepted = sorted(
         (item for item in scored if item.accepted),
-        key=lambda item: item.score,
+        key=candidate_value_score,
         reverse=True,
     )
     if not accepted:

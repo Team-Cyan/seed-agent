@@ -350,6 +350,14 @@ def _free_window_decision(
     remaining = expires_at - _utcnow()
     if remaining > timedelta(minutes=min_remaining):
         return None
+    if not _is_completed_seed(torrent):
+        return CleanupDecision(
+            action="delete",
+            reason=_reason(
+                "incomplete free window expires before next check; delete files before paid period"
+            ),
+            managed=True,
+        )
     if _is_paused_or_stopped(torrent.state):
         return _paused_or_stopped_decision(metadata, cleanup)
     return CleanupDecision(

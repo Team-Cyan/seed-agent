@@ -7,6 +7,7 @@ Score discovered torrents or ranked releases using explicit policy weights and e
 ## Primary Files
 
 - `src/seed_agent/policies/scoring.py`
+- `src/seed_agent/policies/quality.py`
 - `src/seed_agent/policies/intent_ranking.py`
 - `src/seed_agent/actions/pt.py`
 - `src/seed_agent/actions/intent.py`
@@ -14,6 +15,8 @@ Score discovered torrents or ranked releases using explicit policy weights and e
 ## Current Responsibilities
 
 - apply configured scoring weights,
+- keep PT candidate value and existing-torrent retention quality in stable
+  standalone methods so scheduler capacity tuning has narrow edit points,
 - produce explainable breakdowns,
 - keep enqueue decisions auditable,
 - rank releases for intent workflows.

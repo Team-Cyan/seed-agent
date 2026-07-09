@@ -4,6 +4,7 @@ from datetime import UTC, datetime, timedelta
 
 from seed_agent.models import ManagedTorrent
 from seed_agent.policies.eviction import rank_eviction_candidates
+from seed_agent.policies.quality import torrent_retention_quality_score
 
 
 def _torrent(**overrides: object) -> ManagedTorrent:
@@ -46,3 +47,22 @@ def test_rank_eviction_candidates_prefers_low_upload_density_large_cold_torrents
     )
 
     assert ranked[0].hash == "drop"
+
+
+def test_torrent_retention_quality_uses_recent_upload_density_over_total_size() -> None:
+    active_small = _torrent(
+        hash="active-small",
+        size_bytes=20 * 1024**3,
+        uploaded_bytes=20 * 1024**3,
+        metadata={"recent_upload_1h_gb": 2.0, "recent_upload_24h_gb": 8.0},
+    )
+    idle_large = _torrent(
+        hash="idle-large",
+        size_bytes=400 * 1024**3,
+        uploaded_bytes=200 * 1024**3,
+        metadata={"recent_upload_1h_gb": 0.0, "recent_upload_24h_gb": 0.1},
+    )
+
+    assert torrent_retention_quality_score(active_small) > torrent_retention_quality_score(
+        idle_large
+    )

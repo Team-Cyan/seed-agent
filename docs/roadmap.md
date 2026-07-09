@@ -219,6 +219,10 @@ by completion period, and unfinished work is ordered by current priority.
     a dry-run-first, API-budgeted `tracker-source-backfill` command. M-Team
     runtime/profile examples use `mteam` as the site identifier while retaining
     compatibility with older `site:mt` hints.
+  - `schedule-run` now starts with bounded tracker source backfill before
+    pruning and discovery, deletes managed incomplete torrents whose free
+    window expires before the next scheduled check, and routes eviction/value
+    ranking through standalone quality methods.
   - Current docs now match implemented Transmission, Torznab, Letterboxd, and
     Telegram support, with a docs parity regression test for the support matrix.
   - CI now runs on `main` pushes and includes a strict local dependency audit.

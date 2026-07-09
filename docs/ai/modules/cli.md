@@ -70,6 +70,11 @@ Expose the operator-facing command surface and safe summaries.
   `schedule-run --prune`. Standalone `run-once --prune` keeps the historical
   post-enqueue cleanup behavior; scheduled cycles run conservative prune before
   PT discovery/enqueue, then run the resource intent loop last,
+- scheduled cycles first run an API-budgeted tracker source backfill for
+  qB-only live torrents, then conservative prune, then PT discovery/enqueue,
+  then the resource intent loop. The backfill phase is enabled by default with
+  bounded `--tracker-backfill-limit` and `--tracker-backfill-max-api-requests`
+  controls,
 - scheduled PT enqueue can run one capacity-pressure prune when accepted
   candidates would otherwise be added paused by runtime gates. That pass uses
   forced space reclamation, refreshes qB state afterward, and recomputes enqueue
@@ -111,8 +116,9 @@ Expose the operator-facing command surface and safe summaries.
   window is unknown or too short for the configured safety threshold,
 - keep optional scheduled pruning explicit through `--prune` so cleanup is never
   silently bundled into a long-running deployment. When enabled, schedule order
-  must remain conservative prune, PT add, then Want List source refresh, with
-  Want List torrent search only during the local midnight hour,
+  must remain tracker source backfill, conservative prune, PT add, then Want
+  List source refresh, with Want List torrent search only during the local
+  midnight hour,
 - keep scheduled Want List search non-mutating by default and limited to the
   local midnight hour; automatic resource qB enqueue requires explicit
   `--intent-execute`,

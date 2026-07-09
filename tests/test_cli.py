@@ -1213,6 +1213,33 @@ def test_schedule_run_can_prune_each_cycle(
             "decisions": [],
         }
 
+    def fake_tracker_source_backfill_payload(
+        loaded,
+        *,
+        execute: bool,
+        limit: int | None,
+        category: str | None,
+        max_api_requests: int,
+    ) -> dict[str, object]:
+        seen.append(("tracker_backfill", (limit, category, max_api_requests)))
+        return {
+            "command": "tracker-source-backfill",
+            "execute": execute,
+            "category": category,
+            "live_torrent_count": 0,
+            "qbonly_candidates": 0,
+            "api_requests_used": 0,
+            "api_requests_remaining": max_api_requests,
+            "max_api_requests": max_api_requests,
+            "summary": {},
+            "results": [],
+        }
+
+    monkeypatch.setattr(
+        cli,
+        "_tracker_source_backfill_payload",
+        fake_tracker_source_backfill_payload,
+    )
     monkeypatch.setattr(cli, "_prune_payload", fake_prune_payload)
     monkeypatch.setattr(cli, "_run_once_payload", fake_run_once_payload)
     monkeypatch.setattr(cli, "_intent_run_once_payload", fake_intent_run_once_payload)
@@ -1231,9 +1258,15 @@ def test_schedule_run_can_prune_each_cycle(
 
     assert result.exit_code == 0
     payload = _json_output(result)
-    assert seen == [("prune", 60), ("run_once", (False, True)), ("intent", False)]
+    assert seen == [
+        ("tracker_backfill", (10, None, 6)),
+        ("prune", 60),
+        ("run_once", (False, True)),
+        ("intent", False),
+    ]
     assert payload["intent_search_enabled"] is False
     assert payload["prune"]["command"] == "prune"
+    assert payload["tracker_source_backfill"]["command"] == "tracker-source-backfill"
 
 
 def test_schedule_run_persists_phase_order_with_shared_run_id(
@@ -1310,6 +1343,32 @@ def test_schedule_run_persists_phase_order_with_shared_run_id(
             "decisions": [],
         }
 
+    def fake_tracker_source_backfill_payload(
+        loaded,
+        *,
+        execute: bool,
+        limit: int | None,
+        category: str | None,
+        max_api_requests: int,
+    ) -> dict[str, object]:
+        return {
+            "command": "tracker-source-backfill",
+            "execute": execute,
+            "category": category,
+            "live_torrent_count": 0,
+            "qbonly_candidates": 0,
+            "api_requests_used": 0,
+            "api_requests_remaining": max_api_requests,
+            "max_api_requests": max_api_requests,
+            "summary": {},
+            "results": [],
+        }
+
+    monkeypatch.setattr(
+        cli,
+        "_tracker_source_backfill_payload",
+        fake_tracker_source_backfill_payload,
+    )
     monkeypatch.setattr(cli, "_prune_payload", fake_prune_payload)
     monkeypatch.setattr(cli, "_run_once_payload", fake_run_once_payload)
     monkeypatch.setattr(cli, "_intent_run_once_payload", fake_intent_run_once_payload)
@@ -1345,6 +1404,8 @@ def test_schedule_run_persists_phase_order_with_shared_run_id(
     )
     assert [(row["phase"], row["event"]) for row in events] == [
         ("backoff_check", "inactive"),
+        ("tracker_source_backfill", "start"),
+        ("tracker_source_backfill", "end"),
         ("prune", "start"),
         ("prune", "end"),
         ("pt_discovery", "start"),

@@ -26,6 +26,9 @@ balanced safety policy.
   or delete a completed seed simply because it is cold, has no recent upload, or
   has a free-window expiry, unless the operator explicitly enables completed
   low-upload cleanup,
+- delete managed incomplete torrents whose known free window will expire before
+  the next scheduled check. Completed seeds are not deleted by this expiry rule,
+  because once downloaded they no longer create paid download exposure,
 - when `seed_cleanup.delete_completed_low_upload_after_hours` is set, completed
   mutable-category seeds can be deleted without requiring an over-budget pool if
   their no-upload observation window has exceeded that delay and their total
@@ -54,6 +57,11 @@ balanced safety policy.
   planning when accepted candidates would be paused by runtime gates, forces
   space reclamation for mutable delete-enabled categories, and then lets the
   caller refresh qB runtime state before enqueueing.
+- Existing torrent deletion order is driven by
+  `policies.quality.torrent_retention_quality_score()` and
+  `torrent_eviction_pressure_score()`. Tune those methods when upload-density
+  retention changes are needed instead of embedding ad hoc ranking in cleanup
+  callers.
 - Always inspect prune preview counts before execute mode. The useful summary is
   action counts, total size/downloaded/left for deletes, state distribution, and
   a sample of names/reasons. Do not execute a broad cleanup from counts alone if
