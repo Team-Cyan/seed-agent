@@ -18,6 +18,12 @@ from seed_agent.models import (
 )
 from seed_agent.state import StateStore
 
+_HELP_ENV = {"COLUMNS": "160", "GITHUB_ACTIONS": ""}
+
+
+def _invoke_help(app: object, args: list[str]) -> object:
+    return CliRunner().invoke(app, args, env=_HELP_ENV)
+
 
 def _config(secret_ref: str | None = None) -> SeedAgentConfig:
     return SeedAgentConfig(
@@ -265,7 +271,7 @@ def _json_output(result) -> dict[str, object]:
 def test_cli_help_lists_phase_one_commands() -> None:
     from seed_agent.cli import app
 
-    result = CliRunner().invoke(app, ["--help"])
+    result = _invoke_help(app, ["--help"])
 
     assert result.exit_code == 0
     assert "discover" in result.output
@@ -294,7 +300,7 @@ def test_cli_version_option_reports_package_version() -> None:
 def test_enqueue_help_includes_execute_flag() -> None:
     from seed_agent.cli import app
 
-    result = CliRunner().invoke(app, ["enqueue", "--help"])
+    result = _invoke_help(app, ["enqueue", "--help"])
 
     assert result.exit_code == 0
     assert "--execute" in result.output
@@ -304,7 +310,7 @@ def test_enqueue_help_includes_execute_flag() -> None:
 def test_mutating_command_help_includes_execute_flag(command: str) -> None:
     from seed_agent.cli import app
 
-    result = CliRunner().invoke(app, [command, "--help"])
+    result = _invoke_help(app, [command, "--help"])
 
     assert result.exit_code == 0
     assert "--execute" in result.output
@@ -313,7 +319,7 @@ def test_mutating_command_help_includes_execute_flag(command: str) -> None:
 def test_schedule_run_help_includes_interval_and_free_window_flags() -> None:
     from seed_agent.cli import app
 
-    result = CliRunner().invoke(app, ["schedule-run", "--help"])
+    result = _invoke_help(app, ["schedule-run", "--help"])
 
     assert result.exit_code == 0
     assert "--interval-minutes" in result.output
@@ -325,7 +331,7 @@ def test_schedule_run_help_includes_interval_and_free_window_flags() -> None:
 def test_web_help_includes_local_server_options() -> None:
     from seed_agent.cli import app
 
-    result = CliRunner().invoke(app, ["web", "--help"])
+    result = _invoke_help(app, ["web", "--help"])
 
     assert result.exit_code == 0
     assert "--config" in result.output

@@ -6,6 +6,12 @@ from typer.testing import CliRunner
 from seed_agent.models import IntentState
 from seed_agent.state import StateStore
 
+_HELP_ENV = {"COLUMNS": "160", "GITHUB_ACTIONS": ""}
+
+
+def _invoke_help(app: object, args: list[str]) -> object:
+    return CliRunner().invoke(app, args, env=_HELP_ENV)
+
 
 def _write_config(tmp_path: Path) -> Path:
     inbox = tmp_path / "local" / "inbox" / "intents.jsonl"
@@ -150,7 +156,7 @@ def test_intent_inbox_cli_ingests_configured_jsonl(tmp_path: Path, monkeypatch) 
 def test_intent_commands_show_in_help() -> None:
     from seed_agent.cli import app
 
-    result = CliRunner().invoke(app, ["--help"])
+    result = _invoke_help(app, ["--help"])
 
     assert result.exit_code == 0
     assert "intent-add" in result.output
@@ -163,6 +169,6 @@ def test_intent_commands_show_in_help() -> None:
     assert "intent-enqueue" in result.output
     assert "intent-run-once" in result.output
 
-    enqueue_help = CliRunner().invoke(app, ["intent-enqueue", "--help"])
+    enqueue_help = _invoke_help(app, ["intent-enqueue", "--help"])
     assert enqueue_help.exit_code == 0
     assert "--release-id" in enqueue_help.output
