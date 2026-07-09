@@ -418,6 +418,75 @@ def test_run_once_execute_marks_enqueued_without_hash_and_preserves_it_on_dry_ru
     assert preserved["torrent_hash"] is None
 
 
+def test_run_once_execute_resolves_hash_when_qb_add_returns_ok_only(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from seed_agent import cli
+
+    monkeypatch.chdir(tmp_path)
+
+    config_path = _config_file(tmp_path)
+    config = _config()
+
+    async def fake_discover_candidates(config: SeedAgentConfig):
+        return [_candidate()]
+
+    def fake_score_candidates(candidates, discovery_config, scoring_config):
+        return [_scored()]
+
+    class FakeDownloader:
+        async def add_url(
+            self, url: str, category: str, tags: list[str], *, paused: bool = False
+        ) -> str | None:
+            return None
+
+        async def list_torrents(self, category: str | None = None, tags: set[str] | None = None):
+            now = datetime.now(UTC)
+            return [
+                ManagedTorrent(
+                    hash="fedcba9876543210fedcba9876543210fedcba98",
+                    name=_candidate().title,
+                    category="seed",
+                    tags={"seed-agent", "seed"},
+                    state="downloading",
+                    size_bytes=_candidate().size_bytes,
+                    uploaded_bytes=0,
+                    downloaded_bytes=0,
+                    added_at=now,
+                    completed_at=None,
+                    last_activity_at=now,
+                    save_path="/downloads/seed",
+                    metadata={},
+                )
+            ]
+
+        async def pause(self, hash: str) -> None:
+            return None
+
+        async def delete(self, hash: str, delete_files: bool) -> None:
+            return None
+
+    def fake_build_downloader(config: SeedAgentConfig):
+        return FakeDownloader()
+
+    monkeypatch.setattr(cli, "load_config", lambda path: config)
+    monkeypatch.setattr(cli, "discover_candidates", fake_discover_candidates)
+    monkeypatch.setattr(cli, "score_candidates", fake_score_candidates)
+    monkeypatch.setattr(cli, "build_downloader", fake_build_downloader)
+
+    result = CliRunner().invoke(
+        cli.app,
+        ["run-once", "--config", str(config_path), "--execute"],
+    )
+
+    assert result.exit_code == 0
+    store = StateStore(tmp_path / ".seed-agent" / "state.db")
+    row = store.get_candidate(_candidate().stable_id)
+    assert row is not None
+    assert row["state"] == LifecycleState.DOWNLOADING.value
+    assert row["torrent_hash"] == "fedcba9876543210fedcba9876543210fedcba98"
+
+
 def test_run_once_execute_failure_persists_prior_state_and_audit(
     tmp_path: Path, monkeypatch
 ) -> None:

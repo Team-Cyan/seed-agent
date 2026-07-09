@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 
 from seed_agent.audit import AuditLogger
 from seed_agent.config import CategoryPolicyConfig
-from seed_agent.models import ScoreBreakdown, TorrentCandidate
+from seed_agent.models import ManagedTorrent, ScoreBreakdown, TorrentCandidate
 from seed_agent.policies.category_policy import PoolUsage
 
 
@@ -54,15 +55,27 @@ def _policy(**overrides: object) -> CategoryPolicyConfig:
 
 
 class DummyDownloader:
-    def __init__(self, torrent_hash: str | None = None) -> None:
+    def __init__(
+        self,
+        torrent_hash: str | None = None,
+        torrents: list[ManagedTorrent] | None = None,
+    ) -> None:
         self.torrent_hash = torrent_hash
+        self.torrents = list(torrents or [])
         self.calls: list[tuple[str, str, list[str], bool]] = []
+        self.list_calls: list[tuple[str | None, set[str] | None]] = []
 
     async def add_url(
         self, url: str, category: str, tags: list[str], *, paused: bool = False
     ) -> str | None:
         self.calls.append((url, category, tags, paused))
         return self.torrent_hash
+
+    async def list_torrents(
+        self, category: str | None = None, tags: set[str] | None = None
+    ) -> list[ManagedTorrent]:
+        self.list_calls.append((category, tags))
+        return self.torrents
 
 
 class FailingSecondDownloader:
@@ -76,6 +89,27 @@ class FailingSecondDownloader:
         if len(self.calls) == 2:
             raise RuntimeError("qB add failed")
         return "0123456789abcdef0123456789abcdef01234567"
+
+
+def _managed_torrent(**overrides: object) -> ManagedTorrent:
+    now = datetime.now(UTC)
+    data: dict[str, object] = {
+        "hash": "0123456789abcdef0123456789abcdef01234567",
+        "name": "High Confidence Torrent",
+        "category": "seed",
+        "tags": {"seed-agent", "seed"},
+        "state": "downloading",
+        "size_bytes": 10 * 1024 * 1024 * 1024,
+        "uploaded_bytes": 0,
+        "downloaded_bytes": 0,
+        "added_at": now,
+        "completed_at": None,
+        "last_activity_at": now,
+        "save_path": "/downloads/seed",
+        "metadata": {},
+    }
+    data.update(overrides)
+    return ManagedTorrent(**data)
 
 
 @pytest.mark.asyncio
@@ -127,6 +161,51 @@ async def test_execute_accepted_candidate_calls_downloader_and_records_hash() ->
     decision = decisions[0]
     assert decision.execute is True
     assert decision.new_state["torrent_hash"] == "0123456789abcdef0123456789abcdef01234567"
+
+
+@pytest.mark.asyncio
+async def test_execute_resolves_hash_from_live_list_when_add_returns_no_hash() -> None:
+    from seed_agent.actions.qb import enqueue_candidates
+
+    downloader = DummyDownloader(
+        torrent_hash=None,
+        torrents=[_managed_torrent(hash="feedfacefeedfacefeedfacefeedfacefeedface")],
+    )
+
+    decisions = await enqueue_candidates(
+        [_scored()],
+        downloader,
+        _policy(),
+        execute=True,
+    )
+
+    assert downloader.list_calls == [("seed", {"seed-agent", "seed"})]
+    decision = decisions[0]
+    assert decision.new_state["torrent_hash"] == "feedfacefeedfacefeedfacefeedfacefeedface"
+
+
+@pytest.mark.asyncio
+async def test_execute_keeps_enqueue_success_when_hash_resolution_fails() -> None:
+    from seed_agent.actions.qb import enqueue_candidates
+
+    class ListFailingDownloader(DummyDownloader):
+        async def list_torrents(
+            self, category: str | None = None, tags: set[str] | None = None
+        ) -> list[ManagedTorrent]:
+            raise RuntimeError("qB list failed")
+
+    downloader = ListFailingDownloader(torrent_hash=None)
+
+    decisions = await enqueue_candidates(
+        [_scored()],
+        downloader,
+        _policy(),
+        execute=True,
+    )
+
+    assert len(decisions) == 1
+    assert decisions[0].action == "qb.enqueue"
+    assert "torrent_hash" not in decisions[0].new_state
 
 
 @pytest.mark.asyncio

@@ -4,7 +4,7 @@ from collections.abc import Iterable, Sequence
 
 from seed_agent.config import CategoryPolicyConfig, CleanupConfig
 from seed_agent.downloaders.base import Downloader
-from seed_agent.models import Decision, ManagedTorrent, ScoreBreakdown
+from seed_agent.models import Decision, ManagedTorrent, ScoreBreakdown, TorrentCandidate
 from seed_agent.policies.category_policy import PoolUsage
 from seed_agent.policies.cleanup import CleanupDecision, classify_cleanup
 from seed_agent.policies.eviction import rank_eviction_candidates
@@ -64,6 +64,13 @@ async def enqueue_candidates(
                     tags_list,
                     paused=paused,
                 )
+                if torrent_hash is None:
+                    torrent_hash = await _resolve_added_torrent_hash(
+                        downloader,
+                        candidate,
+                        policy.name,
+                        set(tags_list),
+                    )
             except Exception as exc:
                 decisions.append(
                     Decision(
@@ -94,6 +101,39 @@ async def enqueue_candidates(
         )
 
     return decisions
+
+
+async def _resolve_added_torrent_hash(
+    downloader: Downloader,
+    candidate: TorrentCandidate,
+    category: str,
+    tags: set[str],
+) -> str | None:
+    try:
+        torrents = await downloader.list_torrents(category=category, tags=tags or None)
+    except Exception:
+        return None
+    identity = _candidate_identity(candidate)
+    matches = [
+        torrent.hash
+        for torrent in torrents
+        if torrent.hash and _torrent_identity(torrent) == identity
+    ]
+    if len(matches) == 1:
+        return matches[0]
+    return None
+
+
+def _candidate_identity(candidate: TorrentCandidate) -> tuple[str, int]:
+    return (_normalize_torrent_title(candidate.title), int(candidate.size_bytes))
+
+
+def _torrent_identity(torrent: ManagedTorrent) -> tuple[str, int]:
+    return (_normalize_torrent_title(torrent.name), int(torrent.size_bytes))
+
+
+def _normalize_torrent_title(title: str) -> str:
+    return " ".join(title.strip().casefold().split())
 
 
 def _build_reason(
