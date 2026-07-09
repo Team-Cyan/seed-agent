@@ -740,6 +740,33 @@ class StateStore:
             ).fetchall()
         return [_candidate_row(row) for row in rows]
 
+    def list_unlinked_candidates(self) -> list[dict[str, Any]]:
+        with self._connect(row_factory=sqlite3.Row) as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    stable_id,
+                    site,
+                    title,
+                    state,
+                    score,
+                    torrent_hash,
+                    free_window_expires_at,
+                    size_bytes,
+                    seeders,
+                    leechers,
+                    discount,
+                    left_time_minutes,
+                    score_reasons,
+                    first_seen_at,
+                    updated_at
+                FROM candidates
+                WHERE torrent_hash IS NULL
+                ORDER BY updated_at DESC, stable_id ASC
+                """
+            ).fetchall()
+        return [_candidate_row(row) for row in rows]
+
     def update_by_torrent_hash(self, torrent_hash: str, state: LifecycleState) -> int:
         rows = self.list_by_torrent_hash(torrent_hash)
         for row in rows:

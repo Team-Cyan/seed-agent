@@ -2283,6 +2283,69 @@ def test_prune_links_live_torrent_without_existing_candidate(
     assert row["torrent_hash"] == "legacy-hash"
 
 
+def test_prune_links_live_torrent_to_existing_unhashed_candidate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from seed_agent import cli
+
+    monkeypatch.chdir(tmp_path)
+
+    config_path = _config_file(tmp_path, secret_ref="local/secrets/qb.yaml")
+    config = _config(secret_ref="local/secrets/qb.yaml")
+    store = StateStore(tmp_path / ".seed-agent" / "state.db")
+    store.upsert_candidate(
+        stable_id="demo-free:https://tracker.example/details.php?id=1",
+        title="Free Live Torrent",
+        site="demo-free",
+        state=LifecycleState.ENQUEUED,
+        score=95,
+        torrent_hash=None,
+        free_window_expires_at="2026-05-16T00:00:00+00:00",
+        size_bytes=12 * 1024 * 1024 * 1024,
+        discount="free",
+        score_reasons=["discount free accepted"],
+    )
+
+    class FakeDownloader:
+        async def list_torrents(
+            self, category: str | None = None, tags: set[str] | None = None
+        ) -> list[ManagedTorrent]:
+            return [
+                _managed_torrent(
+                    hash="live-hash",
+                    name="Free Live Torrent",
+                    size_bytes=12 * 1024 * 1024 * 1024,
+                )
+            ]
+
+        async def pause(self, hash: str) -> None:
+            raise AssertionError("dry-run prune must not pause torrents")
+
+        async def delete(self, hash: str, delete_files: bool) -> None:
+            raise AssertionError("dry-run prune must not delete torrents")
+
+    monkeypatch.setattr(cli, "load_config", lambda path: config)
+    monkeypatch.setattr(cli, "_maybe_build_downloader", lambda loaded: FakeDownloader())
+
+    result = CliRunner().invoke(cli.app, ["prune", "--config", str(config_path)])
+
+    assert result.exit_code == 0
+    payload = _json_output(result)
+    assert payload["candidate_reconciliation"]["linked_existing_candidates"] == 1
+    assert payload["candidate_reconciliation"]["created_qb_records"] == 0
+    row = store.get_candidate("demo-free:https://tracker.example/details.php?id=1")
+    assert row is not None
+    assert row["torrent_hash"] == "live-hash"
+    assert row["discount"] == "free"
+    assert row["free_window_expires_at"] == "2026-05-16T00:00:00+00:00"
+    assert store.get_candidate("qb:live-hash") is None
+    preview = payload["preview"][0]
+    assert preview["candidate_evidence"]["candidate_id"] == (
+        "demo-free:https://tracker.example/details.php?id=1"
+    )
+    assert preview["candidate_evidence"]["discount"] == "free"
+
+
 def test_prune_marks_deleted_candidate_present_when_seen_live(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

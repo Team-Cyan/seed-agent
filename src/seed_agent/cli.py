@@ -580,12 +580,13 @@ def review(
     policy_lookup = _policy_lookup(loaded)
     torrents = _load_policy_torrents(downloader, loaded)
     torrents, missing_reconciled = _apply_live_torrent_state(store, torrents)
-    _persist_live_torrent_candidates(store, torrents)
+    candidate_reconciliation = _persist_live_torrent_candidates(store, torrents)
     payload = {
         "command": "review",
         "config": str(config),
         "managed_count": len(torrents),
         "missing_from_qb_reconciled": missing_reconciled,
+        "candidate_reconciliation": candidate_reconciliation,
         "pool_usage": _pool_usage_summary(loaded, torrents),
         "runtime_activity": _runtime_activity_summary(torrents),
         "managed_torrents": [
@@ -1545,9 +1546,14 @@ def _prune_payload(
     all_torrents = _load_policy_torrents(downloader, loaded)
     if isinstance(downloader, _NullDownloader):
         missing_reconciled = 0
+        candidate_reconciliation = {
+            "created_qb_records": 0,
+            "linked_existing_candidates": 0,
+            "marked_present": 0,
+        }
     else:
         all_torrents, missing_reconciled = _apply_live_torrent_state(store, all_torrents)
-        _persist_live_torrent_candidates(store, all_torrents)
+        candidate_reconciliation = _persist_live_torrent_candidates(store, all_torrents)
     mutable_policy_names = {policy.name for policy in mutable_policies}
     torrents = [torrent for torrent in all_torrents if torrent.category in mutable_policy_names]
     batch_error = None
@@ -1595,6 +1601,7 @@ def _prune_payload(
         ),
         "managed_count": len(torrents),
         "missing_from_qb_reconciled": missing_reconciled,
+        "candidate_reconciliation": candidate_reconciliation,
         "pool_usage": _pool_usage_summary(loaded, all_torrents),
         "decisions": [_decision_summary(item) for item in decisions],
         "preview": preview,
@@ -2876,7 +2883,8 @@ def _candidate_evidence_summary(store: StateStore, torrent_hash: str) -> dict[st
     rows = store.list_by_torrent_hash(torrent_hash)
     if not rows:
         return None
-    row = rows[-1]
+    non_qb_rows = [row for row in rows if row.get("site") != "qb"]
+    row = (non_qb_rows or rows)[-1]
     return {
         "candidate_id": row["stable_id"],
         "candidate_state": row["state"],
@@ -3296,13 +3304,40 @@ def _pool_usage_item_summary(pool_usage: PoolUsage) -> dict[str, float | bool]:
 def _persist_live_torrent_candidates(
     store: StateStore,
     torrents: list[ManagedTorrent],
-) -> None:
+) -> dict[str, int]:
+    unlinked_by_identity = _unlinked_candidate_identity_map(store)
+    created_qb_records = 0
+    linked_existing_candidates = 0
+    marked_present = 0
     for torrent in torrents:
-        if store.list_by_torrent_hash(torrent.hash):
+        existing_rows = store.list_by_torrent_hash(torrent.hash)
+        non_qb_rows = [row for row in existing_rows if row.get("site") != "qb"]
+        if non_qb_rows:
             store.mark_present_by_torrent_hash(
                 torrent.hash,
                 _lifecycle_state_from_torrent(torrent),
             )
+            marked_present += 1
+            continue
+        linked_row = unlinked_by_identity.get(_live_torrent_identity(torrent))
+        if linked_row is not None:
+            store.upsert_candidate(
+                stable_id=str(linked_row["stable_id"]),
+                title=str(linked_row["title"]),
+                site=str(linked_row["site"]),
+                state=_lifecycle_state_from_torrent(torrent),
+                score=linked_row.get("score"),
+                torrent_hash=torrent.hash,
+                size_bytes=torrent.size_bytes,
+            )
+            linked_existing_candidates += 1
+            continue
+        if existing_rows:
+            store.mark_present_by_torrent_hash(
+                torrent.hash,
+                _lifecycle_state_from_torrent(torrent),
+            )
+            marked_present += 1
             continue
         store.upsert_candidate(
             stable_id=f"qb:{torrent.hash}",
@@ -3313,6 +3348,26 @@ def _persist_live_torrent_candidates(
             torrent_hash=torrent.hash,
             size_bytes=torrent.size_bytes,
         )
+        created_qb_records += 1
+    return {
+        "created_qb_records": created_qb_records,
+        "linked_existing_candidates": linked_existing_candidates,
+        "marked_present": marked_present,
+    }
+
+
+def _unlinked_candidate_identity_map(store: StateStore) -> dict[tuple[str, int], dict[str, Any]]:
+    candidates: dict[tuple[str, int], dict[str, Any]] = {}
+    for row in store.list_unlinked_candidates():
+        size_bytes = row.get("size_bytes")
+        if size_bytes is None:
+            continue
+        try:
+            identity = (_normalize_torrent_title(str(row["title"])), int(size_bytes))
+        except (TypeError, ValueError):
+            continue
+        candidates.setdefault(identity, row)
+    return candidates
 
 
 def _lifecycle_state_from_torrent(torrent: ManagedTorrent) -> LifecycleState:
