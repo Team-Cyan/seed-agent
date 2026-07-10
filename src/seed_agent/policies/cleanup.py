@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict
 from seed_agent.config import CleanupConfig
 from seed_agent.models import ManagedTorrent
 
-CleanupAction = Literal["protect", "keep", "pause", "delete"]
+CleanupAction = Literal["protect", "keep", "delete"]
 
 
 class CleanupDecision(BaseModel):
@@ -53,6 +53,10 @@ def classify_cleanup(
             protected=True,
         )
 
+    free_window_decision = _free_window_decision(torrent, cleanup, metadata)
+    if free_window_decision is not None:
+        return free_window_decision
+
     if _is_currently_uploading(metadata):
         return CleanupDecision(
             action="keep",
@@ -76,10 +80,6 @@ def classify_cleanup(
             managed=True,
         )
 
-    free_window_decision = _free_window_decision(torrent, cleanup, metadata)
-    if free_window_decision is not None:
-        return free_window_decision
-
     no_upload_decision = _no_upload_observation_decision(
         torrent,
         cleanup,
@@ -101,39 +101,6 @@ def classify_cleanup(
                 managed=True,
             )
 
-    if _is_paused_or_stopped(torrent.state):
-        paused_at = _paused_at(metadata)
-        if paused_at is not None:
-            if not space_reclamation_required:
-                return CleanupDecision(
-                    action="keep",
-                    reason=_reason("paused but space reclamation not required"),
-                    managed=True,
-                )
-            paused_age = _utcnow() - paused_at
-            if paused_age >= timedelta(hours=cleanup.pause_before_delete_hours):
-                return CleanupDecision(
-                    action="delete",
-                    reason=_reason(
-                        f"paused for {paused_age.days}d {paused_age.seconds // 3600}h "
-                        f">= delete delay {cleanup.pause_before_delete_hours}h"
-                    ),
-                    managed=True,
-                )
-            return CleanupDecision(
-                action="keep",
-                reason=_reason(
-                    f"paused for {paused_age.days}d {paused_age.seconds // 3600}h "
-                    f"< delete delay {cleanup.pause_before_delete_hours}h"
-                ),
-                managed=True,
-            )
-        return CleanupDecision(
-            action="keep",
-            reason=_reason("paused/stopped torrent missing paused_at timestamp"),
-            managed=True,
-        )
-
     recent_upload_gb = _recent_upload_gb(metadata)
     if recent_upload_gb is not None and recent_upload_gb >= cleanup.min_upload_delta_gb:
         return CleanupDecision(
@@ -145,13 +112,15 @@ def classify_cleanup(
             managed=True,
         )
 
+    if space_reclamation_required:
+        return CleanupDecision(
+            action="delete",
+            reason=_reason("cold managed torrent deleted for required space reclamation"),
+            managed=True,
+        )
     return CleanupDecision(
-        action="pause" if space_reclamation_required else "keep",
-        reason=_reason(
-            "cold managed torrent should be paused before deletion"
-            if space_reclamation_required
-            else "cold managed torrent retained; space reclamation not required"
-        ),
+        action="keep",
+        reason=_reason("cold managed torrent retained; space reclamation not required"),
         managed=True,
     )
 
@@ -170,8 +139,6 @@ def _no_upload_observation_decision(
             space_reclamation_required=space_reclamation_required,
         )
     if not _is_completed_seed(torrent):
-        return None
-    if _is_paused_or_stopped(torrent.state):
         return None
     recent_upload_gb = _recent_upload_gb(metadata)
     if recent_upload_gb is None:
@@ -341,6 +308,14 @@ def _free_window_decision(
     cleanup: CleanupConfig,
     metadata: dict[str, object],
 ) -> CleanupDecision | None:
+    if not _is_completed_seed(torrent) and bool(metadata.get("unknown_free_status_high_risk")):
+        return CleanupDecision(
+            action="delete",
+            reason=_reason(
+                "incomplete torrent free status remained unknown after bounded tracker lookup"
+            ),
+            managed=True,
+        )
     if not _is_completed_seed(torrent) and _is_confirmed_non_free(metadata):
         return CleanupDecision(
             action="delete",
@@ -366,46 +341,7 @@ def _free_window_decision(
             ),
             managed=True,
         )
-    if _is_paused_or_stopped(torrent.state):
-        return _paused_or_stopped_decision(metadata, cleanup)
-    return CleanupDecision(
-        action="pause",
-        reason=_reason(
-            "free window expires before next check; pause managed torrent before paid period"
-        ),
-        managed=True,
-    )
-
-
-def _paused_or_stopped_decision(
-    metadata: dict[str, object],
-    cleanup: CleanupConfig,
-) -> CleanupDecision:
-    paused_at = _paused_at(metadata)
-    if paused_at is not None:
-        paused_age = _utcnow() - paused_at
-        if paused_age >= timedelta(hours=cleanup.pause_before_delete_hours):
-            return CleanupDecision(
-                action="delete",
-                reason=_reason(
-                    f"paused for {paused_age.days}d {paused_age.seconds // 3600}h "
-                    f">= delete delay {cleanup.pause_before_delete_hours}h"
-                ),
-                managed=True,
-            )
-        return CleanupDecision(
-            action="keep",
-            reason=_reason(
-                f"paused for {paused_age.days}d {paused_age.seconds // 3600}h "
-                f"< delete delay {cleanup.pause_before_delete_hours}h"
-            ),
-            managed=True,
-        )
-    return CleanupDecision(
-        action="keep",
-        reason=_reason("paused/stopped torrent missing paused_at timestamp"),
-        managed=True,
-    )
+    return None
 
 
 def _is_managed(
@@ -450,13 +386,6 @@ def _is_currently_uploading(metadata: dict[str, object]) -> bool:
         return int(value) > 0
     except (TypeError, ValueError):
         return False
-
-
-def _paused_at(metadata: dict[str, object]) -> datetime | None:
-    value = metadata.get("paused_at")
-    if isinstance(value, datetime):
-        return value
-    return None
 
 
 def _no_upload_since_at(metadata: dict[str, object]) -> datetime | None:
@@ -505,11 +434,6 @@ def _is_confirmed_non_free(metadata: dict[str, object]) -> bool:
     if not normalized:
         return False
     return normalized not in {"free", "2xfree", "2x_free"}
-
-
-def _is_paused_or_stopped(state: str) -> bool:
-    normalized = state.strip().lower()
-    return normalized.startswith("paused") or normalized.startswith("stopped")
 
 
 def _reason(message: str) -> str:

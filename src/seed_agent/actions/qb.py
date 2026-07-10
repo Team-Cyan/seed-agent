@@ -165,6 +165,7 @@ async def prune_cold_torrents(
     free_window_min_remaining_minutes: int | None = None,
     force_space_reclamation: bool = False,
     completed_low_upload_requires_reclamation: bool = False,
+    reclaim_target_bytes: int | None = None,
 ) -> list[Decision]:
     if policy.mode != "mutable" or not policy.delete_enabled:
         return [
@@ -193,18 +194,30 @@ async def prune_cold_torrents(
     space_reclamation_required = force_space_reclamation or bool(
         pool_usage and pool_usage.over_budget
     )
+    if reclaim_target_bytes is None:
+        if pool_usage is not None and pool_usage.over_budget:
+            reclaim_target_bytes = pool_usage.size_bytes - pool_usage.max_size_bytes
+        elif force_space_reclamation:
+            reclaim_target_bytes = 1
+        else:
+            reclaim_target_bytes = 0
+    reclaim_target_bytes = max(int(reclaim_target_bytes), 0)
+    reclaimed_bytes = 0
 
     for torrent in rank_eviction_candidates(list(torrents)):
         if free_window_min_remaining_minutes is not None:
             metadata = dict(torrent.metadata)
             metadata["free_window_min_remaining_minutes"] = free_window_min_remaining_minutes
             torrent = torrent.model_copy(update={"metadata": metadata})
+        reclamation_needed = (
+            space_reclamation_required and reclaimed_bytes < reclaim_target_bytes
+        )
         classification = classify_cleanup(
             torrent,
             cleanup,
             policy.name,
             tags,
-            space_reclamation_required=space_reclamation_required,
+            space_reclamation_required=reclamation_needed,
             completed_low_upload_requires_reclamation=(
                 completed_low_upload_requires_reclamation
             ),
@@ -215,20 +228,22 @@ async def prune_cold_torrents(
             policy,
             execute,
             pool_usage=pool_usage,
-            space_reclamation_required=space_reclamation_required,
+            space_reclamation_required=reclamation_needed,
             force_space_reclamation=force_space_reclamation,
             completed_low_upload_requires_reclamation=(
                 completed_low_upload_requires_reclamation
             ),
+            reclaim_target_bytes=reclaim_target_bytes,
+            reclaimed_bytes=reclaimed_bytes,
         )
 
         if not execute:
             decisions.append(decision)
+            if classification.action == "delete" and reclamation_needed:
+                reclaimed_bytes += max(int(torrent.size_bytes), 0)
             continue
         try:
-            if classification.action == "pause":
-                await downloader.pause(torrent.hash)
-            elif classification.action == "delete":
+            if classification.action == "delete":
                 await downloader.delete(torrent.hash, delete_files=True)
         except Exception as exc:
             decisions.append(
@@ -239,15 +254,19 @@ async def prune_cold_torrents(
                     execute,
                     exc,
                     pool_usage=pool_usage,
-                    space_reclamation_required=space_reclamation_required,
+                    space_reclamation_required=reclamation_needed,
                     force_space_reclamation=force_space_reclamation,
                     completed_low_upload_requires_reclamation=(
                         completed_low_upload_requires_reclamation
                     ),
+                    reclaim_target_bytes=reclaim_target_bytes,
+                    reclaimed_bytes=reclaimed_bytes,
                 )
             )
             raise MutationBatchError("qBittorrent cleanup batch failed", decisions) from exc
         decisions.append(decision)
+        if classification.action == "delete" and reclamation_needed:
+            reclaimed_bytes += max(int(torrent.size_bytes), 0)
 
     return decisions
 
@@ -262,6 +281,8 @@ def _decision_for_cleanup(
     space_reclamation_required: bool = False,
     force_space_reclamation: bool = False,
     completed_low_upload_requires_reclamation: bool = False,
+    reclaim_target_bytes: int = 0,
+    reclaimed_bytes: int = 0,
 ) -> Decision:
     action = f"qb.cleanup.{classification.action}"
     reason = f"cleanup {classification.action}: {classification.reason}"
@@ -281,6 +302,8 @@ def _decision_for_cleanup(
             "completed_low_upload_requires_reclamation": (
                 completed_low_upload_requires_reclamation
             ),
+            "reclaim_target_bytes": reclaim_target_bytes,
+            "reclaimed_bytes_before_action": reclaimed_bytes,
             **_policy_state(policy),
             **_pool_usage_state(pool_usage),
         },
@@ -298,6 +321,8 @@ def _failed_cleanup_decision(
     space_reclamation_required: bool = False,
     force_space_reclamation: bool = False,
     completed_low_upload_requires_reclamation: bool = False,
+    reclaim_target_bytes: int = 0,
+    reclaimed_bytes: int = 0,
 ) -> Decision:
     error = _error_summary(exc)
     return Decision(
@@ -317,6 +342,8 @@ def _failed_cleanup_decision(
             "completed_low_upload_requires_reclamation": (
                 completed_low_upload_requires_reclamation
             ),
+            "reclaim_target_bytes": reclaim_target_bytes,
+            "reclaimed_bytes_before_action": reclaimed_bytes,
             **_policy_state(policy),
             **_pool_usage_state(pool_usage),
         },

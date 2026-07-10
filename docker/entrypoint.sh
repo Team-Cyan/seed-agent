@@ -23,15 +23,15 @@ esac
 
 CONFIG_PATH="${SEED_AGENT_CONFIG:-/app/config/config.yaml}"
 EXECUTE="${SEED_AGENT_EXECUTE:-true}"
-INTERVAL_MINUTES="${SEED_AGENT_INTERVAL_MINUTES:-60}"
+INTERVAL_MINUTES="${SEED_AGENT_INTERVAL_MINUTES:-}"
 MIN_FREE_WINDOW_MINUTES="${SEED_AGENT_MIN_FREE_WINDOW_MINUTES:-}"
 REQUIRE_KNOWN_FREE_WINDOW="${SEED_AGENT_REQUIRE_KNOWN_FREE_WINDOW:-}"
 HEARTBEAT_FILE="${SEED_AGENT_HEARTBEAT_FILE:-}"
 MAX_STALENESS_MINUTES="${SEED_AGENT_MAX_STALENESS_MINUTES:-}"
 MAX_CYCLES="${SEED_AGENT_MAX_CYCLES:-}"
-PRUNE="${SEED_AGENT_PRUNE:-false}"
+PRUNE="${SEED_AGENT_PRUNE:-}"
 INTENT="${SEED_AGENT_INTENT:-}"
-INTENT_EXECUTE="${SEED_AGENT_INTENT_EXECUTE:-false}"
+INTENT_EXECUTE="${SEED_AGENT_INTENT_EXECUTE:-}"
 STARTUP_STATUS="${SEED_AGENT_STARTUP_STATUS:-true}"
 WEB_ENABLED="${SEED_AGENT_WEB_ENABLED:-false}"
 WEB_HOST="${SEED_AGENT_WEB_HOST:-0.0.0.0}"
@@ -61,12 +61,18 @@ if [ "$MODE" = "schedule-run" ]; then
   if [ -n "$HEARTBEAT_FILE" ]; then
     set -- "$@" --heartbeat-file "$HEARTBEAT_FILE"
   fi
-  set -- "$@" --interval-minutes "$INTERVAL_MINUTES"
+  if [ -n "$INTERVAL_MINUTES" ]; then
+    set -- "$@" --interval-minutes "$INTERVAL_MINUTES"
+  fi
   if [ -n "$MAX_CYCLES" ]; then
     set -- "$@" --max-cycles "$MAX_CYCLES"
   fi
-  if [ "$PRUNE" = "true" ]; then
-    set -- "$@" --prune
+  if [ -n "$PRUNE" ]; then
+    if [ "$PRUNE" = "true" ]; then
+      set -- "$@" --prune
+    else
+      set -- "$@" --no-prune
+    fi
   fi
   if [ -n "$INTENT" ]; then
     if [ "$INTENT" = "true" ]; then
@@ -75,8 +81,12 @@ if [ "$MODE" = "schedule-run" ]; then
       set -- "$@" --no-intent
     fi
   fi
-  if [ "$INTENT_EXECUTE" = "true" ]; then
-    set -- "$@" --intent-execute
+  if [ -n "$INTENT_EXECUTE" ]; then
+    if [ "$INTENT_EXECUTE" = "true" ]; then
+      set -- "$@" --intent-execute
+    else
+      set -- "$@" --intent-dry-run
+    fi
   fi
 fi
 

@@ -138,7 +138,6 @@ seed_cleanup:
   protect_manual: true
   protect_media_library: true
   delete_after_no_upload_hours: 2
-  pause_before_delete_hours: 24
 want_decision:
   confirmation_threshold: 0.82
   auto_enqueue_threshold: 0.94
@@ -162,6 +161,19 @@ release_preferences:
     dolby_vision: 15
     hdr10_plus: 10
     webdl: -10
+scheduler:
+  interval_minutes: 60
+  min_free_window_minutes: 180
+  require_known_free_window: true
+  prune_enabled: true
+  tracker_backfill_enabled: true
+  tracker_backfill_limit: 10
+  tracker_backfill_category: null
+  tracker_backfill_max_api_requests: 6
+  intent_enabled: true
+  intent_execute: false
+  intent_search_mode: daily
+  intent_search_hour: 0
 local_state:
   candidate_retention_days: 30
 want_sources:

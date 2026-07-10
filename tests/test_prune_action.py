@@ -16,7 +16,6 @@ def _cleanup() -> CleanupConfig:
         protect_hr=True,
         protect_manual=True,
         protect_media_library=True,
-        pause_before_delete_hours=24,
         delete_after_no_upload_hours=2,
     )
 
@@ -82,10 +81,10 @@ class DummyDownloader:
 
 
 class FailingSecondDownloader(DummyDownloader):
-    async def pause(self, hash: str) -> None:
-        await super().pause(hash)
+    async def delete(self, hash: str, delete_files: bool) -> None:
+        await super().delete(hash, delete_files)
         if len(self.calls) == 2:
-            raise RuntimeError("pause failed")
+            raise RuntimeError("delete failed")
 
 
 @pytest.mark.asyncio
@@ -109,7 +108,7 @@ async def test_dry_run_prune_does_not_call_downloader() -> None:
 
 
 @pytest.mark.asyncio
-async def test_execute_prune_pauses_cold_incomplete_managed_torrent() -> None:
+async def test_execute_prune_deletes_cold_incomplete_managed_torrent() -> None:
     from seed_agent.actions.qb import prune_cold_torrents
 
     downloader = DummyDownloader()
@@ -127,9 +126,9 @@ async def test_execute_prune_pauses_cold_incomplete_managed_torrent() -> None:
         ),
     )
 
-    assert downloader.calls == [("pause", "abcd1234", None)]
+    assert downloader.calls == [("delete", "abcd1234", True)]
     assert len(decisions) == 1
-    assert decisions[0].action == "qb.cleanup.pause"
+    assert decisions[0].action == "qb.cleanup.delete"
     assert decisions[0].execute is True
 
 
@@ -251,14 +250,14 @@ async def test_execute_batch_failure_carries_prior_cleanup_decisions() -> None:
         )
 
     decisions = raised.value.decisions
-    assert downloader.calls == [("pause", "first", None), ("pause", "second", None)]
+    assert downloader.calls == [("delete", "first", True), ("delete", "second", True)]
     assert [decision.action for decision in decisions] == [
-        "qb.cleanup.pause",
-        "qb.cleanup.pause.failed",
+        "qb.cleanup.delete",
+        "qb.cleanup.delete.failed",
     ]
     assert decisions[0].target_id == "first"
     assert decisions[1].target_id == "second"
-    assert "pause failed" in decisions[1].reason
+    assert "delete failed" in decisions[1].reason
 
 
 @pytest.mark.asyncio
@@ -286,7 +285,7 @@ async def test_prune_keeps_cold_torrent_when_pool_is_not_over_budget() -> None:
 
 
 @pytest.mark.asyncio
-async def test_force_space_reclamation_pauses_cold_torrent_when_pool_is_not_over_budget() -> None:
+async def test_force_space_reclamation_deletes_cold_torrent_when_pool_is_not_over_budget() -> None:
     from seed_agent.actions.qb import prune_cold_torrents
 
     downloader = DummyDownloader()
@@ -305,10 +304,45 @@ async def test_force_space_reclamation_pauses_cold_torrent_when_pool_is_not_over
         force_space_reclamation=True,
     )
 
-    assert downloader.calls == [("pause", "abcd1234", None)]
-    assert decisions[0].action == "qb.cleanup.pause"
+    assert downloader.calls == [("delete", "abcd1234", True)]
+    assert decisions[0].action == "qb.cleanup.delete"
     assert decisions[0].new_state["force_space_reclamation"] is True
     assert decisions[0].new_state["space_reclamation_required"] is True
+
+
+@pytest.mark.asyncio
+async def test_prune_stops_capacity_deletion_after_reclaim_target_is_met() -> None:
+    from seed_agent.actions.qb import prune_cold_torrents
+
+    downloader = DummyDownloader()
+    size = 600 * 1024**3
+    decisions = await prune_cold_torrents(
+        [
+            _incomplete_torrent(hash="first", size_bytes=size),
+            _incomplete_torrent(hash="second", size_bytes=size),
+            _incomplete_torrent(hash="third", size_bytes=size),
+        ],
+        downloader,
+        _cleanup(),
+        _policy(),
+        execute=True,
+        pool_usage=PoolUsage(
+            pool_name="downloads",
+            size_bytes=11 * 1024**4,
+            max_size_bytes=10 * 1024**4,
+        ),
+    )
+
+    assert downloader.calls == [
+        ("delete", "first", True),
+        ("delete", "second", True),
+    ]
+    assert [decision.action for decision in decisions] == [
+        "qb.cleanup.delete",
+        "qb.cleanup.delete",
+        "qb.cleanup.keep",
+    ]
+    assert decisions[2].new_state["space_reclamation_required"] is False
 
 
 @pytest.mark.asyncio

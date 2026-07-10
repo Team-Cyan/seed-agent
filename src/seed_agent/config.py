@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import tempfile
 from pathlib import Path
 from typing import Any, ClassVar, Literal
 
@@ -359,16 +361,22 @@ class CleanupConfig(BaseModel):
     protect_hr: bool
     protect_manual: bool
     protect_media_library: bool
-    pause_before_delete_hours: int
     delete_after_no_upload_hours: int = 2
     delete_completed_low_upload_after_hours: int | None = None
     completed_low_upload_min_ratio: float = 0.0
     completed_low_upload_min_gb: float = 0.0
 
+    @model_validator(mode="before")
+    @classmethod
+    def discard_legacy_pause_delay(cls, value: Any) -> Any:
+        if not isinstance(value, dict) or "pause_before_delete_hours" not in value:
+            return value
+        cleaned = dict(value)
+        cleaned.pop("pause_before_delete_hours", None)
+        return cleaned
+
     @model_validator(mode="after")
-    def validate_pause_before_delete_hours(self) -> CleanupConfig:
-        if self.pause_before_delete_hours < 1:
-            raise ValueError("pause_before_delete_hours must be >= 1")
+    def validate_cleanup_delays(self) -> CleanupConfig:
         if self.delete_after_no_upload_hours < 1:
             raise ValueError("delete_after_no_upload_hours must be >= 1")
         if (
@@ -527,6 +535,43 @@ class StateConfig(BaseModel):
         return self
 
 
+class SchedulerConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    interval_minutes: int = 60
+    min_free_window_minutes: int | None = None
+    require_known_free_window: bool = True
+    prune_enabled: bool = False
+    tracker_backfill_enabled: bool = True
+    tracker_backfill_limit: int = 10
+    tracker_backfill_category: str | None = None
+    tracker_backfill_max_api_requests: int = 6
+    intent_enabled: bool = True
+    intent_execute: bool = False
+    intent_search_mode: Literal["daily", "every_cycle"] = "daily"
+    intent_search_hour: int = 0
+
+    @model_validator(mode="after")
+    def validate_scheduler(self) -> SchedulerConfig:
+        if self.interval_minutes < 1:
+            raise ValueError("scheduler.interval_minutes must be >= 1")
+        if self.min_free_window_minutes is not None and self.min_free_window_minutes < 0:
+            raise ValueError("scheduler.min_free_window_minutes must be >= 0")
+        if self.tracker_backfill_limit < 1:
+            raise ValueError("scheduler.tracker_backfill_limit must be >= 1")
+        if self.tracker_backfill_max_api_requests < 1:
+            raise ValueError("scheduler.tracker_backfill_max_api_requests must be >= 1")
+        if not 0 <= self.intent_search_hour <= 23:
+            raise ValueError("scheduler.intent_search_hour must be between 0 and 23")
+        return self
+
+    def with_overrides(self, overrides: dict[str, Any]) -> SchedulerConfig:
+        updates = {key: value for key, value in overrides.items() if value is not None}
+        if updates.get("min_free_window_minutes") == 0:
+            updates["min_free_window_minutes"] = None
+        return SchedulerConfig.model_validate({**self.model_dump(), **updates})
+
+
 class SeedAgentConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
@@ -541,6 +586,7 @@ class SeedAgentConfig(BaseModel):
     release_profiles: dict[str, ReleaseProfileConfig] = Field(default_factory=dict)
     want_sources: SourcesConfig = Field(default_factory=SourcesConfig)
     local_state: StateConfig = Field(default_factory=StateConfig)
+    scheduler: SchedulerConfig = Field(default_factory=SchedulerConfig)
     _config_dir: Path | None = PrivateAttr(default=None)
 
     @property
@@ -580,11 +626,48 @@ def load_downloader_secret(path: Path) -> dict[str, str]:
     return {str(key): str(value) for key, value in loaded.items()}
 
 
-def load_config(path: Path) -> SeedAgentConfig:
+def load_config_mapping(path: Path) -> dict[str, Any]:
     loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
     data = loaded or {}
     if not isinstance(data, dict):
         raise ValueError("configuration root must be a mapping")
+    return dict(data)
+
+
+def atomic_write_text(path: Path, content: str, *, mode: int | None = None) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if mode is None:
+        mode = (path.stat().st_mode & 0o777) if path.exists() else 0o600
+    fd, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    temporary_path = Path(temporary_name)
+    try:
+        os.chmod(temporary_path, mode)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            fd = -1
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary_path, path)
+    except Exception:
+        if fd >= 0:
+            os.close(fd)
+        temporary_path.unlink(missing_ok=True)
+        raise
+
+
+def write_config_mapping(path: Path, data: dict[str, Any]) -> SeedAgentConfig:
+    config = SeedAgentConfig.model_validate(data)
+    normalized = config.model_dump(mode="json", exclude_none=True)
+    atomic_write_text(
+        path,
+        yaml.safe_dump(normalized, sort_keys=False, allow_unicode=True),
+    )
+    config._config_dir = path.resolve().parent
+    return config
+
+
+def load_config(path: Path) -> SeedAgentConfig:
+    data = load_config_mapping(path)
     config = SeedAgentConfig.model_validate(data)
     config._config_dir = path.resolve().parent
     return config

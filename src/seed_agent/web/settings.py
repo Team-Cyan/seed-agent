@@ -8,7 +8,14 @@ from typing import Any, Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
-from seed_agent.config import MTeamApiDiscoveryConfig, SeedAgentConfig, SiteConfig, load_config
+from seed_agent.config import (
+    MTeamApiDiscoveryConfig,
+    SeedAgentConfig,
+    SiteConfig,
+    atomic_write_text,
+    load_config_mapping,
+    write_config_mapping,
+)
 
 CONFIG_SECTION_NAMES = {
     "download_client",
@@ -16,6 +23,7 @@ CONFIG_SECTION_NAMES = {
     "seed_cleanup",
     "want_decision",
     "release_preferences",
+    "scheduler",
     "want_sources",
 }
 ConfigSectionName = Literal[
@@ -24,6 +32,7 @@ ConfigSectionName = Literal[
     "seed_cleanup",
     "want_decision",
     "release_preferences",
+    "scheduler",
     "want_sources",
 ]
 LOCAL_SECRETS_DIR = Path("local/secrets")
@@ -87,19 +96,14 @@ def config_section_yaml_fragment(section: str, data: dict[str, Any]) -> str:
 
 
 def save_config_section(config_path: Path, draft: ConfigSectionDraft) -> dict[str, Any]:
-    raw = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
-    if not isinstance(raw, dict):
-        raise ValueError("configuration root must be a mapping")
+    raw = load_config_mapping(config_path)
     raw[draft.section] = draft.data
     config = SeedAgentConfig.model_validate(raw)
     raw[draft.section] = getattr(config, draft.section).model_dump(
         mode="json",
         exclude_none=True,
     )
-    config_path.write_text(
-        yaml.safe_dump(raw, sort_keys=False, allow_unicode=True),
-        encoding="utf-8",
-    )
+    write_config_mapping(config_path, raw)
     return raw[draft.section]
 
 
@@ -117,9 +121,7 @@ def save_config_section_yaml(config_path: Path, draft: ConfigSectionYamlDraft) -
 
 
 def preview_config_section(config_path: Path, draft: ConfigSectionDraft) -> dict[str, Any]:
-    before_raw = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
-    if not isinstance(before_raw, dict):
-        raise ValueError("configuration root must be a mapping")
+    before_raw = load_config_mapping(config_path)
     after_raw = dict(before_raw)
     after_raw[draft.section] = draft.data
 
@@ -225,9 +227,7 @@ def build_tracker_status(draft: TrackerDraft, root: Path) -> list[dict[str, str]
 
 def save_tracker_draft(config_path: Path, draft: TrackerDraft) -> SiteConfig:
     site = tracker_draft_to_config(draft)
-    raw = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
-    if not isinstance(raw, dict):
-        raise ValueError("configuration root must be a mapping")
+    raw = load_config_mapping(config_path)
 
     sites = raw.setdefault("tracker_sites", [])
     if not isinstance(sites, list):
@@ -249,11 +249,7 @@ def save_tracker_draft(config_path: Path, draft: TrackerDraft) -> SiteConfig:
         draft.api_key_value,
     )
 
-    config_path.write_text(
-        yaml.safe_dump(raw, sort_keys=False, allow_unicode=True),
-        encoding="utf-8",
-    )
-    load_config(config_path)
+    write_config_mapping(config_path, raw)
     return site
 
 
@@ -266,8 +262,7 @@ def _write_secret_value(
         return
     root = _repo_root_for_config(config_path)
     secret_path = _resolve_secret_write_path(secret_ref, root)
-    secret_path.parent.mkdir(parents=True, exist_ok=True)
-    secret_path.write_text(secret_value, encoding="utf-8")
+    atomic_write_text(secret_path, secret_value, mode=0o600)
 
 
 def _repo_root_for_config(config_path: Path) -> Path:

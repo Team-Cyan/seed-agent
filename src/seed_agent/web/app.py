@@ -79,6 +79,9 @@ def make_handler(config_path: Path) -> type[BaseHTTPRequestHandler]:
                         "sections": config_sections_payload(config),
                         "section_yamls": config_section_yamls_payload(config),
                         "config_yaml": normalized_config_yaml(config),
+                        "scheduler_environment_overrides": (
+                            _scheduler_environment_overrides()
+                        ),
                     }
                 )
                 return
@@ -314,6 +317,30 @@ def _tracker_summary(site: SiteConfig, root: Path) -> dict[str, Any]:
         "cookie_ref": site.cookie_ref,
         "has_api_key": bool(api_key_ref and _resolve_repo_path(api_key_ref, root).exists()),
     }
+
+
+def _scheduler_environment_overrides() -> dict[str, int | bool]:
+    mapping = {
+        "SEED_AGENT_INTERVAL_MINUTES": ("interval_minutes", int),
+        "SEED_AGENT_MIN_FREE_WINDOW_MINUTES": ("min_free_window_minutes", int),
+        "SEED_AGENT_REQUIRE_KNOWN_FREE_WINDOW": ("require_known_free_window", bool),
+        "SEED_AGENT_PRUNE": ("prune_enabled", bool),
+        "SEED_AGENT_INTENT": ("intent_enabled", bool),
+        "SEED_AGENT_INTENT_EXECUTE": ("intent_execute", bool),
+    }
+    overrides: dict[str, int | bool] = {}
+    for variable, (field_name, value_type) in mapping.items():
+        raw_value = os.getenv(variable)
+        if raw_value is None or not raw_value.strip():
+            continue
+        if value_type is bool:
+            overrides[field_name] = raw_value.strip().lower() in {"true", "1", "yes", "on"}
+        else:
+            try:
+                overrides[field_name] = int(raw_value)
+            except ValueError:
+                continue
+    return overrides
 
 
 def _site_probe_payload(

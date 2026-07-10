@@ -21,6 +21,7 @@ const state = {
   configYaml: "",
   configPath: "",
   runtimeRoot: "",
+  schedulerEnvironmentOverrides: {},
   language: "CN",
   dark: false,
   currentSection: "overview",
@@ -52,6 +53,7 @@ const copy = {
       download_client: "下载与分类",
       pt_filters: "PT 入队规则",
       seed_cleanup: "保种清理",
+      scheduler: "定时任务",
       want_decision: "想看决策",
       wants: "想看列表",
       release_preferences: "资源匹配",
@@ -74,7 +76,11 @@ const copy = {
       },
       seed_cleanup: {
         title: "保种清理",
-        description: "配置冷种判断、保护项和删除前暂停观察。",
+        description: "配置冷种判断、保护项和按目标容量直接删除。",
+      },
+      scheduler: {
+        title: "定时任务",
+        description: "统一配置扫描周期、清理、来源补全和想看搜索频率。",
       },
       want_decision: {
         title: "想看决策",
@@ -147,6 +153,7 @@ const copy = {
       formSavedPageState: "表单已保存在当前页面状态。",
       formValid: "表单格式通过。",
       fromYaml: "来自 YAML",
+      runtimeOverrides: "运行时覆盖",
       fullConfigPreview: "完整配置预览",
       fullConfigPreviewDescription: "这里是归一化后的只读预览。需要修改时，进入对应配置页编辑“本页 YAML”。",
       heartbeat: "心跳",
@@ -308,6 +315,7 @@ const copy = {
       download_client: "Download Client",
       pt_filters: "PT Intake Rules",
       seed_cleanup: "Seed Cleanup",
+      scheduler: "Scheduler",
       want_decision: "Want Decisions",
       wants: "Want List",
       release_preferences: "Release Matching",
@@ -330,7 +338,11 @@ const copy = {
       },
       seed_cleanup: {
         title: "Seed Cleanup",
-        description: "This section will configure cold torrent rules, protections, and pause-before-delete behavior.",
+        description: "This section will configure cold torrent rules, protections, and target-limited capacity deletion.",
+      },
+      scheduler: {
+        title: "Scheduler",
+        description: "Configure cycle timing, pruning, tracker backfill, and scheduled Want List search frequency.",
       },
       want_decision: {
         title: "Want Decisions",
@@ -403,6 +415,7 @@ const copy = {
       formSavedPageState: "Form is saved in the current page state.",
       formValid: "Form format is valid.",
       fromYaml: "From YAML",
+      runtimeOverrides: "Runtime overrides",
       fullConfigPreview: "Full config preview",
       fullConfigPreviewDescription: "This is the normalized read-only preview. To edit, open the matching settings page and update This page YAML.",
       heartbeat: "Heartbeat",
@@ -587,7 +600,22 @@ const settingsPanelsByLanguage = {
         ["保护手动标记", "protect_manual", "boolean", "手动标记项默认保护。"],
         ["保护媒体库", "protect_media_library", "boolean", "媒体库相关种子默认保护。"],
         ["零上传删除小时数", "delete_after_no_upload_hours", "number", "零上传观察窗口。"],
-        ["删除前暂停小时数", "pause_before_delete_hours", "number", "删除前先暂停观察的小时数。"],
+      ],
+    },
+    scheduler: {
+      title: "定时任务",
+      fields: [
+        ["扫描周期（分钟）", "interval_minutes", "number", "每轮 scheduled task 的间隔。"],
+        ["候选免费窗口下限", "min_free_window_minutes", "optional-number", "执行入队时要求的剩余免费分钟数；留空表示不限制。"],
+        ["要求已知免费窗口", "require_known_free_window", "boolean", "自动入队前必须能确认免费窗口。"],
+        ["启用清理", "prune_enabled", "boolean", "每轮运行 tracker backfill 后执行 seed 清理。"],
+        ["启用来源补全", "tracker_backfill_enabled", "boolean", "扫描 qB-only 任务并补充 tracker 促销证据。"],
+        ["每轮补全任务数", "tracker_backfill_limit", "number", "每轮最多处理的 qB-only 任务数。"],
+        ["每轮 Tracker API 预算", "tracker_backfill_max_api_requests", "number", "来源补全允许调用的最大 Tracker API 次数。"],
+        ["启用想看同步", "intent_enabled", "boolean", "每轮同步配置的想看来源。"],
+        ["想看自动入队", "intent_execute", "boolean", "允许 scheduled Want List 结果自动写入下载器。"],
+        ["想看搜索频率", "intent_search_mode", "select:daily|every_cycle", "每天在指定小时后执行一次，或每轮搜索。"],
+        ["每日搜索小时", "intent_search_hour", "number", "daily 模式下使用本地时区的 0-23 小时；错过后会在下一轮补跑。"],
       ],
     },
     want_decision: {
@@ -645,7 +673,22 @@ const settingsPanelsByLanguage = {
         ["Protect manual marks", "protect_manual", "boolean", "Protect manually marked torrents by default."],
         ["Protect media library", "protect_media_library", "boolean", "Protect media-library torrents by default."],
         ["Delete after no-upload hours", "delete_after_no_upload_hours", "number", "Zero-upload observation window."],
-        ["Pause before delete hours", "pause_before_delete_hours", "number", "Hours to pause before delete observation."],
+      ],
+    },
+    scheduler: {
+      title: "Scheduler",
+      fields: [
+        ["Interval minutes", "interval_minutes", "number", "Delay between scheduled cycles."],
+        ["Minimum free-window minutes", "min_free_window_minutes", "optional-number", "Required free-window headroom for execute-mode enqueue; empty disables it."],
+        ["Require known free window", "require_known_free_window", "boolean", "Require verified free-window evidence before automatic enqueue."],
+        ["Enable prune", "prune_enabled", "boolean", "Run seed cleanup after tracker backfill each cycle."],
+        ["Enable tracker backfill", "tracker_backfill_enabled", "boolean", "Resolve tracker and promotion evidence for qB-only tasks."],
+        ["Backfill task limit", "tracker_backfill_limit", "number", "Maximum qB-only tasks considered per cycle."],
+        ["Tracker API budget", "tracker_backfill_max_api_requests", "number", "Maximum tracker API requests used by backfill per cycle."],
+        ["Enable Want sync", "intent_enabled", "boolean", "Sync configured Want List sources each cycle."],
+        ["Execute Want enqueue", "intent_execute", "boolean", "Allow scheduled Want List matches to mutate the downloader."],
+        ["Want search frequency", "intent_search_mode", "select:daily|every_cycle", "Search once daily after a local hour, or on every cycle."],
+        ["Daily search hour", "intent_search_hour", "number", "Local hour from 0 through 23; a missed run is caught up on the next cycle."],
       ],
     },
     want_decision: {
@@ -902,6 +945,7 @@ const navigationSections = [
   "download_client",
   "pt_filters",
   "seed_cleanup",
+  "scheduler",
   "want_decision",
   "release_preferences",
   "config_file",
@@ -914,6 +958,7 @@ const sectionGroupBySection = {
   download_client: "automation",
   pt_filters: "acquisition",
   seed_cleanup: "acquisition",
+  scheduler: "automation",
   want_decision: "acquisition",
   release_preferences: "acquisition",
   config_file: "advanced",
@@ -1040,6 +1085,7 @@ async function loadConfig() {
   state.configYaml = payload.config_yaml || "";
   state.configPath = payload.config_path || "";
   state.runtimeRoot = payload.runtime_root || "";
+  state.schedulerEnvironmentOverrides = payload.scheduler_environment_overrides || {};
   state.trackers = payload.trackers.map((tracker) => ({
     id: newClientId(),
     type: tracker.type,
@@ -2881,6 +2927,11 @@ function renderSettingsPanel(section) {
   const page = document.createElement("div");
   page.className = "settings-panel";
   const sectionData = state.configSections[section] || {};
+  const schedulerOverrides = section === "scheduler" ? state.schedulerEnvironmentOverrides : {};
+  const schedulerOverrideEntries = Object.entries(schedulerOverrides);
+  const configSourceLabel = schedulerOverrideEntries.length
+    ? `${uiText("fromYaml")} + ${uiText("runtimeOverrides")}`
+    : uiText("fromYaml");
   const fields = spec.fields
     .map(
       ([label, key, type, description]) => `
@@ -2897,8 +2948,9 @@ function renderSettingsPanel(section) {
         <div class="section-title">${escapeHtml(spec.title)}</div>
         <p>${escapeHtml(uiText("settingsDescription"))}</p>
       </div>
-      <span class="badge">${escapeHtml(uiText("fromYaml"))}</span>
+      <span class="badge">${escapeHtml(configSourceLabel)}</span>
     </div>
+    ${schedulerOverrideEntries.length ? `<div class="status-item warning">${escapeHtml(uiText("runtimeOverrides"))}: ${escapeHtml(schedulerOverrideEntries.map(([key, value]) => `${key}=${value}`).join(", "))}</div>` : ""}
     <div class="field-grid">${fields}</div>
     ${section === "download_client" ? renderDownloaderStructuredEditor(sectionData) : ""}
     ${section === "release_preferences" ? renderSearchTagScoreEditor(sectionData) : ""}

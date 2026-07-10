@@ -1108,6 +1108,7 @@ def test_run_once_capacity_prune_refreshes_runtime_before_enqueue(
         free_window_min_remaining_minutes: int | None = None,
         force_space_reclamation: bool = False,
         completed_low_upload_requires_reclamation: bool = False,
+        reclaim_targets_by_pool: dict[str, int] | None = None,
     ) -> dict[str, object]:
         prune_calls.append(
             {
@@ -1116,6 +1117,7 @@ def test_run_once_capacity_prune_refreshes_runtime_before_enqueue(
                 "completed_low_upload_requires_reclamation": (
                     completed_low_upload_requires_reclamation
                 ),
+                "reclaim_targets_by_pool": reclaim_targets_by_pool,
             }
         )
         return {
@@ -1126,6 +1128,7 @@ def test_run_once_capacity_prune_refreshes_runtime_before_enqueue(
             "completed_low_upload_requires_reclamation": (
                 completed_low_upload_requires_reclamation
             ),
+            "reclaim_targets_by_pool": reclaim_targets_by_pool,
             "managed_count": 1,
             "pool_usage": {},
             "decisions": [{"action": "qb.cleanup.delete"}],
@@ -1149,13 +1152,13 @@ def test_run_once_capacity_prune_refreshes_runtime_before_enqueue(
         capacity_prune=True,
     )
 
-    assert prune_calls == [
-        {
-            "execute": False,
-            "force_space_reclamation": True,
-            "completed_low_upload_requires_reclamation": False,
-        }
-    ]
+    assert len(prune_calls) == 1
+    assert prune_calls[0]["execute"] is False
+    assert prune_calls[0]["force_space_reclamation"] is True
+    assert prune_calls[0]["completed_low_upload_requires_reclamation"] is False
+    reclaim_targets = prune_calls[0]["reclaim_targets_by_pool"]
+    assert isinstance(reclaim_targets, dict)
+    assert int(reclaim_targets["downloads"]) > 0
     assert enqueue_calls == [(False, [])]
     assert payload["enqueue_paused_by_pool_policy"] is False
     assert "enqueue_paused_reasons" not in payload

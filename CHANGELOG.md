@@ -4,6 +4,36 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.17.0 - 2026-07-10
+
+### Added
+
+- Added a validated YAML `scheduler` section for cycle timing, free-window
+  safety, pruning, tracker backfill, and configurable daily/every-cycle Want
+  List search. Explicit CLI and container overrides remain supported and are
+  recorded in scheduler summaries.
+- Added scheduler settings to the Web UI, config export/import, runtime status,
+  example config, and operator field inventory.
+
+### Fixed
+
+- Limited capacity-driven cleanup to a calculated per-pool reclaim target, so
+  eviction stops as soon as enough committed capacity has been removed.
+- Removed pause-before-delete from prune. Mutable seed cleanup now deletes
+  selected torrents and their files directly, while enqueue-time `add_paused`
+  safety gates remain available for new downloads.
+- Kept `pause_before_delete_hours` as an ignored compatibility input so existing
+  mounted configs continue to load after upgrading.
+- Made Web, tracker, and CLI config writes validate and normalize the complete
+  document before same-directory atomic replacement. Secret writes now use the
+  same atomic path with mode `0600`.
+- Classified terminal `not_found`/`ambiguous` tracker backfill results for
+  incomplete torrents as high-risk unknown-free cleanup evidence, while
+  deferring deletion on rate limits, network/API failures, and exhausted API
+  budgets.
+- Marked scheduler runs with unresolved tracker backfill results as warnings
+  instead of reporting ordinary success.
+
 ## 0.16.5 - 2026-07-10
 
 ### Fixed

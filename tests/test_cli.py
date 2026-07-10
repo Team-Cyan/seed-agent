@@ -593,6 +593,7 @@ def test_schedule_run_executes_single_cycle_and_emits_schedule_metadata(
 
     monkeypatch.setattr(cli, "_run_once_payload", fake_run_once_payload)
     monkeypatch.setattr(cli, "_intent_run_once_payload", fake_intent_run_once_payload)
+    monkeypatch.setattr(cli, "_scheduled_intent_search_due", lambda *args, **kwargs: False)
     monkeypatch.setattr(cli.time, "sleep", lambda seconds: None)
 
     result = CliRunner().invoke(
@@ -738,15 +739,105 @@ def test_schedule_run_can_skip_intent_cycle(
     assert intent_called is False
 
 
-def test_scheduled_intent_search_runs_only_during_midnight_hour() -> None:
+def test_schedule_run_uses_yaml_scheduler_defaults(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from seed_agent import cli
+
+    config_path = _config_file(tmp_path)
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw["scheduler"] = {
+        "interval_minutes": 7,
+        "min_free_window_minutes": 90,
+        "require_known_free_window": False,
+        "prune_enabled": False,
+        "tracker_backfill_enabled": False,
+        "intent_enabled": False,
+    }
+    config_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+    seen: dict[str, object] = {}
+
+    def fake_run_once_payload(
+        config_path_value: Path,
+        *,
+        execute: bool,
+        min_free_window_minutes: int | None,
+        require_known_free_window: bool,
+        prune: bool,
+        prune_free_window_min_remaining_minutes: int | None = None,
+        capacity_prune: bool = False,
+    ) -> dict[str, object]:
+        seen.update(
+            {
+                "min_free_window_minutes": min_free_window_minutes,
+                "require_known_free_window": require_known_free_window,
+                "capacity_prune": capacity_prune,
+            }
+        )
+        return {
+            "command": "run-once",
+            "config": str(config_path_value),
+            "execute": execute,
+            "discovered": 0,
+            "scored": 0,
+            "accepted": 0,
+            "enqueued": 0,
+            "scores": [],
+            "decisions": [],
+        }
+
+    monkeypatch.setattr(cli, "_run_once_payload", fake_run_once_payload)
+
+    result = CliRunner().invoke(
+        cli.app,
+        ["schedule-run", "--config", str(config_path), "--max-cycles", "1"],
+    )
+
+    assert result.exit_code == 0
+    payload = _json_output(result)
+    assert payload["interval_minutes"] == 7
+    assert payload["prune_enabled"] is False
+    assert payload["tracker_backfill_enabled"] is False
+    assert payload["intent_enabled"] is False
+    assert seen == {
+        "min_free_window_minutes": 90,
+        "require_known_free_window": False,
+        "capacity_prune": False,
+    }
+
+
+def test_scheduled_intent_search_runs_once_after_daily_hour() -> None:
     from seed_agent import cli
 
     assert cli._scheduled_intent_search_due(
-        datetime(2026, 7, 3, 0, 15)
+        datetime(2026, 7, 3, 0, 15),
     ) is True
     assert cli._scheduled_intent_search_due(
-        datetime(2026, 7, 3, 1, 0)
+        datetime(2026, 7, 3, 1, 0),
+        last_search_at=datetime(2026, 7, 3, 0, 15),
     ) is False
+    assert cli._scheduled_intent_search_due(
+        datetime(2026, 7, 3, 22, 0), hour=23
+    ) is False
+    assert cli._scheduled_intent_search_due(
+        datetime(2026, 7, 3, 23, 30),
+        hour=23,
+        last_search_at=datetime(2026, 7, 2, 23, 45),
+    ) is True
+    assert cli._scheduled_intent_search_due(
+        datetime(2026, 7, 3, 1, 0), mode="every_cycle"
+    ) is True
+
+
+def test_scheduler_status_warns_when_tracker_backfill_is_unresolved() -> None:
+    from seed_agent import cli
+
+    assert (
+        cli._schedule_run_status(
+            {"tracker_source_backfill": {"summary": {"not_found": 1}}}
+        )
+        == "warning"
+    )
 
 
 def test_schedule_rate_limit_backoff_uses_next_midnight_after_24h(
@@ -1339,6 +1430,7 @@ def test_schedule_run_can_execute_intent_cycle_when_explicit(
 
     monkeypatch.setattr(cli, "_run_once_payload", fake_run_once_payload)
     monkeypatch.setattr(cli, "_intent_run_once_payload", fake_intent_run_once_payload)
+    monkeypatch.setattr(cli, "_scheduled_intent_search_due", lambda *args, **kwargs: False)
 
     result = CliRunner().invoke(
         cli.app,
@@ -1561,6 +1653,7 @@ def test_schedule_run_can_prune_each_cycle(
     monkeypatch.setattr(cli, "_prune_payload", fake_prune_payload)
     monkeypatch.setattr(cli, "_run_once_payload", fake_run_once_payload)
     monkeypatch.setattr(cli, "_intent_run_once_payload", fake_intent_run_once_payload)
+    monkeypatch.setattr(cli, "_scheduled_intent_search_due", lambda *args, **kwargs: False)
 
     result = CliRunner().invoke(
         cli.app,
@@ -1585,6 +1678,93 @@ def test_schedule_run_can_prune_each_cycle(
     assert payload["intent_search_enabled"] is False
     assert payload["prune"]["command"] == "prune"
     assert payload["tracker_source_backfill"]["command"] == "tracker-source-backfill"
+
+
+def test_schedule_run_passes_terminal_unknown_incomplete_hashes_to_prune(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from seed_agent import cli
+
+    config_path = _config_file(tmp_path)
+    risky_hashes: list[set[str]] = []
+
+    monkeypatch.setattr(
+        cli,
+        "_tracker_source_backfill_payload",
+        lambda *args, **kwargs: {
+            "command": "tracker-source-backfill",
+            "execute": False,
+            "live_torrent_count": 1,
+            "qbonly_candidates": 1,
+            "api_requests_used": 1,
+            "api_requests_remaining": 5,
+            "max_api_requests": 6,
+            "summary": {"not_found": 1},
+            "results": [
+                {
+                    "hash": "risky-incomplete",
+                    "incomplete": True,
+                    "status": "not_found",
+                    "reason": "no unique title/size match",
+                }
+            ],
+        },
+    )
+
+    def fake_prune_payload(
+        config_path_value: Path,
+        *,
+        execute: bool,
+        free_window_min_remaining_minutes: int | None = None,
+        force_space_reclamation: bool = False,
+        completed_low_upload_requires_reclamation: bool = False,
+        unknown_free_risk_hashes: set[str] | None = None,
+    ) -> dict[str, object]:
+        risky_hashes.append(set(unknown_free_risk_hashes or set()))
+        return {
+            "command": "prune",
+            "config": str(config_path_value),
+            "execute": execute,
+            "managed_count": 1,
+            "pool_usage": {},
+            "decisions": [],
+            "preview": [],
+        }
+
+    monkeypatch.setattr(cli, "_prune_payload", fake_prune_payload)
+    monkeypatch.setattr(
+        cli,
+        "_run_once_payload",
+        lambda *args, **kwargs: {
+            "command": "run-once",
+            "execute": False,
+            "discovered": 0,
+            "scored": 0,
+            "accepted": 0,
+            "enqueued": 0,
+            "scores": [],
+            "decisions": [],
+        },
+    )
+
+    result = CliRunner().invoke(
+        cli.app,
+        [
+            "schedule-run",
+            "--config",
+            str(config_path),
+            "--prune",
+            "--no-intent",
+            "--max-cycles",
+            "1",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert risky_hashes == [{"risky-incomplete"}]
+    assert StateStore(tmp_path / ".seed-agent" / "state.db").list_scheduler_runs()[0][
+        "status"
+    ] == "warning"
 
 
 def test_schedule_run_persists_phase_order_with_shared_run_id(
@@ -1690,7 +1870,7 @@ def test_schedule_run_persists_phase_order_with_shared_run_id(
     monkeypatch.setattr(cli, "_prune_payload", fake_prune_payload)
     monkeypatch.setattr(cli, "_run_once_payload", fake_run_once_payload)
     monkeypatch.setattr(cli, "_intent_run_once_payload", fake_intent_run_once_payload)
-    monkeypatch.setattr(cli, "_scheduled_intent_search_due", lambda now=None: False)
+    monkeypatch.setattr(cli, "_scheduled_intent_search_due", lambda *args, **kwargs: False)
 
     result = CliRunner().invoke(
         cli.app,
@@ -2271,7 +2451,7 @@ def test_enqueue_dry_run_uses_default_category_policy(
     assert "passkey" not in result.output
 
 
-def test_prune_execute_updates_state_to_paused_for_cold_incomplete_torrent(
+def test_prune_execute_updates_state_to_deleted_for_cold_incomplete_torrent(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from seed_agent import cli
@@ -2316,10 +2496,10 @@ def test_prune_execute_updates_state_to_paused_for_cold_incomplete_torrent(
     )
 
     assert result.exit_code == 0
-    assert downloader.calls == [("pause", "abcd1234", None)]
+    assert downloader.calls == [("delete", "abcd1234", True)]
     row = store.get_candidate("demo-free:https://tracker.example/details.php?id=1")
     assert row is not None
-    assert row["state"] == LifecycleState.PAUSED.value
+    assert row["state"] == LifecycleState.DELETED.value
 
 
 def test_prune_execute_updates_state_to_deleted_for_old_paused_incomplete_torrent(
@@ -2549,15 +2729,15 @@ def test_prune_dry_run_previews_live_torrents_without_mutation(
     assert result.exit_code == 0
     payload = _json_output(result)
     assert payload["managed_count"] == 1
-    assert payload["decisions"][0]["action"] == "qb.cleanup.pause"
+    assert payload["decisions"][0]["action"] == "qb.cleanup.delete"
     assert payload["decisions"][0]["execute"] is False
     assert payload["preview"][0]["hash"] == "<redacted>"
     assert payload["preview"][0]["name"] == "Managed Torrent"
     assert payload["preview"][0]["candidate_state"] == LifecycleState.ENQUEUED.value
     assert payload["preview"][0]["delete_files_on_delete"] is True
-    assert payload["cleanup_evidence"]["pause_count"] == 1
-    assert payload["cleanup_evidence"]["by_action"]["qb.cleanup.pause"] == 1
-    assert payload["cleanup_evidence"]["pause_samples"][0]["name"] == "Managed Torrent"
+    assert payload["cleanup_evidence"]["delete_count"] == 1
+    assert payload["cleanup_evidence"]["by_action"]["qb.cleanup.delete"] == 1
+    assert payload["cleanup_evidence"]["delete_samples"][0]["name"] == "Managed Torrent"
     assert downloader.calls == []
     row = store.get_candidate("demo-free:https://tracker.example/details.php?id=1")
     assert row is not None
@@ -3510,13 +3690,9 @@ def test_prune_execute_failure_persists_prior_state_and_audit(
                 _managed_incomplete_torrent(hash="second", size_bytes=6 * 1024**4),
             ]
 
-        async def pause(self, hash: str) -> None:
-            self.calls.append(hash)
-            if hash == "second":
-                raise RuntimeError("pause failed")
-
         async def delete(self, hash: str, delete_files: bool) -> None:
-            raise AssertionError("delete should not be called")
+            self.calls.append(hash)
+            raise RuntimeError("delete failed")
 
     downloader = FakeDownloader()
 
@@ -3531,15 +3707,13 @@ def test_prune_execute_failure_persists_prior_state_and_audit(
     payload = _json_output(result)
     assert payload["error"] == "qBittorrent cleanup batch failed"
     assert [decision["action"] for decision in payload["decisions"]] == [
-        "qb.cleanup.pause",
-        "qb.cleanup.pause.failed",
+        "qb.cleanup.delete.failed",
     ]
-    assert store.get_candidate(first_id)["state"] == LifecycleState.PAUSED.value
+    assert store.get_candidate(first_id)["state"] == LifecycleState.ENQUEUED.value
     assert store.get_candidate(second_id)["state"] == LifecycleState.ENQUEUED.value
     audit_path = tmp_path / ".seed-agent" / "audit.jsonl"
     audit_text = audit_path.read_text(encoding="utf-8")
-    assert "qb.cleanup.pause" in audit_text
-    assert "qb.cleanup.pause.failed" in audit_text
+    assert "qb.cleanup.delete.failed" in audit_text
 
 
 def test_execute_commands_fail_when_downloader_secret_missing(

@@ -1554,8 +1554,11 @@ def test_http_config_section_save_updates_downloader_visual_fields(
 
 def test_http_config_exposes_and_saves_section_yaml_without_splitting_file(
     tmp_path: Path,
+    monkeypatch,
 ) -> None:
     config_path = _write_minimal_config(tmp_path)
+    monkeypatch.setenv("SEED_AGENT_INTERVAL_MINUTES", "30")
+    monkeypatch.setenv("SEED_AGENT_PRUNE", "true")
 
     with _running_server(config_path) as base_url:
         initial = _request_json(base_url, "GET", "/api/config")
@@ -1600,6 +1603,12 @@ release_preferences:
 
     assert "section_yamls" in initial
     assert "release_preferences:" in initial["section_yamls"]["release_preferences"]
+    assert "scheduler:" in initial["section_yamls"]["scheduler"]
+    assert initial["sections"]["scheduler"]["intent_search_mode"] == "daily"
+    assert initial["scheduler_environment_overrides"] == {
+        "interval_minutes": 30,
+        "prune_enabled": True,
+    }
     assert "config_yaml" in initial
     assert preview["section"] == "release_preferences"
     assert "+  max_results_per_site: 6" in preview["diff"]

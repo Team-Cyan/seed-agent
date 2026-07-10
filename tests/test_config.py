@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from seed_agent.config import SeedAgentConfig, load_config
+from seed_agent.config import SeedAgentConfig, load_config, write_config_mapping
 
 
 def _valid_config_data(secret_ref: str) -> dict[str, object]:
@@ -730,9 +730,72 @@ def test_scoring_weights_must_sum_to_100() -> None:
         SeedAgentConfig(**data)
 
 
-def test_cleanup_pause_before_delete_hours_zero_raises_validation_error() -> None:
+def test_cleanup_legacy_pause_delay_is_accepted_but_excluded() -> None:
     data = _valid_config_data("local/secrets/qb.yaml")
-    data["seed_cleanup"] = {**data["seed_cleanup"], "pause_before_delete_hours": 0}
+    data["seed_cleanup"] = {**data["seed_cleanup"], "pause_before_delete_hours": 24}
 
-    with pytest.raises(ValidationError, match="pause_before_delete_hours"):
+    config = SeedAgentConfig(**data)
+
+    assert not hasattr(config.seed_cleanup, "pause_before_delete_hours")
+    assert "pause_before_delete_hours" not in config.seed_cleanup.model_dump()
+
+
+def test_scheduler_config_defaults_preserve_existing_cli_behavior() -> None:
+    config = SeedAgentConfig(**_valid_config_data("local/secrets/qb.yaml"))
+
+    assert config.scheduler.interval_minutes == 60
+    assert config.scheduler.prune_enabled is False
+    assert config.scheduler.tracker_backfill_enabled is True
+    assert config.scheduler.intent_search_mode == "daily"
+
+
+def test_scheduler_config_rejects_invalid_daily_search_hour() -> None:
+    data = _valid_config_data("local/secrets/qb.yaml")
+    data["scheduler"] = {"intent_search_hour": 24}
+
+    with pytest.raises(ValidationError, match="intent_search_hour"):
         SeedAgentConfig(**data)
+
+
+def test_scheduler_config_applies_only_explicit_overrides() -> None:
+    base = SeedAgentConfig(**_valid_config_data("local/secrets/qb.yaml")).scheduler
+
+    resolved = base.with_overrides(
+        {
+            "interval_minutes": 15,
+            "min_free_window_minutes": 0,
+            "prune_enabled": None,
+        }
+    )
+
+    assert resolved.interval_minutes == 15
+    assert resolved.min_free_window_minutes is None
+    assert resolved.prune_enabled is base.prune_enabled
+
+
+def test_write_config_mapping_atomically_replaces_valid_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from seed_agent import config as config_module
+
+    path = tmp_path / "config.yaml"
+    path.write_text("mode: balanced\n", encoding="utf-8")
+    path.chmod(0o640)
+    replacements: list[tuple[Path, Path]] = []
+    real_replace = config_module.os.replace
+
+    def track_replace(source: Path, target: Path) -> None:
+        replacements.append((Path(source), Path(target)))
+        real_replace(source, target)
+
+    monkeypatch.setattr(config_module.os, "replace", track_replace)
+
+    write_config_mapping(path, _valid_config_data("local/secrets/qb.yaml"))
+
+    assert len(replacements) == 1
+    assert replacements[0][1] == path
+    assert path.stat().st_mode & 0o777 == 0o640
+    assert load_config(path).download_client.default_category == "seed"
+    written = path.read_text(encoding="utf-8")
+    assert "scheduler:" in written
+    assert "pause_before_delete_hours" not in written

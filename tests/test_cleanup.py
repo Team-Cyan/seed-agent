@@ -337,6 +337,49 @@ def test_deletes_incomplete_torrent_when_discount_is_confirmed_non_free() -> Non
     assert "confirmed non-free" in decision.reason
 
 
+def test_deletes_incomplete_torrent_when_bounded_lookup_leaves_free_status_unknown() -> None:
+    from seed_agent.policies.cleanup import classify_cleanup
+
+    decision = classify_cleanup(
+        _torrent(
+            state="downloading",
+            downloaded_bytes=10 * 1024**3,
+            metadata={
+                "amount_left_bytes": 5 * 1024**3,
+                "unknown_free_status_high_risk": True,
+            },
+        ),
+        _cleanup(),
+        managed_category="pt-auto",
+        managed_tags={"seed-agent", "pt-auto"},
+    )
+
+    assert decision.action == "delete"
+    assert "remained unknown" in decision.reason
+
+
+def test_incomplete_promotion_risk_overrides_current_upload_protection() -> None:
+    from seed_agent.policies.cleanup import classify_cleanup
+
+    decision = classify_cleanup(
+        _torrent(
+            state="downloading",
+            downloaded_bytes=10 * 1024**3,
+            metadata={
+                "amount_left_bytes": 5 * 1024**3,
+                "discount": "normal",
+                "upspeed_bps": 1024,
+            },
+        ),
+        _cleanup(),
+        managed_category="pt-auto",
+        managed_tags={"seed-agent", "pt-auto"},
+    )
+
+    assert decision.action == "delete"
+    assert "confirmed non-free" in decision.reason
+
+
 def test_keeps_incomplete_torrent_with_unknown_discount_until_other_rules_apply() -> None:
     from seed_agent.policies.cleanup import classify_cleanup
 

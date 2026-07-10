@@ -9,6 +9,7 @@ from seed_agent.cli import (
     _infer_tracker_site,
     _matching_mteam_candidates,
     _tracker_source_backfill_summary,
+    _tracker_source_backfill_unresolved_risk_hashes,
 )
 from seed_agent.config import SiteConfig
 from seed_agent.models import Discount, ManagedTorrent, TorrentCandidate
@@ -109,3 +110,22 @@ def test_tracker_source_backfill_summary_counts_statuses_and_updates() -> None:
             {"status": "skipped"},
         ]
     ) == {"matched": 2, "updated": 1, "skipped": 1}
+
+
+def test_unresolved_backfill_marks_only_terminal_incomplete_tasks_as_risky() -> None:
+    assert _tracker_source_backfill_unresolved_risk_hashes(
+        {
+            "results": [
+                {"hash": "missing", "incomplete": True, "status": "not_found"},
+                {"hash": "ambiguous", "incomplete": True, "status": "ambiguous"},
+                {
+                    "hash": "budget",
+                    "incomplete": True,
+                    "status": "skipped",
+                    "reason": "api request budget exhausted",
+                },
+                {"hash": "complete", "incomplete": False, "status": "not_found"},
+                {"hash": "network", "incomplete": True, "status": "unavailable"},
+            ]
+        }
+    ) == {"missing", "ambiguous"}
