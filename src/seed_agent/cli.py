@@ -1119,7 +1119,7 @@ def schedule_run(
                 run_id=run_id,
                 phase="backoff_check",
                 event="skip",
-                message="schedule backoff active",
+                message="schedule backoff active; tracker API work skipped",
                 payload={"schedule_backoff": backoff},
             )
             payload = _schedule_backoff_skip_payload(
@@ -1130,6 +1130,30 @@ def schedule_run(
                 backoff=backoff,
                 run_id=run_id,
             )
+            if prune:
+                _record_schedule_phase(
+                    store_for_run,
+                    run_id=run_id,
+                    phase="prune",
+                    event="start",
+                    payload={"schedule_backoff_active": True},
+                )
+                prune_payload = _prune_payload(
+                    config,
+                    execute=execute,
+                    free_window_min_remaining_minutes=interval_minutes,
+                    completed_low_upload_requires_reclamation=True,
+                )
+                payload["prune"] = prune_payload
+                _record_schedule_phase(
+                    store_for_run,
+                    run_id=run_id,
+                    phase="prune",
+                    event="end",
+                    payload=_prune_payload_summary(prune_payload),
+                )
+                if "error" in prune_payload:
+                    payload["error"] = f"prune: {prune_payload['error']}"
         else:
             tracker_backfill_payload: dict[str, Any] | None = None
             payload: dict[str, Any] = {}

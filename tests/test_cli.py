@@ -731,14 +731,35 @@ def test_schedule_run_skips_work_while_backoff_is_active(
     def fail_run_once_payload(*args: object, **kwargs: object) -> dict[str, object]:
         pytest.fail("run-once should be skipped during schedule backoff")
 
-    def fail_prune_payload(*args: object, **kwargs: object) -> dict[str, object]:
-        pytest.fail("prune should be skipped during schedule backoff")
+    prune_calls: list[int | None] = []
+
+    def fake_prune_payload(
+        config_path_value: Path,
+        *,
+        execute: bool,
+        free_window_min_remaining_minutes: int | None = None,
+        force_space_reclamation: bool = False,
+        completed_low_upload_requires_reclamation: bool = False,
+    ) -> dict[str, object]:
+        prune_calls.append(free_window_min_remaining_minutes)
+        assert execute is False
+        assert force_space_reclamation is False
+        assert completed_low_upload_requires_reclamation is True
+        return {
+            "command": "prune",
+            "config": str(config_path_value),
+            "execute": execute,
+            "managed_count": 1,
+            "pool_usage": {},
+            "decisions": [],
+            "preview": [],
+        }
 
     def fail_intent_run_once_payload(*args: object, **kwargs: object) -> dict[str, object]:
         pytest.fail("intent should be skipped during schedule backoff")
 
     monkeypatch.setattr(cli, "_run_once_payload", fail_run_once_payload)
-    monkeypatch.setattr(cli, "_prune_payload", fail_prune_payload)
+    monkeypatch.setattr(cli, "_prune_payload", fake_prune_payload)
     monkeypatch.setattr(cli, "_intent_run_once_payload", fail_intent_run_once_payload)
 
     result = CliRunner().invoke(
@@ -759,6 +780,8 @@ def test_schedule_run_skips_work_while_backoff_is_active(
     assert payload["discovered"] == 0
     assert payload["accepted"] == 0
     assert payload["enqueued"] == 0
+    assert prune_calls == [60]
+    assert payload["prune"]["command"] == "prune"
     assert payload["intent"]["skipped_by_backoff"] is True
     assert payload["intent_search_enabled"] is False
 

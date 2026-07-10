@@ -4,6 +4,15 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.16.2 - 2026-07-10
+
+### Fixed
+
+- Fixed scheduled cleanup being skipped when a tracker API backoff is active.
+  The scheduler now skips tracker/API work during backoff but still runs local
+  prune, so already-known cleanup evidence can delete or pause qBittorrent
+  torrents without waiting for the tracker backoff window to expire.
+
 ## 0.16.1 - 2026-07-10
 
 ### Fixed
