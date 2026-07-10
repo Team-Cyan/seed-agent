@@ -879,9 +879,20 @@ class StateStore:
                 ),
                 None,
             )
+            candidate_discount = next(
+                (
+                    row.get("discount")
+                    for row in candidate_rows
+                    if row.get("discount")
+                ),
+                None,
+            )
             if candidate_free_expiry:
                 metadata["free_window_expires_at"] = candidate_free_expiry
                 metadata["free_window_source"] = "candidate_state"
+            if candidate_discount:
+                metadata["discount"] = candidate_discount
+                metadata["discount_source"] = "candidate_state"
             recent_upload_gb = _recent_upload_gb(runtime, torrent.uploaded_bytes)
             if recent_upload_gb is not None:
                 metadata["recent_upload_gb"] = recent_upload_gb

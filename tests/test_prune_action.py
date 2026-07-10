@@ -353,3 +353,35 @@ async def test_completed_low_upload_requires_reclamation_keeps_under_budget_seed
     assert decisions[0].action == "qb.cleanup.keep"
     assert "space reclamation not required" in decisions[0].reason
     assert decisions[0].new_state["completed_low_upload_requires_reclamation"] is True
+
+
+@pytest.mark.asyncio
+async def test_prune_deletes_incomplete_confirmed_non_free_torrent_with_files() -> None:
+    from seed_agent.actions.qb import prune_cold_torrents
+
+    downloader = DummyDownloader()
+
+    decisions = await prune_cold_torrents(
+        [
+            _incomplete_torrent(
+                hash="paid-incomplete",
+                metadata={
+                    "amount_left_bytes": 5 * 1024**3,
+                    "discount": "normal",
+                },
+            )
+        ],
+        downloader,
+        _cleanup(),
+        _policy(),
+        execute=True,
+        pool_usage=PoolUsage(
+            pool_name="downloads",
+            size_bytes=8 * 1024**4,
+            max_size_bytes=10 * 1024**4,
+        ),
+    )
+
+    assert downloader.calls == [("delete", "paid-incomplete", True)]
+    assert decisions[0].action == "qb.cleanup.delete"
+    assert "confirmed non-free" in decisions[0].reason

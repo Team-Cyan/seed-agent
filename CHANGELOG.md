@@ -4,6 +4,15 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.16.1 - 2026-07-10
+
+### Fixed
+
+- Fixed cleanup of managed incomplete torrents that are already confirmed
+  non-free by tracker evidence. Candidate discount evidence is now carried into
+  runtime cleanup metadata, so `discount=normal` incomplete torrents are deleted
+  with files during prune instead of waiting on free-window expiry metadata.
+
 ## 0.16.0 - 2026-07-10
 
 ### Added

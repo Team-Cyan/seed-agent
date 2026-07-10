@@ -341,6 +341,14 @@ def _free_window_decision(
     cleanup: CleanupConfig,
     metadata: dict[str, object],
 ) -> CleanupDecision | None:
+    if not _is_completed_seed(torrent) and _is_confirmed_non_free(metadata):
+        return CleanupDecision(
+            action="delete",
+            reason=_reason(
+                "incomplete torrent is confirmed non-free; delete files before paid download"
+            ),
+            managed=True,
+        )
     expires_at = _free_window_expires_at(metadata)
     if expires_at is None:
         return None
@@ -487,6 +495,16 @@ def _free_window_min_remaining_minutes(metadata: dict[str, object]) -> int | Non
     if isinstance(value, int | float) and value >= 0:
         return int(value)
     return None
+
+
+def _is_confirmed_non_free(metadata: dict[str, object]) -> bool:
+    value = metadata.get("discount")
+    if not isinstance(value, str):
+        return False
+    normalized = value.strip().lower().replace(" ", "")
+    if not normalized:
+        return False
+    return normalized not in {"free", "2xfree", "2x_free"}
 
 
 def _is_paused_or_stopped(state: str) -> bool:

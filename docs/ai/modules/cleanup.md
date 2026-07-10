@@ -29,6 +29,9 @@ balanced safety policy.
 - delete managed incomplete torrents whose known free window will expire before
   the next scheduled check. Completed seeds are not deleted by this expiry rule,
   because once downloaded they no longer create paid download exposure,
+- delete managed incomplete torrents that tracker evidence confirms are
+  non-free, such as `discount=normal` or half-discounted rows. Unknown discount
+  evidence should not be treated as non-free,
 - when `seed_cleanup.delete_completed_low_upload_after_hours` is set, completed
   mutable-category seeds can be deleted without requiring an over-budget pool if
   their no-upload observation window has exceeded that delay and their total

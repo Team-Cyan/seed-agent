@@ -316,6 +316,46 @@ def test_deletes_incomplete_torrent_when_free_window_expires_before_next_check()
     assert "incomplete free window expires before next check" in decision.reason
 
 
+def test_deletes_incomplete_torrent_when_discount_is_confirmed_non_free() -> None:
+    from seed_agent.policies.cleanup import classify_cleanup
+
+    decision = classify_cleanup(
+        _torrent(
+            state="downloading",
+            downloaded_bytes=10 * 1024**3,
+            metadata={
+                "amount_left_bytes": 5 * 1024**3,
+                "discount": "normal",
+            },
+        ),
+        _cleanup(),
+        managed_category="pt-auto",
+        managed_tags={"seed-agent", "pt-auto"},
+    )
+
+    assert decision.action == "delete"
+    assert "confirmed non-free" in decision.reason
+
+
+def test_keeps_incomplete_torrent_with_unknown_discount_until_other_rules_apply() -> None:
+    from seed_agent.policies.cleanup import classify_cleanup
+
+    decision = classify_cleanup(
+        _torrent(
+            state="downloading",
+            downloaded_bytes=10 * 1024**3,
+            last_activity_at=datetime.now(UTC),
+            metadata={"amount_left_bytes": 5 * 1024**3},
+        ),
+        _cleanup(),
+        managed_category="pt-auto",
+        managed_tags={"seed-agent", "pt-auto"},
+    )
+
+    assert decision.action == "keep"
+    assert "recent activity" in decision.reason
+
+
 def test_deletes_completed_seed_with_low_upload_when_policy_enabled() -> None:
     from seed_agent.policies.cleanup import classify_cleanup
 
