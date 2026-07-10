@@ -14,7 +14,7 @@ by completion period, and unfinished work is ordered by current priority.
 - Completed 2026-04 - PT upload strategy loop
   - RSS discovery, score-based candidate evaluation, dry-run-first qBittorrent
     enqueue, managed torrent review, daily reports, and `run-once`.
-  - Balanced cleanup with pause-before-delete behavior.
+  - Balanced cleanup with managed-category protection and auditable decisions.
   - Scheduler command surface with free-window preview/enforcement.
   - Scheduled pruning through `run-once --prune` and `schedule-run --prune`.
   - Enqueue-time evidence persistence for finite and unlimited M-Team free
@@ -152,9 +152,10 @@ by completion period, and unfinished work is ordered by current priority.
     Web UI vs CLI decision path, runtime provenance checks, and the
     preview-first Want List refresh/search boundary.
   - Want List refresh/search actions show immediate in-progress feedback in the
-    Web UI, and `schedule-run` now refreshes configured Want List sources and
-    searches/ranks resource candidates every cycle by default while keeping the
-    scheduled resource loop dry-run unless `--intent-execute` is explicitly set.
+    Web UI. `schedule-run` refreshes configured Want List sources every enabled
+    cycle and searches according to the YAML scheduler policy (`daily` by
+    default or `every_cycle`) while keeping scheduled enqueue dry-run unless
+    intent execution is explicitly enabled.
   - M-Team tracker rate-limit responses now trigger a persistent scheduler
     backoff; the container keeps heartbeat liveness but skips PT discovery,
     cleanup, and Want List tracker searches until the local midnight after at
@@ -170,10 +171,19 @@ by completion period, and unfinished work is ordered by current priority.
   - The Web UI overview includes an operations panel backed by `/api/ops` for
     recent scheduler, tracker, backoff, and Want List search state.
   - Prune payloads include structured cleanup evidence for action counts,
-    low-upload large torrents, and representative pause/delete samples.
+    low-upload large torrents, and representative delete samples.
   - Scheduled prune now runs before PT add, PT add can trigger an aggressive
     capacity-pressure cleanup when accepted candidates would otherwise be paused,
     and the Want List intent loop remains the final scheduled phase.
+  - Capacity cleanup deletes mutable seed candidates directly in eviction order
+    and stops once its calculated reclaim target is met; prune no longer creates
+    paused cleanup placeholders that continue occupying disk.
+  - Scheduler defaults now live in one validated YAML section, explicit
+    CLI/container overrides are observable, and Web/CLI config writes use atomic
+    replacement so long-running readers cannot observe partial YAML.
+  - Terminal tracker-backfill misses for incomplete torrents are passed to prune
+    as high-risk unknown-free evidence; network outages and exhausted request
+    budgets remain deferred instead of triggering blind deletion.
   - Scheduled conservative cleanup keeps completed low-upload seeds unless space
     reclamation is needed, while the explicit low-upload deletion policy remains
     available for normal prune callers.

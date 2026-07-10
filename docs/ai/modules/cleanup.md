@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Decide when managed torrents should be retained, paused, or deleted under the
+Decide when managed torrents should be retained or deleted under the
 balanced safety policy.
 
 ## Primary Files
@@ -42,7 +42,8 @@ balanced safety policy.
   waiting for capacity,
 - keep currently uploading managed torrents even if a stale no-upload marker is
   present,
-- require pause-before-delete timing,
+- delete capacity-eviction candidates directly; pruning does not use a paused
+  observation stage because pausing does not reclaim occupied capacity,
 - keep policy reasoning auditable.
 - distinguish automated lifecycle cleanup from explicit operator cleanup. When
   the user gives a concrete category and age boundary, execute only that bounded
@@ -58,7 +59,8 @@ balanced safety policy.
   is over budget and space reclamation is needed.
 - Capacity-pressure prune is the aggressive mode. It is triggered by enqueue
   planning when accepted candidates would be paused by runtime gates, forces
-  space reclamation for mutable delete-enabled categories, and then lets the
+  space reclamation for mutable delete-enabled categories, deletes in eviction
+  order only until the calculated reclaim target is met, and then lets the
   caller refresh qB runtime state before enqueueing.
 - Existing torrent deletion order is driven by
   `policies.quality.torrent_retention_quality_score()` and

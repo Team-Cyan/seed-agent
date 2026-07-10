@@ -128,7 +128,6 @@ page labels.
 - `protect_hr`
 - `protect_manual`
 - `protect_media_library`
-- `pause_before_delete_hours`
 - `delete_after_no_upload_hours`
 - `delete_completed_low_upload_after_hours`
 - `completed_low_upload_min_ratio`
@@ -184,6 +183,21 @@ page labels.
 `local_state`
 
 - `candidate_retention_days`
+
+`scheduler`
+
+- `interval_minutes`
+- `min_free_window_minutes`
+- `require_known_free_window`
+- `prune_enabled`
+- `tracker_backfill_enabled`
+- `tracker_backfill_limit`
+- `tracker_backfill_category`
+- `tracker_backfill_max_api_requests`
+- `intent_enabled`
+- `intent_execute`
+- `intent_search_mode`
+- `intent_search_hour`
 
 ## SQLite Tables
 

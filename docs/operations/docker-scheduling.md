@@ -116,7 +116,13 @@ docker run --rm \
 - `SEED_AGENT_MAX_CYCLES`
   - useful for smoke tests or external supervisors
 - `SEED_AGENT_PRUNE`
-  - set to `true` to run `schedule-run --prune` each cycle
+  - `true` or `false`; overrides `scheduler.prune_enabled`
+
+The YAML `scheduler` section is the canonical source for cycle behavior. The
+entrypoint only passes a scheduler CLI flag when the matching environment
+variable is explicitly set, so Compose/Unraid variables act as visible
+deployment overrides rather than hidden defaults. `SEED_AGENT_EXECUTE` remains
+an explicit deployment safety control and is not stored in YAML.
 
 ## Healthcheck And Logging
 

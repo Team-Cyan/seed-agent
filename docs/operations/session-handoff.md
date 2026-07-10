@@ -39,7 +39,7 @@ This document captures the durable handoff state from the initial `seed-agent` p
 - Phase 1 focuses on PT upload strategy: fetch free/hot candidates, score them, enqueue strong candidates, and clean up cold managed torrents.
 - Phase 2 focuses on resource intent: accept Telegram, WeChat bridge, and Douban wanted-list intents, search resources, rank candidates, and require operator review when ambiguity is high.
 - qBittorrent is the first downloader implementation, but downloader operations should go through an abstraction to keep Transmission or other clients possible later.
-- Cleanup should default to a conservative/balanced mode: pause before delete, delete only managed torrents, protect torrents with meaningful recent upload, and keep explainable audit records.
+- Cleanup should delete only managed torrents, protect torrents with meaningful recent upload, stop once the calculated capacity target is met, and keep explainable audit records.
 - Phase 1 implementation will use SQLite for local lifecycle state at `.seed-agent/state.db` and append-only JSONL audit records at `.seed-agent/audit.jsonl`.
 - Mutating downloader commands should default to dry-run. The operator must pass `--execute` before qBittorrent add, pause, or delete calls happen.
 - Local qBittorrent credentials should live in `local/secrets/qbittorrent.yaml`, which must stay gitignored.

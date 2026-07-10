@@ -44,6 +44,8 @@ Expose the operator-facing command surface and safe summaries.
   preserving the per-section YAML editor for advanced edits,
 - schema-validated web config previews that return before/after diffs before
   non-tracker section saves write YAML,
+- validated config and secret writes use same-directory atomic replacement, so
+  scheduler readers never observe a partially written YAML or credential file,
 - per-section web YAML editing for top-level config blocks while preserving a
   single physical runtime config file,
 - configured source-event ingestion during `intent-run-once`, including Douban
@@ -53,16 +55,21 @@ Expose the operator-facing command surface and safe summaries.
   `config-import --rules <file>`, with writes gated by `--execute`,
 - read-only product-expansion reports through `release-profiles`,
   `reseed-report`, and `headroom-report`,
-- `schedule-run` runs the resource intent loop every cycle by default so
-  configured Want List sources are refreshed, but scheduled torrent search only
-  runs during the local midnight hour. Operators can still trigger filtered or
+- `schedule-run` reads cycle, prune, backfill, free-window, and Intent defaults
+  from the YAML `scheduler` section. Explicit CLI flags and container variables
+  override those defaults and are reported in scheduler summaries; the Web
+  scheduler page also lists environment-derived overrides. Configured
+  Want List sources are refreshed every enabled cycle; scheduled torrent search
+  follows `scheduler.intent_search_mode` (`daily` once at or after
+  `intent_search_hour` by default, with missed runs caught up on the next
+  cycle, or `every_cycle`). Operators can still trigger filtered or
   single-item Want List searches manually from the Web UI. Scheduled resource
   enqueue remains a dry-run unless `--intent-execute` is explicitly set, and the
   loop can be disabled with `--no-intent`,
 - `schedule-run` records a persistent scheduler backoff when M-Team returns
   "request too frequent" responses. While that backoff is active, the scheduler
-  keeps writing heartbeat output but skips cleanup, PT discovery, and Want List
-  work until the local midnight after at least 24 hours. Web UI Want List search
+  keeps writing heartbeat output, skips tracker/API discovery and Want List
+  search, but still runs local prune from persisted evidence. Web UI Want List search
   actions read the same backoff file and skip tracker searches during that
   window,
 - free-window safety previewing for freeleech-sensitive workflows,
@@ -114,13 +121,11 @@ Expose the operator-facing command surface and safe summaries.
   liability so old paused queue entries do not block fresh high-priority work,
 - preview and enforce risky free-window decisions consistently when the free
   window is unknown or too short for the configured safety threshold,
-- keep optional scheduled pruning explicit through `--prune` so cleanup is never
-  silently bundled into a long-running deployment. When enabled, schedule order
+- keep scheduled pruning explicit through YAML or `--prune`. When enabled, schedule order
   must remain tracker source backfill, conservative prune, PT add, then Want
-  List source refresh, with Want List torrent search only during the local
-  midnight hour,
-- keep scheduled Want List search non-mutating by default and limited to the
-  local midnight hour; automatic resource qB enqueue requires explicit
+  List source refresh, with Want List torrent search following the configured
+  daily/every-cycle policy,
+- keep scheduled Want List search non-mutating by default; automatic resource qB enqueue requires explicit
   `--intent-execute`,
 - when M-Team rate limits scheduled discovery, keep the container alive through
   heartbeat updates but skip PT discovery and Want List search until the shared
@@ -142,8 +147,8 @@ Expose the operator-facing command surface and safe summaries.
   should keep lower-match releases visibly distinct without making their force
   actions look disabled.
 - keep `config-import` dry-run by default and validate the merged config before
-  writing. Imported rule bundles should not contain secret values, only secret
-  refs.
+  atomically writing. Imported rule bundles should not contain secret values,
+  only secret refs.
 
 ## Verification
 
