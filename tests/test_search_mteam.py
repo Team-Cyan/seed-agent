@@ -1,5 +1,6 @@
 from datetime import UTC, datetime
 
+import httpx
 import pytest
 
 from seed_agent.config import SearchConfig
@@ -98,6 +99,29 @@ async def test_mteam_search_provider_stops_on_api_response_error() -> None:
             code="1",
             message="請求過於頻繁",
         )
+
+    provider = MTeamSearchProvider(
+        site="mt",
+        api_key="secret-api-key",
+        search_config=SearchConfig(),
+        fetch_candidates=fail_fetch_candidates,
+    )
+
+    releases = await provider.search(
+        _intent(metadata={"external_ids": {"douban": "26799731", "imdb": "tt5726616"}})
+    )
+
+    assert releases == []
+    assert len(calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_mteam_search_provider_stops_on_network_error() -> None:
+    calls: list[dict[str, object]] = []
+
+    async def fail_fetch_candidates(**kwargs):
+        calls.append(kwargs)
+        raise httpx.ReadTimeout("mteam api unavailable")
 
     provider = MTeamSearchProvider(
         site="mt",

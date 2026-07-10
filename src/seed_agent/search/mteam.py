@@ -3,6 +3,8 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from typing import Literal
 
+import httpx
+
 from seed_agent.config import SearchConfig
 from seed_agent.models import (
     IntentKind,
@@ -65,6 +67,8 @@ class MTeamSearchProvider:
                     options=options,
                 )
             except MTeamApiResponseError:
+                break
+            except (httpx.TimeoutException, httpx.NetworkError):
                 break
             for candidate in candidates:
                 release = _release_from_candidate(candidate)

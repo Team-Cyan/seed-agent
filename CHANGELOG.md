@@ -4,6 +4,14 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.16.4 - 2026-07-10
+
+### Fixed
+
+- Made M-Team intent search fail-soft on transient network failures. Manual
+  Want List searches and other provider callers now stop M-Team search cleanly
+  on timeout/connection errors instead of surfacing raw `httpx` exceptions.
+
 ## 0.16.3 - 2026-07-10
 
 ### Fixed
