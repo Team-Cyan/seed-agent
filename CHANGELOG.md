@@ -4,6 +4,19 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.16.5 - 2026-07-10
+
+### Fixed
+
+- Prioritized qB-only tracker-source backfill for incomplete or stopped
+  downloads with unknown free status before ordinary completed seeds.
+- Recovered M-Team source evidence directly from tracker `tid` values when
+  available, avoiding fragile title-only matching for high-risk incomplete
+  downloads.
+- Updated M-Team detail enrichment to refresh discount evidence from the detail
+  response, so cleanup can delete incomplete torrents once they are confirmed
+  non-free.
+
 ## 0.16.4 - 2026-07-10
 
 ### Fixed

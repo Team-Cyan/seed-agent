@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -196,6 +197,139 @@ def _managed_incomplete_torrent(**overrides: object) -> ManagedTorrent:
     }
     data.update(overrides)
     return _managed_torrent(**data)
+
+
+def test_qb_only_backfill_targets_prioritize_unknown_incomplete_risk(
+    tmp_path: Path,
+) -> None:
+    from seed_agent import cli
+
+    store = StateStore(tmp_path / "state.db")
+    torrents = [
+        _managed_torrent(
+            hash="completed-new",
+            name="Completed New",
+            added_at=datetime(2026, 7, 10, tzinfo=UTC),
+            state="stalledUP",
+            metadata={"amount_left_bytes": 0},
+        ),
+        _managed_torrent(
+            hash="incomplete-small",
+            name="Incomplete Small",
+            added_at=datetime(2026, 7, 8, tzinfo=UTC),
+            completed_at=None,
+            state="stoppedDL",
+            downloaded_bytes=1 * 1024**3,
+            metadata={"amount_left_bytes": 3 * 1024**3},
+        ),
+        _managed_torrent(
+            hash="incomplete-large",
+            name="Incomplete Large",
+            added_at=datetime(2026, 7, 8, tzinfo=UTC),
+            completed_at=None,
+            state="stoppedDL",
+            downloaded_bytes=1 * 1024**3,
+            metadata={"amount_left_bytes": 30 * 1024**3},
+        ),
+    ]
+    for torrent in torrents:
+        store.upsert_candidate(
+            stable_id=f"qb:{torrent.hash}",
+            title=torrent.name,
+            site="qb",
+            state=LifecycleState.DOWNLOADING,
+            score=None,
+            torrent_hash=torrent.hash,
+        )
+
+    targets = cli._qb_only_backfill_targets(store, torrents)
+
+    assert [item.hash for item in targets] == [
+        "incomplete-large",
+        "incomplete-small",
+        "completed-new",
+    ]
+
+
+def test_mteam_torrent_id_from_tracker_decodes_credential() -> None:
+    from seed_agent import cli
+
+    credential = base64.b64encode(b"sign=abc&t=1783531016&tid=1206069&uid=305694").decode()
+    torrent = _managed_torrent(
+        metadata={
+            "tracker": f"https://tracker.m-team.io/announce?credential={credential}",
+        }
+    )
+
+    assert cli._mteam_torrent_id_from_tracker(torrent) == "1206069"
+
+
+@pytest.mark.asyncio
+async def test_find_mteam_match_uses_tracker_tid_before_keyword_search(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from seed_agent import cli
+
+    calls: list[str] = []
+
+    class FakeMTeamApiClient:
+        def __init__(self, **kwargs: object) -> None:
+            calls.append("init")
+
+        async def fetch_torrent_detail(self, torrent_id: str) -> dict[str, object]:
+            calls.append(f"detail:{torrent_id}")
+            return {
+                "id": torrent_id,
+                "name": "Risky Incomplete Torrent",
+                "size": 42 * 1024**3,
+                "discount": "NORMAL",
+                "status": {"seeders": 1, "leechers": 0},
+            }
+
+        async def _candidate_from_search_row(
+            self, site: str, row: dict[str, object]
+        ) -> TorrentCandidate | None:
+            return TorrentCandidate(
+                site=site,
+                title=str(row["name"]),
+                source_url=f"https://kp.m-team.cc/detail/{row['id']}",
+                download_url=f"mteam-api://torrent/{row['id']}",
+                size_bytes=int(row["size"]),
+                seeders=1,
+                leechers=0,
+                discount="normal",
+                metadata={"mteam_torrent_id": str(row["id"])},
+            )
+
+    async def fail_keyword_search(**kwargs: object) -> list[TorrentCandidate]:
+        raise AssertionError("keyword search should not run when tracker tid is available")
+
+    monkeypatch.setattr(cli, "MTeamApiClient", FakeMTeamApiClient)
+    monkeypatch.setattr(cli, "fetch_mteam_api_candidates", fail_keyword_search)
+    credential = base64.b64encode(b"sign=abc&t=1783531016&tid=1206069&uid=305694").decode()
+    torrent = _managed_incomplete_torrent(
+        name="Risky Incomplete Torrent",
+        metadata={
+            "amount_left_bytes": 10 * 1024**3,
+            "tracker": f"https://tracker.m-team.io/announce?credential={credential}",
+        },
+    )
+    request_budget = {"remaining": 2, "used": 0}
+
+    result = await cli._find_mteam_match_for_torrent(
+        site_name="mteam",
+        site_mode="adult",
+        api_key="secret",
+        api_key_header="x-api-key",
+        torrent=torrent,
+        request_budget=request_budget,
+    )
+
+    assert result["status"] == "matched"
+    assert result["candidate"].discount.value == "normal"
+    assert result["candidate"].metadata["backfill_match_source"] == "tracker_tid"
+    assert request_budget == {"remaining": 1, "used": 1}
+    assert calls == ["init", "detail:1206069"]
 
 
 def _config_file(tmp_path: Path, secret_ref: str | None = None) -> Path:

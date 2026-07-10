@@ -404,3 +404,40 @@ async def test_resolve_mteam_release_download_url_fetches_deferred_token(monkeyp
     assert resolved is not None
     assert resolved.download_url.startswith("https://dl.m-team.example/26799731")
     assert resolved.metadata["download_url_source"] == "mteam_api"
+
+
+@pytest.mark.asyncio
+async def test_mteam_detail_enrichment_updates_discount() -> None:
+    from seed_agent.sites.mteam import enrich_candidates
+
+    candidate = TorrentCandidate(
+        site="mt",
+        title="Risky Incomplete Torrent",
+        source_url="https://kp.m-team.cc/detail/1206069",
+        download_url="mteam-api://torrent/1206069",
+        size_bytes=10 * 1024**3,
+        seeders=0,
+        leechers=0,
+        discount=Discount.FREE,
+        metadata={"mteam_torrent_id": "1206069"},
+    )
+
+    async def fake_fetch_detail(torrent_id: str):
+        assert torrent_id == "1206069"
+        return {
+            "id": "1206069",
+            "name": "Risky Incomplete Torrent",
+            "size": 10 * 1024**3,
+            "discount": "NORMAL",
+            "status": {"seeders": 1, "leechers": 0},
+        }
+
+    enriched = await enrich_candidates(
+        [candidate],
+        cookie=None,
+        api_key="secret",
+        fetch_detail=fake_fetch_detail,
+    )
+
+    assert enriched[0].discount == Discount.NORMAL
+    assert enriched[0].metadata["mteam_detail_enriched"] is True

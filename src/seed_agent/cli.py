@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import errno
 import json
 import re
@@ -10,6 +12,7 @@ from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Any
+from urllib.parse import parse_qsl, urlparse
 
 import httpx
 import typer
@@ -72,6 +75,8 @@ from seed_agent.search.mteam import (
 from seed_agent.search.rss import RssSearchProvider
 from seed_agent.search.torznab import TorznabSearchProvider
 from seed_agent.sites.mteam import (
+    DEFERRED_DOWNLOAD_URL_PREFIX,
+    MTeamApiClient,
     MTeamApiDiscoveryOptions,
     MTeamApiResponseError,
 )
@@ -2830,8 +2835,28 @@ def _qb_only_backfill_targets(
         if any(row.get("site") != "qb" for row in rows):
             continue
         targets.append(torrent)
-    targets.sort(key=lambda item: (item.added_at, item.name), reverse=True)
+    targets.sort(key=_qb_only_backfill_priority)
     return targets
+
+
+def _qb_only_backfill_priority(torrent: ManagedTorrent) -> tuple[int, int, datetime, str]:
+    risk = _qb_only_unknown_free_risk(torrent)
+    amount_left = int(torrent.metadata.get("amount_left_bytes", 0) or 0)
+    return (-risk, -amount_left, torrent.added_at, torrent.name)
+
+
+def _qb_only_unknown_free_risk(torrent: ManagedTorrent) -> int:
+    state = torrent.state.strip().lower()
+    amount_left = int(torrent.metadata.get("amount_left_bytes", 0) or 0)
+    if amount_left > 0:
+        return 3
+    if "err" in state and not state.endswith("up"):
+        return 2
+    if state in {"stoppeddl", "pauseddl", "missingfiles"}:
+        return 2
+    if state in {"downloading", "stalleddl", "metadl", "checkingdl"}:
+        return 1
+    return 0
 
 
 async def _backfill_tracker_sources(
@@ -3022,6 +3047,16 @@ async def _find_mteam_match_for_torrent(
     torrent: ManagedTorrent,
     request_budget: dict[str, int],
 ) -> dict[str, Any]:
+    direct_match = await _find_mteam_match_by_tracker_id(
+        site_name=site_name,
+        api_key=api_key,
+        api_key_header=api_key_header,
+        torrent=torrent,
+        request_budget=request_budget,
+    )
+    if direct_match is not None:
+        return direct_match
+
     matches: list[TorrentCandidate] = []
     searched_keywords: list[str] = []
     for keyword in _mteam_backfill_keywords(torrent.name):
@@ -3105,6 +3140,125 @@ async def _find_mteam_match_for_torrent(
         "reason": "no unique title/size match",
         "searched": searched_keywords,
     }
+
+
+async def _find_mteam_match_by_tracker_id(
+    *,
+    site_name: str,
+    api_key: str,
+    api_key_header: str,
+    torrent: ManagedTorrent,
+    request_budget: dict[str, int],
+) -> dict[str, Any] | None:
+    torrent_id = _mteam_torrent_id_from_tracker(torrent)
+    if torrent_id is None:
+        return None
+    if request_budget["remaining"] <= 0:
+        return {
+            "status": "skipped",
+            "reason": "api request budget exhausted",
+            "searched": [f"detail:{torrent_id}"],
+        }
+    request_budget["remaining"] -= 1
+    request_budget["used"] += 1
+    client = MTeamApiClient(api_key=api_key, api_key_header=api_key_header)
+    try:
+        detail = await client.fetch_torrent_detail(torrent_id)
+    except MTeamApiResponseError as exc:
+        if exc.rate_limited:
+            request_budget["remaining"] = 0
+            return {
+                "status": "rate_limited",
+                "reason": exc.message,
+                "searched": [f"detail:{torrent_id}"],
+            }
+        return {
+            "status": "error",
+            "reason": str(exc),
+            "searched": [f"detail:{torrent_id}"],
+        }
+    except httpx.TimeoutException as exc:
+        request_budget["remaining"] = 0
+        return {
+            "status": "unavailable",
+            "reason": type(exc).__name__,
+            "searched": [f"detail:{torrent_id}"],
+        }
+    except httpx.NetworkError as exc:
+        request_budget["remaining"] = 0
+        return {
+            "status": "unavailable",
+            "reason": type(exc).__name__,
+            "searched": [f"detail:{torrent_id}"],
+        }
+    except Exception as exc:
+        return {
+            "status": "error",
+            "reason": str(exc),
+            "searched": [f"detail:{torrent_id}"],
+        }
+    if detail is None:
+        return None
+    candidate = await client._candidate_from_search_row(site_name, detail)
+    if candidate is None:
+        return {
+            "status": "error",
+            "reason": "mteam detail response missing torrent identity",
+            "searched": [f"detail:{torrent_id}"],
+        }
+    return {
+        "status": "matched",
+        "candidate": candidate.model_copy(
+            update={
+                "download_url": f"{DEFERRED_DOWNLOAD_URL_PREFIX}{torrent_id}",
+                "metadata": {
+                    **candidate.metadata,
+                    "mteam_torrent_id": torrent_id,
+                    "backfill_match_source": "tracker_tid",
+                },
+            }
+        ),
+        "match": _candidate_match_summary(candidate),
+        "searched": [f"detail:{torrent_id}"],
+    }
+
+
+def _mteam_torrent_id_from_tracker(torrent: ManagedTorrent) -> str | None:
+    tracker = str(torrent.metadata.get("tracker") or "").strip()
+    if not tracker:
+        return None
+    parsed = urlparse(tracker)
+    direct = _mteam_torrent_id_from_query(parsed.query)
+    if direct is not None:
+        return direct
+    params = dict(parse_qsl(parsed.query, keep_blank_values=True))
+    credential = params.get("credential")
+    if not credential:
+        return None
+    decoded = _decode_mteam_tracker_credential(credential)
+    if decoded is None:
+        return None
+    return _mteam_torrent_id_from_query(decoded)
+
+
+def _mteam_torrent_id_from_query(query: str) -> str | None:
+    for key, value in parse_qsl(query, keep_blank_values=True):
+        if key.lower() in {"tid", "id", "torrent_id", "torrentid"} and value.isdigit():
+            return value
+    return None
+
+
+def _decode_mteam_tracker_credential(value: str) -> str | None:
+    clean = value.strip()
+    if not clean:
+        return None
+    padded = clean + ("=" * (-len(clean) % 4))
+    for decoder in (base64.b64decode, base64.urlsafe_b64decode):
+        try:
+            return decoder(padded).decode("utf-8", errors="ignore")
+        except (binascii.Error, ValueError, TypeError):
+            continue
+    return None
 
 
 def _mteam_backfill_keywords(name: str) -> list[str]:

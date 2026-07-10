@@ -466,10 +466,11 @@ def _merge_detail(candidate: TorrentCandidate, detail: dict[str, Any]) -> Torren
     size_bytes = _coerce_int(detail.get("size")) or candidate.size_bytes
     seeders = _coerce_int(status_data.get("seeders")) or candidate.seeders
     leechers = _coerce_int(status_data.get("leechers")) or candidate.leechers
+    discount = _normalize_discount_label(_row_discount(detail))
     left_time_minutes = _left_time_minutes_from_api_row(detail)
     if left_time_minutes is not None:
         metadata.pop("left_time_source", None)
-    elif candidate.discount in {Discount.FREE, Discount.TWO_X_FREE}:
+    elif discount in {Discount.FREE, Discount.TWO_X_FREE}:
         metadata["left_time_source"] = _left_time_source_from_api_row(detail)
 
     return candidate.model_copy(
@@ -477,6 +478,7 @@ def _merge_detail(candidate: TorrentCandidate, detail: dict[str, Any]) -> Torren
             "size_bytes": size_bytes,
             "seeders": seeders,
             "leechers": leechers,
+            "discount": discount,
             "left_time_minutes": (
                 left_time_minutes if left_time_minutes is not None else candidate.left_time_minutes
             ),
