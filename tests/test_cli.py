@@ -715,6 +715,167 @@ def test_schedule_run_records_backoff_and_skips_intent_after_mteam_rate_limit(
     assert bool(events[0]["rate_limited"]) is True
 
 
+def test_schedule_run_records_network_backoff_after_mteam_timeout(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from seed_agent import cli
+
+    config_path = _config_file(tmp_path)
+
+    def fake_run_once_payload(
+        config_path_value: Path,
+        *,
+        execute: bool,
+        min_free_window_minutes: int | None,
+        require_known_free_window: bool,
+        prune: bool,
+        prune_free_window_min_remaining_minutes: int | None = None,
+        capacity_prune: bool = False,
+    ) -> dict[str, object]:
+        return {
+            "command": "run-once",
+            "config": str(config_path_value),
+            "execute": execute,
+            "discovered": 0,
+            "scored": 0,
+            "accepted": 0,
+            "enqueued": 0,
+            "scores": [],
+            "decisions": [],
+            "discovery_warnings": [
+                {
+                    "site": "mteam",
+                    "error_type": "ReadTimeout",
+                    "message": "ReadTimeout",
+                    "endpoint": "torrent/search",
+                    "rate_limited": False,
+                }
+            ],
+        }
+
+    monkeypatch.setattr(cli, "_run_once_payload", fake_run_once_payload)
+    monkeypatch.setattr(
+        cli,
+        "_intent_run_once_payload",
+        lambda *args, **kwargs: pytest.fail("intent should be skipped after network backoff"),
+    )
+
+    result = CliRunner().invoke(
+        cli.app,
+        ["schedule-run", "--config", str(config_path), "--max-cycles", "1"],
+    )
+
+    assert result.exit_code == 0
+    payload = _json_output(result)
+    assert payload["skipped_by_backoff"] is True
+    assert payload["schedule_backoff"]["active"] is True
+    assert payload["schedule_backoff"]["endpoint"] == "torrent/search"
+    assert payload["schedule_backoff"]["reason"] == "mteam api unavailable"
+    assert payload["intent"]["skipped_by_backoff"] is True
+    assert not (tmp_path / ".seed-agent" / "schedule-backoff.json").exists()
+
+    store = StateStore(tmp_path / ".seed-agent" / "state.db")
+    backoff = store.get_tracker_backoff("mteam", "torrent/search")
+    assert backoff is not None
+    assert bool(backoff["active"]) is True
+    assert backoff["source"] == "schedule_network"
+    events = store.list_tracker_api_events(site="mteam")
+    assert len(events) == 1
+    assert events[0]["event"] == "unavailable"
+    assert bool(events[0]["rate_limited"]) is False
+
+
+def test_schedule_run_prunes_after_tracker_backfill_network_backoff(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from seed_agent import cli
+
+    config_path = _config_file(tmp_path)
+    prune_calls: list[int | None] = []
+
+    def fake_tracker_source_backfill_payload(
+        loaded,
+        *,
+        execute: bool,
+        limit: int | None,
+        category: str | None,
+        max_api_requests: int,
+    ) -> dict[str, object]:
+        return {
+            "command": "tracker-source-backfill",
+            "execute": execute,
+            "category": category,
+            "live_torrent_count": 2,
+            "qbonly_candidates": 2,
+            "api_requests_used": 1,
+            "api_requests_remaining": 0,
+            "max_api_requests": max_api_requests,
+            "summary": {"unavailable": 1, "skipped": 1},
+            "results": [
+                {"status": "unavailable", "reason": "ReadTimeout"},
+                {"status": "skipped", "reason": "api request budget exhausted"},
+            ],
+        }
+
+    def fake_prune_payload(
+        config_path_value: Path,
+        *,
+        execute: bool,
+        free_window_min_remaining_minutes: int | None = None,
+        force_space_reclamation: bool = False,
+        completed_low_upload_requires_reclamation: bool = False,
+    ) -> dict[str, object]:
+        prune_calls.append(free_window_min_remaining_minutes)
+        return {
+            "command": "prune",
+            "config": str(config_path_value),
+            "execute": execute,
+            "managed_count": 1,
+            "pool_usage": {},
+            "decisions": [],
+            "preview": [],
+        }
+
+    monkeypatch.setattr(
+        cli,
+        "_tracker_source_backfill_payload",
+        fake_tracker_source_backfill_payload,
+    )
+    monkeypatch.setattr(cli, "_prune_payload", fake_prune_payload)
+    monkeypatch.setattr(
+        cli,
+        "_run_once_payload",
+        lambda *args, **kwargs: pytest.fail("run-once should be skipped"),
+    )
+    monkeypatch.setattr(
+        cli,
+        "_intent_run_once_payload",
+        lambda *args, **kwargs: pytest.fail("intent should be skipped"),
+    )
+
+    result = CliRunner().invoke(
+        cli.app,
+        [
+            "schedule-run",
+            "--config",
+            str(config_path),
+            "--prune",
+            "--max-cycles",
+            "1",
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = _json_output(result)
+    assert prune_calls == [60]
+    assert payload["prune"]["command"] == "prune"
+    assert payload["skipped_by_backoff"] is True
+    assert payload["schedule_backoff"]["reason"] == "mteam api unavailable"
+    assert payload["tracker_source_backfill"]["summary"]["unavailable"] == 1
+
+
 def test_schedule_run_skips_work_while_backoff_is_active(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

@@ -4,6 +4,19 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.16.3 - 2026-07-10
+
+### Fixed
+
+- Added short M-Team network backoff handling for API timeouts. Tracker API
+  timeouts now stop the current tracker API phase, skip later tracker/search
+  work briefly, and still allow local qBittorrent prune to run.
+- Kept M-Team rate-limit handling separate from transient network failures, so
+  `ReadTimeout`/connection errors no longer get recorded as tracker
+  rate-limit events.
+- Reduced the default M-Team API timeout so site outages do not hold scheduler
+  cycles open for long periods.
+
 ## 0.16.2 - 2026-07-10
 
 ### Fixed

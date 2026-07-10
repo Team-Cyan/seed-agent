@@ -226,6 +226,9 @@ by completion period, and unfinished work is ordered by current priority.
   - Active tracker API backoff now suppresses tracker/API phases only. Local
     scheduled prune still runs during backoff, so already-known cleanup evidence
     can act on qBittorrent without making more tracker calls.
+  - M-Team API timeouts now create a short network backoff instead of a
+    rate-limit backoff. Scheduler cycles stop tracker/API work quickly while
+    still running local qBittorrent prune.
   - Current docs now match implemented Transmission, Torznab, Letterboxd, and
     Telegram support, with a docs parity regression test for the support matrix.
   - CI now runs on `main` pushes and includes a strict local dependency audit.

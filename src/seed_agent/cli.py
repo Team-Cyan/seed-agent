@@ -11,6 +11,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Any
 
+import httpx
 import typer
 import yaml
 
@@ -91,6 +92,18 @@ DEFAULT_CONFIG = Path("config/example.yaml")
 SCHEDULE_BACKOFF_FILE = "schedule-backoff.json"
 MTEAM_RATE_LIMIT_MARKERS = ("請求過於頻繁", "请求过于频繁")
 MTEAM_RATE_LIMIT_BACKOFF_HOURS = 24
+MTEAM_NETWORK_BACKOFF_MINUTES = 30
+MTEAM_NETWORK_ERROR_TYPES = {
+    "ConnectError",
+    "ConnectTimeout",
+    "NetworkError",
+    "PoolTimeout",
+    "ReadError",
+    "ReadTimeout",
+    "TimeoutException",
+    "WriteError",
+    "WriteTimeout",
+}
 CONFIG_RULE_SECTIONS = (
     "pt_filters",
     "pt_scoring",
@@ -1210,9 +1223,35 @@ def schedule_run(
                         message="mteam rate limited",
                         payload={"schedule_backoff": payload["schedule_backoff"]},
                     )
+                elif _tracker_source_backfill_has_network_unavailable(
+                    tracker_backfill_payload
+                ):
+                    payload["schedule_backoff"] = _record_schedule_network_backoff(
+                        config,
+                        endpoint="torrent/search",
+                        reason="mteam api unavailable",
+                        run_id=run_id,
+                    )
+                    payload["skipped_by_backoff"] = True
+                    store_for_run.record_tracker_api_event(
+                        site="mteam",
+                        endpoint="torrent/search",
+                        event="unavailable",
+                        run_id=run_id,
+                        rate_limited=False,
+                        message="mteam api unavailable",
+                    )
+                    _record_schedule_phase(
+                        store_for_run,
+                        run_id=run_id,
+                        phase="tracker_source_backfill",
+                        event="warning",
+                        message="mteam api unavailable",
+                        payload={"schedule_backoff": payload["schedule_backoff"]},
+                    )
 
             prune_payload: dict[str, Any] | None = None
-            if prune and "schedule_backoff" not in payload:
+            if prune and "error" not in payload:
                 _record_schedule_phase(
                     store_for_run,
                     run_id=run_id,
@@ -1303,6 +1342,31 @@ def schedule_run(
                         phase="pt_discovery",
                         event="warning",
                         message="mteam rate limited",
+                        payload={"schedule_backoff": payload["schedule_backoff"]},
+                    )
+                elif _payload_has_mteam_network_unavailable(payload):
+                    endpoint = _mteam_network_unavailable_endpoint(payload)
+                    payload["schedule_backoff"] = _record_schedule_network_backoff(
+                        config,
+                        endpoint=endpoint,
+                        reason="mteam api unavailable",
+                        run_id=run_id,
+                    )
+                    payload["skipped_by_backoff"] = True
+                    store_for_run.record_tracker_api_event(
+                        site="mteam",
+                        endpoint=endpoint,
+                        event="unavailable",
+                        run_id=run_id,
+                        rate_limited=False,
+                        message="mteam api unavailable",
+                    )
+                    _record_schedule_phase(
+                        store_for_run,
+                        run_id=run_id,
+                        phase="pt_discovery",
+                        event="warning",
+                        message="mteam api unavailable",
                         payload={"schedule_backoff": payload["schedule_backoff"]},
                     )
 
@@ -1509,6 +1573,31 @@ def _record_schedule_rate_limit_backoff(
     return _schedule_backoff_status(config_path, now=current)
 
 
+def _record_schedule_network_backoff(
+    config_path: Path,
+    *,
+    endpoint: str,
+    reason: str,
+    run_id: str | None = None,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    current = now or datetime.now().astimezone()
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=UTC)
+    until = current + timedelta(minutes=MTEAM_NETWORK_BACKOFF_MINUTES)
+    store = StateStore(_state_path(load_config(config_path)))
+    store.set_tracker_backoff(
+        site="mteam",
+        endpoint=endpoint,
+        until=until.isoformat(),
+        reason=reason,
+        source="schedule_network",
+        run_id=run_id,
+        created_at=current,
+    )
+    return _schedule_backoff_status(config_path, now=current)
+
+
 def _tracker_backoff_status(
     config_path: Path,
     *,
@@ -1585,6 +1674,33 @@ def _payload_has_mteam_rate_limit(payload: dict[str, Any]) -> bool:
         for message in messages
         for marker in MTEAM_RATE_LIMIT_MARKERS
     )
+
+
+def _payload_has_mteam_network_unavailable(payload: dict[str, Any]) -> bool:
+    for warning in payload.get("discovery_warnings") or []:
+        if not isinstance(warning, dict):
+            continue
+        if str(warning.get("site") or "").lower() not in {"mteam", "mt"}:
+            continue
+        if warning.get("rate_limited") is True:
+            continue
+        error_type = str(warning.get("error_type") or "")
+        message = str(warning.get("message") or "")
+        if error_type in MTEAM_NETWORK_ERROR_TYPES or _is_mteam_network_message(message):
+            return True
+    return False
+
+
+def _mteam_network_unavailable_endpoint(payload: dict[str, Any]) -> str:
+    for warning in payload.get("discovery_warnings") or []:
+        if not isinstance(warning, dict):
+            continue
+        if str(warning.get("site") or "").lower() not in {"mteam", "mt"}:
+            continue
+        endpoint = str(warning.get("endpoint") or "").strip()
+        if endpoint:
+            return endpoint
+    return "torrent/search"
 
 
 def _mteam_rate_limit_endpoint(payload: dict[str, Any]) -> str:
@@ -2859,6 +2975,25 @@ def _tracker_source_backfill_has_rate_limit(payload: dict[str, Any]) -> bool:
     return False
 
 
+def _tracker_source_backfill_has_network_unavailable(payload: dict[str, Any]) -> bool:
+    summary = payload.get("summary")
+    if isinstance(summary, dict) and int(summary.get("unavailable") or 0) > 0:
+        return True
+    for result in payload.get("results") or []:
+        if not isinstance(result, dict):
+            continue
+        if result.get("status") == "unavailable":
+            return True
+        reason = str(result.get("reason") or "")
+        if _is_mteam_network_message(reason):
+            return True
+    return False
+
+
+def _is_mteam_network_message(message: str) -> bool:
+    return any(error_type in message for error_type in MTEAM_NETWORK_ERROR_TYPES)
+
+
 def _infer_tracker_site(torrent: ManagedTorrent) -> str | None:
     for tag in torrent.tags:
         if tag.startswith("site:") and len(tag) > len("site:"):
@@ -2928,6 +3063,20 @@ async def _find_mteam_match_for_torrent(
                 return {
                     "status": "error",
                     "reason": str(exc),
+                    "searched": searched_keywords,
+                }
+            except httpx.TimeoutException as exc:
+                request_budget["remaining"] = 0
+                return {
+                    "status": "unavailable",
+                    "reason": type(exc).__name__,
+                    "searched": searched_keywords,
+                }
+            except httpx.NetworkError as exc:
+                request_budget["remaining"] = 0
+                return {
+                    "status": "unavailable",
+                    "reason": type(exc).__name__,
                     "searched": searched_keywords,
                 }
             except Exception as exc:

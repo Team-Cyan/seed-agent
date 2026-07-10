@@ -94,7 +94,7 @@ class MTeamApiClient:
         api_key: str | None = None,
         api_key_header: str = "x-api-key",
         visitor_id: str | None = None,
-        timeout: float = 20.0,
+        timeout: float = 8.0,
     ) -> None:
         self.cookie = cookie
         self.api_key = api_key
