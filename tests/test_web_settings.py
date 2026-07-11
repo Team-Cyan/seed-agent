@@ -1402,6 +1402,36 @@ def test_http_config_section_preview_returns_diff_without_writing(
     assert "secret-token" not in json.dumps(payload)
 
 
+def test_http_tracker_preview_returns_diff_without_writing_secret(
+    tmp_path: Path,
+) -> None:
+    config_path = _write_minimal_config(tmp_path)
+    before = config_path.read_text(encoding="utf-8")
+
+    with _running_server(config_path) as base_url:
+        payload = _request_json(
+            base_url,
+            "POST",
+            "/api/trackers/preview",
+            {
+                "type": "mteam",
+                "name": "mteam",
+                "enabled": True,
+                "rss_url": "",
+                "discovery_mode": "api",
+                "api_key_ref": "local/secrets/mteam.api-key",
+                "api_key_value": "must-not-appear",
+                "auth_header": "x-api-key",
+                "cookie_ref": None,
+            },
+        )
+
+    assert config_path.read_text(encoding="utf-8") == before
+    assert payload["tracker"]["name"] == "mteam"
+    assert "+- name: mteam" in payload["diff"]
+    assert "must-not-appear" not in json.dumps(payload)
+
+
 def test_http_config_section_save_updates_search_and_source_refs_without_secrets(
     tmp_path: Path,
 ) -> None:
@@ -1684,6 +1714,27 @@ def test_http_state_summary_reports_local_state_counts(tmp_path: Path) -> None:
     }
     assert payload["torrent_runtime"] == {"total": 1}
     assert payload["release_candidates"] == {"total": 0}
+
+
+def test_http_metrics_endpoint_is_optional_and_prometheus_compatible(tmp_path: Path) -> None:
+    config_path = _write_minimal_config(tmp_path)
+    StateStore(tmp_path / ".seed-agent" / "state.db")
+
+    with _running_server(config_path) as base_url:
+        disabled = _request_json(base_url, "GET", "/metrics", expected_status=404)
+
+    config_path.write_text(
+        config_path.read_text(encoding="utf-8")
+        + "\nmetrics:\n  enabled: true\n  path: /metrics\n",
+        encoding="utf-8",
+    )
+    with _running_server(config_path) as base_url:
+        metrics, content_type = _request_text(base_url, "/metrics")
+
+    assert disabled == {"error": "not found"}
+    assert content_type.startswith("text/plain")
+    assert "seed_agent_tracker_backoff_active" in metrics
+    assert "seed_agent_heartbeat_present 0.000000" in metrics
 
 
 def test_http_health_reports_recent_heartbeat(tmp_path: Path) -> None:
@@ -1993,3 +2044,14 @@ def _request_json(
     connection.close()
     assert response.status == expected_status, data
     return data
+
+
+def _request_text(base_url: str, path: str) -> tuple[str, str]:
+    connection = HTTPConnection(base_url)
+    connection.request("GET", path)
+    response = connection.getresponse()
+    data = response.read().decode("utf-8")
+    content_type = response.getheader("Content-Type") or ""
+    connection.close()
+    assert response.status == 200, data
+    return data, content_type

@@ -33,6 +33,7 @@ from seed_agent.config import (
     SiteConfig,
     load_config,
 )
+from seed_agent.metrics import render_prometheus_metrics
 from seed_agent.models import IntentSource, RankedRelease, ReleaseCandidate
 from seed_agent.quality_tags import matching_quality_tag_groups
 from seed_agent.search.base import SearchProvider
@@ -48,6 +49,7 @@ from seed_agent.web.settings import (
     normalized_config_yaml,
     preview_config_section,
     preview_config_section_yaml,
+    preview_tracker_draft,
     save_config_section,
     save_config_section_yaml,
     save_tracker_draft,
@@ -64,6 +66,22 @@ def make_handler(config_path: Path) -> type[BaseHTTPRequestHandler]:
 
     class SeedAgentWebHandler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
+            try:
+                metrics_config = load_config(resolved_config_path).metrics
+            except (OSError, ValueError):
+                metrics_config = None
+            if metrics_config is not None and self.path == metrics_config.path:
+                if not metrics_config.enabled:
+                    self._send_json({"error": "not found"}, status=HTTPStatus.NOT_FOUND)
+                    return
+                self._send_bytes(
+                    render_prometheus_metrics(
+                        _state_db_path(root),
+                        _heartbeat_file_path(root),
+                    ).encode("utf-8"),
+                    content_type="text/plain; version=0.0.4; charset=utf-8",
+                )
+                return
             want_candidates_id = _want_subresource_intent_id(self.path, "candidates")
             if want_candidates_id is not None:
                 payload, status = _want_candidates_payload(root, want_candidates_id)
@@ -192,6 +210,17 @@ def make_handler(config_path: Path) -> type[BaseHTTPRequestHandler]:
                     {
                         "tracker": _tracker_summary(site, root),
                         "status": build_tracker_status(draft, root),
+                    }
+                )
+                return
+            if self.path == "/api/trackers/preview":
+                draft = TrackerDraft.model_validate(self._read_json())
+                self._send_json(
+                    {
+                        **preview_tracker_draft(resolved_config_path, draft),
+                        "status": [
+                            {"level": "ok", "message": "tracker config preview ready"}
+                        ],
                     }
                 )
                 return
@@ -1328,6 +1357,9 @@ def _ops_payload(root: Path) -> dict[str, Any]:
         "tracker_backoffs": [],
         "tracker_api_events": [],
         "want_search_runs": [],
+        "cleanup_events": [],
+        "audit_tail": _audit_tail(root),
+        "scheduler_lease": None,
     }
     if not state_path.exists():
         return payload
@@ -1338,9 +1370,30 @@ def _ops_payload(root: Path) -> dict[str, Any]:
             "tracker_backoffs": store.list_tracker_backoffs(),
             "tracker_api_events": store.list_tracker_api_events(limit=10),
             "want_search_runs": store.list_want_search_runs(limit=10),
+            "cleanup_events": [
+                row
+                for row in store.list_scheduler_run_events(limit=100)
+                if row.get("phase") == "prune"
+            ][:20],
+            "scheduler_lease": store.get_scheduler_lease(),
         }
     )
     return payload
+
+
+def _audit_tail(root: Path, limit: int = 20) -> list[dict[str, Any]]:
+    path = root / ".seed-agent" / "audit.jsonl"
+    if not path.is_file():
+        return []
+    rows: list[dict[str, Any]] = []
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines()[-limit:]:
+        try:
+            loaded = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(loaded, dict):
+            rows.append(redact_payload(loaded))
+    return rows
 
 
 def _state_db_path(root: Path) -> Path:

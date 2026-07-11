@@ -54,6 +54,7 @@ const copy = {
       pt_filters: "PT 入队规则",
       seed_cleanup: "保种清理",
       scheduler: "定时任务",
+      metrics: "监控指标",
       want_decision: "想看决策",
       wants: "想看列表",
       release_preferences: "资源匹配",
@@ -81,6 +82,10 @@ const copy = {
       scheduler: {
         title: "定时任务",
         description: "统一配置扫描周期、清理、来源补全和想看搜索频率。",
+      },
+      metrics: {
+        title: "监控指标",
+        description: "配置可选的本地 Prometheus 指标端点。",
       },
       want_decision: {
         title: "想看决策",
@@ -316,6 +321,7 @@ const copy = {
       pt_filters: "PT Intake Rules",
       seed_cleanup: "Seed Cleanup",
       scheduler: "Scheduler",
+      metrics: "Metrics",
       want_decision: "Want Decisions",
       wants: "Want List",
       release_preferences: "Release Matching",
@@ -343,6 +349,10 @@ const copy = {
       scheduler: {
         title: "Scheduler",
         description: "Configure cycle timing, pruning, tracker backfill, and scheduled Want List search frequency.",
+      },
+      metrics: {
+        title: "Metrics",
+        description: "Configure the optional local Prometheus metrics endpoint.",
       },
       want_decision: {
         title: "Want Decisions",
@@ -600,6 +610,7 @@ const settingsPanelsByLanguage = {
         ["保护手动标记", "protect_manual", "boolean", "手动标记项默认保护。"],
         ["保护媒体库", "protect_media_library", "boolean", "媒体库相关种子默认保护。"],
         ["零上传删除小时数", "delete_after_no_upload_hours", "number", "零上传观察窗口。"],
+        ["单轮容量删除上限", "max_capacity_deletes_per_run", "number", "限制每轮因容量压力触发的删除数量；直接付费风险不受此限制。"],
       ],
     },
     scheduler: {
@@ -616,6 +627,14 @@ const settingsPanelsByLanguage = {
         ["想看自动入队", "intent_execute", "boolean", "允许 scheduled Want List 结果自动写入下载器。"],
         ["想看搜索频率", "intent_search_mode", "select:daily|every_cycle", "每天在指定小时后执行一次，或每轮搜索。"],
         ["每日搜索小时", "intent_search_hour", "number", "daily 模式下使用本地时区的 0-23 小时；错过后会在下一轮补跑。"],
+        ["Scheduler Lease 分钟", "lease_ttl_minutes", "number", "实例失联后允许其他 scheduler 接管前的等待时间。"],
+      ],
+    },
+    metrics: {
+      title: "监控指标",
+      fields: [
+        ["启用 Metrics", "enabled", "boolean", "从本地 SQLite 和 heartbeat 暴露 Prometheus 指标，不调用 tracker 或下载器。"],
+        ["Metrics 路径", "path", "text", "Prometheus 拉取路径，例如 /metrics。"],
       ],
     },
     want_decision: {
@@ -635,6 +654,7 @@ const settingsPanelsByLanguage = {
       fields: [
         ["站点优先级", "site_priority", "map", "按 site=priority 填写，例如 mteam=10。只影响搜索排序，不保存 secret。"],
         ["每站结果上限", "max_results_per_site", "number", "每个站点最多保留的搜索结果数量。"],
+        ["每个意图 API 请求上限", "max_api_requests_per_intent", "number", "限制 ID 与标题回退查询的总次数。"],
         ["优先免费", "prefer_free", "boolean", "搜索排序中优先 free/freeleech 资源。"],
         ["默认排除 HR", "reject_hr_by_default", "boolean", "默认拒绝 HR 风险资源。"],
       ],
@@ -673,6 +693,7 @@ const settingsPanelsByLanguage = {
         ["Protect manual marks", "protect_manual", "boolean", "Protect manually marked torrents by default."],
         ["Protect media library", "protect_media_library", "boolean", "Protect media-library torrents by default."],
         ["Delete after no-upload hours", "delete_after_no_upload_hours", "number", "Zero-upload observation window."],
+        ["Capacity deletes per run", "max_capacity_deletes_per_run", "number", "Caps capacity-pressure deletes per cycle; direct paid-risk deletion remains independent."],
       ],
     },
     scheduler: {
@@ -689,6 +710,14 @@ const settingsPanelsByLanguage = {
         ["Execute Want enqueue", "intent_execute", "boolean", "Allow scheduled Want List matches to mutate the downloader."],
         ["Want search frequency", "intent_search_mode", "select:daily|every_cycle", "Search once daily after a local hour, or on every cycle."],
         ["Daily search hour", "intent_search_hour", "number", "Local hour from 0 through 23; a missed run is caught up on the next cycle."],
+        ["Scheduler lease minutes", "lease_ttl_minutes", "number", "Time before another scheduler can take over an abandoned lease."],
+      ],
+    },
+    metrics: {
+      title: "Metrics",
+      fields: [
+        ["Enable metrics", "enabled", "boolean", "Expose Prometheus metrics from local SQLite and heartbeat state without tracker/downloader calls."],
+        ["Metrics path", "path", "text", "Prometheus scrape path, for example /metrics."],
       ],
     },
     want_decision: {
@@ -708,6 +737,7 @@ const settingsPanelsByLanguage = {
       fields: [
         ["Site priority", "site_priority", "map", "Use site=priority, for example mteam=10. Affects search ranking only and never saves secrets."],
         ["Max results per site", "max_results_per_site", "number", "Maximum retained search results per site."],
+        ["API requests per intent", "max_api_requests_per_intent", "number", "Bounds identifier and title fallback queries."],
         ["Prefer free", "prefer_free", "boolean", "Prefer free/freeleech releases in search ranking."],
         ["Reject HR by default", "reject_hr_by_default", "boolean", "Reject HR-risk releases by default."],
       ],
@@ -946,6 +976,7 @@ const navigationSections = [
   "pt_filters",
   "seed_cleanup",
   "scheduler",
+  "metrics",
   "want_decision",
   "release_preferences",
   "config_file",
@@ -959,6 +990,7 @@ const sectionGroupBySection = {
   pt_filters: "acquisition",
   seed_cleanup: "acquisition",
   scheduler: "automation",
+  metrics: "advanced",
   want_decision: "acquisition",
   release_preferences: "acquisition",
   config_file: "advanced",
@@ -2458,6 +2490,7 @@ function renderTrackerDetailFooter(tracker) {
       <button class="secondary-button" type="button" data-action="validate" aria-label="${escapeAttribute(uiText("trackerValidate"))}">${escapeHtml(uiText("trackerValidate"))}</button>
       <button class="secondary-button" type="button" data-action="site-probe" aria-label="${escapeAttribute(uiText("trackerProbe"))}">${escapeHtml(uiText("trackerProbe"))}</button>
       <button class="secondary-button" type="button" data-action="dry-run" aria-label="${escapeAttribute(uiText("trackerDryRun"))}">${escapeHtml(uiText("trackerDryRun"))}</button>
+      <button class="secondary-button" type="button" data-action="preview" aria-label="${escapeAttribute(uiText("preview"))}">${escapeHtml(uiText("preview"))}</button>
     </div>
     <div class="tracker-actions-group">
       <button class="secondary-button" type="button" data-action="cancel">${escapeHtml(uiText("trackerCancel"))}</button>
@@ -2483,6 +2516,7 @@ async function handleTrackerAction(tracker, action) {
     validate: "/api/trackers/validate",
     "site-probe": "/api/trackers/site-probe",
     "dry-run": "/api/trackers/dry-run",
+    preview: "/api/trackers/preview",
     save: "/api/trackers",
   };
   try {
@@ -2493,6 +2527,7 @@ async function handleTrackerAction(tracker, action) {
     });
     const payload = await response.json();
     tracker.status = payload.status || tracker.status;
+    tracker.diff = payload.diff || "";
     if (!response.ok && !payload.status) {
       tracker.status = [{ level: "warning", message: `${uiText("requestFailedPrefix")}: ${response.status}` }];
     }
@@ -2518,6 +2553,7 @@ function renderStatusPanel(tracker) {
           )
           .join("")}
       </div>
+      ${tracker.diff ? `<pre class="diff-preview">${escapeHtml(tracker.diff)}</pre>` : ""}
     </div>
   `;
 }

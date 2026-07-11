@@ -24,6 +24,7 @@ CONFIG_SECTION_NAMES = {
     "want_decision",
     "release_preferences",
     "scheduler",
+    "metrics",
     "want_sources",
 }
 ConfigSectionName = Literal[
@@ -33,6 +34,7 @@ ConfigSectionName = Literal[
     "want_decision",
     "release_preferences",
     "scheduler",
+    "metrics",
     "want_sources",
 ]
 LOCAL_SECRETS_DIR = Path("local/secrets")
@@ -251,6 +253,38 @@ def save_tracker_draft(config_path: Path, draft: TrackerDraft) -> SiteConfig:
 
     write_config_mapping(config_path, raw)
     return site
+
+
+def preview_tracker_draft(config_path: Path, draft: TrackerDraft) -> dict[str, Any]:
+    site = tracker_draft_to_config(draft)
+    before_raw = load_config_mapping(config_path)
+    after_raw = dict(before_raw)
+    sites = list(after_raw.get("tracker_sites") or [])
+    site_data = site.model_dump(mode="json", exclude_none=True)
+    replaced = False
+    for index, existing in enumerate(sites):
+        if isinstance(existing, dict) and existing.get("name") == site.name:
+            sites[index] = site_data
+            replaced = True
+            break
+    if not replaced:
+        sites.append(site_data)
+    after_raw["tracker_sites"] = sites
+    before_config = SeedAgentConfig.model_validate(before_raw)
+    after_config = SeedAgentConfig.model_validate(after_raw)
+    before_yaml = _normalized_config_yaml(before_config)
+    after_yaml = _normalized_config_yaml(after_config)
+    return {
+        "tracker": site_data,
+        "diff": "".join(
+            unified_diff(
+                before_yaml.splitlines(keepends=True),
+                after_yaml.splitlines(keepends=True),
+                fromfile="current",
+                tofile="preview",
+            )
+        ),
+    }
 
 
 def _write_secret_value(
