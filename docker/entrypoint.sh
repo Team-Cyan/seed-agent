@@ -1,15 +1,22 @@
 #!/bin/sh
 set -eu
 
-PUID="${PUID:-1000}"
-PGID="${PGID:-1000}"
-if [ "$(id -u)" = "0" ] && [ "${SEED_AGENT_PRIVILEGES_DROPPED:-false}" != "true" ]; then
+PUID="${PUID:-}"
+PGID="${PGID:-}"
+if [ -n "$PUID" ] || [ -n "$PGID" ]; then
+  if [ -z "$PUID" ] || [ -z "$PGID" ]; then
+    echo "PUID and PGID must be configured together" >&2
+    exit 2
+  fi
   case "$PUID:$PGID" in
     *[!0-9:]*|:*|*:)
       echo "PUID and PGID must be numeric" >&2
       exit 2
       ;;
   esac
+fi
+
+if [ "$(id -u)" = "0" ] && [ -n "$PUID" ] && [ "${SEED_AGENT_PRIVILEGES_DROPPED:-false}" != "true" ]; then
   if ! command -v setpriv >/dev/null 2>&1; then
     echo "setpriv is required to drop container privileges" >&2
     exit 2

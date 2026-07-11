@@ -37,6 +37,11 @@ bounding Linux capabilities; do not pre-drop `SETUID`/`SETGID`, which are needed
 only for that transition. The entrypoint does not recursively change mounted
 ownership.
 
+Both variables must be configured together. Existing DockerMan installations
+that predate these template fields and provide neither variable retain their
+legacy container user until the operator adds matching IDs; this avoids making
+mounted SQLite and secret files unreadable during an image-only update.
+
 ## Free-Window Safety
 
 The main risk with freeleech torrents is not polling frequency by itself. The

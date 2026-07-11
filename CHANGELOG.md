@@ -4,6 +4,15 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.18.2 - 2026-07-11
+
+### Fixed
+
+- Preserve the legacy container user when an existing DockerMan installation
+  provides neither `PUID` nor `PGID`, preventing image-only upgrades from
+  changing mounted appdata ownership expectations to an implicit `1000:1000`.
+  Explicit non-root deployments must configure both values together.
+
 ## 0.18.1 - 2026-07-11
 
 ### Fixed
