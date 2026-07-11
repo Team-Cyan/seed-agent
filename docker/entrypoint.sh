@@ -1,6 +1,34 @@
 #!/bin/sh
 set -eu
 
+PUID="${PUID:-1000}"
+PGID="${PGID:-1000}"
+if [ "$(id -u)" = "0" ] && [ "${SEED_AGENT_PRIVILEGES_DROPPED:-false}" != "true" ]; then
+  case "$PUID:$PGID" in
+    *[!0-9:]*|:*|*:)
+      echo "PUID and PGID must be numeric" >&2
+      exit 2
+      ;;
+  esac
+  if ! command -v setpriv >/dev/null 2>&1; then
+    echo "setpriv is required to drop container privileges" >&2
+    exit 2
+  fi
+  exec env \
+    SEED_AGENT_PRIVILEGES_DROPPED=true \
+    HOME=/tmp/seed-agent \
+    setpriv \
+      --reuid "$PUID" \
+      --regid "$PGID" \
+      --clear-groups \
+      --inh-caps=-all \
+      --ambient-caps=-all \
+      --bounding-set=-all \
+      "$0" "$@"
+fi
+
+mkdir -p "${HOME:-/tmp/seed-agent}"
+
 if [ "${1:-}" = "seed-agent" ]; then
   shift
   exec seed-agent "$@"

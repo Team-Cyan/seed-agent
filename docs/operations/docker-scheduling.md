@@ -28,6 +28,15 @@ Current project recommendation:
   primitives and you want one-shot container execution,
 - use a heartbeat file plus `healthcheck` for the long-running shape.
 
+The entrypoint drops root privileges before startup status, Web, scheduler, or
+one-off CLI commands run. Set numeric `PUID` and `PGID` to match the owner of
+mounted config and state paths. The Compose example also uses a read-only root
+filesystem with a dedicated `/tmp` tmpfs; durable writes must stay in mounted
+runtime paths. The same privilege transition clears inheritable, ambient, and
+bounding Linux capabilities; do not pre-drop `SETUID`/`SETGID`, which are needed
+only for that transition. The entrypoint does not recursively change mounted
+ownership.
+
 ## Free-Window Safety
 
 The main risk with freeleech torrents is not polling frequency by itself. The

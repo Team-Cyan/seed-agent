@@ -56,9 +56,9 @@ by completion period, and unfinished work is ordered by current priority.
     with qB runtime outcomes.
   - Currently uploading managed torrents are protected from stale no-upload
     cleanup.
-  - Mutable seed cleanup pauses/deletes incomplete cold or zero-upload torrents
-    only when the configured budget pool is over budget; completed seeds remain
-    available for upload.
+  - Mutable seed cleanup selects incomplete cold or zero-upload torrents only
+    when the configured budget pool is over budget; current cleanup deletes
+    selected files directly and completed seeds remain available for upload.
   - Missing-from-qB reconciliation marks disappeared hashes as locally deleted
     and revives stale deleted evidence when hashes reappear.
 
@@ -252,17 +252,38 @@ by completion period, and unfinished work is ordered by current priority.
   - A provider-kernel roadmap spec captures later autobrr/Prowlarr/cross-seed
     lessons without expanding current scope into a broad plugin framework.
 
-- Next P0 - Live Unraid stopgap and preview verification
+- Completed 2026-07 - Runtime hardening refinement
+  - Deterministic fake downloader/provider integration runs a complete local
+    scheduler cycle with persisted phase evidence and no mutation.
+  - Existing M-Team intent queries have configurable request budgets and
+    redacted ID/fallback path diagnostics.
+  - Quality replay exposes stable score components and rank deltas; capacity
+    cleanup has both byte targets and a per-cycle deletion count guardrail.
+  - Web tracker edits have diff preview, and operations output includes bounded
+    cleanup events and redacted audit tail evidence.
+  - SQLite enforces one mutable scheduler lease with expiry takeover and safe
+    termination release.
+  - State backup/verify/preview-first restore, locked audit archival, storage
+    doctor evidence, retention controls, non-root/read-only-root packaging, and
+    optional local Prometheus metrics are implemented.
+  - The acceptance matrix and local/live gates are maintained in
+    `docs/plans/2026-07-11-runtime-hardening-refinement.md`.
+
+- Next P0 - Complete the live Unraid release gate
   - Current read-only qB evidence shows the physical disk is overcommitted even
     though the logical `downloads` pool is still under 10 TiB; new local
     headroom planning reports this as `over_existing_liability`.
-  - Pause, do not delete, unfinished `seed` category qB tasks before any live
-    deployment if the operator authorizes a stopgap mutation.
-  - Restore SSH access before host-level Unraid checks such as DockerMan
-    container rebuild, `docker port seed-agent`, and live template provenance.
-  - After qB is stable, rebuild/update the DockerMan-managed container from the
-    updated template, confirm `8765/tcp` publishing, and verify the WebUI button
-    and runtime provenance paths.
+  - The scheduler/Web integration, intent diagnostics, evidence replay, Web
+    operations, scheduler ownership, backup/retention, container security, and
+    optional metrics implementation is complete locally.
+  - Use current direct-delete cleanup semantics with a calculated reclaim target;
+    do not recreate paused cleanup placeholders as an operational stopgap.
+  - After the complete Apple `container` release gate, restore SSH access and
+    perform read-only DockerMan, image, port, config, qB, and runtime provenance
+    checks. Request explicit operator authorization before deployment or
+    downloader mutation.
+  - Keep the detailed acceptance matrix in
+    `docs/plans/2026-07-11-runtime-hardening-refinement.md`.
 
 - Next P0 - Add scheduler and Web preview integration coverage
   - Add fake downloader/provider fixtures that can run a scheduler cycle without
@@ -304,6 +325,16 @@ by completion period, and unfinished work is ordered by current priority.
     history changes suddenly.
   - Prefer read-only contribution and headroom reports before changing cleanup
     thresholds or executing deletions.
+
+- Next P1 - Runtime ownership, recovery, and telemetry
+  - Enforce one mutable scheduler per SQLite/downloader runtime with an expiring
+    durable lease while preserving read-only command access.
+  - Add SQLite-safe backup/verify/preview-first restore and append-only audit
+    archival with doctor health evidence.
+  - Run the image as a non-root UID/GID with read-only-root compatibility after
+    verifying mounted runtime ownership on Apple `container` and Unraid.
+  - Expose optional low-cardinality Prometheus metrics without torrent, tracker,
+    URL, or secret labels.
 
 - Deferred / intentionally not in scope
   - Dashboard-first product work.

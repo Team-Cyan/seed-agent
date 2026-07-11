@@ -62,7 +62,7 @@ Dry-run is the default behavior for mutating actions. Use it first to inspect wh
 
 Cleanup is capacity-driven for mutable seed categories. Completed seeds remain
 available for upload. Cold incomplete or zero-upload torrents are retained while
-the configured budget pool is under its limit; prune only pauses or deletes them
+the configured budget pool is under its limit; prune only deletes them
 automatically when space reclamation is actually needed. Add-only media
 categories remain protected from cleanup mutations.
 

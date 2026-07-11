@@ -1,9 +1,9 @@
 # syntax=docker/dockerfile:1.7
 
-ARG AGENT_PYTHON_UV_BASE=ghcr.io/astral-sh/uv:python3.14-trixie
+ARG AGENT_PYTHON_UV_BASE=ghcr.io/astral-sh/uv:python3.14-trixie@sha256:fc2acf3556b55b4474fef2d41d267f8f819c8c393fe20ea35e764e2282427de4
 FROM ${AGENT_PYTHON_UV_BASE}
 
-ARG VERSION=0.17.0
+ARG VERSION=0.18.0
 ARG REVISION=unknown
 ARG BUILD_DATE=unknown
 
@@ -19,7 +19,8 @@ LABEL org.opencontainers.image.title="seed-agent" \
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     UV_LINK_MODE=copy \
-    UV_PROJECT_ENVIRONMENT=/usr/local
+    UV_PROJECT_ENVIRONMENT=/usr/local \
+    HOME=/tmp/seed-agent
 
 WORKDIR /app
 

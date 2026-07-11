@@ -6,6 +6,9 @@ services:
     #   context: ..
     container_name: seed-agent
     restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
     labels:
       org.opencontainers.image.icon: https://raw.githubusercontent.com/Team-Cyan/seed-agent/main/docs/assets/seed-agent-icon-transparent.png
     environment:
@@ -24,6 +27,8 @@ services:
       SEED_AGENT_WEB_HOST: 0.0.0.0
       SEED_AGENT_WEB_PORT: "8765"
       SEED_AGENT_WEB_TOKEN: ${SEED_AGENT_WEB_TOKEN:-}
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
     ports:
       - "8765:8765"
     volumes:
@@ -35,6 +40,7 @@ services:
       test:
         [
           "CMD",
+          "/app/docker/entrypoint.sh",
           "seed-agent",
           "healthcheck",
           "--config",

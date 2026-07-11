@@ -327,6 +327,10 @@ uv run seed-agent run-once --config config/config.yaml --execute
 uv run seed-agent schedule-run --config config/config.yaml --execute --interval-minutes 30
 uv run seed-agent healthcheck --config config/config.yaml
 uv run seed-agent web --config config/config.yaml --host 127.0.0.1 --port 8765
+uv run seed-agent quality-replay-report --config config/config.yaml
+uv run seed-agent state-backup --config config/config.yaml
+uv run seed-agent state-restore --config config/config.yaml --backup backup.db
+uv run seed-agent audit-archive --config config/config.yaml
 ```
 
 ## Runtime Files

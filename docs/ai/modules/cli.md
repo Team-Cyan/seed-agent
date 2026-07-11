@@ -54,7 +54,10 @@ Expose the operator-facing command surface and safe summaries.
 - rule/config portability through `config-export` and dry-run-first
   `config-import --rules <file>`, with writes gated by `--execute`,
 - read-only product-expansion reports through `release-profiles`,
-  `reseed-report`, and `headroom-report`,
+  `reseed-report`, `headroom-report`, and `quality-replay-report`,
+- runtime recovery through `state-backup`, `state-backup-verify`, preview-first
+  `state-restore`, and locked `audit-archive`; restore execution is rejected
+  while a scheduler lease is active,
 - `schedule-run` reads cycle, prune, backfill, free-window, and Intent defaults
   from the YAML `scheduler` section. Explicit CLI flags and container variables
   override those defaults and are reported in scheduler summaries; the Web
@@ -100,6 +103,9 @@ Expose the operator-facing command surface and safe summaries.
   List source refresh fails while the intent cycle continues with no new source
   events,
 - heartbeat reporting and healthcheck probes for long-running deployments.
+- optional Prometheus `/metrics` output derived only from local SQLite and
+  heartbeat evidence, with fixed low-cardinality labels and no tracker or
+  downloader calls during scrape.
 
 ## Expectations
 

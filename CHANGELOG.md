@@ -4,6 +4,33 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.18.0 - 2026-07-11
+
+### Added
+
+- Added deterministic scheduler/Web integration fakes and a full local cycle
+  test covering prune, PT, Intent, heartbeat, and persisted phase ordering.
+- Added bounded per-intent M-Team query diagnostics for Douban ID, IMDb ID, and
+  title/year fallback paths.
+- Added `quality-replay-report` with inspectable retention/eviction components,
+  current-vs-legacy ranking, evidence sufficiency, and deletion provenance.
+- Added an expiring SQLite scheduler lease with atomic acquisition, renewal,
+  normal/SIGTERM release, and abandoned-owner takeover.
+- Added SQLite-native state backup, verification, preview-first lease-aware
+  restore, locked gzip audit archival, retention controls, and doctor storage
+  health.
+- Added optional low-cardinality Prometheus metrics derived only from local
+  SQLite and heartbeat state.
+
+### Changed
+
+- Added a per-cycle capacity deletion count guardrail while keeping direct
+  incomplete paid/free-window risk deletion independent.
+- Added tracker before/after diff preview and bounded prune/audit evidence to
+  the Web operations API.
+- Pinned the container base manifest, dropped privileges through configurable
+  numeric `PUID`/`PGID`, and documented a read-only-root Compose shape.
+
 ## 0.17.0 - 2026-07-10
 
 ### Added

@@ -129,6 +129,7 @@ page labels.
 - `protect_manual`
 - `protect_media_library`
 - `delete_after_no_upload_hours`
+- `max_capacity_deletes_per_run`
 - `delete_completed_low_upload_after_hours`
 - `completed_low_upload_min_ratio`
 - `completed_low_upload_min_gb`
@@ -147,6 +148,7 @@ page labels.
 
 - `site_priority`
 - `max_results_per_site`
+- `max_api_requests_per_intent`
 - `prefer_free`
 - `reject_hr_by_default`
 - `quality_tag_scores`
@@ -183,6 +185,9 @@ page labels.
 `local_state`
 
 - `candidate_retention_days`
+- `backup_retention_count`
+- `audit_archive_retention_count`
+- `audit_archive_max_mb`
 
 `scheduler`
 
@@ -198,6 +203,12 @@ page labels.
 - `intent_execute`
 - `intent_search_mode`
 - `intent_search_hour`
+- `lease_ttl_minutes`
+
+`metrics`
+
+- `enabled`
+- `path`
 
 ## SQLite Tables
 
@@ -306,6 +317,14 @@ page labels.
 - `warning_count`
 - `error`
 - `summary_json`
+
+`scheduler_leases`
+
+- `lease_name`
+- `owner_id`
+- `acquired_at`
+- `renewed_at`
+- `expires_at`
 
 `scheduler_run_events`
 

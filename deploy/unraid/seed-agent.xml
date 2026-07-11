@@ -28,6 +28,8 @@
   <Author>Team-Cyan</Author>
   <Config Name="Appdata Root" Target="/workspace" Default="/mnt/user/appdata/seed-agent" Mode="rw" Description="Single mounted root folder containing runtime/config, runtime/local, runtime/.seed-agent, and runtime/state." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/seed-agent</Config>
   <Config Name="Timezone" Target="TZ" Default="Asia/Shanghai" Mode="" Description="Container timezone." Type="Variable" Display="always" Required="true" Mask="false">Asia/Shanghai</Config>
+  <Config Name="Runtime UID" Target="PUID" Default="99" Mode="" Description="Run seed-agent as this numeric UID after startup. Unraid appdata commonly uses 99." Type="Variable" Display="advanced" Required="true" Mask="false">99</Config>
+  <Config Name="Runtime GID" Target="PGID" Default="100" Mode="" Description="Run seed-agent as this numeric GID after startup. Unraid users commonly use 100." Type="Variable" Display="advanced" Required="true" Mask="false">100</Config>
   <Config Name="Mode" Target="SEED_AGENT_MODE" Default="schedule-run" Mode="" Description="Primary entry mode for the container." Type="Variable" Display="always" Required="true" Mask="false">schedule-run</Config>
   <Config Name="Config Path" Target="SEED_AGENT_CONFIG" Default="/workspace/runtime/config/config.yaml" Mode="" Description="Path to the runtime config file inside the mounted root folder." Type="Variable" Display="always" Required="true" Mask="false">/workspace/runtime/config/config.yaml</Config>
   <Config Name="Execute" Target="SEED_AGENT_EXECUTE" Default="true" Mode="" Description="Set true for unattended execution or false for dry-run scheduler mode." Type="Variable" Display="always" Required="true" Mask="false">true</Config>

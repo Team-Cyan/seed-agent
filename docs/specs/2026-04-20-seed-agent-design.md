@@ -101,7 +101,11 @@ Protected torrents:
 - Unknown-origin torrents.
 - Torrents below minimum seed time.
 
-Cold candidates can be paused automatically when rules match. Deletion can happen only after the configured pause-before-delete delay, and only for managed torrents that still satisfy the cold criteria.
+Cold candidates remain observable until cleanup rules and capacity pressure
+select them. Cleanup deletes selected managed torrents and files directly,
+stopping at the calculated reclaim target and per-cycle deletion limit. Paused
+state remains part of enqueue safety and external/manual downloader behavior,
+not a cleanup staging state.
 
 ### Audit Records
 
@@ -230,7 +234,8 @@ seed_cleanup:
   protect_hr: true
   protect_manual: true
   protect_media_library: true
-  pause_before_delete_hours: 24
+  delete_after_no_upload_hours: 2
+  max_capacity_deletes_per_run: 50
 ```
 
 ## Proposed Modules

@@ -138,6 +138,9 @@ seed_cleanup:
   protect_manual: true
   protect_media_library: true
   delete_after_no_upload_hours: 2
+  # Capacity-driven deletes stop at this count per scheduler run. Direct
+  # incomplete paid/free-window risk deletes remain independent.
+  max_capacity_deletes_per_run: 50
 want_decision:
   confirmation_threshold: 0.82
   auto_enqueue_threshold: 0.94
@@ -152,6 +155,8 @@ release_preferences:
   site_priority:
     demo: 10
   max_results_per_site: 20
+  # Bound M-Team identifier/fallback calls for each Want List item.
+  max_api_requests_per_intent: 3
   prefer_free: true
   reject_hr_by_default: true
   # Intent search quality preferences. Values are integer score adjustments
@@ -174,8 +179,19 @@ scheduler:
   intent_execute: false
   intent_search_mode: daily
   intent_search_hour: 0
+  # Prevent two scheduler processes from mutating the same runtime. The lease
+  # is renewed every cycle and can be taken over after expiry.
+  lease_ttl_minutes: 120
+metrics:
+  # Disabled by default. Metrics are derived from local SQLite/heartbeat state
+  # and never call a tracker or downloader during scrape.
+  enabled: false
+  path: /metrics
 local_state:
   candidate_retention_days: 30
+  backup_retention_count: 10
+  audit_archive_retention_count: 20
+  audit_archive_max_mb: 100
 want_sources:
   telegram:
     enabled: false
