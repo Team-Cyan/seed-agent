@@ -6,7 +6,14 @@ from pathlib import Path
 import pytest
 
 from seed_agent.config import DiscoveryConfig, ScoringConfig, SeedAgentConfig
-from seed_agent.models import ManagedTorrent, ScoreBreakdown, TorrentCandidate
+from seed_agent.models import Discount, ManagedTorrent, ScoreBreakdown, TorrentCandidate
+
+
+async def _accept_mteam_preflight(
+    item: ScoreBreakdown,
+    **_: object,
+) -> ScoreBreakdown:
+    return item
 
 
 def _candidate(**overrides: object) -> TorrentCandidate:
@@ -878,10 +885,12 @@ async def test_resolve_deferred_download_urls_uses_mteam_api_key(
         candidate: TorrentCandidate,
         *,
         api_key: str,
+        api_key_header: str,
     ) -> TorrentCandidate | None:
         calls.append(api_key)
         return candidate.model_copy(update={"download_url": "https://dl.example/torrent"})
 
+    monkeypatch.setattr(pt_actions, "_revalidate_mteam_candidate", _accept_mteam_preflight)
     monkeypatch.setattr(
         pt_actions,
         "resolve_deferred_download_url",
@@ -893,6 +902,84 @@ async def test_resolve_deferred_download_urls_uses_mteam_api_key(
     assert calls == ["secret-api-key"]
     assert resolved[0].accepted is True
     assert resolved[0].candidate.download_url == "https://dl.example/torrent"
+
+
+@pytest.mark.asyncio
+async def test_mteam_preflight_rejects_discount_that_changed_to_half(
+    monkeypatch,
+) -> None:
+    from seed_agent.actions import pt as pt_actions
+
+    config = _config()
+    candidate = _candidate(
+        site="mt",
+        source_url="https://kp.m-team.cc/detail/1171443",
+        download_url="mteam-api://torrent/1171443",
+        metadata={
+            "mteam_discovery_mode": "api",
+            "download_url_source": "mteam_api_deferred",
+            "mteam_torrent_id": "1171443",
+        },
+    )
+    scored = ScoreBreakdown(
+        candidate_id=candidate.stable_id,
+        score=95,
+        accepted=True,
+        reasons=["discount free accepted"],
+        candidate=candidate,
+    )
+
+    async def fake_enrich(candidates, **_):
+        return [
+            candidates[0].model_copy(
+                update={
+                    "discount": Discount.HALF,
+                    "metadata": {
+                        **candidates[0].metadata,
+                        "mteam_detail_enriched": True,
+                    },
+                }
+            )
+        ]
+
+    monkeypatch.setattr(pt_actions, "enrich_candidates", fake_enrich)
+
+    result = await pt_actions._revalidate_mteam_candidate(
+        scored,
+        config=config,
+        api_key="secret-api-key",
+        api_key_header="x-api-key",
+    )
+
+    assert result.accepted is False
+    assert result.score == 0
+    assert "discount 50% not accepted" in result.reasons
+    assert result.reasons[-1] == "mteam promotion preflight rejected"
+
+
+def test_mteam_preflight_reapplies_execute_free_window_threshold() -> None:
+    from seed_agent.actions import pt as pt_actions
+
+    candidate = _candidate(left_time_minutes=150)
+    item = ScoreBreakdown(
+        candidate_id=candidate.stable_id,
+        score=95,
+        accepted=True,
+        reasons=["mteam promotion preflight accepted"],
+        candidate=candidate,
+    )
+
+    result = pt_actions._apply_mteam_preflight_free_window(
+        item,
+        min_free_window_minutes=180,
+        require_known_free_window=True,
+    )
+
+    assert result.accepted is False
+    assert result.score == 0
+    assert result.reasons[-1] == (
+        "mteam promotion preflight left_time 150 < execute safety 180"
+    )
 
 
 @pytest.mark.asyncio
@@ -956,9 +1043,11 @@ async def test_resolve_deferred_download_urls_rejects_candidate_on_mteam_timeout
         candidate: TorrentCandidate,
         *,
         api_key: str,
+        api_key_header: str,
     ) -> TorrentCandidate | None:
         raise httpx.ConnectTimeout("connect timed out")
 
+    monkeypatch.setattr(pt_actions, "_revalidate_mteam_candidate", _accept_mteam_preflight)
     monkeypatch.setattr(
         pt_actions,
         "resolve_deferred_download_url",
@@ -1039,6 +1128,7 @@ async def test_resolve_deferred_download_urls_stops_after_mteam_rate_limit(
         candidate: TorrentCandidate,
         *,
         api_key: str,
+        api_key_header: str,
     ) -> TorrentCandidate | None:
         calls.append(candidate.stable_id)
         raise MTeamApiResponseError(
@@ -1047,6 +1137,7 @@ async def test_resolve_deferred_download_urls_stops_after_mteam_rate_limit(
             message="請求過於頻繁",
         )
 
+    monkeypatch.setattr(pt_actions, "_revalidate_mteam_candidate", _accept_mteam_preflight)
     monkeypatch.setattr(
         pt_actions,
         "resolve_deferred_download_url",

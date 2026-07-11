@@ -4,6 +4,17 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.18.1 - 2026-07-11
+
+### Fixed
+
+- Treat configured PT discounts as a strict allowlist unless
+  `allow_non_free=true`, preventing high-demand half-discount torrents from
+  scoring into a free-only enqueue batch.
+- Re-fetch M-Team torrent detail and re-score each accepted API candidate
+  immediately before generating its download token. Promotion changes or
+  unavailable preflight evidence now fail closed before qBittorrent enqueue.
+
 ## 0.18.0 - 2026-07-11
 
 ### Added

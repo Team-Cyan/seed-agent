@@ -52,6 +52,8 @@ Score discovered torrents or ranked releases using explicit policy weights and e
 - `pt_filters.size_partial_max_gb` is the soft size-credit ceiling after
   `preferred_size_max_gb`. Raise it for upload-farming strategies that allow
   very large hot packs; lower it for space-saving strategies.
+- `pt_filters.discounts` is a strict allowlist while `allow_non_free=false`;
+  unlisted half-discount and NORMAL candidates are hard-rejected.
 - `pt_filters.allow_non_free` lets NORMAL/non-free candidates remain eligible
   without discount-score credit. Keep it false for freeleech-only discovery.
 - Use `seed-agent strategy-report --config <config>` before changing strategy

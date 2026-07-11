@@ -294,7 +294,14 @@ def enqueue(
         require_known_free_window=require_known_free_window if execute else False,
     )
     if execute:
-        scored = _run(resolve_deferred_download_urls(scored, loaded))
+        scored = _run(
+            resolve_deferred_download_urls(
+                scored,
+                loaded,
+                min_free_window_minutes=min_free_window_minutes,
+                require_known_free_window=require_known_free_window,
+            )
+        )
     default_policy = _default_category_policy(loaded)
     (
         downloader,
@@ -2254,7 +2261,14 @@ def _run_once_payload(
         require_known_free_window=require_known_free_window,
     )
     if execute:
-        scored = _run(resolve_deferred_download_urls(scored, loaded))
+        scored = _run(
+            resolve_deferred_download_urls(
+                scored,
+                loaded,
+                min_free_window_minutes=min_free_window_minutes,
+                require_known_free_window=require_known_free_window,
+            )
+        )
     scored_by_id = {item.candidate_id: item for item in scored}
     for item in scored:
         store.upsert_candidate(

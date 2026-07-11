@@ -1984,7 +1984,7 @@ def test_execute_enqueue_persists_candidate_free_window_expiry(
     def fake_score_candidates(candidates, discovery_config, scoring_config):
         return [_scored(candidate=candidate)]
 
-    async def fake_resolve_deferred_download_urls(scored, loaded):
+    async def fake_resolve_deferred_download_urls(scored, loaded, **_):
         return scored
 
     class FakeDownloader:

@@ -88,7 +88,9 @@ def _score_discount(
     if discount in discovery.discounts:
         return _ComponentScore(weight, f"discount {discount.value} accepted")
     if discount in {Discount.HALF, Discount.TWO_X_HALF}:
-        return _ComponentScore(weight * 0.5, f"discount {discount.value} partial")
+        if discovery.allow_non_free:
+            return _ComponentScore(weight * 0.5, f"discount {discount.value} allowed partial")
+        return _ComponentScore(0.0, f"discount {discount.value} not accepted", True)
     if discount == Discount.NORMAL:
         if discovery.allow_non_free:
             return _ComponentScore(0.0, "discount normal allowed without discount credit")

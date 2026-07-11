@@ -63,8 +63,8 @@ pt_filters:
   # Soft scoring pressure: seeders / max(leechers, 1). Higher ratios lose
   # seeder-score credit but are not hard-rejected.
   target_seed_leecher_ratio: 10
-  # Set true only when you intentionally want NORMAL/non-free candidates to
-  # stay eligible without discount-score credit.
+  # discounts is a strict allowlist unless this is true. Set true only when
+  # NORMAL and partial-discount candidates are intentionally eligible.
   allow_non_free: false
   # Hard candidate size bounds. Use these to keep giant packs out of mutable seed pools.
   # Set max_size_gb to null to disable the hard size ceiling.

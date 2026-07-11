@@ -10,8 +10,10 @@ from seed_agent.config import DiscoveryConfig, ScoringConfig, SeedAgentConfig
 from seed_agent.models import ManagedTorrent, ScoreBreakdown, TorrentCandidate
 from seed_agent.policies.scoring import score_candidate
 from seed_agent.sites.mteam import (
+    MTeamApiClient,
     MTeamApiDiscoveryOptions,
     MTeamApiResponseError,
+    enrich_candidates,
     has_deferred_download_url,
     resolve_deferred_download_url,
 )
@@ -200,10 +202,16 @@ def apply_site_history_feedback(
 async def resolve_deferred_download_urls(
     scored: Sequence[ScoreBreakdown] | Iterable[ScoreBreakdown],
     config: SeedAgentConfig,
+    *,
+    min_free_window_minutes: int | None = None,
+    require_known_free_window: bool = False,
 ) -> list[ScoreBreakdown]:
     scored_list = list(scored)
-    api_keys = {
-        site.name: _read_secret(site.api_key_ref, config.config_dir)
+    api_credentials = {
+        site.name: (
+            _read_secret(site.api_key_ref, config.config_dir),
+            site.auth_header or "x-api-key",
+        )
         for site in config.enabled_sites
         if site.type == "mteam"
     }
@@ -220,15 +228,36 @@ async def resolve_deferred_download_urls(
             )
             continue
 
-        api_key = api_keys.get(candidate.site)
+        api_key, api_key_header = api_credentials.get(
+            candidate.site,
+            (None, "x-api-key"),
+        )
         if not api_key:
             resolved.append(_reject_unresolved_download_url(item, "missing mteam api key"))
             continue
 
         try:
-            resolved_candidate = await resolve_deferred_download_url(
-                candidate,
+            refreshed_item = await _revalidate_mteam_candidate(
+                item,
+                config=config,
                 api_key=api_key,
+                api_key_header=api_key_header,
+            )
+            if not refreshed_item.accepted:
+                resolved.append(refreshed_item)
+                continue
+            refreshed_item = _apply_mteam_preflight_free_window(
+                refreshed_item,
+                min_free_window_minutes=min_free_window_minutes,
+                require_known_free_window=require_known_free_window,
+            )
+            if not refreshed_item.accepted:
+                resolved.append(refreshed_item)
+                continue
+            resolved_candidate = await resolve_deferred_download_url(
+                refreshed_item.candidate,
+                api_key=api_key,
+                api_key_header=api_key_header,
             )
         except MTeamApiResponseError as exc:
             if exc.rate_limited:
@@ -266,8 +295,83 @@ async def resolve_deferred_download_urls(
                 _reject_unresolved_download_url(item, "download_url unavailable from mteam api")
             )
             continue
-        resolved.append(item.model_copy(update={"candidate": resolved_candidate}))
+        resolved.append(refreshed_item.model_copy(update={"candidate": resolved_candidate}))
     return resolved
+
+
+async def _revalidate_mteam_candidate(
+    item: ScoreBreakdown,
+    *,
+    config: SeedAgentConfig,
+    api_key: str,
+    api_key_header: str,
+) -> ScoreBreakdown:
+    candidate = item.candidate
+    client = MTeamApiClient(api_key=api_key, api_key_header=api_key_header)
+    refreshed = await enrich_candidates(
+        [candidate],
+        cookie=None,
+        api_key=api_key,
+        api_key_header=api_key_header,
+        fetch_detail=client.fetch_torrent_detail,
+    )
+    refreshed_candidate = refreshed[0]
+    if not refreshed_candidate.metadata.get("mteam_detail_enriched"):
+        return _reject_unresolved_download_url(
+            item,
+            "mteam promotion preflight unavailable",
+        )
+    rescored = score_candidate(
+        refreshed_candidate,
+        config.pt_filters,
+        config.pt_scoring,
+    )
+    if not rescored.accepted:
+        return rescored.model_copy(
+            update={
+                "reasons": [
+                    *rescored.reasons,
+                    "mteam promotion preflight rejected",
+                ]
+            }
+        )
+    return rescored.model_copy(
+        update={
+            "reasons": [
+                *rescored.reasons,
+                "mteam promotion preflight accepted",
+            ]
+        }
+    )
+
+
+def _apply_mteam_preflight_free_window(
+    item: ScoreBreakdown,
+    *,
+    min_free_window_minutes: int | None,
+    require_known_free_window: bool,
+) -> ScoreBreakdown:
+    candidate = item.candidate
+    left_time = candidate.left_time_minutes
+    unlimited = candidate.metadata.get("left_time_source") == "mteam_api_unlimited"
+    if require_known_free_window and left_time is None and not unlimited:
+        return _reject_unresolved_download_url(
+            item,
+            "mteam promotion preflight requires known free window",
+        )
+    if (
+        min_free_window_minutes is not None
+        and left_time is not None
+        and left_time < min_free_window_minutes
+    ):
+        return _reject_unresolved_download_url(
+            item,
+            (
+                f"mteam promotion preflight left_time {left_time} "
+                f"< execute safety {min_free_window_minutes}"
+            ),
+        )
+    return item
 
 
 def _reject_unresolved_download_url(item: ScoreBreakdown, reason: str) -> ScoreBreakdown:

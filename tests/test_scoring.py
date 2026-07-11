@@ -59,6 +59,29 @@ def test_high_confidence_free_candidate_is_accepted() -> None:
     assert any(reason.startswith("score ") for reason in result.reasons)
 
 
+def test_half_discount_is_rejected_when_only_free_discounts_are_configured() -> None:
+    result = score_candidate(
+        make_candidate(discount="50%"),
+        discovery(discounts=["free", "2xfree"], allow_non_free=False),
+        scoring(),
+    )
+
+    assert result.accepted is False
+    assert result.score == 0
+    assert "discount 50% not accepted" in result.reasons
+
+
+def test_half_discount_can_score_only_when_non_free_is_explicitly_allowed() -> None:
+    result = score_candidate(
+        make_candidate(discount="50%"),
+        discovery(discounts=["free", "2xfree"], allow_non_free=True),
+        scoring(),
+    )
+
+    assert result.accepted is True
+    assert "discount 50% allowed partial" in result.reasons
+
+
 def test_hr_candidate_is_rejected_when_config_disallows_it() -> None:
     result = score_candidate(make_candidate(hr=True), discovery(), scoring())
 
