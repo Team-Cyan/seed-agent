@@ -19,6 +19,7 @@ class CleanupDecision(BaseModel):
     reason: str
     managed: bool = False
     protected: bool = False
+    capacity_reclamation: bool = False
 
 
 @dataclass(frozen=True)
@@ -117,6 +118,7 @@ def classify_cleanup(
             action="delete",
             reason=_reason("cold managed torrent deleted for required space reclamation"),
             managed=True,
+            capacity_reclamation=True,
         )
     return CleanupDecision(
         action="keep",
@@ -179,6 +181,7 @@ def _no_upload_observation_decision(
                 f">= delete delay {cleanup.delete_after_no_upload_hours}h"
             ),
             managed=True,
+            capacity_reclamation=True,
         )
     return CleanupDecision(
         action="keep",
@@ -222,6 +225,7 @@ def _zero_total_upload_decision(
                 f">= delete delay {cleanup.delete_after_no_upload_hours}h"
             ),
             managed=True,
+            capacity_reclamation=True,
         )
     return CleanupDecision(
         action="keep",
@@ -300,6 +304,7 @@ def _completed_low_upload_decision(
             f"no upload for {no_upload_age.days}d {no_upload_age.seconds // 3600}h"
         ),
         managed=True,
+        capacity_reclamation=requires_reclamation,
     )
 
 

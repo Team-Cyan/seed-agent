@@ -37,6 +37,86 @@ class StateStore:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._initialize()
 
+    def acquire_scheduler_lease(
+        self,
+        owner_id: str,
+        *,
+        lease_name: str = "schedule-run",
+        ttl_seconds: int = 7200,
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
+        current_time = now or _utc_now_datetime()
+        expires_at = current_time + timedelta(seconds=max(ttl_seconds, 1))
+        with self._connect(row_factory=sqlite3.Row) as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT * FROM scheduler_leases WHERE lease_name = ?",
+                (lease_name,),
+            ).fetchone()
+            if row is not None:
+                current = dict(row)
+                current_expiry = _parse_datetime(current.get("expires_at"))
+                if (
+                    current.get("owner_id") != owner_id
+                    and current_expiry is not None
+                    and current_expiry > current_time
+                ):
+                    return {"acquired": False, **current}
+            acquired_at = (
+                str(row["acquired_at"])
+                if row is not None and row["owner_id"] == owner_id
+                else current_time.isoformat()
+            )
+            conn.execute(
+                """
+                INSERT INTO scheduler_leases (
+                  lease_name, owner_id, acquired_at, renewed_at, expires_at
+                )
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(lease_name) DO UPDATE SET
+                  owner_id = excluded.owner_id,
+                  acquired_at = excluded.acquired_at,
+                  renewed_at = excluded.renewed_at,
+                  expires_at = excluded.expires_at
+                """,
+                (
+                    lease_name,
+                    owner_id,
+                    acquired_at,
+                    current_time.isoformat(),
+                    expires_at.isoformat(),
+                ),
+            )
+        return {
+            "acquired": True,
+            "lease_name": lease_name,
+            "owner_id": owner_id,
+            "acquired_at": acquired_at,
+            "renewed_at": current_time.isoformat(),
+            "expires_at": expires_at.isoformat(),
+        }
+
+    def release_scheduler_lease(
+        self,
+        owner_id: str,
+        *,
+        lease_name: str = "schedule-run",
+    ) -> bool:
+        with self._connect() as conn:
+            cursor = conn.execute(
+                "DELETE FROM scheduler_leases WHERE lease_name = ? AND owner_id = ?",
+                (lease_name, owner_id),
+            )
+        return cursor.rowcount > 0
+
+    def get_scheduler_lease(self, lease_name: str = "schedule-run") -> dict[str, Any] | None:
+        with self._connect(row_factory=sqlite3.Row) as conn:
+            row = conn.execute(
+                "SELECT * FROM scheduler_leases WHERE lease_name = ?",
+                (lease_name,),
+            ).fetchone()
+        return dict(row) if row is not None else None
+
     def start_scheduler_run(
         self,
         *,
@@ -1706,6 +1786,13 @@ class StateStore:
                   warning_count INTEGER NOT NULL DEFAULT 0,
                   error TEXT,
                   summary_json TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS scheduler_leases (
+                  lease_name TEXT PRIMARY KEY,
+                  owner_id TEXT NOT NULL,
+                  acquired_at TEXT NOT NULL,
+                  renewed_at TEXT NOT NULL,
+                  expires_at TEXT NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS scheduler_run_events (
                   id INTEGER PRIMARY KEY AUTOINCREMENT,

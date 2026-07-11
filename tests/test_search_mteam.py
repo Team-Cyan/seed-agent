@@ -296,6 +296,42 @@ async def test_mteam_search_provider_uses_imdb_identifier_when_douban_is_missing
 
 
 @pytest.mark.asyncio
+async def test_mteam_search_provider_bounds_and_reports_query_paths() -> None:
+    calls: list[dict[str, object]] = []
+
+    async def fake_fetch_candidates(**kwargs):
+        calls.append(kwargs)
+        return []
+
+    provider = MTeamSearchProvider(
+        site="mteam",
+        api_key="secret-api-key",
+        search_config=SearchConfig(max_api_requests_per_intent=2),
+        fetch_candidates=fake_fetch_candidates,
+    )
+
+    intent = _intent(
+        metadata={"external_ids": {"douban": "26799731", "imdb": "tt5726616"}}
+    )
+    await provider.search(intent)
+
+    assert len(calls) == 2
+    assert provider.search_diagnostics == [
+        {
+            "site": "mteam",
+            "intent_id": intent.intent_id,
+            "request_budget": 2,
+            "attempts": [
+                {"query_path": "douban_id", "status": "ok", "result_count": 0},
+                {"query_path": "imdb_id", "status": "ok", "result_count": 0},
+            ],
+            "requests_used": 2,
+            "release_count": 0,
+        }
+    ]
+
+
+@pytest.mark.asyncio
 async def test_mteam_search_provider_defaults_episode_intents_to_season_keyword() -> None:
     calls: list[dict[str, object]] = []
 

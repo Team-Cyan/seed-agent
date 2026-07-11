@@ -4,7 +4,10 @@ from datetime import UTC, datetime, timedelta
 
 from seed_agent.models import ManagedTorrent
 from seed_agent.policies.eviction import rank_eviction_candidates
-from seed_agent.policies.quality import torrent_retention_quality_score
+from seed_agent.policies.quality import (
+    torrent_eviction_evidence,
+    torrent_retention_quality_score,
+)
 
 
 def _torrent(**overrides: object) -> ManagedTorrent:
@@ -66,3 +69,21 @@ def test_torrent_retention_quality_uses_recent_upload_density_over_total_size() 
     assert torrent_retention_quality_score(active_small) > torrent_retention_quality_score(
         idle_large
     )
+
+
+def test_eviction_evidence_exposes_stable_score_components() -> None:
+    torrent = _torrent(
+        metadata={
+            "recent_upload_1h_gb": 1.0,
+            "recent_upload_24h_gb": 5.0,
+            "amount_left_bytes": 2 * 1024**3,
+        }
+    )
+
+    evidence = torrent_eviction_evidence(torrent)
+
+    assert evidence["evidence_sufficient"] is True
+    assert evidence["evidence_points"] == 2
+    assert evidence["amount_left_gib"] == 2.0
+    assert isinstance(evidence["retention_quality_score"], float)
+    assert isinstance(evidence["eviction_pressure_score"], float)

@@ -365,6 +365,7 @@ class CleanupConfig(BaseModel):
     delete_completed_low_upload_after_hours: int | None = None
     completed_low_upload_min_ratio: float = 0.0
     completed_low_upload_min_gb: float = 0.0
+    max_capacity_deletes_per_run: int = 50
 
     @model_validator(mode="before")
     @classmethod
@@ -388,6 +389,8 @@ class CleanupConfig(BaseModel):
             raise ValueError("completed_low_upload_min_ratio must be >= 0")
         if self.completed_low_upload_min_gb < 0:
             raise ValueError("completed_low_upload_min_gb must be >= 0")
+        if self.max_capacity_deletes_per_run < 1:
+            raise ValueError("max_capacity_deletes_per_run must be >= 1")
         return self
 
 
@@ -418,6 +421,7 @@ class SearchConfig(BaseModel):
 
     site_priority: dict[str, int] = Field(default_factory=dict)
     max_results_per_site: int = 20
+    max_api_requests_per_intent: int = 3
     prefer_free: bool = True
     reject_hr_by_default: bool = True
     quality_tag_scores: dict[str, int] = Field(default_factory=dict)
@@ -426,6 +430,8 @@ class SearchConfig(BaseModel):
     def validate_limits(self) -> SearchConfig:
         if self.max_results_per_site < 1:
             raise ValueError("max_results_per_site must be >= 1")
+        if self.max_api_requests_per_intent < 1:
+            raise ValueError("max_api_requests_per_intent must be >= 1")
         unknown_keys = set(self.quality_tag_scores) - quality_tag_group_keys()
         if unknown_keys:
             raise ValueError(
@@ -527,11 +533,20 @@ class StateConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     candidate_retention_days: int = 30
+    backup_retention_count: int = 10
+    audit_archive_retention_count: int = 20
+    audit_archive_max_mb: int = 100
 
     @model_validator(mode="after")
     def validate_retention(self) -> StateConfig:
         if self.candidate_retention_days < 1:
             raise ValueError("candidate_retention_days must be >= 1")
+        if self.backup_retention_count < 1:
+            raise ValueError("backup_retention_count must be >= 1")
+        if self.audit_archive_retention_count < 1:
+            raise ValueError("audit_archive_retention_count must be >= 1")
+        if self.audit_archive_max_mb < 1:
+            raise ValueError("audit_archive_max_mb must be >= 1")
         return self
 
 
@@ -550,6 +565,7 @@ class SchedulerConfig(BaseModel):
     intent_execute: bool = False
     intent_search_mode: Literal["daily", "every_cycle"] = "daily"
     intent_search_hour: int = 0
+    lease_ttl_minutes: int = 120
 
     @model_validator(mode="after")
     def validate_scheduler(self) -> SchedulerConfig:
@@ -563,6 +579,10 @@ class SchedulerConfig(BaseModel):
             raise ValueError("scheduler.tracker_backfill_max_api_requests must be >= 1")
         if not 0 <= self.intent_search_hour <= 23:
             raise ValueError("scheduler.intent_search_hour must be between 0 and 23")
+        if self.lease_ttl_minutes < 5:
+            raise ValueError("scheduler.lease_ttl_minutes must be >= 5")
+        if self.lease_ttl_minutes <= self.interval_minutes:
+            raise ValueError("scheduler.lease_ttl_minutes must exceed interval_minutes")
         return self
 
     def with_overrides(self, overrides: dict[str, Any]) -> SchedulerConfig:
@@ -570,6 +590,19 @@ class SchedulerConfig(BaseModel):
         if updates.get("min_free_window_minutes") == 0:
             updates["min_free_window_minutes"] = None
         return SchedulerConfig.model_validate({**self.model_dump(), **updates})
+
+
+class MetricsConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    enabled: bool = False
+    path: str = "/metrics"
+
+    @model_validator(mode="after")
+    def validate_path(self) -> MetricsConfig:
+        if not self.path.startswith("/") or self.path == "/":
+            raise ValueError("metrics.path must be an absolute non-root HTTP path")
+        return self
 
 
 class SeedAgentConfig(BaseModel):
@@ -587,6 +620,7 @@ class SeedAgentConfig(BaseModel):
     want_sources: SourcesConfig = Field(default_factory=SourcesConfig)
     local_state: StateConfig = Field(default_factory=StateConfig)
     scheduler: SchedulerConfig = Field(default_factory=SchedulerConfig)
+    metrics: MetricsConfig = Field(default_factory=MetricsConfig)
     _config_dir: Path | None = PrivateAttr(default=None)
 
     @property

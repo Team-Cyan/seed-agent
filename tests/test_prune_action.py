@@ -346,6 +346,69 @@ async def test_prune_stops_capacity_deletion_after_reclaim_target_is_met() -> No
 
 
 @pytest.mark.asyncio
+async def test_prune_stops_capacity_deletion_at_per_run_limit() -> None:
+    from seed_agent.actions.qb import prune_cold_torrents
+
+    downloader = DummyDownloader()
+    cleanup = CleanupConfig(
+        **{**_cleanup().model_dump(), "max_capacity_deletes_per_run": 1}
+    )
+    decisions = await prune_cold_torrents(
+        [
+            _incomplete_torrent(hash="first"),
+            _incomplete_torrent(hash="second"),
+        ],
+        downloader,
+        cleanup,
+        _policy(),
+        execute=True,
+        force_space_reclamation=True,
+        reclaim_target_bytes=20 * 1024**3,
+    )
+
+    assert downloader.calls == [("delete", "first", True)]
+    assert [decision.action for decision in decisions] == [
+        "qb.cleanup.delete",
+        "qb.cleanup.keep",
+    ]
+    assert "capacity deletion limit reached" in decisions[1].reason
+
+
+@pytest.mark.asyncio
+async def test_capacity_delete_limit_does_not_block_direct_paid_risk_delete() -> None:
+    from seed_agent.actions.qb import prune_cold_torrents
+
+    downloader = DummyDownloader()
+    cleanup = CleanupConfig(
+        **{**_cleanup().model_dump(), "max_capacity_deletes_per_run": 1}
+    )
+    decisions = await prune_cold_torrents(
+        [
+            _incomplete_torrent(hash="capacity"),
+            _incomplete_torrent(
+                hash="paid",
+                metadata={"amount_left_bytes": 1, "discount": "normal"},
+            ),
+        ],
+        downloader,
+        cleanup,
+        _policy(),
+        execute=True,
+        force_space_reclamation=True,
+        reclaim_target_bytes=20 * 1024**3,
+    )
+
+    assert downloader.calls == [
+        ("delete", "paid", True),
+        ("delete", "capacity", True),
+    ]
+    assert [decision.action for decision in decisions] == [
+        "qb.cleanup.delete",
+        "qb.cleanup.delete",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_completed_low_upload_requires_reclamation_keeps_under_budget_seed() -> None:
     from seed_agent.actions.qb import prune_cold_torrents
 

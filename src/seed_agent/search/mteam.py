@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from typing import Literal
+from typing import Any, Literal
 
 import httpx
 
@@ -46,6 +46,7 @@ class MTeamSearchProvider:
         self.series_search_mode = series_search_mode
         self.api_options = api_options or _default_intent_api_options()
         self.fetch_candidates = fetch_candidates
+        self.search_diagnostics: list[dict[str, Any]] = []
 
     async def search(self, intent: ResourceIntent) -> list[ReleaseCandidate]:
         option_sequence = _api_option_sequence_for_intent(
@@ -54,10 +55,18 @@ class MTeamSearchProvider:
             self.search_config,
             self.default_resolution,
             self.series_search_mode,
-        )
+        )[: self.search_config.max_api_requests_per_intent]
         releases: list[ReleaseCandidate] = []
         seen_release_ids: set[str] = set()
+        diagnostic: dict[str, Any] = {
+            "site": self.site,
+            "intent_id": intent.intent_id,
+            "request_budget": self.search_config.max_api_requests_per_intent,
+            "attempts": [],
+        }
         for options in option_sequence:
+            attempt = {"query_path": _query_path(options), "status": "started"}
+            diagnostic["attempts"].append(attempt)
             try:
                 candidates = await self.fetch_candidates(
                     site=self.site,
@@ -66,10 +75,18 @@ class MTeamSearchProvider:
                     cookie=self.cookie,
                     options=options,
                 )
-            except MTeamApiResponseError:
+            except MTeamApiResponseError as exc:
+                attempt.update(
+                    {
+                        "status": "api_error",
+                        "rate_limited": exc.rate_limited,
+                    }
+                )
                 break
             except (httpx.TimeoutException, httpx.NetworkError):
+                attempt["status"] = "network_error"
                 break
+            attempt.update({"status": "ok", "result_count": len(candidates)})
             for candidate in candidates:
                 release = _release_from_candidate(candidate)
                 if release.release_id in seen_release_ids:
@@ -80,7 +97,18 @@ class MTeamSearchProvider:
                     break
             if len(releases) >= self.search_config.max_results_per_site:
                 break
+        diagnostic["requests_used"] = len(diagnostic["attempts"])
+        diagnostic["release_count"] = len(releases)
+        self.search_diagnostics.append(diagnostic)
         return releases
+
+
+def _query_path(options: MTeamApiDiscoveryOptions) -> str:
+    if options.douban:
+        return "douban_id"
+    if options.imdb:
+        return "imdb_id"
+    return "title_year"
 
 
 async def resolve_mteam_release_download_url(

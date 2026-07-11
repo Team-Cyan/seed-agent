@@ -803,3 +803,31 @@ def test_state_store_records_want_search_runs(tmp_path: Path) -> None:
     assert rows[0]["intent_id"] == "douban_wanted:1"
     assert rows[0]["status"] == "skipped_backoff"
     assert rows[0]["backoff_active"] == 1
+
+
+def test_scheduler_lease_rejects_second_owner_and_allows_expired_takeover(
+    tmp_path: Path,
+) -> None:
+    store = StateStore(tmp_path / "state.sqlite3")
+    now = datetime(2026, 7, 11, tzinfo=UTC)
+
+    first = store.acquire_scheduler_lease("owner-a", ttl_seconds=60, now=now)
+    blocked = store.acquire_scheduler_lease(
+        "owner-b",
+        ttl_seconds=60,
+        now=now + timedelta(seconds=30),
+    )
+    takeover = store.acquire_scheduler_lease(
+        "owner-b",
+        ttl_seconds=60,
+        now=now + timedelta(seconds=61),
+    )
+
+    assert first["acquired"] is True
+    assert blocked["acquired"] is False
+    assert blocked["owner_id"] == "owner-a"
+    assert takeover["acquired"] is True
+    assert takeover["owner_id"] == "owner-b"
+    assert store.release_scheduler_lease("owner-a") is False
+    assert store.release_scheduler_lease("owner-b") is True
+    assert store.get_scheduler_lease() is None

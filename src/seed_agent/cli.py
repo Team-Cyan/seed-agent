@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import atexit
 import base64
 import binascii
 import errno
 import json
+import os
 import re
+import signal
 import time
 import uuid
 from collections.abc import Awaitable, Callable
@@ -54,6 +57,14 @@ from seed_agent.config import (
 from seed_agent.downloaders.base import Downloader, DownloaderStatus, DownloaderStatusProvider
 from seed_agent.downloaders.qbittorrent import QbittorrentClient
 from seed_agent.downloaders.transmission import TransmissionClient
+from seed_agent.maintenance import (
+    archive_audit_jsonl,
+    backup_sqlite_database,
+    enforce_retention,
+    restore_sqlite_database,
+    storage_health,
+    verify_sqlite_database,
+)
 from seed_agent.models import (
     Decision,
     IntentKind,
@@ -68,7 +79,7 @@ from seed_agent.models import (
     safe_url_identity,
 )
 from seed_agent.policies.category_policy import PoolUsage, usage_by_pool
-from seed_agent.policies.quality import candidate_value_score
+from seed_agent.policies.quality import candidate_value_score, torrent_eviction_evidence
 from seed_agent.search.base import SearchProvider
 from seed_agent.search.mteam import (
     MTeamSearchProvider,
@@ -122,6 +133,7 @@ CONFIG_RULE_SECTIONS = (
     "want_sources",
     "local_state",
     "scheduler",
+    "metrics",
 )
 
 
@@ -798,6 +810,101 @@ def runtime_doctor(
             "config": str(config),
             "status": status.get("status"),
             "checks": _runtime_doctor_checks(status),
+            "storage": storage_health(_runtime_root(load_config(config))),
+        }
+    )
+
+
+@app.command(name="state-backup")
+def state_backup(
+    config: Annotated[Path, typer.Option("--config")] = DEFAULT_CONFIG,
+    output: Annotated[Path | None, typer.Option("--output")] = None,
+) -> None:
+    loaded = load_config(config)
+    runtime_root = _runtime_root(loaded)
+    destination = output or (
+        runtime_root
+        / "backups"
+        / f"state-{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}.db"
+    )
+    verification = backup_sqlite_database(_state_path(loaded), destination)
+    removed = enforce_retention(
+        destination.parent,
+        "state-*.db",
+        loaded.local_state.backup_retention_count,
+    )
+    _print_json(
+        {
+            "command": "state-backup",
+            "config": str(config),
+            "backup": str(destination),
+            "verification": verification,
+            "retention_removed": removed,
+        }
+    )
+
+
+@app.command(name="state-backup-verify")
+def state_backup_verify(backup: Annotated[Path, typer.Option("--backup")]) -> None:
+    payload = verify_sqlite_database(backup)
+    _print_json({"command": "state-backup-verify", **payload})
+    if not payload["valid"]:
+        raise typer.Exit(code=1)
+
+
+@app.command(name="state-restore")
+def state_restore(
+    backup: Annotated[Path, typer.Option("--backup")],
+    config: Annotated[Path, typer.Option("--config")] = DEFAULT_CONFIG,
+    execute: Annotated[bool, typer.Option("--execute")] = False,
+) -> None:
+    loaded = load_config(config)
+    payload = restore_sqlite_database(_state_path(loaded), backup, execute=execute)
+    _print_json({"command": "state-restore", "config": str(config), **payload})
+    if payload["status"] not in {"dry_run", "restored"}:
+        raise typer.Exit(code=1)
+
+
+@app.command(name="audit-archive")
+def audit_archive(
+    config: Annotated[Path, typer.Option("--config")] = DEFAULT_CONFIG,
+    execute: Annotated[bool, typer.Option("--execute")] = False,
+    force: Annotated[bool, typer.Option("--force")] = False,
+) -> None:
+    loaded = load_config(config)
+    runtime_root = _runtime_root(loaded)
+    audit_path = _audit_path(loaded)
+    size_bytes = audit_path.stat().st_size if audit_path.exists() else 0
+    threshold = loaded.local_state.audit_archive_max_mb * 1024**2
+    if not force and size_bytes < threshold:
+        payload: dict[str, Any] = {
+            "execute": execute,
+            "status": "below_threshold",
+            "audit_path": str(audit_path),
+            "size_bytes": size_bytes,
+            "threshold_bytes": threshold,
+        }
+    else:
+        payload = archive_audit_jsonl(
+            audit_path,
+            runtime_root / "audit-archives",
+            execute=execute,
+        )
+    removed = (
+        enforce_retention(
+            runtime_root / "audit-archives",
+            "audit-*.jsonl.gz",
+            loaded.local_state.audit_archive_retention_count,
+        )
+        if execute
+        else []
+    )
+    _print_json(
+        {
+            "command": "audit-archive",
+            "config": str(config),
+            **payload,
+            "retention_removed": removed,
         }
     )
 
@@ -1051,6 +1158,73 @@ def contribution_report(
     )
 
 
+@app.command(name="quality-replay-report")
+def quality_replay_report(
+    config: Annotated[Path, typer.Option("--config")] = DEFAULT_CONFIG,
+    limit: Annotated[int, typer.Option("--limit", min=1)] = 50,
+) -> None:
+    loaded = load_config(config)
+    store = StateStore(_state_path(loaded))
+    torrents, missing_reconciled = _managed_torrents_for_report_with_reconciliation(
+        loaded,
+        store=store,
+    )
+    current = sorted(
+        torrents,
+        key=lambda torrent: float(
+            torrent_eviction_evidence(torrent)["eviction_pressure_score"]
+        ),
+        reverse=True,
+    )
+    legacy = sorted(
+        torrents,
+        key=lambda torrent: (
+            float(torrent.metadata.get("recent_upload_gb", 0) or 0),
+            torrent.uploaded_bytes,
+            -torrent.size_bytes,
+        ),
+    )
+    legacy_rank = {torrent.hash: index + 1 for index, torrent in enumerate(legacy)}
+    rows = []
+    for current_index, torrent in enumerate(current, start=1):
+        evidence = torrent_eviction_evidence(torrent)
+        rows.append(
+            {
+                "hash": torrent.hash,
+                "name": torrent.name,
+                "category": torrent.category,
+                "current_rank": current_index,
+                "legacy_rank": legacy_rank[torrent.hash],
+                "rank_delta": legacy_rank[torrent.hash] - current_index,
+                "evidence": evidence,
+                "deletion_provenance": _torrent_deletion_provenance(store, torrent.hash),
+            }
+        )
+    _print_json(
+        {
+            "command": "quality-replay-report",
+            "config": str(config),
+            "managed_count": len(torrents),
+            "missing_from_qb_reconciled": missing_reconciled,
+            "max_capacity_deletes_per_run": loaded.seed_cleanup.max_capacity_deletes_per_run,
+            "insufficient_evidence_count": sum(
+                not bool(row["evidence"]["evidence_sufficient"]) for row in rows
+            ),
+            "items": rows[:limit],
+        }
+    )
+
+
+def _torrent_deletion_provenance(store: StateStore, torrent_hash: str) -> str:
+    runtime = store.get_torrent_runtime(torrent_hash)
+    if runtime and runtime.get("missing_from_qb_at"):
+        return "external_or_manual"
+    rows = store.list_by_torrent_hash(torrent_hash)
+    if any(row.get("state") == LifecycleState.DELETED.value for row in rows):
+        return "agent_recorded"
+    return "active"
+
+
 @app.command(name="schedule-run")
 def schedule_run(
     config: Annotated[Path, typer.Option("--config")] = DEFAULT_CONFIG,
@@ -1103,12 +1277,52 @@ def schedule_run(
     if max_cycles is not None and max_cycles < 1:
         raise typer.BadParameter("max_cycles must be >= 1")
 
+    initial_config = load_config(config)
+    initial_scheduler = initial_config.scheduler.with_overrides(scheduler_option_overrides)
+    lease_store = StateStore(_state_path(initial_config))
+    lease_owner_id = f"schedule-run:{os.getpid()}:{uuid.uuid4().hex}"
+    lease = lease_store.acquire_scheduler_lease(
+        lease_owner_id,
+        ttl_seconds=initial_scheduler.lease_ttl_minutes * 60,
+    )
+    if not lease["acquired"]:
+        _print_json(
+            {
+                "command": "schedule-run",
+                "config": str(config),
+                "error": "scheduler lease is already held",
+                "scheduler_lease": lease,
+            }
+        )
+        raise typer.Exit(code=1)
+    lease_released = False
+    previous_sigterm_handler = signal.getsignal(signal.SIGTERM)
+
+    def release_scheduler_lease() -> None:
+        nonlocal lease_released
+        if lease_released:
+            return
+        lease_store.release_scheduler_lease(lease_owner_id)
+        lease_released = True
+
+    def handle_scheduler_sigterm(signum: int, frame: object) -> None:
+        del frame
+        release_scheduler_lease()
+        raise SystemExit(128 + signum)
+
+    atexit.register(release_scheduler_lease)
+    signal.signal(signal.SIGTERM, handle_scheduler_sigterm)
+
     cycle = 0
     while True:
         cycle += 1
         run_id = _new_schedule_run_id()
         loaded_for_run = load_config(config)
         scheduler = loaded_for_run.scheduler.with_overrides(scheduler_option_overrides)
+        lease = lease_store.acquire_scheduler_lease(
+            lease_owner_id,
+            ttl_seconds=scheduler.lease_ttl_minutes * 60,
+        )
         interval_minutes = scheduler.interval_minutes
         min_free_window_minutes = scheduler.min_free_window_minutes
         require_known_free_window = scheduler.require_known_free_window
@@ -1431,6 +1645,7 @@ def schedule_run(
             "yaml+cli_overrides" if scheduler_cli_overrides else "yaml"
         )
         payload["scheduler_cli_overrides"] = scheduler_cli_overrides
+        payload["scheduler_lease"] = lease
         if payload.get("schedule_backoff", {}).get("active"):
             payload["intent_search_enabled"] = False
             if intent and "intent" not in payload:
@@ -1486,8 +1701,14 @@ def schedule_run(
         _print_json(summary)
 
         if "error" in payload and max_cycles is not None:
+            release_scheduler_lease()
+            atexit.unregister(release_scheduler_lease)
+            signal.signal(signal.SIGTERM, previous_sigterm_handler)
             raise typer.Exit(code=1)
         if max_cycles is not None and cycle >= max_cycles:
+            release_scheduler_lease()
+            atexit.unregister(release_scheduler_lease)
+            signal.signal(signal.SIGTERM, previous_sigterm_handler)
             return
         time.sleep(interval_minutes * 60)
 
@@ -2290,6 +2511,9 @@ def _intent_run_once_payload(
         )
         payload["intents"] = [_intent_summary(intent) for intent in result.searched]
         payload["selected"] = [_ranked_release_summary(item) for item in result.enqueue_selected]
+    search_diagnostics = _search_provider_diagnostics(providers)
+    if search_diagnostics:
+        payload["search_diagnostics"] = search_diagnostics
     if source_warnings:
         payload["source_warnings"] = source_warnings
     if batch_error is not None:
@@ -2330,6 +2554,16 @@ def _record_intent_search_runs(
             message=message,
             payload={"state": row.get("state"), "title": intent.title},
         )
+
+
+def _search_provider_diagnostics(providers: list[SearchProvider]) -> list[dict[str, Any]]:
+    diagnostics: list[dict[str, Any]] = []
+    for provider in providers:
+        rows = getattr(provider, "search_diagnostics", None)
+        if not isinstance(rows, list):
+            continue
+        diagnostics.extend(row for row in rows if isinstance(row, dict))
+    return diagnostics
 
 
 def _stored_ranked_releases(store: StateStore, intent_id: str) -> list[RankedRelease]:
@@ -3685,6 +3919,7 @@ def _prune_payload_summary(payload: object) -> dict[str, Any] | None:
         "reclaim_targets_by_pool": payload.get("reclaim_targets_by_pool"),
         "reclaimed_capacity_by_pool": payload.get("reclaimed_capacity_by_pool"),
         "unknown_free_risk_count": payload.get("unknown_free_risk_count"),
+        "delete_count": (payload.get("cleanup_evidence") or {}).get("delete_count"),
         "managed_count": payload.get("managed_count"),
         "decisions_count": len(payload.get("decisions") or []),
         "preview_count": len(payload.get("preview") or []),

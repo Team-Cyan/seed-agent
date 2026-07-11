@@ -203,6 +203,7 @@ async def prune_cold_torrents(
             reclaim_target_bytes = 0
     reclaim_target_bytes = max(int(reclaim_target_bytes), 0)
     reclaimed_bytes = 0
+    capacity_delete_count = 0
 
     for torrent in rank_eviction_candidates(list(torrents)):
         if free_window_min_remaining_minutes is not None:
@@ -222,6 +223,19 @@ async def prune_cold_torrents(
                 completed_low_upload_requires_reclamation
             ),
         )
+        if (
+            classification.action == "delete"
+            and classification.capacity_reclamation
+            and capacity_delete_count >= cleanup.max_capacity_deletes_per_run
+        ):
+            classification = CleanupDecision(
+                action="keep",
+                reason=(
+                    "capacity deletion limit reached: "
+                    f"{cleanup.max_capacity_deletes_per_run} per run"
+                ),
+                managed=True,
+            )
         decision = _decision_for_cleanup(
             torrent,
             classification,
@@ -241,6 +255,8 @@ async def prune_cold_torrents(
             decisions.append(decision)
             if classification.action == "delete" and reclamation_needed:
                 reclaimed_bytes += max(int(torrent.size_bytes), 0)
+            if classification.action == "delete" and classification.capacity_reclamation:
+                capacity_delete_count += 1
             continue
         try:
             if classification.action == "delete":
@@ -267,6 +283,8 @@ async def prune_cold_torrents(
         decisions.append(decision)
         if classification.action == "delete" and reclamation_needed:
             reclaimed_bytes += max(int(torrent.size_bytes), 0)
+        if classification.action == "delete" and classification.capacity_reclamation:
+            capacity_delete_count += 1
 
     return decisions
 

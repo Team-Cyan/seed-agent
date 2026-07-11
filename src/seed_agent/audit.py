@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import fcntl
 import json
 import re
 from pathlib import Path
@@ -70,8 +71,13 @@ class AuditLogger:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         payload = redact_payload(decision.model_dump(mode="json"))
         with self.path.open("a", encoding="utf-8") as handle:
-            json.dump(payload, handle, ensure_ascii=False, sort_keys=True)
-            handle.write("\n")
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            try:
+                json.dump(payload, handle, ensure_ascii=False, sort_keys=True)
+                handle.write("\n")
+                handle.flush()
+            finally:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 def _redact_url_match(match: re.Match[str]) -> str:

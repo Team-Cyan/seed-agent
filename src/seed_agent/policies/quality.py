@@ -8,6 +8,12 @@ GIB = 1024**3
 def torrent_retention_quality_score(torrent: ManagedTorrent) -> float:
     """Higher means the existing torrent is more worth keeping."""
 
+    return float(torrent_quality_evidence(torrent)["retention_quality_score"])
+
+
+def torrent_quality_evidence(torrent: ManagedTorrent) -> dict[str, float | int | bool]:
+    """Return stable, inspectable components used by retention and eviction ranking."""
+
     size_gib = max(torrent.size_bytes / GIB, 0.001)
     total_uploaded_gib = torrent.uploaded_bytes / GIB
     total_ratio = total_uploaded_gib / size_gib
@@ -22,7 +28,7 @@ def torrent_retention_quality_score(torrent: ManagedTorrent) -> float:
     recent_density = recent_gib / size_gib
     session_density = session_gib / size_gib
 
-    return (
+    retention_score = (
         hourly_density * 100.0
         + daily_density * 35.0
         + recent_density * 20.0
@@ -30,6 +36,29 @@ def torrent_retention_quality_score(torrent: ManagedTorrent) -> float:
         + total_ratio * 4.0
         + min(upspeed_mib_s, 20.0) * 0.1
     )
+    evidence_points = sum(
+        key in torrent.metadata
+        for key in (
+            "recent_upload_1h_gb",
+            "recent_upload_24h_gb",
+            "recent_upload_gb",
+            "upload_delta_gb",
+            "uploaded_session_bytes",
+            "upspeed_bps",
+        )
+    )
+    return {
+        "size_gib": size_gib,
+        "total_ratio": total_ratio,
+        "hourly_density": hourly_density,
+        "daily_density": daily_density,
+        "recent_density": recent_density,
+        "session_density": session_density,
+        "upspeed_mib_s": upspeed_mib_s,
+        "retention_quality_score": retention_score,
+        "evidence_points": evidence_points,
+        "evidence_sufficient": evidence_points >= 1,
+    }
 
 
 def torrent_eviction_pressure_score(torrent: ManagedTorrent) -> float:
@@ -42,6 +71,27 @@ def torrent_eviction_pressure_score(torrent: ManagedTorrent) -> float:
     incomplete_pressure = amount_left_gib * 0.03
     size_pressure = size_gib * 0.005
     return stale_penalty + incomplete_pressure + size_pressure - quality
+
+
+def torrent_eviction_evidence(torrent: ManagedTorrent) -> dict[str, float | int | bool]:
+    quality = torrent_quality_evidence(torrent)
+    amount_left_gib = _metadata_bytes_as_gib(torrent, "amount_left_bytes")
+    stale_penalty = 3.0 if torrent.last_activity_at is None else 0.0
+    incomplete_pressure = amount_left_gib * 0.03
+    size_pressure = float(quality["size_gib"]) * 0.005
+    return {
+        **quality,
+        "amount_left_gib": amount_left_gib,
+        "stale_penalty": stale_penalty,
+        "incomplete_pressure": incomplete_pressure,
+        "size_pressure": size_pressure,
+        "eviction_pressure_score": (
+            stale_penalty
+            + incomplete_pressure
+            + size_pressure
+            - float(quality["retention_quality_score"])
+        ),
+    }
 
 
 def candidate_value_score(item: ScoreBreakdown) -> float:
