@@ -15,11 +15,26 @@ from seed_agent.sites.mteam import (
     MTeamApiDiscoveryOptions,
     MTeamApiResponseError,
     _merge_detail,
+    _parse_api_datetime,
     enrich_candidates,
     extract_torrent_id,
     fetch_api_candidates,
     resolve_deferred_download_url,
 )
+
+
+def test_parse_api_datetime_treats_naive_mteam_time_as_asia_shanghai() -> None:
+    parsed = _parse_api_datetime("2026-07-12T09:22:00")
+
+    assert parsed is not None
+    assert parsed.isoformat() == "2026-07-12T01:22:00+00:00"
+
+
+def test_parse_api_datetime_preserves_explicit_offset() -> None:
+    parsed = _parse_api_datetime("2026-07-12T09:22:00+00:00")
+
+    assert parsed is not None
+    assert parsed.isoformat() == "2026-07-12T09:22:00+00:00"
 
 
 def _candidate(**overrides: object) -> TorrentCandidate:

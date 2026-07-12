@@ -287,6 +287,42 @@ def test_mteam_torrent_id_from_tracker_decodes_credential() -> None:
     assert cli._mteam_torrent_id_from_tracker(torrent) == "1206069"
 
 
+def test_live_reconciliation_links_unlinked_candidate_by_tracker_tid(
+    tmp_path: Path,
+) -> None:
+    from seed_agent import cli
+
+    store = StateStore(tmp_path / "state.db")
+    store.upsert_candidate(
+        stable_id="mteam:https://kp.m-team.cc/detail/1206069",
+        title="Tracker Title That Differs From qB",
+        site="mteam",
+        state=LifecycleState.ENQUEUED,
+        score=95,
+        torrent_hash=None,
+        discount="free",
+    )
+    credential = base64.b64encode(
+        b"sign=abc&t=1783531016&tid=1206069&uid=305694"
+    ).decode()
+    torrent = _managed_incomplete_torrent(
+        hash="live-hash",
+        name="Renamed qB Content Root",
+        metadata={
+            "amount_left_bytes": 5 * 1024**3,
+            "tracker": f"https://tracker.m-team.io/announce?credential={credential}",
+        },
+    )
+
+    result = cli._persist_live_torrent_candidates(store, [torrent])
+
+    assert result["linked_existing_candidates"] == 1
+    rows = store.list_by_torrent_hash("live-hash")
+    assert [row["stable_id"] for row in rows] == [
+        "mteam:https://kp.m-team.cc/detail/1206069"
+    ]
+
+
 @pytest.mark.asyncio
 async def test_find_mteam_match_uses_tracker_tid_before_keyword_search(
     monkeypatch: pytest.MonkeyPatch,

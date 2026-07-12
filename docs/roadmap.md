@@ -279,6 +279,9 @@ by completion period, and unfinished work is ordered by current priority.
     scheduler intervals.
   - Unraid packaging defaults to UID 1000 and GID 100, matching the live
     qBittorrent and Plex application user convention.
+  - M-Team timezone-naive promotion timestamps are interpreted as
+    `Asia/Shanghai`, and qB rows retain candidate evidence through tracker-ID
+    reconciliation even when their content-root names differ.
 
 - Next P0 - Complete the live Unraid release gate
   - Current read-only qB evidence shows the physical disk is overcommitted even

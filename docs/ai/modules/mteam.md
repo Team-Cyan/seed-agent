@@ -53,6 +53,8 @@ Current fallback still present in code:
 - Do not delete the RSS path. It remains useful for fallback and for other sites.
 - Do not reintroduce browser-login assumptions into the main flow.
 - Treat M-Team API key as the long-term preferred authenticated path.
+- Treat timezone-naive M-Team API date strings as `Asia/Shanghai`; convert them
+  to UTC before calculating or persisting free-window time.
 - Keep API discovery cheap: search/detail calls may run during discovery and
   scoring, but `genDlToken` should only run for accepted candidates when
   enqueue is executing.

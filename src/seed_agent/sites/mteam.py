@@ -9,6 +9,7 @@ from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import parse_qsl, urlparse
+from zoneinfo import ZoneInfo
 
 import httpx
 from pydantic import BaseModel, ConfigDict, Field
@@ -21,6 +22,7 @@ DownloadUrlFetcher = Callable[[str], Awaitable[str | None]]
 
 DEFERRED_DOWNLOAD_URL_PREFIX = "mteam-api://torrent/"
 MTEAM_RATE_LIMIT_MARKERS = ("請求過於頻繁", "请求过于频繁")
+MTEAM_LOCAL_TIMEZONE = ZoneInfo("Asia/Shanghai")
 
 
 class MTeamApiResponseError(RuntimeError):
@@ -800,5 +802,5 @@ def _parse_api_datetime(value: Any) -> datetime | None:
     except ValueError:
         return None
     if dt.tzinfo is None:
-        return dt.replace(tzinfo=UTC)
-    return dt
+        dt = dt.replace(tzinfo=MTEAM_LOCAL_TIMEZONE)
+    return dt.astimezone(UTC)

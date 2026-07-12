@@ -4659,6 +4659,7 @@ def _persist_live_torrent_candidates(
     torrents: list[ManagedTorrent],
 ) -> dict[str, int]:
     unlinked_by_identity = _unlinked_candidate_identity_map(store)
+    unlinked_by_mteam_id = _unlinked_mteam_candidate_id_map(store)
     created_qb_records = 0
     linked_existing_candidates = 0
     marked_present = 0
@@ -4672,7 +4673,12 @@ def _persist_live_torrent_candidates(
             )
             marked_present += 1
             continue
-        linked_row = unlinked_by_identity.get(_live_torrent_identity(torrent))
+        tracker_id = _mteam_torrent_id_from_tracker(torrent)
+        linked_row = (
+            unlinked_by_mteam_id.get(tracker_id) if tracker_id is not None else None
+        )
+        if linked_row is None:
+            linked_row = unlinked_by_identity.get(_live_torrent_identity(torrent))
         if linked_row is not None:
             store.upsert_candidate(
                 stable_id=str(linked_row["stable_id"]),
@@ -4720,6 +4726,19 @@ def _unlinked_candidate_identity_map(store: StateStore) -> dict[tuple[str, int],
         except (TypeError, ValueError):
             continue
         candidates.setdefault(identity, row)
+    return candidates
+
+
+def _unlinked_mteam_candidate_id_map(store: StateStore) -> dict[str, dict[str, Any]]:
+    candidates: dict[str, dict[str, Any]] = {}
+    marker = "/detail/"
+    for row in store.list_unlinked_candidates():
+        stable_id = str(row.get("stable_id") or "")
+        if row.get("site") == "qb" or marker not in stable_id:
+            continue
+        torrent_id = stable_id.rsplit(marker, 1)[-1].strip()
+        if torrent_id.isdigit():
+            candidates.setdefault(torrent_id, row)
     return candidates
 
 

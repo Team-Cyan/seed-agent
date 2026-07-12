@@ -38,6 +38,9 @@ support policy.
 - refresh tracker evidence for every incomplete managed torrent regardless of
   qB state, including manually stopped downloads; bounded batches rotate by
   oldest tracker evidence so a fixed API budget cannot starve later torrents,
+- reconcile newly added qB rows to unlinked M-Team candidates by tracker `tid`
+  before title/size fallback so qB content-root renaming does not lose discount
+  evidence or force avoidable tracker searches,
 - reconcile known active hashes that are absent from a real qB live listing into
   local missing/deleted evidence,
 - revive stale local `deleted` evidence when qB still reports the same hash as

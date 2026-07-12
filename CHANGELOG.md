@@ -4,6 +4,18 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.18.4 - 2026-07-12
+
+### Fixed
+
+- Interpret timezone-naive M-Team API timestamps as `Asia/Shanghai` before
+  converting them to UTC. Free-window safety no longer overestimates remaining
+  promotion time by eight hours.
+- Link newly visible qB torrents back to unlinked M-Team candidates by tracker
+  torrent ID before falling back to title and size matching. Renamed content
+  roots now retain enqueue-time discount and expiry evidence without extra
+  tracker searches.
+
 ## 0.18.3 - 2026-07-12
 
 ### Fixed
