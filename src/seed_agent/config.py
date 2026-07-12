@@ -558,9 +558,11 @@ class SchedulerConfig(BaseModel):
     require_known_free_window: bool = True
     prune_enabled: bool = False
     tracker_backfill_enabled: bool = True
-    tracker_backfill_limit: int = 10
+    # Deprecated compatibility fields. Scheduled backfill is intentionally
+    # unbounded and relies on the shared M-Team request pacer and backoff.
+    tracker_backfill_limit: int | None = None
     tracker_backfill_category: str | None = None
-    tracker_backfill_max_api_requests: int = 6
+    tracker_backfill_max_api_requests: int | None = None
     intent_enabled: bool = True
     intent_execute: bool = False
     intent_search_mode: Literal["daily", "every_cycle"] = "daily"
@@ -573,9 +575,12 @@ class SchedulerConfig(BaseModel):
             raise ValueError("scheduler.interval_minutes must be >= 1")
         if self.min_free_window_minutes is not None and self.min_free_window_minutes < 0:
             raise ValueError("scheduler.min_free_window_minutes must be >= 0")
-        if self.tracker_backfill_limit < 1:
+        if self.tracker_backfill_limit is not None and self.tracker_backfill_limit < 1:
             raise ValueError("scheduler.tracker_backfill_limit must be >= 1")
-        if self.tracker_backfill_max_api_requests < 1:
+        if (
+            self.tracker_backfill_max_api_requests is not None
+            and self.tracker_backfill_max_api_requests < 1
+        ):
             raise ValueError("scheduler.tracker_backfill_max_api_requests must be >= 1")
         if not 0 <= self.intent_search_hour <= 23:
             raise ValueError("scheduler.intent_search_hour must be between 0 and 23")

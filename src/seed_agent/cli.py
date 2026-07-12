@@ -1247,14 +1247,8 @@ def schedule_run(
     tracker_backfill: Annotated[
         bool | None, typer.Option("--tracker-backfill/--no-tracker-backfill")
     ] = None,
-    tracker_backfill_limit: Annotated[
-        int | None, typer.Option("--tracker-backfill-limit", min=1)
-    ] = None,
     tracker_backfill_category: Annotated[
         str | None, typer.Option("--tracker-backfill-category")
-    ] = None,
-    tracker_backfill_max_api_requests: Annotated[
-        int | None, typer.Option("--tracker-backfill-max-api-requests", min=1)
     ] = None,
     intent: Annotated[bool | None, typer.Option("--intent/--no-intent")] = None,
     intent_execute: Annotated[
@@ -1270,9 +1264,7 @@ def schedule_run(
         "require_known_free_window": require_known_free_window,
         "prune_enabled": prune,
         "tracker_backfill_enabled": tracker_backfill,
-        "tracker_backfill_limit": tracker_backfill_limit,
         "tracker_backfill_category": tracker_backfill_category,
-        "tracker_backfill_max_api_requests": tracker_backfill_max_api_requests,
         "intent_enabled": intent,
         "intent_execute": intent_execute,
     }
@@ -1338,9 +1330,7 @@ def schedule_run(
         require_known_free_window = scheduler.require_known_free_window
         prune = scheduler.prune_enabled
         tracker_backfill = scheduler.tracker_backfill_enabled
-        tracker_backfill_limit = scheduler.tracker_backfill_limit
         tracker_backfill_category = scheduler.tracker_backfill_category
-        tracker_backfill_max_api_requests = scheduler.tracker_backfill_max_api_requests
         intent = scheduler.intent_enabled
         intent_execute = scheduler.intent_execute
         store_for_run = StateStore(_state_path(loaded_for_run))
@@ -1433,16 +1423,16 @@ def schedule_run(
                     event="start",
                     payload={
                         "category": tracker_backfill_category,
-                        "limit": tracker_backfill_limit,
-                        "max_api_requests": tracker_backfill_max_api_requests,
+                        "limit": None,
+                        "max_api_requests": None,
                     },
                 )
                 tracker_backfill_payload = _tracker_source_backfill_payload(
                     loaded_for_run,
                     execute=execute,
-                    limit=tracker_backfill_limit,
+                    limit=None,
                     category=tracker_backfill_category,
-                    max_api_requests=tracker_backfill_max_api_requests,
+                    max_api_requests=None,
                 )
                 _record_schedule_phase(
                     store_for_run,
@@ -1646,9 +1636,8 @@ def schedule_run(
         payload["require_known_free_window"] = require_known_free_window if execute else False
         payload["prune_enabled"] = prune
         payload["tracker_backfill_enabled"] = tracker_backfill
-        payload["tracker_backfill_limit"] = tracker_backfill_limit
         payload["tracker_backfill_category"] = tracker_backfill_category
-        payload["tracker_backfill_max_api_requests"] = tracker_backfill_max_api_requests
+        payload["tracker_backfill_unbounded"] = True
         payload["intent_enabled"] = intent
         payload["intent_execute"] = intent_execute
         payload["scheduler_config_source"] = (
@@ -3182,7 +3171,7 @@ def _tracker_source_backfill_payload(
     execute: bool,
     limit: int | None,
     category: str | None,
-    max_api_requests: int,
+    max_api_requests: int | None,
 ) -> dict[str, Any]:
     store = StateStore(_state_path(config))
     downloader = _maybe_build_downloader(config)
@@ -3200,7 +3189,10 @@ def _tracker_source_backfill_payload(
     candidates = _qb_only_backfill_targets(store, torrents)
     if limit is not None:
         candidates = candidates[:limit]
-    request_budget = {"remaining": max_api_requests, "used": 0}
+    request_budget: dict[str, int | None] = {
+        "remaining": max_api_requests,
+        "used": 0,
+    }
     results = _run(
         _backfill_tracker_sources(
             config,
@@ -3299,11 +3291,11 @@ async def _backfill_tracker_sources(
     torrents: list[ManagedTorrent],
     *,
     execute: bool,
-    request_budget: dict[str, int],
+    request_budget: dict[str, int | None],
 ) -> list[dict[str, Any]]:
     results: list[dict[str, Any]] = []
     for torrent in torrents:
-        if request_budget["remaining"] <= 0:
+        if _tracker_request_budget_exhausted(request_budget):
             results.append(
                 _tracker_source_result(
                     torrent,
@@ -3495,6 +3487,18 @@ def _configured_site_for_inferred_tracker(config: SeedAgentConfig, site_name: st
     return None
 
 
+def _tracker_request_budget_exhausted(budget: dict[str, int | None]) -> bool:
+    remaining = budget["remaining"]
+    return remaining is not None and remaining <= 0
+
+
+def _consume_tracker_request_budget(budget: dict[str, int | None]) -> None:
+    remaining = budget["remaining"]
+    if remaining is not None:
+        budget["remaining"] = remaining - 1
+    budget["used"] = int(budget["used"] or 0) + 1
+
+
 async def _find_mteam_match_for_torrent(
     *,
     site_name: str,
@@ -3502,7 +3506,7 @@ async def _find_mteam_match_for_torrent(
     api_key: str,
     api_key_header: str,
     torrent: ManagedTorrent,
-    request_budget: dict[str, int],
+    request_budget: dict[str, int | None],
 ) -> dict[str, Any]:
     direct_match = await _find_mteam_match_by_tracker_id(
         site_name=site_name,
@@ -3518,14 +3522,13 @@ async def _find_mteam_match_for_torrent(
     searched_keywords: list[str] = []
     for keyword in _mteam_backfill_keywords(torrent.name):
         for mode in _mteam_backfill_modes(site_mode):
-            if request_budget["remaining"] <= 0:
+            if _tracker_request_budget_exhausted(request_budget):
                 return {
                     "status": "skipped",
                     "reason": "api request budget exhausted",
                     "searched": searched_keywords,
                 }
-            request_budget["remaining"] -= 1
-            request_budget["used"] += 1
+            _consume_tracker_request_budget(request_budget)
             searched_keywords.append(f"{mode or 'all'}:{keyword}")
             try:
                 candidates = await fetch_mteam_api_candidates(
@@ -3605,19 +3608,18 @@ async def _find_mteam_match_by_tracker_id(
     api_key: str,
     api_key_header: str,
     torrent: ManagedTorrent,
-    request_budget: dict[str, int],
+    request_budget: dict[str, int | None],
 ) -> dict[str, Any] | None:
     torrent_id = _mteam_torrent_id_from_tracker(torrent)
     if torrent_id is None:
         return None
-    if request_budget["remaining"] <= 0:
+    if _tracker_request_budget_exhausted(request_budget):
         return {
             "status": "skipped",
             "reason": "api request budget exhausted",
             "searched": [f"detail:{torrent_id}"],
         }
-    request_budget["remaining"] -= 1
-    request_budget["used"] += 1
+    _consume_tracker_request_budget(request_budget)
     client = MTeamApiClient(api_key=api_key, api_key_header=api_key_header)
     try:
         detail = await client.fetch_torrent_detail(torrent_id)
@@ -3920,9 +3922,8 @@ def _schedule_log_summary(payload: dict[str, Any]) -> dict[str, Any]:
         "require_known_free_window",
         "prune_enabled",
         "tracker_backfill_enabled",
-        "tracker_backfill_limit",
         "tracker_backfill_category",
-        "tracker_backfill_max_api_requests",
+        "tracker_backfill_unbounded",
         "intent_enabled",
         "intent_execute",
         "scheduler_config_source",

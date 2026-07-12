@@ -4,8 +4,14 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.18.7 - 2026-07-12
+
 ### Changed
 
+- Removed scheduled tracker-backfill task and API request caps. Each cycle now
+  resolves every outstanding qB task with the shared one-second M-Team request
+  pacer, while rate-limit and network failures still stop the remaining calls
+  and activate scheduler protection.
 - Removed scheduler policy environment variables from the DockerMan template
   and Compose example. Interval, free-window safety, prune, and Intent execute
   settings now use YAML/Web UI as the deployment source of truth; legacy

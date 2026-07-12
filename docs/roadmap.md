@@ -182,8 +182,12 @@ by completion period, and unfinished work is ordered by current priority.
     CLI/container overrides are observable, and Web/CLI config writes use atomic
     replacement so long-running readers cannot observe partial YAML.
   - Terminal tracker-backfill misses for incomplete torrents are passed to prune
-    as high-risk unknown-free evidence; network outages and exhausted request
-    budgets remain deferred instead of triggering blind deletion.
+    as high-risk unknown-free evidence; network outages remain deferred instead
+    of triggering blind deletion.
+  - Scheduled tracker backfill now processes all outstanding qB tasks without a
+    per-cycle task or request cap. The shared one-second M-Team request pacer
+    remains mandatory, and rate-limit or network failures stop the rest of the
+    cycle and activate scheduler protection.
   - Scheduled conservative cleanup keeps completed low-upload seeds unless space
     reclamation is needed, while the explicit low-upload deletion policy remains
     available for normal prune callers.

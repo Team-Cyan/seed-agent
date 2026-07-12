@@ -196,9 +196,7 @@ page labels.
 - `require_known_free_window`
 - `prune_enabled`
 - `tracker_backfill_enabled`
-- `tracker_backfill_limit`
 - `tracker_backfill_category`
-- `tracker_backfill_max_api_requests`
 - `intent_enabled`
 - `intent_execute`
 - `intent_search_mode`

@@ -1085,7 +1085,7 @@ def test_schedule_run_prunes_after_tracker_backfill_network_backoff(
         execute: bool,
         limit: int | None,
         category: str | None,
-        max_api_requests: int,
+        max_api_requests: int | None,
     ) -> dict[str, object]:
         return {
             "command": "tracker-source-backfill",
@@ -1612,6 +1612,15 @@ def test_schedule_run_can_prune_each_cycle(
     from seed_agent import cli
 
     config_path = _config_file(tmp_path)
+    config_path.write_text(
+        config_path.read_text(encoding="utf-8")
+        + """
+scheduler:
+  tracker_backfill_limit: 20
+  tracker_backfill_max_api_requests: 20
+""",
+        encoding="utf-8",
+    )
     seen: list[tuple[str, object]] = []
 
     def fake_prune_payload(
@@ -1688,7 +1697,7 @@ def test_schedule_run_can_prune_each_cycle(
         execute: bool,
         limit: int | None,
         category: str | None,
-        max_api_requests: int,
+        max_api_requests: int | None,
     ) -> dict[str, object]:
         seen.append(("tracker_backfill", (limit, category, max_api_requests)))
         return {
@@ -1729,7 +1738,7 @@ def test_schedule_run_can_prune_each_cycle(
     assert result.exit_code == 0
     payload = _json_output(result)
     assert seen == [
-        ("tracker_backfill", (10, None, 6)),
+        ("tracker_backfill", (None, None, None)),
         ("prune", 120),
         ("run_once", (False, True)),
         ("intent", False),
@@ -1906,7 +1915,7 @@ def test_schedule_run_persists_phase_order_with_shared_run_id(
         execute: bool,
         limit: int | None,
         category: str | None,
-        max_api_requests: int,
+        max_api_requests: int | None,
     ) -> dict[str, object]:
         return {
             "command": "tracker-source-backfill",
