@@ -126,26 +126,17 @@ docker run --rm \
   - defaults to `/app/config/config.yaml`
 - `SEED_AGENT_EXECUTE`
   - `true` or `false`
-- `SEED_AGENT_INTERVAL_MINUTES`
-  - used by `schedule-run`
-- `SEED_AGENT_MIN_FREE_WINDOW_MINUTES`
-  - optional execute-time free-window safety threshold
-- `SEED_AGENT_REQUIRE_KNOWN_FREE_WINDOW`
-  - `true` or `false`
 - `SEED_AGENT_HEARTBEAT_FILE`
   - optional heartbeat JSON file written by `schedule-run`
 - `SEED_AGENT_MAX_STALENESS_MINUTES`
   - used by `healthcheck`
 - `SEED_AGENT_MAX_CYCLES`
   - useful for smoke tests or external supervisors
-- `SEED_AGENT_PRUNE`
-  - `true` or `false`; overrides `scheduler.prune_enabled`
-
 The YAML `scheduler` section is the canonical source for cycle behavior. The
-entrypoint only passes a scheduler CLI flag when the matching environment
-variable is explicitly set, so Compose/Unraid variables act as visible
-deployment overrides rather than hidden defaults. `SEED_AGENT_EXECUTE` remains
-an explicit deployment safety control and is not stored in YAML.
+DockerMan template and Compose example do not define scheduler policy
+overrides. Legacy explicit environment variables remain compatible, but should
+be removed so Web UI saves are authoritative. `SEED_AGENT_EXECUTE` remains an
+explicit deployment safety control and is not stored in YAML.
 
 ## Healthcheck And Logging
 

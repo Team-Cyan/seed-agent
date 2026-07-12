@@ -151,13 +151,8 @@ Key environment variables:
 - `SEED_AGENT_MODE=schedule-run`
 - `SEED_AGENT_CONFIG=/app/config/config.yaml`
 - `SEED_AGENT_EXECUTE=true`
-- `SEED_AGENT_INTERVAL_MINUTES=30`
-- `SEED_AGENT_MIN_FREE_WINDOW_MINUTES=180`
-- `SEED_AGENT_REQUIRE_KNOWN_FREE_WINDOW=true`
 - `SEED_AGENT_HEARTBEAT_FILE=/state/schedule-heartbeat.json`
 - `SEED_AGENT_MAX_STALENESS_MINUTES=90`
-- `SEED_AGENT_PRUNE=true`
-- `SEED_AGENT_INTENT_EXECUTE=false`
 - `SEED_AGENT_WEB_ENABLED=true`
 - `SEED_AGENT_WEB_HOST=0.0.0.0`
 - `SEED_AGENT_WEB_PORT=8765`
@@ -165,8 +160,10 @@ Key environment variables:
   POST protection beyond trusted-local deployments
 
 The example publishes `8765:8765`, so the same container can run the scheduler
-and the settings Web UI. Open `http://127.0.0.1:8765` for local
-Compose installs, or the DockerMan WebUI button for Unraid installs.
+and the settings Web UI. Open `http://127.0.0.1:8765` for local Compose
+installs, or use the DockerMan WebUI button for Unraid installs. Configure
+scheduler policy in the YAML/Web UI; the Compose example does not override
+scheduler fields through environment variables.
 
 See:
 
@@ -235,8 +232,8 @@ for the Web UI vs CLI decision path and runtime provenance checks.
 Recommended unattended protections:
 
 - conservative `pt_filters.min_left_time_minutes`
-- `SEED_AGENT_MIN_FREE_WINDOW_MINUTES=180`
-- `SEED_AGENT_REQUIRE_KNOWN_FREE_WINDOW=true`
+- `scheduler.min_free_window_minutes=180`
+- `scheduler.require_known_free_window=true`
 - `pt_filters.max_active_downloads`
 - `pt_filters.max_total_amount_left_gb`
 - `pt_filters.min_free_disk_gb`

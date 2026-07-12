@@ -285,6 +285,8 @@ by completion period, and unfinished work is ordered by current priority.
   - Search, detail, and token API calls share a per-process one-second minimum
     request interval to reduce burst-driven tracker throttling; Web and scheduler
     processes remain independently limited.
+  - DockerMan and Compose no longer duplicate scheduler policy as environment
+    overrides; YAML/Web UI is the deployment source of truth for those fields.
 
 - Next P0 - Complete the live Unraid release gate
   - Current read-only qB evidence shows the physical disk is overcommitted even

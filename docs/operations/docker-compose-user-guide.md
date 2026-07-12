@@ -108,19 +108,18 @@ Main env vars:
 - `SEED_AGENT_MODE=schedule-run`
 - `SEED_AGENT_CONFIG=/app/config/config.yaml`
 - `SEED_AGENT_EXECUTE=true`
-- `SEED_AGENT_INTERVAL_MINUTES=30`
-- `SEED_AGENT_MIN_FREE_WINDOW_MINUTES=180`
-- `SEED_AGENT_REQUIRE_KNOWN_FREE_WINDOW=true`
 - `SEED_AGENT_HEARTBEAT_FILE=/state/schedule-heartbeat.json`
 - `SEED_AGENT_MAX_STALENESS_MINUTES=90`
-- `SEED_AGENT_PRUNE=true`
-- `SEED_AGENT_INTENT_EXECUTE=false`
 - `SEED_AGENT_STARTUP_STATUS=true`
 - `SEED_AGENT_WEB_ENABLED=true`
 - `SEED_AGENT_WEB_HOST=0.0.0.0`
 - `SEED_AGENT_WEB_PORT=8765`
 - optional `SEED_AGENT_WEB_TOKEN=<local-token>` for write/search/enqueue POST
   protection when the Web UI is reachable outside a trusted local network
+
+Scheduler policy comes only from the YAML/Web UI in the example deployment.
+Do not duplicate interval, free-window, prune, or Intent execute settings in
+Compose environment variables.
 
 The example publishes host port `8765` to the container's Web UI port. That lets
 one long-running container serve the settings UI while `schedule-run` remains

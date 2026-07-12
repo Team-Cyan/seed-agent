@@ -76,8 +76,9 @@ Recommended user-visible defaults:
 - `SEED_AGENT_CONFIG=/workspace/runtime/config/config.yaml`
 - `SEED_AGENT_HEARTBEAT_FILE=/workspace/runtime/state/schedule-heartbeat.json`
 - `SEED_AGENT_EXECUTE=true`
-- `SEED_AGENT_REQUIRE_KNOWN_FREE_WINDOW=true`
-- `SEED_AGENT_INTENT_EXECUTE=false`
+- Configure scheduler interval, free-window safety, prune, tracker backfill,
+  and Intent execution in YAML or the Web UI. The DockerMan template does not
+  define scheduler policy environment overrides.
 - `SEED_AGENT_STARTUP_STATUS=true`
 - `SEED_AGENT_WEB_ENABLED=true`
 - `SEED_AGENT_WEB_HOST=0.0.0.0`

@@ -4,6 +4,13 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+### Changed
+
+- Removed scheduler policy environment variables from the DockerMan template
+  and Compose example. Interval, free-window safety, prune, and Intent execute
+  settings now use YAML/Web UI as the deployment source of truth; legacy
+  explicit environment overrides remain readable for compatibility.
+
 ## 0.18.5 - 2026-07-12
 
 ### Fixed
