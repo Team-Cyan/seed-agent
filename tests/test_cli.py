@@ -251,6 +251,29 @@ def test_qb_only_backfill_targets_prioritize_unknown_incomplete_risk(
     ]
 
 
+def test_backfill_targets_refresh_tracked_incomplete_but_not_tracked_completed(
+    tmp_path: Path,
+) -> None:
+    from seed_agent import cli
+
+    store = StateStore(tmp_path / "state.db")
+    incomplete = _managed_incomplete_torrent(hash="tracked-incomplete")
+    completed = _managed_torrent(hash="tracked-completed", metadata={"amount_left_bytes": 0})
+    for torrent in (incomplete, completed):
+        store.upsert_candidate(
+            stable_id=f"mteam:https://kp.m-team.cc/detail/{torrent.hash}",
+            title=torrent.name,
+            site="mteam",
+            state=LifecycleState.DOWNLOADING,
+            score=None,
+            torrent_hash=torrent.hash,
+        )
+
+    targets = cli._qb_only_backfill_targets(store, [completed, incomplete])
+
+    assert [item.hash for item in targets] == ["tracked-incomplete"]
+
+
 def test_mteam_torrent_id_from_tracker_decodes_credential() -> None:
     from seed_agent import cli
 
@@ -1094,7 +1117,7 @@ def test_schedule_run_prunes_after_tracker_backfill_network_backoff(
 
     assert result.exit_code == 0
     payload = _json_output(result)
-    assert prune_calls == [60]
+    assert prune_calls == [120]
     assert payload["prune"]["command"] == "prune"
     assert payload["skipped_by_backoff"] is True
     assert payload["schedule_backoff"]["reason"] == "mteam api unavailable"
@@ -1166,7 +1189,7 @@ def test_schedule_run_skips_work_while_backoff_is_active(
     assert payload["discovered"] == 0
     assert payload["accepted"] == 0
     assert payload["enqueued"] == 0
-    assert prune_calls == [60]
+    assert prune_calls == [120]
     assert payload["prune"]["command"] == "prune"
     assert payload["intent"]["skipped_by_backoff"] is True
     assert payload["intent_search_enabled"] is False
@@ -1671,7 +1694,7 @@ def test_schedule_run_can_prune_each_cycle(
     payload = _json_output(result)
     assert seen == [
         ("tracker_backfill", (10, None, 6)),
-        ("prune", 60),
+        ("prune", 120),
         ("run_once", (False, True)),
         ("intent", False),
     ]
@@ -1913,7 +1936,7 @@ def test_schedule_run_persists_phase_order_with_shared_run_id(
     ]
 
 
-def test_schedule_run_prune_uses_interval_as_free_window_horizon(
+def test_schedule_run_prune_uses_twice_interval_as_free_window_horizon(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from seed_agent import cli
@@ -1963,7 +1986,16 @@ def test_schedule_run_prune_uses_interval_as_free_window_horizon(
     )
 
     assert result.exit_code == 0
-    assert seen == [45]
+    assert seen == [90]
+
+
+def test_schedule_free_window_horizon_keeps_larger_configured_minimum() -> None:
+    from seed_agent.cli import _schedule_free_window_safety_minutes
+
+    assert _schedule_free_window_safety_minutes(
+        interval_minutes=60,
+        configured_minutes=180,
+    ) == 180
 
 
 def test_execute_enqueue_persists_candidate_free_window_expiry(

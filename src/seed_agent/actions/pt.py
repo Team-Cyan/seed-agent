@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from seed_agent.config import DiscoveryConfig, ScoringConfig, SeedAgentConfig
-from seed_agent.models import ManagedTorrent, ScoreBreakdown, TorrentCandidate
+from seed_agent.models import Discount, ManagedTorrent, ScoreBreakdown, TorrentCandidate
 from seed_agent.policies.scoring import score_candidate
 from seed_agent.sites.mteam import (
     MTeamApiClient,
@@ -221,6 +221,17 @@ async def resolve_deferred_download_urls(
         candidate = item.candidate
         if not item.accepted or not has_deferred_download_url(candidate):
             resolved.append(item)
+            continue
+        if not config.pt_filters.allow_non_free and candidate.discount not in {
+            Discount.FREE,
+            Discount.TWO_X_FREE,
+        }:
+            resolved.append(
+                _reject_unresolved_download_url(
+                    item,
+                    f"discount {candidate.discount.value} rejected by execute free-only policy",
+                )
+            )
             continue
         if rate_limited:
             resolved.append(

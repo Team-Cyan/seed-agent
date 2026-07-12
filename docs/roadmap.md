@@ -269,6 +269,17 @@ by completion period, and unfinished work is ordered by current priority.
   - The acceptance matrix and local/live gates are maintained in
     `docs/plans/2026-07-11-runtime-hardening-refinement.md`.
 
+- Completed 2026-07 - Free-only billing safety hardening
+  - `allow_non_free=false` is now a fail-closed invariant at scoring and again
+    before M-Team token generation; only zero-cost FREE/2xFREE promotions pass.
+  - Every incomplete managed qB task is eligible for bounded tracker refresh,
+    including manually stopped downloads, with oldest-evidence rotation to
+    avoid fixed-budget starvation.
+  - Scheduled enqueue and expiry cleanup share a safety horizon of at least two
+    scheduler intervals.
+  - Unraid packaging defaults to UID 1000 and GID 100, matching the live
+    qBittorrent and Plex application user convention.
+
 - Next P0 - Complete the live Unraid release gate
   - Current read-only qB evidence shows the physical disk is overcommitted even
     though the logical `downloads` pool is still under 10 TiB; new local

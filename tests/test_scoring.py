@@ -68,7 +68,19 @@ def test_half_discount_is_rejected_when_only_free_discounts_are_configured() -> 
 
     assert result.accepted is False
     assert result.score == 0
-    assert "discount 50% not accepted" in result.reasons
+    assert "discount 50% rejected by free-only policy" in result.reasons
+
+
+def test_free_only_policy_rejects_half_even_if_misconfigured_in_allowlist() -> None:
+    result = score_candidate(
+        make_candidate(discount="50%"),
+        discovery(discounts=["free", "50%"], allow_non_free=False),
+        scoring(),
+    )
+
+    assert result.accepted is False
+    assert result.score == 0
+    assert "discount 50% rejected by free-only policy" in result.reasons
 
 
 def test_half_discount_can_score_only_when_non_free_is_explicitly_allowed() -> None:
@@ -310,7 +322,7 @@ def test_normal_discount_not_in_config_is_rejected() -> None:
 
     assert result.accepted is False
     assert result.score == 0
-    assert "discount normal not accepted" in result.reasons
+    assert "discount normal rejected by free-only policy" in result.reasons
 
 
 def test_normal_discount_can_be_scored_when_non_free_is_allowed() -> None:

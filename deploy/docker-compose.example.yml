@@ -28,7 +28,7 @@ services:
       SEED_AGENT_WEB_PORT: "8765"
       SEED_AGENT_WEB_TOKEN: ${SEED_AGENT_WEB_TOKEN:-}
       PUID: ${PUID:-1000}
-      PGID: ${PGID:-1000}
+      PGID: ${PGID:-100}
     ports:
       - "8765:8765"
     volumes:

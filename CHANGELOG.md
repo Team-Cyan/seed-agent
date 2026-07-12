@@ -4,6 +4,23 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.18.3 - 2026-07-12
+
+### Fixed
+
+- Enforce `allow_non_free=false` as a non-bypassable free-only invariant. Only
+  `FREE` and `2xFREE` may pass scoring or execute-time token resolution;
+  unknown, normal, and partial discounts fail closed even if misconfigured in
+  the discount allowlist.
+- Refresh tracker promotion evidence for every incomplete managed torrent,
+  including manually stopped qB downloads, and rotate bounded batches by the
+  oldest tracker evidence so a fixed API budget cannot starve later tasks.
+- Use at least twice the scheduler interval as the free-window enqueue and
+  cleanup horizon, preserving an extra cycle of safety before paid download
+  time.
+- Align the Unraid template and Compose example with the live qBittorrent/Plex
+  runtime owner convention of UID 1000 and GID 100.
+
 ## 0.18.2 - 2026-07-11
 
 ### Fixed

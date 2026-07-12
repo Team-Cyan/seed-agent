@@ -953,8 +953,49 @@ async def test_mteam_preflight_rejects_discount_that_changed_to_half(
 
     assert result.accepted is False
     assert result.score == 0
-    assert "discount 50% not accepted" in result.reasons
+    assert "discount 50% rejected by free-only policy" in result.reasons
     assert result.reasons[-1] == "mteam promotion preflight rejected"
+
+
+@pytest.mark.asyncio
+async def test_execute_free_only_guard_rejects_before_preflight_or_token(
+    monkeypatch,
+) -> None:
+    from seed_agent.actions import pt as pt_actions
+
+    config = _config()
+    candidate = _candidate(
+        site="mt",
+        discount=Discount.HALF,
+        source_url="https://kp.m-team.cc/detail/1171443",
+        download_url="mteam-api://torrent/1171443",
+        metadata={
+            "download_url_source": "mteam_api_deferred",
+            "mteam_torrent_id": "1171443",
+        },
+    )
+    scored = [
+        ScoreBreakdown(
+            candidate_id=candidate.stable_id,
+            score=95,
+            accepted=True,
+            reasons=["incorrectly accepted upstream"],
+            candidate=candidate,
+        )
+    ]
+
+    async def fail_preflight(*args, **kwargs):
+        raise AssertionError("paid candidate must be rejected before tracker API calls")
+
+    monkeypatch.setattr(pt_actions, "_revalidate_mteam_candidate", fail_preflight)
+
+    resolved = await pt_actions.resolve_deferred_download_urls(scored, config)
+
+    assert resolved[0].accepted is False
+    assert resolved[0].score == 0
+    assert resolved[0].reasons[-1] == (
+        "discount 50% rejected by execute free-only policy"
+    )
 
 
 def test_mteam_preflight_reapplies_execute_free_window_threshold() -> None:

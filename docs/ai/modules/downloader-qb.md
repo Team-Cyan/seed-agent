@@ -35,6 +35,9 @@ support policy.
   can infer source-site hints when tags or SQLite evidence are missing,
 - expose joined operator evidence that links enqueue-time candidate signals with
   later qB runtime outcomes in `review`, `daily-report`, and prune previews,
+- refresh tracker evidence for every incomplete managed torrent regardless of
+  qB state, including manually stopped downloads; bounded batches rotate by
+  oldest tracker evidence so a fixed API budget cannot starve later torrents,
 - reconcile known active hashes that are absent from a real qB live listing into
   local missing/deleted evidence,
 - revive stale local `deleted` evidence when qB still reports the same hash as

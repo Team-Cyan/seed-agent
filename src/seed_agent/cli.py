@@ -1331,7 +1331,10 @@ def schedule_run(
             ttl_seconds=scheduler.lease_ttl_minutes * 60,
         )
         interval_minutes = scheduler.interval_minutes
-        min_free_window_minutes = scheduler.min_free_window_minutes
+        min_free_window_minutes = _schedule_free_window_safety_minutes(
+            interval_minutes=interval_minutes,
+            configured_minutes=scheduler.min_free_window_minutes,
+        )
         require_known_free_window = scheduler.require_known_free_window
         prune = scheduler.prune_enabled
         tracker_backfill = scheduler.tracker_backfill_enabled
@@ -1406,7 +1409,7 @@ def schedule_run(
                 prune_payload = _prune_payload(
                     config,
                     execute=execute,
-                    free_window_min_remaining_minutes=interval_minutes,
+                    free_window_min_remaining_minutes=min_free_window_minutes,
                     completed_low_upload_requires_reclamation=True,
                 )
                 payload["prune"] = prune_payload
@@ -1520,7 +1523,7 @@ def schedule_run(
                 prune_payload = _prune_payload(
                     config,
                     execute=execute,
-                    free_window_min_remaining_minutes=interval_minutes,
+                    free_window_min_remaining_minutes=min_free_window_minutes,
                     completed_low_upload_requires_reclamation=True,
                     **(
                         {"unknown_free_risk_hashes": unresolved_risk_hashes}
@@ -2758,6 +2761,15 @@ def _write_heartbeat(
     )
 
 
+def _schedule_free_window_safety_minutes(
+    *,
+    interval_minutes: int,
+    configured_minutes: int | None,
+) -> int:
+    """Keep enough freeleech time to survive one delayed scheduler cycle."""
+    return max(configured_minutes or 0, interval_minutes * 2)
+
+
 def _heartbeat_status(
     heartbeat_file: Path,
     *,
@@ -3226,17 +3238,45 @@ def _qb_only_backfill_targets(
         rows = store.list_by_torrent_hash(torrent.hash)
         if not rows:
             continue
-        if any(row.get("site") != "qb" for row in rows):
+        amount_left = int(torrent.metadata.get("amount_left_bytes", 0) or 0)
+        has_tracker_evidence = any(row.get("site") != "qb" for row in rows)
+        if amount_left <= 0 and has_tracker_evidence:
             continue
         targets.append(torrent)
-    targets.sort(key=_qb_only_backfill_priority)
+    targets.sort(key=lambda torrent: _qb_only_backfill_priority(store, torrent))
     return targets
 
 
-def _qb_only_backfill_priority(torrent: ManagedTorrent) -> tuple[int, int, datetime, str]:
+def _qb_only_backfill_priority(
+    store: StateStore,
+    torrent: ManagedTorrent,
+) -> tuple[int, datetime, int, datetime, str]:
     risk = _qb_only_unknown_free_risk(torrent)
     amount_left = int(torrent.metadata.get("amount_left_bytes", 0) or 0)
-    return (-risk, -amount_left, torrent.added_at, torrent.name)
+    return (
+        -risk,
+        _tracker_evidence_updated_at(store, torrent.hash),
+        -amount_left,
+        torrent.added_at,
+        torrent.name,
+    )
+
+
+def _tracker_evidence_updated_at(store: StateStore, torrent_hash: str) -> datetime:
+    rows = [
+        row
+        for row in store.list_by_torrent_hash(torrent_hash)
+        if row.get("site") != "qb" and row.get("updated_at")
+    ]
+    parsed: list[datetime | None] = []
+    for row in rows:
+        try:
+            value = datetime.fromisoformat(str(row["updated_at"]).replace("Z", "+00:00"))
+        except ValueError:
+            value = None
+        parsed.append(value)
+    known = [value for value in parsed if value is not None]
+    return max(known, default=datetime.min.replace(tzinfo=UTC))
 
 
 def _qb_only_unknown_free_risk(torrent: ManagedTorrent) -> int:

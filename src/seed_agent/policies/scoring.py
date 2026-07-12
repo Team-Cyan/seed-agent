@@ -85,6 +85,15 @@ def _score_discount(
 ) -> _ComponentScore:
     weight = scoring.weights["discount"]
     discount = candidate.discount
+    if not discovery.allow_non_free and discount not in {
+        Discount.FREE,
+        Discount.TWO_X_FREE,
+    }:
+        return _ComponentScore(
+            0.0,
+            f"discount {discount.value} rejected by free-only policy",
+            True,
+        )
     if discount in discovery.discounts:
         return _ComponentScore(weight, f"discount {discount.value} accepted")
     if discount in {Discount.HALF, Discount.TWO_X_HALF}:
