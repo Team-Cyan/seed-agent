@@ -41,6 +41,11 @@ On the reference Unraid deployment, qBittorrent and Plex use `PUID=1000` and
 `PGID=100`; the seed-agent DockerMan template uses the same values so mounted
 appdata remains writable without running the application as root.
 
+M-Team search, detail, and token requests share a per-process minimum request
+interval. `SEED_AGENT_MTEAM_MIN_REQUEST_INTERVAL_SECONDS` defaults to `1`; do
+not reduce it on unattended deployments without a bounded live probe. Web and
+scheduler processes use independent limiters.
+
 Both variables must be configured together. Existing DockerMan installations
 that predate these template fields and provide neither variable retain their
 legacy container user until the operator adds matching IDs; this avoids making

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import hmac
+import os
+import threading
 import time
 import uuid
 from collections.abc import Awaitable, Callable
@@ -23,6 +26,9 @@ DownloadUrlFetcher = Callable[[str], Awaitable[str | None]]
 DEFERRED_DOWNLOAD_URL_PREFIX = "mteam-api://torrent/"
 MTEAM_RATE_LIMIT_MARKERS = ("請求過於頻繁", "请求过于频繁")
 MTEAM_LOCAL_TIMEZONE = ZoneInfo("Asia/Shanghai")
+MTEAM_MIN_REQUEST_INTERVAL_ENV = "SEED_AGENT_MTEAM_MIN_REQUEST_INTERVAL_SECONDS"
+_MTEAM_REQUEST_LOCK = threading.Lock()
+_MTEAM_LAST_REQUEST_AT = 0.0
 
 
 class MTeamApiResponseError(RuntimeError):
@@ -97,12 +103,18 @@ class MTeamApiClient:
         api_key_header: str = "x-api-key",
         visitor_id: str | None = None,
         timeout: float = 8.0,
+        min_request_interval_seconds: float | None = None,
     ) -> None:
         self.cookie = cookie
         self.api_key = api_key
         self.api_key_header = api_key_header
         self.visitor_id = visitor_id or str(uuid.uuid4())
         self.timeout = timeout
+        self.min_request_interval_seconds = (
+            _mteam_min_request_interval_seconds()
+            if min_request_interval_seconds is None
+            else max(float(min_request_interval_seconds), 0.0)
+        )
 
     async def discover_torrents(
         self,
@@ -143,6 +155,7 @@ class MTeamApiClient:
         options: MTeamApiDiscoveryOptions,
     ) -> list[TorrentCandidate]:
         candidates: list[TorrentCandidate] = []
+        await self._wait_for_request_slot()
         response = await client.post(
             f"{self.API_BASE_URL}/torrent/search",
             headers={
@@ -205,6 +218,7 @@ class MTeamApiClient:
         }
 
         async with httpx.AsyncClient(follow_redirects=True, timeout=self.timeout) as client:
+            await self._wait_for_request_slot()
             response = await client.get(
                 f"{self.API_BASE_URL}/torrent/detail",
                 params=params,
@@ -231,6 +245,7 @@ class MTeamApiClient:
         }
 
         async with httpx.AsyncClient(follow_redirects=True, timeout=self.timeout) as client:
+            await self._wait_for_request_slot()
             response = await client.post(
                 f"{self.API_BASE_URL}/torrent/detail",
                 params={"id": torrent_id},
@@ -261,6 +276,7 @@ class MTeamApiClient:
         }
 
         async with httpx.AsyncClient(follow_redirects=True, timeout=self.timeout) as client:
+            await self._wait_for_request_slot()
             response = await client.post(
                 f"{self.API_BASE_URL}/torrent/genDlToken",
                 headers=headers,
@@ -285,6 +301,14 @@ class MTeamApiClient:
         if not isinstance(data, str):
             return None
         return data.strip() or None
+
+    async def _wait_for_request_slot(self) -> None:
+        if self.min_request_interval_seconds <= 0:
+            return
+        await asyncio.to_thread(
+            _wait_for_mteam_request_slot,
+            self.min_request_interval_seconds,
+        )
 
     async def _candidate_from_search_row(
         self, site: str, row: dict[str, Any]
@@ -804,3 +828,20 @@ def _parse_api_datetime(value: Any) -> datetime | None:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=MTEAM_LOCAL_TIMEZONE)
     return dt.astimezone(UTC)
+
+
+def _mteam_min_request_interval_seconds() -> float:
+    raw = os.getenv(MTEAM_MIN_REQUEST_INTERVAL_ENV, "1.0").strip()
+    try:
+        return max(float(raw), 0.0)
+    except ValueError:
+        return 1.0
+
+
+def _wait_for_mteam_request_slot(interval_seconds: float) -> None:
+    global _MTEAM_LAST_REQUEST_AT
+    with _MTEAM_REQUEST_LOCK:
+        remaining = interval_seconds - (time.monotonic() - _MTEAM_LAST_REQUEST_AT)
+        if remaining > 0:
+            time.sleep(remaining)
+        _MTEAM_LAST_REQUEST_AT = time.monotonic()

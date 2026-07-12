@@ -37,6 +37,27 @@ def test_parse_api_datetime_preserves_explicit_offset() -> None:
     assert parsed.isoformat() == "2026-07-12T09:22:00+00:00"
 
 
+def test_process_wide_request_slot_enforces_minimum_spacing(monkeypatch) -> None:
+    from seed_agent.sites import mteam
+
+    clock = [10.0]
+    sleeps: list[float] = []
+
+    def fake_sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+        clock[0] += seconds
+
+    monkeypatch.setattr(mteam.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(mteam.time, "sleep", fake_sleep)
+    monkeypatch.setattr(mteam, "_MTEAM_LAST_REQUEST_AT", 9.5)
+
+    mteam._wait_for_mteam_request_slot(1.0)
+    mteam._wait_for_mteam_request_slot(1.0)
+
+    assert sleeps == [0.5, 1.0]
+    assert mteam._MTEAM_LAST_REQUEST_AT == 11.5
+
+
 def _candidate(**overrides: object) -> TorrentCandidate:
     data: dict[str, object] = {
         "site": "mt",

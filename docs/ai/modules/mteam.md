@@ -53,6 +53,10 @@ Current fallback still present in code:
 - Do not delete the RSS path. It remains useful for fallback and for other sites.
 - Do not reintroduce browser-login assumptions into the main flow.
 - Treat M-Team API key as the long-term preferred authenticated path.
+- All M-Team API clients within one process share a request-start interval. The
+  default is one second and can be tuned with
+  `SEED_AGENT_MTEAM_MIN_REQUEST_INTERVAL_SECONDS`; keep it conservative. Web
+  and scheduler processes intentionally maintain separate limiters.
 - Treat timezone-naive M-Team API date strings as `Asia/Shanghai`; convert them
   to UTC before calculating or persisting free-window time.
 - Keep API discovery cheap: search/detail calls may run during discovery and

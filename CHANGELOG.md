@@ -4,6 +4,15 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.18.5 - 2026-07-12
+
+### Fixed
+
+- Serialize all M-Team API request starts across client instances within each
+  process with a minimum interval of one second. Search, detail refresh, and
+  download-token generation now share the same conservative rate guard, while
+  Web and scheduler processes keep independent limits.
+
 ## 0.18.4 - 2026-07-12
 
 ### Fixed

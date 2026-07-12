@@ -282,6 +282,9 @@ by completion period, and unfinished work is ordered by current priority.
   - M-Team timezone-naive promotion timestamps are interpreted as
     `Asia/Shanghai`, and qB rows retain candidate evidence through tracker-ID
     reconciliation even when their content-root names differ.
+  - Search, detail, and token API calls share a per-process one-second minimum
+    request interval to reduce burst-driven tracker throttling; Web and scheduler
+    processes remain independently limited.
 
 - Next P0 - Complete the live Unraid release gate
   - Current read-only qB evidence shows the physical disk is overcommitted even
