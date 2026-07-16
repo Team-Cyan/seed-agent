@@ -1,6 +1,7 @@
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+from seed_agent.actions.intent import add_intent
 from seed_agent.models import LifecycleState, ManagedTorrent
 from seed_agent.state import StateStore
 
@@ -653,6 +654,12 @@ def test_state_store_site_history_scores_join_runtime_and_tracker_signals(
         until=(datetime.now(UTC) + timedelta(hours=1)).isoformat(),
         reason="rate limited",
     )
+    store.set_tracker_backoff(
+        site="demo",
+        endpoint="torrent/detail",
+        until=(datetime.now(UTC) - timedelta(hours=1)).isoformat(),
+        reason="expired rate limit",
+    )
 
     history = store.site_history_scores(min_samples=3)
 
@@ -831,3 +838,58 @@ def test_scheduler_lease_rejects_second_owner_and_allows_expired_takeover(
     assert store.release_scheduler_lease("owner-a") is False
     assert store.release_scheduler_lease("owner-b") is True
     assert store.get_scheduler_lease() is None
+
+
+def test_intent_enqueue_claim_blocks_parallel_owner_and_commits_atomically(
+    tmp_path: Path,
+) -> None:
+    store = StateStore(tmp_path / "state.sqlite3")
+    intent, _ = add_intent("Inception 2010 1080p", store)
+    now = datetime(2026, 7, 13, tzinfo=UTC)
+
+    first = store.acquire_intent_enqueue_claim(
+        intent.intent_id,
+        "release-a",
+        "owner-a",
+        ttl_seconds=60,
+        now=now,
+    )
+    blocked = store.acquire_intent_enqueue_claim(
+        intent.intent_id,
+        "release-a",
+        "owner-b",
+        ttl_seconds=60,
+        now=now + timedelta(seconds=30),
+    )
+    takeover = store.acquire_intent_enqueue_claim(
+        intent.intent_id,
+        "release-a",
+        "owner-b",
+        ttl_seconds=60,
+        now=now + timedelta(seconds=61),
+    )
+
+    assert first["acquired"] is True
+    assert blocked["acquired"] is False
+    assert blocked["status"] == "in_progress"
+    assert takeover["acquired"] is True
+    assert store.complete_intent_enqueue_claim(
+        intent.intent_id,
+        "release-a",
+        "owner-b",
+    )
+    row = store.get_intent(intent.intent_id)
+    assert row is not None
+    assert row["state"] == "enqueued"
+    assert row["selected_release_id"] == "release-a"
+
+    already_enqueued = store.acquire_intent_enqueue_claim(
+        intent.intent_id,
+        "release-a",
+        "owner-c",
+    )
+    assert already_enqueued == {
+        "acquired": False,
+        "status": "already_enqueued",
+        "selected_release_id": "release-a",
+    }

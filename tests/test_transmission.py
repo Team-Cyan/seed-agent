@@ -26,9 +26,7 @@ async def test_transmission_add_url_retries_with_session_id_and_labels() -> None
             json={
                 "result": "success",
                 "arguments": {
-                    "torrent-added": {
-                        "hashString": "0123456789abcdef0123456789abcdef01234567"
-                    }
+                    "torrent-added": {"hashString": "0123456789abcdef0123456789abcdef01234567"}
                 },
             },
         )
@@ -122,6 +120,105 @@ async def test_transmission_list_torrents_maps_and_filters_labels() -> None:
             },
         )
     ]
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_transmission_category_resolution_requires_explicit_or_unique_policy_label() -> None:
+    respx.post("https://tr.example/transmission/rpc").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "result": "success",
+                "arguments": {
+                    "torrents": [
+                        {
+                            "hashString": "ambiguous",
+                            "name": "Ambiguous",
+                            "labels": ["tv", "seed", "seed-agent"],
+                            "status": 6,
+                            "addedDate": 1700000000,
+                        },
+                        {
+                            "hashString": "movie",
+                            "name": "Movie",
+                            "labels": ["movie", "mteam", "seed-agent"],
+                            "status": 6,
+                            "addedDate": 1700000000,
+                        },
+                        {
+                            "hashString": "unknown",
+                            "name": "Unknown",
+                            "labels": ["archive", "seed-agent"],
+                            "status": 6,
+                            "addedDate": 1700000000,
+                        },
+                    ]
+                },
+            },
+        )
+    )
+    client = TransmissionClient("https://tr.example")
+
+    categorized = await client.list_torrents(known_policy_categories={"seed", "movie", "tv"})
+    without_policy_context = await client.list_torrents()
+    explicitly_requested = await client.list_torrents(
+        category="tv",
+        known_policy_categories={"seed", "movie", "tv"},
+    )
+
+    assert {torrent.hash: torrent.category for torrent in categorized} == {
+        "ambiguous": None,
+        "movie": "movie",
+        "unknown": None,
+    }
+    assert all(torrent.category is None for torrent in without_policy_context)
+    assert [(torrent.hash, torrent.category) for torrent in explicitly_requested] == [
+        ("ambiguous", "tv")
+    ]
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_transmission_emits_only_provable_cleanup_metadata() -> None:
+    respx.post("https://tr.example/transmission/rpc").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "result": "success",
+                "arguments": {
+                    "torrents": [
+                        {
+                            "hashString": "protected",
+                            "name": "Protected",
+                            "labels": ["seed", "seed-agent", "H&R", "manual"],
+                            "status": 6,
+                            "addedDate": 1700000000,
+                            "downloadDir": "/mnt/user/media/movies",
+                        },
+                        {
+                            "hashString": "unproven",
+                            "name": "Unproven",
+                            "labels": ["seed", "seed-agent", "manual-copy"],
+                            "status": 6,
+                            "addedDate": 1700000000,
+                            "downloadDir": "/mnt/user/downloads/movies.tmp",
+                        },
+                    ]
+                },
+            },
+        )
+    )
+    client = TransmissionClient("https://tr.example")
+
+    torrents = await client.list_torrents(category="seed")
+
+    assert torrents[0].metadata["hr"] is True
+    assert torrents[0].metadata["manual"] is True
+    assert torrents[0].metadata["media_library"] is True
+    assert "hr" not in torrents[1].metadata
+    assert "manual" not in torrents[1].metadata
+    assert "media_library" not in torrents[1].metadata
 
 
 @pytest.mark.asyncio

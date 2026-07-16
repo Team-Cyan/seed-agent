@@ -86,7 +86,7 @@ Expose the operator-facing command surface and safe summaries.
   bounded `--tracker-backfill-limit` and `--tracker-backfill-max-api-requests`
   controls,
 - scheduled PT enqueue can run one capacity-pressure prune when accepted
-  candidates would otherwise be added paused by runtime gates. That pass uses
+  candidates would otherwise be rejected by runtime gates. That pass uses
   forced space reclamation, refreshes qB state afterward, and recomputes enqueue
   batches before adding,
 - stronger prune previews that include live torrent identity, linked candidate
@@ -117,12 +117,13 @@ Expose the operator-facing command surface and safe summaries.
 - keep site discovery warnings visible in both full JSON payloads and
   `schedule-run` summaries so transient tracker errors are diagnosable without
   forcing a container restart,
-- keep enqueue-like commands aligned on runtime gate reporting so paused-add
-  decisions expose both `enqueue_paused_by_pool_policy` and
-  `enqueue_paused_reasons`,
+- keep enqueue-like commands aligned on runtime gate reporting so rejected
+  decisions expose `enqueue_blocked_by_runtime_gate` and
+  `enqueue_blocked_reasons`; the legacy paused-policy flag remains `false`
+  during compatibility migration,
 - when remaining-download caps are configured, plan enqueue batches by score so
   higher-scoring candidates get the available active-download headroom before
-  lower-scoring candidates are added paused,
+  lower-scoring candidates are rejected before qB is called,
 - exclude zero-progress stopped download placeholders from active download
   liability so old paused queue entries do not block fresh high-priority work,
 - preview and enforce risky free-window decisions consistently when the free

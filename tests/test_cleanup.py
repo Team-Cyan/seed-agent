@@ -125,9 +125,7 @@ def test_currently_uploading_torrent_is_kept_even_with_stale_no_upload_marker() 
             metadata={
                 "upspeed_bps": 1024,
                 "recent_upload_gb": 0,
-                "no_upload_since_at": (
-                    datetime.now(UTC) - timedelta(hours=12)
-                ).isoformat(),
+                "no_upload_since_at": (datetime.now(UTC) - timedelta(hours=12)).isoformat(),
             },
         ),
         _cleanup(delete_after_no_upload_hours=2),
@@ -207,7 +205,7 @@ def test_protects_hr_manual_and_media_library_when_configured(
     assert reason_fragment in decision.reason.lower()
 
 
-def test_keeps_stopped_completed_seed_after_pause_delay() -> None:
+def test_hard_capacity_deletes_stopped_completed_seed_regardless_of_age() -> None:
     from seed_agent.policies.cleanup import classify_cleanup
 
     now = datetime.now(UTC)
@@ -223,8 +221,48 @@ def test_keeps_stopped_completed_seed_after_pause_delay() -> None:
         space_reclamation_required=True,
     )
 
-    assert decision.action == "keep"
-    assert "completed seed" in decision.reason
+    assert decision.action == "delete"
+    assert decision.capacity_reclamation is True
+
+
+@pytest.mark.parametrize("protection_flag", ["hr", "manual", "media_library"])
+def test_hard_capacity_overrides_mutable_retention_protection(
+    protection_flag: str,
+) -> None:
+    from seed_agent.policies.cleanup import classify_cleanup
+
+    decision = classify_cleanup(
+        _torrent(metadata={protection_flag: True, "upspeed_bps": 1024}),
+        _cleanup(),
+        managed_category="pt-auto",
+        managed_tags={"seed-agent", "pt-auto"},
+        space_reclamation_required=True,
+    )
+
+    assert decision.action == "delete"
+    assert decision.capacity_reclamation is True
+
+
+@pytest.mark.parametrize("state", ["error", "missingFiles", "unknown"])
+def test_broken_incomplete_managed_torrent_is_deleted_without_capacity_pressure(
+    state: str,
+) -> None:
+    from seed_agent.policies.cleanup import classify_cleanup
+
+    decision = classify_cleanup(
+        _torrent(
+            state=state,
+            downloaded_bytes=5 * 1024**3,
+            completed_at=None,
+            metadata={"amount_left_bytes": 5 * 1024**3},
+        ),
+        _cleanup(),
+        managed_category="pt-auto",
+        managed_tags={"seed-agent", "pt-auto"},
+    )
+
+    assert decision.action == "delete"
+    assert "broken incomplete" in decision.reason
 
 
 def test_keeps_stopped_managed_torrent_when_space_reclamation_is_not_required() -> None:
@@ -269,7 +307,7 @@ def test_keeps_active_seed_while_no_upload_observation_window_is_young() -> None
     assert "completed seed" in decision.reason
 
 
-def test_keeps_active_seed_after_no_upload_observation_window() -> None:
+def test_hard_capacity_deletes_recent_non_uploading_completed_seed() -> None:
     from seed_agent.policies.cleanup import classify_cleanup
 
     now = datetime.now(UTC)
@@ -289,8 +327,8 @@ def test_keeps_active_seed_after_no_upload_observation_window() -> None:
         space_reclamation_required=True,
     )
 
-    assert decision.action == "keep"
-    assert "completed seed" in decision.reason
+    assert decision.action == "delete"
+    assert "hard pool capacity" in decision.reason
 
 
 def test_deletes_incomplete_torrent_when_free_window_expires_before_next_check() -> None:
@@ -326,6 +364,31 @@ def test_deletes_incomplete_torrent_when_discount_is_confirmed_non_free() -> Non
             metadata={
                 "amount_left_bytes": 5 * 1024**3,
                 "discount": "normal",
+            },
+        ),
+        _cleanup(),
+        managed_category="pt-auto",
+        managed_tags={"seed-agent", "pt-auto"},
+    )
+
+    assert decision.action == "delete"
+    assert "confirmed non-free" in decision.reason
+
+
+@pytest.mark.parametrize("protection_flag", ["hr", "manual", "media_library"])
+def test_incomplete_billing_risk_overrides_retention_protection(
+    protection_flag: str,
+) -> None:
+    from seed_agent.policies.cleanup import classify_cleanup
+
+    decision = classify_cleanup(
+        _torrent(
+            state="downloading",
+            completed_at=None,
+            metadata={
+                "amount_left_bytes": 5 * 1024**3,
+                "discount": "normal",
+                protection_flag: True,
             },
         ),
         _cleanup(),
@@ -512,7 +575,7 @@ def test_keeps_completed_seed_with_enough_total_upload_when_policy_enabled() -> 
     assert "completed seed" in decision.reason
 
 
-def test_keeps_cold_completed_seed_when_space_reclamation_is_required() -> None:
+def test_deletes_cold_completed_seed_when_hard_capacity_requires_space() -> None:
     from seed_agent.policies.cleanup import classify_cleanup
 
     now = datetime.now(UTC)
@@ -531,8 +594,8 @@ def test_keeps_cold_completed_seed_when_space_reclamation_is_required() -> None:
         space_reclamation_required=True,
     )
 
-    assert decision.action == "keep"
-    assert "completed seed" in decision.reason
+    assert decision.action == "delete"
+    assert decision.capacity_reclamation is True
 
 
 def test_deletes_incomplete_zero_upload_torrent_after_observation_window() -> None:
@@ -557,7 +620,7 @@ def test_deletes_incomplete_zero_upload_torrent_after_observation_window() -> No
     )
 
     assert decision.action == "delete"
-    assert "zero total upload" in decision.reason
+    assert "hard pool capacity" in decision.reason
 
 
 def test_keeps_zero_upload_torrent_when_space_reclamation_is_not_required() -> None:

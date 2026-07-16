@@ -93,6 +93,10 @@ page labels.
 - `max_total_amount_left_gb`
 - `min_free_disk_gb`
 
+`pt_filters.allow_non_free` belongs only to PT upload-farming discovery and
+enqueue. Want List acquisition is intentionally independent and may enqueue a
+paid release for a requested work, subject to its category and capacity gates.
+
 `pt_scoring`
 
 - `min_score_to_enqueue`
@@ -117,6 +121,8 @@ page labels.
 - `category_policies[].budget_pool`
 - `category_policies[].delete_enabled`
 - `category_policies[].over_budget_behavior`
+  - Current value is `reject`. Legacy `add_paused` input is migrated while
+    loading, and newly saved YAML emits `reject`.
 - `category_policies[].tags`
 - `budget_pools[].name`
 - `budget_pools[].max_size_tib`
@@ -130,6 +136,8 @@ page labels.
 - `protect_media_library`
 - `delete_after_no_upload_hours`
 - `max_capacity_deletes_per_run`
+  - Applies only to non-hard-cap reclamation. A mutable pool already above
+    `max_size_tib` bypasses this limit and converges in the same prune run.
 - `delete_completed_low_upload_after_hours`
 - `completed_low_upload_min_ratio`
 - `completed_low_upload_min_gb`
@@ -192,6 +200,7 @@ page labels.
 `scheduler`
 
 - `interval_minutes`
+- `capacity_guard_interval_seconds`
 - `min_free_window_minutes`
 - `require_known_free_window`
 - `prune_enabled`
@@ -240,6 +249,14 @@ page labels.
 - `selected_release_id`
 - `created_at`
 - `updated_at`
+
+`intent_enqueue_claims`
+
+- `intent_id`
+- `release_id`
+- `owner_id`
+- `acquired_at`
+- `expires_at`
 
 `release_candidates`
 

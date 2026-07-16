@@ -104,7 +104,7 @@ def _phase2_data() -> dict[str, object]:
                 "douban_wanted": {
                     "enabled": False,
                     "export_ref": "local/inbox/douban-wanted.json",
-                    "user_name": "LancerC",
+                    "user_name": "example-user",
                     "max_pages": 2,
                 },
                 "want_lists": [
@@ -113,7 +113,7 @@ def _phase2_data() -> dict[str, object]:
                         "id": "douban-me",
                         "label": "我",
                         "enabled": True,
-                        "user_name": "LancerC",
+                        "user_name": "example-user",
                         "max_pages": 2,
                     },
                     {
@@ -157,7 +157,7 @@ def test_phase2_config_accepts_intent_search_and_source_sections() -> None:
     }
     assert config.want_sources.telegram.secret_ref == "local/secrets/telegram.yaml"
     assert config.want_sources.douban_wanted.export_ref == "local/inbox/douban-wanted.json"
-    assert config.want_sources.douban_wanted.user_name == "LancerC"
+    assert config.want_sources.douban_wanted.user_name == "example-user"
     assert config.want_sources.douban_wanted.max_pages == 2
     assert config.want_sources.want_lists[0].provider == "douban"
     assert config.want_sources.want_lists[0].id == "douban-me"
@@ -265,14 +265,14 @@ want_sources:
   douban_wanted:
     enabled: false
     export_ref: local/inbox/douban-wanted.json
-    user_name: LancerC
+    user_name: example-user
     max_pages: 2
   want_lists:
     - provider: douban
       id: douban-me
       label: 我
       enabled: true
-      user_name: LancerC
+      user_name: example-user
       max_pages: 2
     - provider: imdb
       id: imdb-weekend
@@ -297,7 +297,7 @@ want_sources:
     assert config.want_decision.default_resolution == "1080p"
     assert config.release_preferences.site_priority["demo-free"] == 10
     assert config.release_preferences.quality_tag_scores == {"remux": 20, "webdl": -10}
-    assert config.want_sources.douban_wanted.user_name == "LancerC"
+    assert config.want_sources.douban_wanted.user_name == "example-user"
     assert config.want_sources.douban_wanted.max_pages == 2
     assert config.want_sources.want_lists[0].provider == "douban"
     assert config.want_sources.want_lists[1].provider == "imdb"

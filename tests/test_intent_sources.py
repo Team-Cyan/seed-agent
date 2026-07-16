@@ -180,14 +180,14 @@ def test_douban_wanted_parses_public_wish_html() -> None:
     </div>
     """
 
-    events = parse_douban_wish_html(html, user_name="LancerC")
+    events = parse_douban_wish_html(html, user_name="example-user")
 
     assert len(events) == 1
     assert events[0].source == IntentSource.DOUBAN_WANTED
     assert events[0].raw_text == "请以你的名字呼唤我 Call Me by Your Name 2017"
     assert events[0].source_event_id == "douban:26799731"
     assert events[0].metadata["source_adapter"] == "douban_wanted_public"
-    assert events[0].metadata["douban_user_name"] == "LancerC"
+    assert events[0].metadata["douban_user_name"] == "example-user"
     assert events[0].metadata["url"] == "https://movie.douban.com/subject/26799731/"
     assert events[0].metadata["media_type"] == "movie"
     assert events[0].metadata["external_ids"] == {"douban": "26799731"}
@@ -212,7 +212,7 @@ def test_douban_wanted_infers_anime_and_show_media_types() -> None:
     </div>
     """
 
-    events = parse_douban_wish_html(html, user_name="LancerC")
+    events = parse_douban_wish_html(html, user_name="example-user")
 
     assert [event.metadata["media_type"] for event in events] == ["anime", "tv"]
 
@@ -232,15 +232,15 @@ def test_douban_wanted_fetches_configured_user_pages() -> None:
         """
 
     events = fetch_douban_wanted_user(
-        "LancerC",
+        "example-user",
         max_pages=2,
         fetcher=fake_fetch,
         enrich_subjects=False,
     )
 
     assert calls == [
-        "https://movie.douban.com/people/LancerC/wish?start=0",
-        "https://movie.douban.com/people/LancerC/wish?start=15",
+        "https://movie.douban.com/people/example-user/wish?start=0",
+        "https://movie.douban.com/people/example-user/wish?start=15",
     ]
     assert [event.raw_text for event in events] == ["暴风 2023"]
 
@@ -261,11 +261,11 @@ def test_douban_wanted_fetches_subject_page_to_refine_tv_media_type() -> None:
         </div>
         """
 
-    events = fetch_douban_wanted_user("LancerC", max_pages=1, fetcher=fake_fetch)
+    events = fetch_douban_wanted_user("example-user", max_pages=1, fetcher=fake_fetch)
 
     assert events[0].metadata["media_type"] == "tv"
     assert calls == [
-        "https://movie.douban.com/people/LancerC/wish?start=0",
+        "https://movie.douban.com/people/example-user/wish?start=0",
         "https://m.douban.com/movie/subject/33404425/",
     ]
 
@@ -283,7 +283,7 @@ def test_douban_wanted_enriches_subject_imdb_id() -> None:
         </div>
         """
 
-    events = fetch_douban_wanted_user("LancerC", max_pages=1, fetcher=fake_fetch)
+    events = fetch_douban_wanted_user("example-user", max_pages=1, fetcher=fake_fetch)
 
     assert events[0].metadata["external_ids"] == {
         "douban": "1292052",
@@ -381,9 +381,9 @@ def test_letterboxd_watchlist_parses_csv_export() -> None:
 
 
 def test_build_douban_wish_url_accepts_profile_url_or_user_name() -> None:
-    assert build_douban_wish_url("LancerC", start=15) == (
-        "https://movie.douban.com/people/LancerC/wish?start=15"
+    assert build_douban_wish_url("example-user", start=15) == (
+        "https://movie.douban.com/people/example-user/wish?start=15"
     )
-    assert build_douban_wish_url("https://www.douban.com/people/LancerC/", start=0) == (
-        "https://movie.douban.com/people/LancerC/wish?start=0"
+    assert build_douban_wish_url("https://www.douban.com/people/example-user/", start=0) == (
+        "https://movie.douban.com/people/example-user/wish?start=0"
     )

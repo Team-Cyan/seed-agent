@@ -17,6 +17,7 @@ from seed_agent.models import (
     ScoreBreakdown,
     TorrentCandidate,
 )
+from seed_agent.policies.category_policy import PoolUsage
 from seed_agent.state import StateStore
 
 _HELP_ENV = {"COLUMNS": "160", "GITHUB_ACTIONS": ""}
@@ -123,6 +124,50 @@ def _scored(**overrides: object) -> ScoreBreakdown:
     }
     data.update(overrides)
     return ScoreBreakdown(**data)
+
+
+def test_pt_batch_rejects_large_candidate_without_blocking_smaller_fit() -> None:
+    from seed_agent.cli import _enqueue_candidate_batches
+
+    config = _config()
+    max_size_bytes = 10 * 1024**4
+    pool_usage = PoolUsage(
+        pool_name="downloads",
+        size_bytes=max_size_bytes - 6 * 1024**3,
+        max_size_bytes=max_size_bytes,
+    )
+    large = _scored(
+        score=100,
+        candidate=_candidate(
+            title="Large paused candidate",
+            source_url="https://tracker.example/details.php?id=large",
+            download_url="https://tracker.example/download.php?id=large",
+            size_bytes=10 * 1024**3,
+        ),
+    )
+    small = _scored(
+        score=90,
+        candidate=_candidate(
+            title="Small candidate after paused liability",
+            source_url="https://tracker.example/details.php?id=small",
+            download_url="https://tracker.example/download.php?id=small",
+            size_bytes=1024**3,
+        ),
+    )
+
+    batches = _enqueue_candidate_batches(
+        [small, large],
+        config,
+        [],
+        pool_usage,
+        None,
+    )
+
+    assert len(batches) == 2
+    assert batches[0] == ([small], False, [])
+    assert batches[1][0] == [large]
+    assert batches[1][1] is True
+    assert "budget pool downloads capacity reserved" in batches[1][2][0]
 
 
 def test_apply_free_window_safety_allows_mteam_unlimited_window() -> None:
@@ -302,9 +347,7 @@ def test_live_reconciliation_links_unlinked_candidate_by_tracker_tid(
         torrent_hash=None,
         discount="free",
     )
-    credential = base64.b64encode(
-        b"sign=abc&t=1783531016&tid=1206069&uid=305694"
-    ).decode()
+    credential = base64.b64encode(b"sign=abc&t=1783531016&tid=1206069&uid=305694").decode()
     torrent = _managed_incomplete_torrent(
         hash="live-hash",
         name="Renamed qB Content Root",
@@ -318,9 +361,7 @@ def test_live_reconciliation_links_unlinked_candidate_by_tracker_tid(
 
     assert result["linked_existing_candidates"] == 1
     rows = store.list_by_torrent_hash("live-hash")
-    assert [row["stable_id"] for row in rows] == [
-        "mteam:https://kp.m-team.cc/detail/1206069"
-    ]
+    assert [row["stable_id"] for row in rows] == ["mteam:https://kp.m-team.cc/detail/1206069"]
 
 
 @pytest.mark.asyncio
@@ -868,33 +909,36 @@ def test_schedule_run_uses_yaml_scheduler_defaults(
 def test_scheduled_intent_search_runs_once_after_daily_hour() -> None:
     from seed_agent import cli
 
-    assert cli._scheduled_intent_search_due(
-        datetime(2026, 7, 3, 0, 15),
-    ) is True
-    assert cli._scheduled_intent_search_due(
-        datetime(2026, 7, 3, 1, 0),
-        last_search_at=datetime(2026, 7, 3, 0, 15),
-    ) is False
-    assert cli._scheduled_intent_search_due(
-        datetime(2026, 7, 3, 22, 0), hour=23
-    ) is False
-    assert cli._scheduled_intent_search_due(
-        datetime(2026, 7, 3, 23, 30),
-        hour=23,
-        last_search_at=datetime(2026, 7, 2, 23, 45),
-    ) is True
-    assert cli._scheduled_intent_search_due(
-        datetime(2026, 7, 3, 1, 0), mode="every_cycle"
-    ) is True
+    assert (
+        cli._scheduled_intent_search_due(
+            datetime(2026, 7, 3, 0, 15),
+        )
+        is True
+    )
+    assert (
+        cli._scheduled_intent_search_due(
+            datetime(2026, 7, 3, 1, 0),
+            last_search_at=datetime(2026, 7, 3, 0, 15),
+        )
+        is False
+    )
+    assert cli._scheduled_intent_search_due(datetime(2026, 7, 3, 22, 0), hour=23) is False
+    assert (
+        cli._scheduled_intent_search_due(
+            datetime(2026, 7, 3, 23, 30),
+            hour=23,
+            last_search_at=datetime(2026, 7, 2, 23, 45),
+        )
+        is True
+    )
+    assert cli._scheduled_intent_search_due(datetime(2026, 7, 3, 1, 0), mode="every_cycle") is True
 
 
 def test_scheduler_status_warns_when_tracker_backfill_is_unresolved() -> None:
     from seed_agent import cli
 
     assert (
-        cli._schedule_run_status(
-            {"tracker_source_backfill": {"summary": {"not_found": 1}}}
-        )
+        cli._schedule_run_status({"tracker_source_backfill": {"summary": {"not_found": 1}}})
         == "warning"
     )
 
@@ -1110,8 +1154,10 @@ def test_schedule_run_prunes_after_tracker_backfill_network_backoff(
         free_window_min_remaining_minutes: int | None = None,
         force_space_reclamation: bool = False,
         completed_low_upload_requires_reclamation: bool = False,
+        fail_closed_unknown_incomplete: bool = False,
     ) -> dict[str, object]:
         prune_calls.append(free_window_min_remaining_minutes)
+        assert fail_closed_unknown_incomplete is True
         return {
             "command": "prune",
             "config": str(config_path_value),
@@ -1185,11 +1231,13 @@ def test_schedule_run_skips_work_while_backoff_is_active(
         free_window_min_remaining_minutes: int | None = None,
         force_space_reclamation: bool = False,
         completed_low_upload_requires_reclamation: bool = False,
+        fail_closed_unknown_incomplete: bool = False,
     ) -> dict[str, object]:
         prune_calls.append(free_window_min_remaining_minutes)
         assert execute is False
         assert force_space_reclamation is False
         assert completed_low_upload_requires_reclamation is True
+        assert fail_closed_unknown_incomplete is True
         return {
             "command": "prune",
             "config": str(config_path_value),
@@ -1606,9 +1654,7 @@ def test_intent_run_once_reports_source_warnings(
     ]
 
 
-def test_schedule_run_can_prune_each_cycle(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_schedule_run_can_prune_each_cycle(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from seed_agent import cli
 
     config_path = _config_file(tmp_path)
@@ -1830,9 +1876,169 @@ def test_schedule_run_passes_terminal_unknown_incomplete_hashes_to_prune(
 
     assert result.exit_code == 0
     assert risky_hashes == [{"risky-incomplete"}]
-    assert StateStore(tmp_path / ".seed-agent" / "state.db").list_scheduler_runs()[0][
-        "status"
-    ] == "warning"
+    assert (
+        StateStore(tmp_path / ".seed-agent" / "state.db").list_scheduler_runs()[0]["status"]
+        == "warning"
+    )
+
+
+def test_category_filtered_backfill_reconciles_against_all_live_torrents(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from seed_agent import cli
+
+    monkeypatch.chdir(tmp_path)
+    config = _config()
+    torrents = [
+        _managed_torrent(hash="seed-live", category="seed"),
+        _managed_torrent(hash="movie-live", category="movie"),
+    ]
+
+    class FakeDownloader:
+        async def list_torrents(
+            self,
+            category: str | None = None,
+            tags: set[str] | None = None,
+        ) -> list[ManagedTorrent]:
+            del category, tags
+            return torrents
+
+    reconciled_hashes: list[set[str]] = []
+    original_reconcile = StateStore.reconcile_missing_torrents
+
+    def record_reconcile(
+        self: StateStore,
+        live_hashes: set[str],
+        **kwargs: object,
+    ) -> int:
+        reconciled_hashes.append(set(live_hashes))
+        return original_reconcile(self, live_hashes, **kwargs)
+
+    monkeypatch.setattr(cli, "_maybe_build_downloader", lambda loaded: FakeDownloader())
+    monkeypatch.setattr(StateStore, "reconcile_missing_torrents", record_reconcile)
+
+    payload = cli._tracker_source_backfill_payload(
+        config,
+        execute=False,
+        limit=0,
+        category="seed",
+        max_api_requests=0,
+    )
+
+    assert reconciled_hashes == [{"seed-live", "movie-live"}]
+    assert payload["live_torrent_count"] == 1
+
+
+def test_prune_capacity_delete_limit_is_shared_across_mutable_categories(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from seed_agent import cli
+
+    monkeypatch.chdir(tmp_path)
+    raw = _config().model_dump(mode="json")
+    raw["download_client"]["category_policies"].append(
+        {
+            "name": "seed-alt",
+            "mode": "mutable",
+            "budget_pool": "downloads",
+            "delete_enabled": True,
+            "over_budget_behavior": "add_paused",
+            "tags": ["seed-agent", "seed-alt"],
+        }
+    )
+    raw["seed_cleanup"]["max_capacity_deletes_per_run"] = 1
+    config = SeedAgentConfig.model_validate(raw)
+
+    class EmptyDownloader:
+        async def list_torrents(
+            self,
+            category: str | None = None,
+            tags: set[str] | None = None,
+        ) -> list[ManagedTorrent]:
+            del category, tags
+            return []
+
+    limits: list[int | None] = []
+
+    async def fake_prune_cold_torrents(
+        torrents: list[ManagedTorrent],
+        downloader: object,
+        cleanup: object,
+        policy: object,
+        execute: bool,
+        **kwargs: object,
+    ) -> list[Decision]:
+        del torrents, downloader, cleanup, execute
+        limit = kwargs.get("capacity_delete_limit")
+        limits.append(limit if isinstance(limit, int) else None)
+        if limit == 0:
+            return []
+        return [
+            Decision(
+                action="qb.cleanup.delete",
+                target_id=str(getattr(policy, "name", "seed")),
+                execute=False,
+                reason="capacity delete",
+                old_state={"size_bytes": 1},
+                new_state={
+                    "capacity_reclamation": True,
+                    "space_reclamation_required": True,
+                },
+            )
+        ]
+
+    monkeypatch.setattr(cli, "load_config", lambda path: config)
+    monkeypatch.setattr(cli, "_maybe_build_downloader", lambda loaded: EmptyDownloader())
+    monkeypatch.setattr(cli, "prune_cold_torrents", fake_prune_cold_torrents)
+
+    payload = cli._prune_payload(tmp_path / "config.yaml", execute=False)
+
+    assert limits == [1, 0]
+    assert payload["capacity_deletes_remaining"] == 0
+
+
+def test_prune_execute_fails_closed_when_live_pool_remains_over_hard_cap(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from seed_agent import cli
+
+    monkeypatch.chdir(tmp_path)
+    config = _config()
+    torrent = ManagedTorrent(
+        hash="still-over",
+        name="Still over",
+        category="seed",
+        tags={"seed-agent", "seed"},
+        state="stalledUP",
+        size_bytes=11 * 1024**4,
+        uploaded_bytes=1,
+        downloaded_bytes=11 * 1024**4,
+        added_at=datetime.now(UTC),
+        completed_at=datetime.now(UTC),
+        last_activity_at=datetime.now(UTC),
+        metadata={"amount_left_bytes": 0},
+    )
+
+    class StaleDownloader:
+        async def list_torrents(self, category=None, tags=None):
+            return [torrent]
+
+    async def fake_prune(*args: object, **kwargs: object) -> list[Decision]:
+        return []
+
+    monkeypatch.setattr(cli, "load_config", lambda path: config)
+    monkeypatch.setattr(cli, "build_downloader", lambda loaded: StaleDownloader())
+    monkeypatch.setattr(cli, "prune_cold_torrents", fake_prune)
+
+    payload = cli._prune_payload(tmp_path / "config.yaml", execute=True)
+
+    assert payload["hard_cap_satisfied"] is False
+    assert payload["hard_cap_violations_by_pool"] == {"downloads": 1024**4}
+    assert payload["verified_committed_reclaim_by_pool"]["downloads"] == 0
+    assert "hard pool capacity invariant not satisfied" in payload["error"]
 
 
 def test_schedule_run_persists_phase_order_with_shared_run_id(
@@ -2037,10 +2243,13 @@ def test_schedule_run_prune_uses_twice_interval_as_free_window_horizon(
 def test_schedule_free_window_horizon_keeps_larger_configured_minimum() -> None:
     from seed_agent.cli import _schedule_free_window_safety_minutes
 
-    assert _schedule_free_window_safety_minutes(
-        interval_minutes=60,
-        configured_minutes=180,
-    ) == 180
+    assert (
+        _schedule_free_window_safety_minutes(
+            interval_minutes=60,
+            configured_minutes=180,
+        )
+        == 180
+    )
 
 
 def test_execute_enqueue_persists_candidate_free_window_expiry(
@@ -2086,9 +2295,7 @@ def test_execute_enqueue_persists_candidate_free_window_expiry(
     monkeypatch.setattr(cli, "resolve_deferred_download_urls", fake_resolve_deferred_download_urls)
     monkeypatch.setattr(cli, "build_downloader", lambda loaded: FakeDownloader())
 
-    result = CliRunner().invoke(
-        cli.app, ["run-once", "--config", str(config_path), "--execute"]
-    )
+    result = CliRunner().invoke(cli.app, ["run-once", "--config", str(config_path), "--execute"])
 
     assert result.exit_code == 0
     row = StateStore(state_path).get_candidate(candidate.stable_id)
@@ -2551,10 +2758,13 @@ def test_prune_execute_updates_state_to_deleted_for_cold_incomplete_torrent(
     class FakeDownloader:
         def __init__(self) -> None:
             self.calls: list[tuple[str, str, object]] = []
+            self.deleted = False
 
         async def list_torrents(
             self, category: str | None = None, tags: set[str] | None = None
         ) -> list[ManagedTorrent]:
+            if self.deleted:
+                return []
             return [_managed_incomplete_torrent(hash="abcd1234", size_bytes=11 * 1024**4)]
 
         async def pause(self, hash: str) -> None:
@@ -2562,15 +2772,14 @@ def test_prune_execute_updates_state_to_deleted_for_cold_incomplete_torrent(
 
         async def delete(self, hash: str, delete_files: bool) -> None:
             self.calls.append(("delete", hash, delete_files))
+            self.deleted = True
 
     downloader = FakeDownloader()
 
     monkeypatch.setattr(cli, "load_config", lambda path: config)
     monkeypatch.setattr(cli, "build_downloader", lambda loaded: downloader)
 
-    result = CliRunner().invoke(
-        cli.app, ["prune", "--config", str(config_path), "--execute"]
-    )
+    result = CliRunner().invoke(cli.app, ["prune", "--config", str(config_path), "--execute"])
 
     assert result.exit_code == 0
     assert downloader.calls == [("delete", "abcd1234", True)]
@@ -2602,10 +2811,13 @@ def test_prune_execute_updates_state_to_deleted_for_old_paused_incomplete_torren
     class FakeDownloader:
         def __init__(self) -> None:
             self.calls: list[tuple[str, str, object]] = []
+            self.deleted = False
 
         async def list_torrents(
             self, category: str | None = None, tags: set[str] | None = None
         ) -> list[ManagedTorrent]:
+            if self.deleted:
+                return []
             return [
                 _managed_torrent(
                     hash="abcd1234",
@@ -2625,15 +2837,14 @@ def test_prune_execute_updates_state_to_deleted_for_old_paused_incomplete_torren
 
         async def delete(self, hash: str, delete_files: bool) -> None:
             self.calls.append(("delete", hash, delete_files))
+            self.deleted = True
 
     downloader = FakeDownloader()
 
     monkeypatch.setattr(cli, "load_config", lambda path: config)
     monkeypatch.setattr(cli, "build_downloader", lambda loaded: downloader)
 
-    result = CliRunner().invoke(
-        cli.app, ["prune", "--config", str(config_path), "--execute"]
-    )
+    result = CliRunner().invoke(cli.app, ["prune", "--config", str(config_path), "--execute"])
 
     assert result.exit_code == 0
     assert downloader.calls == [("delete", "abcd1234", True)]
@@ -2666,10 +2877,13 @@ def test_prune_execute_uses_persisted_pause_timestamp_for_delete(
     class FakeDownloader:
         def __init__(self) -> None:
             self.calls: list[tuple[str, str, object]] = []
+            self.deleted = False
 
         async def list_torrents(
             self, category: str | None = None, tags: set[str] | None = None
         ) -> list[ManagedTorrent]:
+            if self.deleted:
+                return []
             return [
                 _managed_torrent(
                     hash="abcd1234",
@@ -2689,15 +2903,14 @@ def test_prune_execute_uses_persisted_pause_timestamp_for_delete(
 
         async def delete(self, hash: str, delete_files: bool) -> None:
             self.calls.append(("delete", hash, delete_files))
+            self.deleted = True
 
     downloader = FakeDownloader()
 
     monkeypatch.setattr(cli, "load_config", lambda path: config)
     monkeypatch.setattr(cli, "build_downloader", lambda loaded: downloader)
 
-    result = CliRunner().invoke(
-        cli.app, ["prune", "--config", str(config_path), "--execute"]
-    )
+    result = CliRunner().invoke(cli.app, ["prune", "--config", str(config_path), "--execute"])
 
     assert result.exit_code == 0
     assert downloader.calls == [("delete", "abcd1234", True)]
@@ -3113,7 +3326,7 @@ def test_prune_pool_usage_includes_add_only_categories(
                         category="movie",
                         tags={"seed-agent", "movie"},
                         size_bytes=2 * 1024**4,
-                    )
+                    ),
                 ]
             return []
 
@@ -3226,15 +3439,15 @@ def test_review_reports_runtime_activity_summary(
                             "dlspeed_bps": 4 * 1024**2,
                             "uploaded_session_bytes": 0,
                             "amount_left_bytes": 5 * 1024**3,
-                            },
-                        ),
+                        },
+                    ),
                     _managed_torrent(
                         hash="movie-paused",
                         category="movie",
                         tags={"seed-agent", "movie"},
                         state="pausedUP",
                         metadata={},
-                    )
+                    ),
                 ]
             return []
 
@@ -3643,12 +3856,12 @@ def test_run_once_reports_discovery_warnings(
     payload = _json_output(result)
     assert payload["discovery_warnings"] == [
         {
-                "site": "mt",
-                "error_type": "MTeamApiResponseError",
-                "message": "torrent/search failed: code=1 message=請求過於頻繁",
-                "endpoint": "torrent/search",
-                "rate_limited": True,
-            }
+            "site": "mt",
+            "error_type": "MTeamApiResponseError",
+            "message": "torrent/search failed: code=1 message=請求過於頻繁",
+            "endpoint": "torrent/search",
+            "rate_limited": True,
+        }
     ]
 
 
@@ -3776,9 +3989,7 @@ def test_prune_execute_failure_persists_prior_state_and_audit(
     monkeypatch.setattr(cli, "load_config", lambda path: config)
     monkeypatch.setattr(cli, "build_downloader", lambda loaded: downloader)
 
-    result = CliRunner().invoke(
-        cli.app, ["prune", "--config", str(config_path), "--execute"]
-    )
+    result = CliRunner().invoke(cli.app, ["prune", "--config", str(config_path), "--execute"])
 
     assert result.exit_code == 1
     payload = _json_output(result)
@@ -4172,7 +4383,7 @@ def test_headroom_report_flags_disk_headroom_after_existing_liability(
     payload = _json_output(result)
     assert payload["headroom_v2"]["over_budget_after_accepts"] is False
     assert payload["headroom_v2"]["over_disk_after_accepts"] is True
-    assert payload["headroom_v2"]["recommended_enqueue_mode"] == "add_paused"
+    assert payload["headroom_v2"]["recommended_enqueue_mode"] == "reject"
     assert payload["downloader_status"]["available_for_new_downloads_gb"] == 7.0
 
 

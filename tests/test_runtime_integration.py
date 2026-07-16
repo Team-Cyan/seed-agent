@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -10,6 +11,38 @@ from typer.testing import CliRunner
 
 from seed_agent.models import Discount, ManagedTorrent, ReleaseCandidate
 from seed_agent.state import StateStore
+
+
+def test_scheduler_lease_heartbeat_renews_during_long_cycle() -> None:
+    from seed_agent.cli import _SchedulerLeaseHeartbeat
+
+    renewed = threading.Event()
+
+    class RecordingLeaseStore:
+        def acquire_scheduler_lease(
+            self,
+            owner_id: str,
+            *,
+            ttl_seconds: int,
+        ) -> dict[str, object]:
+            renewed.set()
+            return {
+                "acquired": True,
+                "owner_id": owner_id,
+                "expires_at": str(ttl_seconds),
+            }
+
+    heartbeat = _SchedulerLeaseHeartbeat(
+        RecordingLeaseStore(),  # type: ignore[arg-type]
+        "scheduler-test",
+        ttl_seconds=1,
+    )
+    heartbeat.start()
+    try:
+        assert renewed.wait(timeout=2)
+        heartbeat.ensure_owned()
+    finally:
+        heartbeat.stop()
 
 
 def test_scheduler_cycle_uses_local_fakes_and_persists_all_phases(

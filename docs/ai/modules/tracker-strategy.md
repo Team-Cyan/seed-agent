@@ -69,7 +69,7 @@ For upload farming:
 - remove or raise `max_size_gb`,
 - increase leecher weight,
 - optionally lower `min_score_to_enqueue` slightly,
-- keep qB budget gates so accepted torrents can be added paused when capacity is tight.
+- keep qB budget gates so over-capacity candidates are rejected before they reach qB.
 
 For space saving:
 

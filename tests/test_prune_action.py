@@ -87,6 +87,31 @@ class FailingSecondDownloader(DummyDownloader):
             raise RuntimeError("delete failed")
 
 
+class StatefulDownloader(DummyDownloader):
+    def __init__(
+        self,
+        torrents: list[ManagedTorrent],
+        *,
+        remove_on_delete: bool,
+    ) -> None:
+        super().__init__()
+        self.torrents = list(torrents)
+        self.remove_on_delete = remove_on_delete
+
+    async def list_torrents(
+        self,
+        category: str | None = None,
+        tags: set[str] | None = None,
+    ) -> list[ManagedTorrent]:
+        del category, tags
+        return list(self.torrents)
+
+    async def delete(self, hash: str, delete_files: bool) -> None:
+        await super().delete(hash, delete_files)
+        if self.remove_on_delete:
+            self.torrents = [torrent for torrent in self.torrents if torrent.hash != hash]
+
+
 @pytest.mark.asyncio
 async def test_dry_run_prune_does_not_call_downloader() -> None:
     from seed_agent.actions.qb import prune_cold_torrents
@@ -199,8 +224,12 @@ async def test_prune_orders_mutable_torrents_by_eviction_rank() -> None:
         ),
     )
 
-    assert downloader.calls == [("delete", "drop", True)]
+    assert downloader.calls == [
+        ("delete", "drop", True),
+        ("delete", "keep", True),
+    ]
     assert [decision.target_id for decision in decisions] == ["drop", "keep"]
+    assert all(decision.action == "qb.cleanup.delete" for decision in decisions)
 
 
 @pytest.mark.asyncio
@@ -350,9 +379,7 @@ async def test_prune_stops_capacity_deletion_at_per_run_limit() -> None:
     from seed_agent.actions.qb import prune_cold_torrents
 
     downloader = DummyDownloader()
-    cleanup = CleanupConfig(
-        **{**_cleanup().model_dump(), "max_capacity_deletes_per_run": 1}
-    )
+    cleanup = CleanupConfig(**{**_cleanup().model_dump(), "max_capacity_deletes_per_run": 1})
     decisions = await prune_cold_torrents(
         [
             _incomplete_torrent(hash="first"),
@@ -375,13 +402,44 @@ async def test_prune_stops_capacity_deletion_at_per_run_limit() -> None:
 
 
 @pytest.mark.asyncio
+async def test_hard_pool_limit_bypasses_per_run_capacity_delete_limit() -> None:
+    from seed_agent.actions.qb import prune_cold_torrents
+
+    downloader = DummyDownloader()
+    cleanup = CleanupConfig(**{**_cleanup().model_dump(), "max_capacity_deletes_per_run": 1})
+    size = 6 * 1024**3
+    decisions = await prune_cold_torrents(
+        [
+            _incomplete_torrent(hash="first", size_bytes=size),
+            _incomplete_torrent(hash="second", size_bytes=size),
+        ],
+        downloader,
+        cleanup,
+        _policy(),
+        execute=True,
+        pool_usage=PoolUsage(
+            pool_name="downloads",
+            size_bytes=12 * 1024**3,
+            max_size_bytes=1 * 1024**3,
+        ),
+    )
+
+    assert downloader.calls == [
+        ("delete", "first", True),
+        ("delete", "second", True),
+    ]
+    assert [decision.action for decision in decisions] == [
+        "qb.cleanup.delete",
+        "qb.cleanup.delete",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_capacity_delete_limit_does_not_block_direct_paid_risk_delete() -> None:
     from seed_agent.actions.qb import prune_cold_torrents
 
     downloader = DummyDownloader()
-    cleanup = CleanupConfig(
-        **{**_cleanup().model_dump(), "max_capacity_deletes_per_run": 1}
-    )
+    cleanup = CleanupConfig(**{**_cleanup().model_dump(), "max_capacity_deletes_per_run": 1})
     decisions = await prune_cold_torrents(
         [
             _incomplete_torrent(hash="capacity"),
@@ -482,3 +540,91 @@ async def test_prune_deletes_incomplete_confirmed_non_free_torrent_with_files() 
     assert downloader.calls == [("delete", "paid-incomplete", True)]
     assert decisions[0].action == "qb.cleanup.delete"
     assert "confirmed non-free" in decisions[0].reason
+
+
+@pytest.mark.asyncio
+async def test_prune_revalidates_category_before_delete() -> None:
+    from seed_agent.actions.qb import prune_cold_torrents
+
+    original = _incomplete_torrent(
+        hash="moved",
+        metadata={"amount_left_bytes": 5 * 1024**3, "discount": "normal"},
+    )
+    downloader = StatefulDownloader(
+        [original.model_copy(update={"category": "movie"})],
+        remove_on_delete=True,
+    )
+
+    decisions = await prune_cold_torrents(
+        [original],
+        downloader,
+        _cleanup(),
+        _policy(),
+        execute=True,
+    )
+
+    assert downloader.calls == []
+    assert decisions[0].action == "qb.cleanup.protect"
+    assert "category changed" in decisions[0].reason
+
+
+@pytest.mark.asyncio
+async def test_prune_reclassifies_latest_completed_state_before_delete() -> None:
+    from seed_agent.actions.qb import prune_cold_torrents
+
+    original = _incomplete_torrent(
+        hash="completed-before-delete",
+        metadata={"amount_left_bytes": 5 * 1024**3, "discount": "normal"},
+    )
+    completed = original.model_copy(
+        update={
+            "state": "uploading",
+            "downloaded_bytes": original.size_bytes,
+            "completed_at": datetime.now(UTC),
+            "metadata": {"amount_left_bytes": 0},
+        }
+    )
+    downloader = StatefulDownloader([completed], remove_on_delete=True)
+
+    decisions = await prune_cold_torrents(
+        [original],
+        downloader,
+        _cleanup(),
+        _policy(),
+        execute=True,
+    )
+
+    assert downloader.calls == []
+    assert decisions[0].action == "qb.cleanup.keep"
+    assert decisions[0].old_state["completed_at"] is not None
+
+
+@pytest.mark.asyncio
+async def test_prune_fails_when_delete_cannot_be_verified(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from seed_agent.actions import qb
+
+    original = _incomplete_torrent(
+        hash="still-present",
+        metadata={"amount_left_bytes": 5 * 1024**3, "discount": "normal"},
+    )
+    downloader = StatefulDownloader([original], remove_on_delete=False)
+
+    async def no_sleep(seconds: float) -> None:
+        del seconds
+
+    monkeypatch.setattr(qb.asyncio, "sleep", no_sleep)
+
+    with pytest.raises(qb.MutationBatchError) as raised:
+        await qb.prune_cold_torrents(
+            [original],
+            downloader,
+            _cleanup(),
+            _policy(),
+            execute=True,
+        )
+
+    assert downloader.calls == [("delete", "still-present", True)]
+    assert raised.value.decisions[0].action == "qb.cleanup.delete.failed"
+    assert "delete verification failed" in raised.value.decisions[0].reason

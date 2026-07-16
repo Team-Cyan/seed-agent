@@ -18,19 +18,35 @@ operations.
 | Want List search | Refresh configured sources, search/rank candidates for the current filters, and store release candidates. | Preview-first search | It may read runtime config, source state, and tracker/downloader-adjacent metadata needed for ranking. It does not add tasks to qBittorrent. |
 | Want List candidate enqueue | Add exactly one selected release candidate through the shared intent enqueue path. | Explicit qB mutation | This is the only current Web UI qB enqueue surface. Use it only after reviewing the candidate modal preview and in-modal confirmation. |
 
-## Optional Write Token
+## Optional API Token
 
 By default the Web UI assumes a trusted local bind or LAN-only deployment. If
 the Web UI is reachable outside a trusted local network, set
-`SEED_AGENT_WEB_TOKEN` on the Web process. When this variable is non-empty, every
-Web API write/search/enqueue `POST` must include either:
+`SEED_AGENT_WEB_TOKEN` on the Web process. When this variable is non-empty,
+every Web API `GET` and `POST` must include either:
 
 - `X-Seed-Agent-Token: <token>`
 - `Authorization: Bearer <token>`
 
-Read-only `GET` endpoints stay available so health and status checks can remain
-simple. Do not put this token in committed config files; keep it in local env or
-the host's secret manager.
+The built-in UI asks for the token and keeps it in page memory only. It is not
+written to local storage. External health checks must also send the token. Do
+not put it in committed config files; keep it in local env or the host's secret
+manager.
+
+## Config Concurrency And Secrets
+
+- Config reads return a content revision. Saves must submit that revision; a
+  stale browser draft receives `409 Conflict` instead of overwriting a newer
+  CLI or Web edit.
+- Config API responses redact credentials embedded in URLs and never return
+  secret contents.
+- Secret refs must resolve to regular files under the runtime
+  `local/secrets/` directory. Absolute paths, parent traversal, and symlink
+  escapes are rejected.
+- Tracker probe and dry-run actions may only use credentials already assigned
+  to that saved tracker. Changing a draft URL cannot reuse its cookie against a
+  different origin, and the Web UI cannot bind an arbitrary existing secret
+  file to another tracker.
 
 ## Web UI Vs CLI
 

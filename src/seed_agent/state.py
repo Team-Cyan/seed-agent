@@ -573,9 +573,10 @@ class StateStore:
                 """
                 SELECT site, COUNT(*) AS count
                 FROM tracker_backoffs
-                WHERE active = 1
+                WHERE active = 1 AND until > ?
                 GROUP BY site
-                """
+                """,
+                (_utc_now(),),
             ).fetchall()
 
         rate_limited_counts = {
@@ -1388,6 +1389,131 @@ class StateStore:
         self.upsert_intent(intent, selected_release_id=selected_release_id)
         return True
 
+    def acquire_intent_enqueue_claim(
+        self,
+        intent_id: str,
+        release_id: str,
+        owner_id: str,
+        *,
+        ttl_seconds: int = 600,
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
+        current_time = now or _utc_now_datetime()
+        expires_at = current_time + timedelta(seconds=max(ttl_seconds, 1))
+        with self._connect(row_factory=sqlite3.Row) as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            intent = conn.execute(
+                "SELECT state, selected_release_id FROM intents WHERE intent_id = ?",
+                (intent_id,),
+            ).fetchone()
+            if intent is None:
+                return {"acquired": False, "status": "missing"}
+            if str(intent["state"]) == IntentState.ENQUEUED.value:
+                return {
+                    "acquired": False,
+                    "status": "already_enqueued",
+                    "selected_release_id": intent["selected_release_id"],
+                }
+            claim = conn.execute(
+                "SELECT * FROM intent_enqueue_claims WHERE intent_id = ?",
+                (intent_id,),
+            ).fetchone()
+            if claim is not None:
+                claim_expiry = _parse_datetime(claim["expires_at"])
+                if (
+                    str(claim["owner_id"]) != owner_id
+                    and claim_expiry is not None
+                    and claim_expiry > current_time
+                ):
+                    return {"acquired": False, "status": "in_progress", **dict(claim)}
+            conn.execute(
+                """
+                INSERT INTO intent_enqueue_claims (
+                  intent_id, release_id, owner_id, acquired_at, expires_at
+                ) VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(intent_id) DO UPDATE SET
+                  release_id = excluded.release_id,
+                  owner_id = excluded.owner_id,
+                  acquired_at = excluded.acquired_at,
+                  expires_at = excluded.expires_at
+                """,
+                (
+                    intent_id,
+                    release_id,
+                    owner_id,
+                    current_time.isoformat(),
+                    expires_at.isoformat(),
+                ),
+            )
+        return {
+            "acquired": True,
+            "status": "acquired",
+            "intent_id": intent_id,
+            "release_id": release_id,
+            "owner_id": owner_id,
+            "expires_at": expires_at.isoformat(),
+        }
+
+    def complete_intent_enqueue_claim(
+        self,
+        intent_id: str,
+        release_id: str,
+        owner_id: str,
+    ) -> bool:
+        now = _utc_now()
+        with self._connect(row_factory=sqlite3.Row) as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            claim = conn.execute(
+                """
+                SELECT owner_id, release_id
+                FROM intent_enqueue_claims
+                WHERE intent_id = ?
+                """,
+                (intent_id,),
+            ).fetchone()
+            if (
+                claim is None
+                or str(claim["owner_id"]) != owner_id
+                or str(claim["release_id"]) != release_id
+            ):
+                return False
+            row = conn.execute(
+                "SELECT normalized_json FROM intents WHERE intent_id = ?",
+                (intent_id,),
+            ).fetchone()
+            if row is None:
+                return False
+            normalized = json.loads(str(row["normalized_json"]))
+            normalized["state"] = IntentState.ENQUEUED.value
+            ResourceIntent.model_validate(normalized)
+            conn.execute(
+                """
+                UPDATE intents
+                SET state = ?, normalized_json = ?, selected_release_id = ?, updated_at = ?
+                WHERE intent_id = ?
+                """,
+                (
+                    IntentState.ENQUEUED.value,
+                    _json_dumps(normalized),
+                    release_id,
+                    now,
+                    intent_id,
+                ),
+            )
+            conn.execute(
+                "DELETE FROM intent_enqueue_claims WHERE intent_id = ? AND owner_id = ?",
+                (intent_id, owner_id),
+            )
+        return True
+
+    def release_intent_enqueue_claim(self, intent_id: str, owner_id: str) -> bool:
+        with self._connect() as conn:
+            cursor = conn.execute(
+                "DELETE FROM intent_enqueue_claims WHERE intent_id = ? AND owner_id = ?",
+                (intent_id, owner_id),
+            )
+        return cursor.rowcount > 0
+
     def find_intent_id_by_alias(self, alias: str) -> str | None:
         with self._connect(row_factory=sqlite3.Row) as conn:
             row = conn.execute(
@@ -1708,6 +1834,13 @@ class StateStore:
                   selected_release_id TEXT,
                   created_at TEXT NOT NULL,
                   updated_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS intent_enqueue_claims (
+                  intent_id TEXT PRIMARY KEY,
+                  release_id TEXT NOT NULL,
+                  owner_id TEXT NOT NULL,
+                  acquired_at TEXT NOT NULL,
+                  expires_at TEXT NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS release_candidates (
                   intent_id TEXT NOT NULL,

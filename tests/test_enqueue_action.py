@@ -290,7 +290,7 @@ async def test_downloader_exception_propagates() -> None:
 
 
 @pytest.mark.asyncio
-async def test_execute_accepted_candidate_adds_paused_when_pool_is_over_budget() -> None:
+async def test_execute_candidate_is_rejected_without_downloader_add_when_gate_blocks() -> None:
     from seed_agent.actions.qb import enqueue_candidates
 
     downloader = DummyDownloader(torrent_hash="0123456789abcdef0123456789abcdef01234567")
@@ -303,15 +303,10 @@ async def test_execute_accepted_candidate_adds_paused_when_pool_is_over_budget()
         paused=True,
     )
 
-    assert downloader.calls == [
-        (
-            _scored().candidate.download_url,
-            "seed",
-            ["seed-agent", "seed"],
-            True,
-        )
-    ]
-    assert decisions[0].new_state["paused"] is True
+    assert downloader.calls == []
+    assert decisions[0].action == "qb.enqueue.rejected"
+    assert decisions[0].new_state["paused"] is False
+    assert decisions[0].new_state["rejected"] is True
 
 
 @pytest.mark.asyncio
@@ -360,4 +355,4 @@ async def test_enqueue_decision_records_pause_reasons_when_paused() -> None:
 
     decision = decisions[0]
     assert decision.new_state["pause_reasons"] == ["active downloads 3 > max 2"]
-    assert "paused_by_policy=active downloads 3 > max 2" in decision.reason
+    assert "enqueue rejected by hard runtime gate" in decision.reason

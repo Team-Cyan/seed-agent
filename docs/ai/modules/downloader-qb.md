@@ -48,9 +48,12 @@ support policy.
 - keep enqueue-like CLI commands aligned on the same qB runtime view during
   dry-run and execute flows,
 - support pause/delete flows through explicit decisions,
+- reject over-budget enqueue before calling qB; never add a torrent in paused
+  state as a capacity workaround,
 - support Transmission RPC as a second downloader through
   `download_client.type: transmission`, using Transmission labels to carry the
-  existing category/tag semantics.
+  existing category/tag semantics. Only an explicitly requested label or one
+  unambiguous configured policy label is treated as cleanup category authority.
 
 ## Expectations
 
@@ -66,6 +69,9 @@ support policy.
   state, or score; never use tags alone as a delete boundary,
 - before deleting qB torrents with files, print or persist the exact candidate
   list and execute only that bounded hash set,
+- immediately before delete, verify that each hash is still present in the
+  authorized category; after `delete_files=true`, verify that it disappeared
+  and surface a mutation failure otherwise,
 - if the live qB list is needed for multiple configured categories, prefer one
   all-category listing plus local filtering; if only one category is needed,
   keep the qB category filter to avoid unnecessary host/API work.

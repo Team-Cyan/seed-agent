@@ -15,6 +15,7 @@ from seed_agent.models import (
     ScoreBreakdown,
     TorrentCandidate,
 )
+from seed_agent.policies.category_policy import PoolUsage
 from seed_agent.state import StateStore
 
 
@@ -186,6 +187,153 @@ password: s3cr3t
         encoding="utf-8",
     )
     return path
+
+
+def test_enqueue_batch_hard_pool_limit_is_exact_to_one_byte() -> None:
+    from seed_agent import cli
+
+    first = _scored(candidate=_candidate(size_bytes=1), score=95)
+    second = _scored(
+        candidate=_candidate(
+            source_url="https://tracker.example/details.php?id=2",
+            download_url="https://tracker.example/download.php?id=2",
+            size_bytes=1,
+        ),
+        score=90,
+    )
+
+    batches = cli._enqueue_candidate_batches(
+        [second, first],
+        _config(),
+        [],
+        PoolUsage(pool_name="downloads", size_bytes=1023, max_size_bytes=1024),
+        None,
+    )
+
+    assert [(batch[0][0].candidate.stable_id, batch[1]) for batch in batches] == [
+        (first.candidate.stable_id, False),
+        (second.candidate.stable_id, True),
+    ]
+
+
+def test_capacity_guard_triggers_prune_when_mutable_pool_is_over_budget(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from seed_agent import cli
+
+    torrent = ManagedTorrent(
+        hash="over-budget",
+        name="Over budget",
+        category="seed",
+        tags={"seed-agent", "seed"},
+        state="stalledUP",
+        size_bytes=11 * 1024**4,
+        uploaded_bytes=1,
+        downloaded_bytes=11 * 1024**4,
+        added_at=datetime.now(UTC),
+        completed_at=datetime.now(UTC),
+        last_activity_at=datetime.now(UTC),
+        metadata={"amount_left_bytes": 0},
+    )
+
+    class FakeDownloader:
+        async def list_torrents(self, category=None, tags=None):
+            return [torrent]
+
+    calls: list[dict[str, object]] = []
+
+    def fake_prune(path: Path, **kwargs: object) -> dict[str, object]:
+        calls.append(kwargs)
+        return {"execute": False, "hard_cap_satisfied": False}
+
+    monkeypatch.setattr(cli, "load_config", lambda path: _config())
+    monkeypatch.setattr(cli, "_maybe_build_downloader", lambda config: FakeDownloader())
+    monkeypatch.setattr(cli, "_prune_payload", fake_prune)
+
+    payload = cli._capacity_guard_payload(tmp_path / "config.yaml", execute=False)
+
+    assert payload["triggered"] is True
+    assert payload["trigger_over_budget_pools"] == ["downloads"]
+    assert calls == [
+        {
+            "execute": False,
+            "completed_low_upload_requires_reclamation": True,
+            "fail_closed_unknown_incomplete": True,
+        }
+    ]
+
+
+def test_capacity_guard_wait_checks_between_full_cycles(monkeypatch) -> None:
+    from seed_agent import cli
+
+    sleeps: list[int] = []
+    checks: list[bool] = []
+
+    class FakeLeaseHeartbeat:
+        def ensure_owned(self) -> None:
+            checks.append(True)
+
+    monkeypatch.setattr(cli.time, "sleep", sleeps.append)
+    monkeypatch.setattr(
+        cli,
+        "_capacity_guard_payload",
+        lambda path, *, execute: {
+            "command": "capacity-guard",
+            "execute": execute,
+            "triggered": False,
+        },
+    )
+    monkeypatch.setattr(cli, "_print_json", lambda payload: None)
+
+    cli._wait_for_next_schedule_cycle(
+        Path("config.yaml"),
+        execute=True,
+        interval_seconds=130,
+        guard_interval_seconds=60,
+        lease_heartbeat=FakeLeaseHeartbeat(),
+    )
+
+    assert sleeps == [60, 60, 10]
+    assert checks == [True, True]
+
+
+def test_capacity_guard_wait_survives_transient_downloader_failure(monkeypatch) -> None:
+    from seed_agent import cli
+
+    outputs: list[dict[str, object]] = []
+    attempts = 0
+
+    class FakeLeaseHeartbeat:
+        def ensure_owned(self) -> None:
+            return None
+
+    def guard(path: Path, *, execute: bool) -> dict[str, object]:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise RuntimeError("qB temporarily unavailable")
+        return {
+            "command": "capacity-guard",
+            "execute": execute,
+            "triggered": False,
+            "hard_cap_satisfied": True,
+        }
+
+    monkeypatch.setattr(cli.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(cli, "_capacity_guard_payload", guard)
+    monkeypatch.setattr(cli, "_print_json", outputs.append)
+
+    cli._wait_for_next_schedule_cycle(
+        Path("config.yaml"),
+        execute=True,
+        interval_seconds=130,
+        guard_interval_seconds=60,
+        lease_heartbeat=FakeLeaseHeartbeat(),
+    )
+
+    assert attempts == 2
+    assert outputs[0]["error"] == "qB temporarily unavailable"
+    assert outputs[1]["hard_cap_satisfied"] is True
 
 
 def _json_output(result) -> dict[str, object]:
@@ -641,9 +789,7 @@ def test_run_once_skips_previously_enqueued_candidate(tmp_path: Path, monkeypatc
     assert payload["enqueued"] == 0
 
 
-def test_run_once_links_existing_live_torrent_before_enqueue(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_run_once_links_existing_live_torrent_before_enqueue(tmp_path: Path, monkeypatch) -> None:
     from seed_agent import cli
     from seed_agent.models import ManagedTorrent
 
@@ -797,7 +943,7 @@ def test_run_once_dry_run_pauses_enqueue_when_runtime_download_gate_exceeded(
     ):
         assert paused is True
         assert pool_usage is not None
-        assert pause_reasons == ["active downloads 1 > max 0"]
+        assert pause_reasons == ["active downloads 1 >= max 0"]
         return []
 
     class FakeDownloader:
@@ -839,8 +985,9 @@ def test_run_once_dry_run_pauses_enqueue_when_runtime_download_gate_exceeded(
 
     assert result.exit_code == 0
     payload = _json_output(result)
-    assert payload["enqueue_paused_by_pool_policy"] is True
-    assert "active downloads 1 > max 0" in payload["enqueue_paused_reasons"]
+    assert payload["enqueue_paused_by_pool_policy"] is False
+    assert payload["enqueue_blocked_by_runtime_gate"] is True
+    assert "active downloads 1 >= max 0" in payload["enqueue_blocked_reasons"]
     assert payload["decisions"] == []
 
 
@@ -926,8 +1073,9 @@ def test_run_once_dry_run_uses_raw_amount_left_for_runtime_gate(
     payload = _json_output(result)
     assert payload["runtime_activity"]["total_amount_left_gb"] == 1.0
     assert payload["runtime_activity"]["total_download_liability_gb"] == 1.0
-    assert payload["enqueue_paused_by_pool_policy"] is True
-    assert payload["enqueue_paused_reasons"] == [
+    assert payload["enqueue_paused_by_pool_policy"] is False
+    assert payload["enqueue_blocked_by_runtime_gate"] is True
+    assert payload["enqueue_blocked_reasons"] == [
         "remaining download budget reserved for higher-score candidates (1.0004 GiB / max 1.0)"
     ]
 
@@ -958,9 +1106,7 @@ def test_run_once_pauses_when_existing_download_liability_exceeds_free_disk(
         pause_reasons=None,
     ):
         assert paused is True
-        assert pause_reasons == [
-            "free disk 15.0 GiB below existing remaining download 20.0 GiB"
-        ]
+        assert pause_reasons == ["free disk 15.0 GiB below existing remaining download 20.0 GiB"]
         return []
 
     class FakeDownloader:
@@ -1005,8 +1151,9 @@ def test_run_once_pauses_when_existing_download_liability_exceeds_free_disk(
 
     assert result.exit_code == 0
     payload = _json_output(result)
-    assert payload["enqueue_paused_by_pool_policy"] is True
-    assert payload["enqueue_paused_reasons"] == [
+    assert payload["enqueue_paused_by_pool_policy"] is False
+    assert payload["enqueue_blocked_by_runtime_gate"] is True
+    assert payload["enqueue_blocked_reasons"] == [
         "free disk 15.0 GiB below existing remaining download 20.0 GiB"
     ]
     assert payload["downloader_status"]["free_space_gb"] == 15.0
@@ -1155,7 +1302,7 @@ def test_run_once_capacity_prune_refreshes_runtime_before_enqueue(
     assert len(prune_calls) == 1
     assert prune_calls[0]["execute"] is False
     assert prune_calls[0]["force_space_reclamation"] is True
-    assert prune_calls[0]["completed_low_upload_requires_reclamation"] is False
+    assert prune_calls[0]["completed_low_upload_requires_reclamation"] is True
     reclaim_targets = prune_calls[0]["reclaim_targets_by_pool"]
     assert isinstance(reclaim_targets, dict)
     assert int(reclaim_targets["downloads"]) > 0
@@ -1355,7 +1502,7 @@ def test_run_once_dry_run_counts_stalled_downloads_for_runtime_gate(
         pause_reasons=None,
     ):
         assert paused is True
-        assert pause_reasons == ["active downloads 1 > max 0"]
+        assert pause_reasons == ["active downloads 1 >= max 0"]
         return []
 
     class FakeDownloader:
@@ -1399,5 +1546,6 @@ def test_run_once_dry_run_counts_stalled_downloads_for_runtime_gate(
     payload = _json_output(result)
     assert payload["runtime_activity"]["active_download_count"] == 1
     assert payload["runtime_activity"]["stalled_download_count"] == 1
-    assert payload["enqueue_paused_by_pool_policy"] is True
-    assert payload["enqueue_paused_reasons"] == ["active downloads 1 > max 0"]
+    assert payload["enqueue_paused_by_pool_policy"] is False
+    assert payload["enqueue_blocked_by_runtime_gate"] is True
+    assert payload["enqueue_blocked_reasons"] == ["active downloads 1 >= max 0"]

@@ -209,9 +209,7 @@ def test_intent_enqueue_dry_run_reports_runtime_activity_when_qb_visible(
     store.save_ranked_releases([ranked])
 
     class FakeDownloader(_DummyDownloader):
-        async def list_torrents(
-            self, category: str | None = None, tags: set[str] | None = None
-        ):
+        async def list_torrents(self, category: str | None = None, tags: set[str] | None = None):
             return [
                 ManagedTorrent(
                     hash="abcd1234",
@@ -258,9 +256,7 @@ def test_intent_enqueue_dry_run_reports_pause_reasons_when_runtime_gate_exceeded
     store.save_ranked_releases([ranked])
 
     class FakeDownloader(_DummyDownloader):
-        async def list_torrents(
-            self, category: str | None = None, tags: set[str] | None = None
-        ):
+        async def list_torrents(self, category: str | None = None, tags: set[str] | None = None):
             return [
                 ManagedTorrent(
                     hash="abcd1234",
@@ -286,9 +282,10 @@ def test_intent_enqueue_dry_run_reports_pause_reasons_when_runtime_gate_exceeded
 
     assert result.exit_code == 0
     payload = _json_output(result)
-    assert payload["enqueue_paused_by_pool_policy"] is True
-    assert payload["enqueue_paused_reasons"] == ["active downloads 1 > max 0"]
-    assert "paused_by_policy=active downloads 1 > max 0" in payload["decisions"][0]["reason"]
+    assert payload["enqueue_paused_by_pool_policy"] is False
+    assert payload["enqueue_blocked_by_runtime_gate"] is True
+    assert payload["enqueue_blocked_reasons"] == ["active downloads 1 >= max 0"]
+    assert payload["decisions"][0]["action"] == "qb.enqueue.rejected"
 
 
 def test_intent_enqueue_execute_can_select_release_id_and_updates_state(
@@ -336,6 +333,80 @@ def test_intent_enqueue_execute_can_select_release_id_and_updates_state(
     assert row["selected_release_id"] == ranked.release.release_id
     audit = (tmp_path / ".seed-agent" / "audit.jsonl").read_text(encoding="utf-8")
     assert "qb.enqueue" in audit
+
+
+def test_intent_enqueue_execute_is_idempotent_across_repeated_requests(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from seed_agent import cli
+
+    monkeypatch.chdir(tmp_path)
+    downloader = _DummyDownloader()
+    monkeypatch.setattr(cli, "build_downloader", lambda config: downloader)
+    config_path = _write_config(tmp_path)
+    store = StateStore(tmp_path / ".seed-agent" / "state.db")
+    intent, _ = add_intent("Inception 2010 1080p", store)
+    ranked = _ranked(intent.intent_id)
+    store.save_ranked_releases([ranked])
+
+    first = CliRunner().invoke(
+        cli.app,
+        ["intent-enqueue", intent.intent_id, "--config", str(config_path), "--execute"],
+    )
+    second = CliRunner().invoke(
+        cli.app,
+        ["intent-enqueue", intent.intent_id, "--config", str(config_path), "--execute"],
+    )
+
+    assert first.exit_code == 0
+    assert second.exit_code == 0
+    assert len(downloader.calls) == 1
+    second_payload = _json_output(second)
+    assert second_payload["enqueued"] == 0
+    assert second_payload["decisions"][0]["action"] == "qb.enqueue.skip"
+    assert second_payload["decisions"][0]["reason"] == "already enqueued"
+
+
+def test_intent_enqueue_projects_capacity_in_selected_media_pool(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from seed_agent import cli
+
+    monkeypatch.chdir(tmp_path)
+    downloader = _DummyDownloader()
+    monkeypatch.setattr(cli, "_maybe_build_downloader", lambda config: downloader)
+    config_path = _write_config(tmp_path)
+    config_path.write_text(
+        config_path.read_text(encoding="utf-8").replace(
+            "    - name: media\n      max_size_tib: 10",
+            "    - name: media\n      max_size_tib: 0.01",
+        ),
+        encoding="utf-8",
+    )
+    store = StateStore(tmp_path / ".seed-agent" / "state.db")
+    intent, _ = add_intent(
+        "Inception 2010 1080p",
+        store,
+        metadata={"media_type": "movie"},
+    )
+    store.save_ranked_releases([_ranked(intent.intent_id)])
+
+    result = CliRunner().invoke(
+        cli.app,
+        ["intent-enqueue", intent.intent_id, "--config", str(config_path)],
+    )
+
+    assert result.exit_code == 0
+    payload = _json_output(result)
+    assert payload["enqueue_paused_by_pool_policy"] is False
+    assert payload["enqueue_blocked_by_runtime_gate"] is True
+    assert payload["enqueue_blocked_reasons"][0].startswith(
+        "budget pool media projected usage"
+    )
+    assert payload["decisions"][0]["new_state"]["category"] == "movie"
+    assert payload["decisions"][0]["new_state"]["rejected"] is True
 
 
 def test_intent_enqueue_rejects_unknown_release_id(tmp_path: Path, monkeypatch) -> None:
@@ -543,6 +614,48 @@ tracker_sites:
     stored = json.loads(str(rows[0]["release_json"]))
     assert stored["release"]["metadata"]["download_url_source"] == "mteam_api"
     assert "passkey=secret" not in result.output
+
+
+def test_want_list_enqueue_allows_non_free_release_when_pt_flow_is_free_only(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from seed_agent import cli
+
+    monkeypatch.chdir(tmp_path)
+    downloader = _DummyDownloader()
+    monkeypatch.setattr(cli, "build_downloader", lambda config: downloader)
+
+    async def resolve_release(release):
+        return release.model_copy(
+            update={
+                "download_url": "https://dl.m-team.example/non-free",
+                "metadata": {
+                    **release.metadata,
+                    "download_url_source": "mteam_api",
+                },
+            }
+        )
+
+    monkeypatch.setattr(
+        cli,
+        "_build_release_download_resolver",
+        lambda config: resolve_release,
+    )
+    config_path = _write_config(tmp_path)
+    store = StateStore(tmp_path / ".seed-agent" / "state.db")
+    intent, _ = add_intent("Call Me by Your Name 2017 Remux", store)
+    ranked = _mteam_deferred_ranked(intent.intent_id)
+    store.save_ranked_releases([ranked])
+
+    result = CliRunner().invoke(
+        cli.app,
+        ["intent-enqueue", intent.intent_id, "--config", str(config_path), "--execute"],
+    )
+
+    assert result.exit_code == 0
+    assert downloader.calls[0][1] == "movie"
+    assert _json_output(result)["decisions"][0]["action"] == "qb.enqueue"
 
 
 def test_intent_enqueue_requires_confirmation_for_ambiguous_release(

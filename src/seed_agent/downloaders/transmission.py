@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
+from pathlib import PurePosixPath
 from typing import Any
 
 import httpx
@@ -60,6 +61,8 @@ class TransmissionClient:
         self,
         category: str | None = None,
         tags: set[str] | None = None,
+        *,
+        known_policy_categories: set[str] | None = None,
     ) -> list[ManagedTorrent]:
         payload = await self._rpc(
             "torrent-get",
@@ -87,9 +90,16 @@ class TransmissionClient:
         rows = arguments.get("torrents")
         if not isinstance(rows, list):
             return []
-        torrents = [_torrent_from_row(row, requested_category=category) for row in rows]
+        torrents = [
+            _torrent_from_row(
+                row,
+                requested_category=category,
+                known_policy_categories=known_policy_categories,
+            )
+            for row in rows
+        ]
         if category is not None:
-            torrents = [torrent for torrent in torrents if category in torrent.tags]
+            torrents = [torrent for torrent in torrents if torrent.category == category]
         if tags is not None:
             torrents = [torrent for torrent in torrents if tags.intersection(torrent.tags)]
         return torrents
@@ -151,7 +161,12 @@ def _rpc_url(base_url: str) -> str:
     return f"{base_url}/transmission/rpc"
 
 
-def _torrent_from_row(row: Any, *, requested_category: str | None) -> ManagedTorrent:
+def _torrent_from_row(
+    row: Any,
+    *,
+    requested_category: str | None,
+    known_policy_categories: set[str] | None,
+) -> ManagedTorrent:
     data = _dict_value(row)
     labels = _labels(data.get("labels"))
     metadata: dict[str, Any] = {"transmission_labels": sorted(labels)}
@@ -164,13 +179,20 @@ def _torrent_from_row(row: Any, *, requested_category: str | None) -> ManagedTor
         metadata["dlspeed_bps"] = dlspeed
     if amount_left is not None:
         metadata["amount_left_bytes"] = amount_left
+    if _looks_like_hr_label(labels):
+        metadata["hr"] = True
+    if _looks_like_manual_label(labels):
+        metadata["manual"] = True
+    save_path = _optional_str(data.get("downloadDir"))
+    if save_path is not None and _looks_like_media_library_path(save_path):
+        metadata["media_library"] = True
     return ManagedTorrent(
         hash=str(data.get("hashString") or ""),
         name=str(data.get("name") or ""),
         category=(
             requested_category
             if requested_category in labels
-            else _category_from_labels(labels)
+            else _category_from_labels(labels, known_policy_categories)
         ),
         tags=labels,
         state=_status_name(data.get("status")),
@@ -180,7 +202,7 @@ def _torrent_from_row(row: Any, *, requested_category: str | None) -> ManagedTor
         added_at=_timestamp(data.get("addedDate")) or datetime.fromtimestamp(0, tz=UTC),
         completed_at=_timestamp(data.get("doneDate")),
         last_activity_at=_timestamp(data.get("activityDate")),
-        save_path=_optional_str(data.get("downloadDir")),
+        save_path=save_path,
         metadata=metadata,
     )
 
@@ -207,11 +229,32 @@ def _labels(value: Any) -> set[str]:
     return set()
 
 
-def _category_from_labels(labels: set[str]) -> str | None:
-    for label in sorted(labels):
-        if label != "seed-agent":
-            return label
-    return None
+def _category_from_labels(
+    labels: set[str],
+    known_policy_categories: set[str] | None,
+) -> str | None:
+    if not known_policy_categories:
+        return None
+    matches = labels.intersection(known_policy_categories)
+    if len(matches) != 1:
+        return None
+    return next(iter(matches))
+
+
+def _looks_like_hr_label(labels: set[str]) -> bool:
+    normalized = {label.strip().lower() for label in labels}
+    clear_labels = {"hr", "h&r", "hit-and-run", "hit and run", "hit_and_run"}
+    return bool(normalized.intersection(clear_labels))
+
+
+def _looks_like_manual_label(labels: set[str]) -> bool:
+    return "manual" in {label.strip().lower() for label in labels}
+
+
+def _looks_like_media_library_path(save_path: str) -> bool:
+    path = PurePosixPath(save_path.replace("\\", "/"))
+    segments = {segment.lower() for segment in path.parts if segment not in {"/", ""}}
+    return bool(segments.intersection({"media", "library", "movies", "tv", "shows"}))
 
 
 def _timestamp(value: Any) -> datetime | None:
@@ -226,7 +269,7 @@ def _int_value(value: Any) -> int | None:
         return None
     try:
         return int(value)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
 
 

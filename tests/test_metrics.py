@@ -50,6 +50,9 @@ def test_prometheus_metrics_are_local_bounded_and_secret_free(tmp_path: Path) ->
                 "delete_count": 1,
                 "reclaim_targets_by_pool": {"secret-pool-name": 100},
                 "reclaimed_capacity_by_pool": {"secret-pool-name": 80},
+                "verified_committed_reclaim_by_pool": {"secret-pool-name": 75},
+                "hard_cap_violations_by_pool": {},
+                "hard_cap_satisfied": True,
             },
         },
     )
@@ -66,6 +69,9 @@ def test_prometheus_metrics_are_local_bounded_and_secret_free(tmp_path: Path) ->
     assert 'seed_agent_scheduler_runs_total{status="success"} 1.000000' in output
     assert "seed_agent_last_cycle_cleanup_delete_count 1.000000" in output
     assert "seed_agent_last_cycle_reclaim_target_bytes 100.000000" in output
+    assert "seed_agent_last_cycle_verified_committed_reclaim_bytes 75.000000" in output
+    assert "seed_agent_last_cycle_hard_cap_violation_bytes 0.000000" in output
+    assert "seed_agent_last_cycle_hard_cap_satisfied 1.000000" in output
     assert 'seed_agent_last_cycle_phase_duration_seconds{phase="prune"}' in output
     assert "seed_agent_heartbeat_age_seconds" in output
     assert "private-tracker-name" not in output

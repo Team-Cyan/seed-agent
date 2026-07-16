@@ -234,9 +234,9 @@ Expected: all commands exit `0`.
 Run:
 
 ```bash
-git worktree remove /Users/lancer/.config/superpowers/worktrees/seed-agent/phase-1-pt-upload-loop
-git worktree remove /Users/lancer/.config/superpowers/worktrees/seed-agent/phase-2-resource-intent-loop
-git worktree remove /Users/lancer/.config/superpowers/worktrees/seed-agent/feat-qb-category-policy-budgeting
+git worktree remove $HOME/.config/superpowers/worktrees/seed-agent/phase-1-pt-upload-loop
+git worktree remove $HOME/.config/superpowers/worktrees/seed-agent/phase-2-resource-intent-loop
+git worktree remove $HOME/.config/superpowers/worktrees/seed-agent/feat-qb-category-policy-budgeting
 ```
 
 Expected: each remove succeeds. If a worktree has unexpected local changes, stop and report the exact path.

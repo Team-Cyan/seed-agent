@@ -22,6 +22,8 @@ Persist local lifecycle knowledge and durable decision evidence.
 - persist scheduler runs, scheduler phase events, tracker backoffs, tracker API
   events, and Want List search runs so operator reports and Web ops surfaces can
   explain recent unattended behavior,
+- persist atomic Want List enqueue claims so concurrent Web, CLI, and scheduler
+  execution cannot add the same intent/release pair more than once,
 - persist `9999-12-31T23:59:59+00:00` for API candidates whose FREE window is
   explicitly unlimited,
 - prune stale unqueued candidate rows after the configured retention window,
@@ -44,6 +46,11 @@ Persist local lifecycle knowledge and durable decision evidence.
   candidate pruning so cleanup evidence remains durable,
 - redact secrets in audit output,
 - keep state changes explainable and reviewable.
+- renew the mutable scheduler lease in the background during long tracker,
+  prune, discovery, and intent phases, and verify ownership at phase boundaries,
+- verify SQLite backups and restores against the complete current StateStore
+  schema. Legacy databases may be accepted only when normal migrations can
+  bring a temporary copy to that schema before replacement,
 - for manual live cleanup outside the normal prune decision path, write a
   separate operator audit record in the mounted runtime state area before
   mutation. Include cutoff, category, hash, name, size, state, and whether files

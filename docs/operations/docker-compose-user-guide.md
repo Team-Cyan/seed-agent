@@ -59,8 +59,8 @@ For unattended NAS use, strongly consider:
 
 `pt_filters.max_total_amount_left_gb` is an active download liability cap. The
 agent ignores zero-progress stopped download placeholders for that cap and uses
-score order when deciding which accepted candidates should start versus be added
-paused.
+score order when deciding which accepted candidates fit. Candidates beyond the
+cap are rejected before qBittorrent enqueue.
 
 ## 3. Prepare Local Secrets
 

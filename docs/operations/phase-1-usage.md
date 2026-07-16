@@ -22,19 +22,19 @@ download_client:
       mode: mutable
       budget_pool: downloads
       delete_enabled: true
-      over_budget_behavior: add_paused
+      over_budget_behavior: reject
       tags: [seed-agent, seed]
     - name: movie
       mode: add_only
       budget_pool: media
       delete_enabled: false
-      over_budget_behavior: add_paused
+      over_budget_behavior: reject
       tags: [seed-agent, movie]
     - name: tv
       mode: add_only
       budget_pool: media
       delete_enabled: false
-      over_budget_behavior: add_paused
+      over_budget_behavior: reject
       tags: [seed-agent, tv]
   budget_pools:
     - name: downloads

@@ -3,13 +3,13 @@ tracker_sites:
   - name: demo
     type: nexusphp
     enabled: true
-    rss_url: https://tracker.example/rss.php?passkey=secret
+    rss_url: https://tracker.example/rss.php?passkey=YOUR_PASSKEY
     cookie_ref: local/secrets/demo.cookie
   # Example M-Team shape:
   # - name: mteam
   #   type: mteam
   #   enabled: false
-  #   rss_url: https://rss.m-team.cc/api/rss/fetch?dl=1&pageSize=10&sign=secret
+  #   rss_url: https://rss.m-team.cc/api/rss/fetch?dl=1&pageSize=10&sign=YOUR_RSS_SIGN
   #   # Secret reference only. The token value itself stays in local/secrets/mt.api-key.
   #   api_key_ref: local/secrets/mt.api-key
   #   auth_header: x-api-key
@@ -77,8 +77,8 @@ pt_filters:
   # for upload-farming profiles that intentionally allow very large hot packs,
   # or lower it for space-saving profiles.
   size_partial_max_gb: 150
-  # Optional conservative runtime gates. When exceeded, enqueue-like commands
-  # still add accepted torrents but mark them paused by policy.
+  # Optional conservative runtime gates. When reached, automatic enqueue is
+  # rejected before the downloader is called.
   # max_active_downloads: 3
   # max_total_amount_left_gb: 150
   # min_free_disk_gb keeps this much downloader-reported free disk space
@@ -111,21 +111,22 @@ download_client:
       mode: mutable
       budget_pool: downloads
       delete_enabled: true
-      over_budget_behavior: add_paused
+      over_budget_behavior: reject
       tags: [seed-agent, seed]
     - name: movie
       mode: add_only
       budget_pool: media
       delete_enabled: false
-      over_budget_behavior: add_paused
+      over_budget_behavior: reject
       tags: [seed-agent, movie]
     - name: tv
       mode: add_only
       budget_pool: media
       delete_enabled: false
-      over_budget_behavior: add_paused
+      over_budget_behavior: reject
       tags: [seed-agent, tv]
   budget_pools:
+    # Example-only values. Set real pool limits in local runtime YAML/Web UI.
     - name: downloads
       max_size_tib: 10
     - name: media
@@ -168,6 +169,8 @@ release_preferences:
     webdl: -10
 scheduler:
   interval_minutes: 60
+  # qB-only hard-cap and broken-download check between full tracker cycles.
+  capacity_guard_interval_seconds: 60
   min_free_window_minutes: 180
   require_known_free_window: true
   prune_enabled: true
@@ -199,8 +202,8 @@ want_sources:
     secret_ref: local/secrets/wechat-bridge.yaml
   douban_wanted:
     enabled: false
-    # Public Douban user name or profile URL, for example LancerC or
-    # https://www.douban.com/people/LancerC
+    # Public Douban user name or profile URL, for example example-user or
+    # https://www.douban.com/people/example-user
     user_name: null
     max_pages: 1
     # Optional local export fallback. Keep private exports under local/inbox.
@@ -211,15 +214,15 @@ want_sources:
   want_lists:
     - provider: douban
       id: douban-me
-      label: 我
+      label: Example Douban list
       enabled: false
-      user_name: LancerC
+      user_name: example-user
       max_pages: 1
       # Optional local export fallback. Keep private exports under local/inbox.
       # export_ref: local/inbox/douban-me.json
     - provider: imdb
       id: imdb-weekend
-      label: 周末清单
+      label: Example IMDb list
       enabled: false
       watchlist_url: https://www.imdb.com/user/p.example/watchlist/
       # IMDb public pages may challenge server-side fetches. CSV export refs are

@@ -52,12 +52,15 @@ Score discovered torrents or ranked releases using explicit policy weights and e
 - `pt_filters.size_partial_max_gb` is the soft size-credit ceiling after
   `preferred_size_max_gb`. Raise it for upload-farming strategies that allow
   very large hot packs; lower it for space-saving strategies.
-- `allow_non_free=false` is a free-only hard invariant: only `FREE` and
-  `2xFREE` candidates may pass, even if a paid discount is accidentally listed
-  in `pt_filters.discounts`. Unknown, half-discount, and NORMAL candidates are
+- `pt_filters.allow_non_free=false` is a free-only hard invariant for the PT
+  upload-farming discovery and enqueue flow: only `FREE` and `2xFREE`
+  candidates may pass, even if a paid discount is accidentally listed in
+  `pt_filters.discounts`. Unknown, half-discount, and NORMAL PT candidates are
   rejected before download-token generation.
-- `pt_filters.allow_non_free` lets NORMAL/non-free candidates remain eligible
-  without discount-score credit. Keep it false for freeleech-only discovery.
+- `pt_filters.allow_non_free` does not govern Want List acquisition. Want List
+  ranking and explicit/scheduled intent enqueue may select a paid release for a
+  requested work; they still pass through the selected category's capacity and
+  downloader gates.
 - Use `seed-agent strategy-report --config <config>` before changing strategy
   knobs. It groups current candidates and linked qB runtime outcomes by demand,
   ratio, size, and score, and shows the state-derived site-history feedback

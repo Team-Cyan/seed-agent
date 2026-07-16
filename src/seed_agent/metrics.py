@@ -70,6 +70,22 @@ def _latest_run_samples(
         "seed_agent_last_cycle_reclaimed_bytes",
         _mapping_sum(prune.get("reclaimed_capacity_by_pool")),
     )
+    _sample(
+        samples,
+        "seed_agent_last_cycle_verified_committed_reclaim_bytes",
+        _mapping_sum(prune.get("verified_committed_reclaim_by_pool")),
+    )
+    _sample(
+        samples,
+        "seed_agent_last_cycle_hard_cap_violation_bytes",
+        _mapping_sum(prune.get("hard_cap_violations_by_pool")),
+    )
+    if prune.get("hard_cap_satisfied") is not None:
+        _sample(
+            samples,
+            "seed_agent_last_cycle_hard_cap_satisfied",
+            int(bool(prune.get("hard_cap_satisfied"))),
+        )
     usage = summary.get("default_pool_usage")
     if isinstance(usage, dict):
         _sample(

@@ -20,11 +20,13 @@ const state = {
   sectionYamls: {},
   configYaml: "",
   configPath: "",
+  configRevision: "",
   runtimeRoot: "",
   schedulerEnvironmentOverrides: {},
   language: "CN",
   dark: false,
   currentSection: "overview",
+  webToken: "",
 };
 
 const trackerList = document.querySelector("[data-tracker-list]");
@@ -32,12 +34,53 @@ const addTrackerButton = document.querySelector("[data-add-tracker]");
 const themeButton = document.querySelector("[data-theme-button]");
 const languageButton = document.querySelector("[data-language-button]");
 const languageMenu = document.querySelector("[data-language-menu]");
+const webTokenButton = document.querySelector("[data-web-token-button]");
 const helpPopover = document.querySelector("[data-help-popover]");
 const configPathLabel = document.querySelector("[data-config-path]");
 const sectionSwitcher = document.querySelector("[data-section-switcher]");
 const sectionGroupLabel = document.querySelector("[data-section-group-label]");
 const navGroupLabels = document.querySelectorAll("[data-nav-group-label]");
 const navItems = document.querySelectorAll("[data-section]");
+let webTokenPrompt = null;
+
+async function requestWebToken() {
+  if (!webTokenPrompt) {
+    webTokenPrompt = Promise.resolve()
+      .then(() =>
+        window.prompt(
+          state.language === "CN" ? "输入 Web API token" : "Enter Web API token",
+          state.webToken,
+        ),
+      )
+      .then((value) => {
+        if (value === null) {
+          return false;
+        }
+        state.webToken = value.trim();
+        webTokenButton?.classList.toggle("active", Boolean(state.webToken));
+        return Boolean(state.webToken);
+      })
+      .finally(() => {
+        webTokenPrompt = null;
+      });
+  }
+  return webTokenPrompt;
+}
+
+async function apiFetch(input, init = {}, retryUnauthorized = true) {
+  const headers = new Headers(init.headers || {});
+  if (state.webToken) {
+    headers.set("X-Seed-Agent-Token", state.webToken);
+  }
+  const response = await globalThis.fetch(input, { ...init, headers });
+  if (response.status !== 401 || !retryUnauthorized) {
+    return response;
+  }
+  if (!(await requestWebToken())) {
+    return response;
+  }
+  return apiFetch(input, init, false);
+}
 
 const copy = {
   CN: {
@@ -256,7 +299,7 @@ const copy = {
       dashboardAttention: "需要关注",
       tags: "标签",
       overBudgetBehavior: "超预算处理",
-      overBudgetAddPaused: "暂停添加",
+      overBudgetReject: "拒绝入队",
       statusAccepted: "已接受",
       statusConfirmationRequired: "待复核",
       statusDeleted: "已删除",
@@ -523,7 +566,7 @@ const copy = {
       dashboardAttention: "Needs attention",
       tags: "Tags",
       overBudgetBehavior: "Over budget",
-      overBudgetAddPaused: "Add paused",
+      overBudgetReject: "Reject enqueue",
       statusAccepted: "Accepted",
       statusConfirmationRequired: "Needs review",
       statusDeleted: "Deleted",
@@ -596,9 +639,9 @@ const settingsPanelsByLanguage = {
         ["目标做种/下载比", "target_seed_leecher_ratio", "number", "控制热门程度，不再使用绝对做种数上限。"],
         ["允许非免费", "allow_non_free", "boolean", "是否允许普通候选进入评分。"],
         ["最大体积 GB", "max_size_gb", "optional-number", "候选硬大小上限；留空表示不限制。"],
-        ["最大活动下载数", "max_active_downloads", "optional-number", "超过后将候选转为暂停添加。"],
-        ["最大剩余下载量 GB", "max_total_amount_left_gb", "optional-number", "剩余下载总量超过后暂停添加。"],
-        ["保留磁盘空间 GB", "min_free_disk_gb", "optional-number", "下载器真实剩余空间扣除既有未完成下载后低于此值时暂停添加。"],
+        ["最大活动下载数", "max_active_downloads", "optional-number", "达到上限后拒绝新的自动入队。"],
+        ["最大剩余下载量 GB", "max_total_amount_left_gb", "optional-number", "预计剩余下载量超过上限时拒绝新的自动入队。"],
+        ["保留磁盘空间 GB", "min_free_disk_gb", "optional-number", "下载器真实剩余空间扣除既有未完成下载后低于此值时拒绝新的自动入队。"],
       ],
     },
     seed_cleanup: {
@@ -610,13 +653,14 @@ const settingsPanelsByLanguage = {
         ["保护手动标记", "protect_manual", "boolean", "手动标记项默认保护。"],
         ["保护媒体库", "protect_media_library", "boolean", "媒体库相关种子默认保护。"],
         ["零上传删除小时数", "delete_after_no_upload_hours", "number", "零上传观察窗口。"],
-        ["单轮容量删除上限", "max_capacity_deletes_per_run", "number", "限制每轮因容量压力触发的删除数量；直接付费风险不受此限制。"],
+        ["单轮软清理上限", "max_capacity_deletes_per_run", "number", "限制非硬上限场景的容量清理数量；池已超限和直接付费风险不受此限制。"],
       ],
     },
     scheduler: {
       title: "定时任务",
       fields: [
         ["扫描周期（分钟）", "interval_minutes", "number", "每轮 scheduled task 的间隔。"],
+        ["容量守卫（秒）", "capacity_guard_interval_seconds", "number", "完整扫描之间仅检查 qB 硬容量和错误任务的频率。"],
         ["候选免费窗口下限", "min_free_window_minutes", "optional-number", "执行入队时要求的剩余免费分钟数；留空表示不限制。"],
         ["要求已知免费窗口", "require_known_free_window", "boolean", "自动入队前必须能确认免费窗口。"],
         ["启用清理", "prune_enabled", "boolean", "每轮运行 tracker backfill 后执行 seed 清理。"],
@@ -677,8 +721,8 @@ const settingsPanelsByLanguage = {
         ["Target seeder/leecher ratio", "target_seed_leecher_ratio", "number", "Controls demand pressure; no absolute seeder cap is used."],
         ["Allow non-free", "allow_non_free", "boolean", "Allow normal candidates into scoring."],
         ["Maximum size GB", "max_size_gb", "optional-number", "Hard candidate size cap; empty means no limit."],
-        ["Maximum active downloads", "max_active_downloads", "optional-number", "Above this, candidates are added paused."],
-        ["Maximum remaining download GB", "max_total_amount_left_gb", "optional-number", "Above this remaining-download total, candidates are added paused."],
+        ["Maximum active downloads", "max_active_downloads", "optional-number", "At the limit, reject new automatic enqueue."],
+        ["Maximum remaining download GB", "max_total_amount_left_gb", "optional-number", "Reject new automatic enqueue when projected remaining downloads exceed this limit."],
         ["Minimum free disk GB", "min_free_disk_gb", "optional-number", "Reserve this much downloader-reported free disk after existing incomplete downloads."],
       ],
     },
@@ -691,13 +735,14 @@ const settingsPanelsByLanguage = {
         ["Protect manual marks", "protect_manual", "boolean", "Protect manually marked torrents by default."],
         ["Protect media library", "protect_media_library", "boolean", "Protect media-library torrents by default."],
         ["Delete after no-upload hours", "delete_after_no_upload_hours", "number", "Zero-upload observation window."],
-        ["Capacity deletes per run", "max_capacity_deletes_per_run", "number", "Caps capacity-pressure deletes per cycle; direct paid-risk deletion remains independent."],
+        ["Soft capacity deletes per run", "max_capacity_deletes_per_run", "number", "Caps non-hard-cap cleanup; an exceeded pool limit and direct paid-risk deletion bypass this value."],
       ],
     },
     scheduler: {
       title: "Scheduler",
       fields: [
         ["Interval minutes", "interval_minutes", "number", "Delay between scheduled cycles."],
+        ["Capacity guard seconds", "capacity_guard_interval_seconds", "number", "qB-only hard-cap and error check frequency between full cycles."],
         ["Minimum free-window minutes", "min_free_window_minutes", "optional-number", "Required free-window headroom for execute-mode enqueue; empty disables it."],
         ["Require known free window", "require_known_free_window", "boolean", "Require verified free-window evidence before automatic enqueue."],
         ["Enable prune", "prune_enabled", "boolean", "Run seed cleanup after tracker backfill each cycle."],
@@ -1041,6 +1086,12 @@ languageButton.addEventListener("click", () => {
   languageMenu.hidden = !languageMenu.hidden;
 });
 
+webTokenButton?.addEventListener("click", async () => {
+  if (await requestWebToken()) {
+    await loadInitialData();
+  }
+});
+
 languageMenu.addEventListener("click", (event) => {
   const language = event.target?.dataset?.languageOption;
   if (language) {
@@ -1102,7 +1153,7 @@ function syncNavigationLabels() {
 }
 
 async function loadConfig() {
-  const response = await fetch("/api/config");
+  const response = await apiFetch("/api/config");
   if (!response.ok) {
     renderSection();
     return;
@@ -1112,6 +1163,7 @@ async function loadConfig() {
   state.sectionYamls = payload.section_yamls || {};
   state.configYaml = payload.config_yaml || "";
   state.configPath = payload.config_path || "";
+  state.configRevision = payload.revision || "";
   state.runtimeRoot = payload.runtime_root || "";
   state.schedulerEnvironmentOverrides = payload.scheduler_environment_overrides || {};
   state.trackers = payload.trackers.map((tracker) => ({
@@ -1123,7 +1175,7 @@ async function loadConfig() {
     discovery_mode: tracker.discovery_mode,
     api_key_ref: tracker.api_key_ref || "",
     api_key_value: "",
-    auth_header: "x-api-key",
+    auth_header: tracker.auth_header || "x-api-key",
     cookie_ref: tracker.cookie_ref || "",
     saved: true,
     collapsed: true,
@@ -1137,10 +1189,10 @@ async function loadConfig() {
 async function loadOverview() {
   try {
     const [healthResponse, stateResponse, poolsResponse, opsResponse] = await Promise.all([
-      fetch("/api/health"),
-      fetch("/api/state/summary"),
-      fetch("/api/pools"),
-      fetch("/api/ops"),
+      apiFetch("/api/health"),
+      apiFetch("/api/state/summary"),
+      apiFetch("/api/pools"),
+      apiFetch("/api/ops"),
     ]);
     if (!healthResponse.ok || !stateResponse.ok || !poolsResponse.ok || !opsResponse.ok) {
       throw new Error(uiText("readingStatus"));
@@ -1165,7 +1217,7 @@ async function loadOverview() {
 
 async function loadWants() {
   try {
-    const response = await fetch("/api/wants");
+    const response = await apiFetch("/api/wants");
     if (!response.ok) {
       throw new Error(uiText("wantsReadFailed"));
     }
@@ -1847,7 +1899,7 @@ async function openWantCandidates(panel, intentId, message = "") {
   status.innerHTML = message ? `<div class="status-item ok">${escapeHtml(message)}</div>` : "";
   list.innerHTML = `<div class="empty-state">${escapeHtml(uiText("loadingCandidates"))}</div>`;
   try {
-    const response = await fetch(`/api/wants/${encodeURIComponent(intentId)}/candidates`);
+    const response = await apiFetch(`/api/wants/${encodeURIComponent(intentId)}/candidates`);
     const payload = await response.json();
     if (!response.ok) {
       throw new Error(payload.error || `${uiText("requestFailedPrefix")}: ${response.status}`);
@@ -1986,7 +2038,7 @@ async function confirmWantCandidateEnqueue(panel, intentId, releaseId, button) {
 async function submitWantCandidateEnqueue(intentId, releaseId, execute) {
   const endpoint = `/api/wants/${encodeURIComponent(intentId)}/enqueue`;
   const body = { release_id: releaseId, execute: execute ? true : false };
-  const response = await fetch(endpoint, {
+  const response = await apiFetch(endpoint, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -2076,6 +2128,9 @@ async function handleWantAction(panel, action, event) {
       if (payload.config_yaml) {
         state.configYaml = payload.config_yaml;
       }
+      if (payload.revision) {
+        state.configRevision = payload.revision;
+      }
       await syncConfiguredWants(panel);
       await loadWants();
       renderSection();
@@ -2112,14 +2167,14 @@ async function searchFilteredWants(panel, button) {
     status.innerHTML = `<div class="status-item info">${escapeHtml(uiText("searchingWants"))}</div>`;
   }
   try {
-    const response = await fetch("/api/wants/search", {
+    const response = await apiFetch("/api/wants/search", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(state.wants.filters),
     });
     const payload = await response.json();
     if (!response.ok) {
-      throw new Error(payload.status?.[0]?.message || `${uiText("requestFailedPrefix")}: ${response.status}`);
+      throw new Error(payload.message || payload.status?.[0]?.message || `${uiText("requestFailedPrefix")}: ${response.status}`);
     }
     await loadWants();
     renderSection();
@@ -2145,12 +2200,12 @@ async function searchSingleWant(panel, button) {
     status.innerHTML = `<div class="status-item info">${escapeHtml(uiText("searchingWants"))}</div>`;
   }
   try {
-    const response = await fetch(`/api/wants/${encodeURIComponent(intentId)}/search`, {
+    const response = await apiFetch(`/api/wants/${encodeURIComponent(intentId)}/search`, {
       method: "POST",
     });
     const payload = await response.json();
     if (!response.ok) {
-      throw new Error(payload.status?.[0]?.message || `${uiText("requestFailedPrefix")}: ${response.status}`);
+      throw new Error(payload.message || payload.status?.[0]?.message || `${uiText("requestFailedPrefix")}: ${response.status}`);
     }
     await loadWants();
     renderSection();
@@ -2173,10 +2228,10 @@ async function syncConfiguredWants(panel) {
     status.innerHTML = `<div class="status-item info">${escapeHtml(uiText("syncingWants"))}</div>`;
   }
   try {
-    const response = await fetch("/api/wants/sync", { method: "POST" });
+    const response = await apiFetch("/api/wants/sync", { method: "POST" });
     const payload = await response.json();
     if (!response.ok) {
-      throw new Error(payload.status?.[0]?.message || `${uiText("requestFailedPrefix")}: ${response.status}`);
+      throw new Error(payload.message || payload.status?.[0]?.message || `${uiText("requestFailedPrefix")}: ${response.status}`);
     }
     if (status) {
       status.innerHTML = `<div class="status-item ok">${escapeHtml(payload.status?.[0]?.message || uiText("syncWantsCompleted"))}</div>`;
@@ -2262,14 +2317,14 @@ async function submitWantSourceConfig(panel, endpoint) {
   try {
     const data = { ...(state.configSections.want_sources || {}) };
     data.want_lists = readWantSourceConfig(panel);
-    const response = await fetch(endpoint, {
+    const response = await apiFetch(endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ section: "want_sources", data }),
+      body: JSON.stringify({ section: "want_sources", data, revision: state.configRevision || null }),
     });
     const payload = await response.json();
     if (!response.ok) {
-      throw new Error(payload.status?.[0]?.message || `${uiText("requestFailedPrefix")}: ${response.status}`);
+      throw new Error(payload.message || payload.status?.[0]?.message || `${uiText("requestFailedPrefix")}: ${response.status}`);
     }
     status.innerHTML = `
       <div class="status-item ok">${escapeHtml(payload.status?.[0]?.message || "ok")}</div>
@@ -2516,7 +2571,7 @@ async function handleTrackerAction(tracker, action) {
     save: "/api/trackers",
   };
   try {
-    const response = await fetch(endpoints[action], {
+    const response = await apiFetch(endpoints[action], {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(toDraftPayload(tracker)),
@@ -2525,11 +2580,17 @@ async function handleTrackerAction(tracker, action) {
     tracker.status = payload.status || tracker.status;
     tracker.diff = payload.diff || "";
     if (!response.ok && !payload.status) {
-      tracker.status = [{ level: "warning", message: `${uiText("requestFailedPrefix")}: ${response.status}` }];
+      tracker.status = [
+        {
+          level: "warning",
+          message: payload.message || `${uiText("requestFailedPrefix")}: ${response.status}`,
+        },
+      ];
     }
     if (action === "save" && response.ok) {
       tracker.saved = true;
       tracker.api_key_value = "";
+      state.configRevision = payload.revision || state.configRevision;
     }
   } catch (error) {
     tracker.status = [{ level: "warning", message: `${uiText("requestFailedPrefix")}: ${error.message}` }];
@@ -2582,6 +2643,7 @@ function toDraftPayload(tracker) {
     api_key_value: tracker.api_key_value || null,
     auth_header: tracker.auth_header || null,
     cookie_ref: tracker.cookie_ref || null,
+    revision: state.configRevision || null,
   };
 }
 
@@ -2942,7 +3004,7 @@ function renderCategoryPolicyRow(policy = {}, index = 0) {
       <label class="field">
         <span>${escapeHtml(uiText("overBudgetBehavior"))}</span>
         <select data-category-policy-field="over_budget_behavior">
-          <option value="add_paused" selected>${escapeHtml(uiText("overBudgetAddPaused"))}</option>
+          <option value="reject" selected>${escapeHtml(uiText("overBudgetReject"))}</option>
         </select>
       </label>
       <label class="field">
@@ -3188,7 +3250,7 @@ function readDownloaderStructuredData(page, data) {
       mode,
       budget_pool: budgetPool,
       delete_enabled: row.querySelector('[data-category-policy-field="delete_enabled"]')?.value === "true",
-      over_budget_behavior: row.querySelector('[data-category-policy-field="over_budget_behavior"]')?.value || "add_paused",
+      over_budget_behavior: row.querySelector('[data-category-policy-field="over_budget_behavior"]')?.value || "reject",
       tags: tags.split(",").map((item) => item.trim()).filter(Boolean),
     });
   });
@@ -3281,6 +3343,9 @@ function applyReturnedConfigState(payload, section, page) {
   if (payload.config_yaml) {
     state.configYaml = payload.config_yaml;
   }
+  if (payload.revision) {
+    state.configRevision = payload.revision;
+  }
   const yamlTextarea = page.querySelector("[data-section-yaml]");
   if (yamlTextarea && state.sectionYamls[section]) {
     yamlTextarea.value = state.sectionYamls[section];
@@ -3302,14 +3367,14 @@ async function saveSettingsPanelYaml(page, section) {
 async function submitSettingsPanelYaml(page, section, endpoint, persist) {
   try {
     const yamlText = readSectionYamlText(page);
-    const response = await fetch(endpoint, {
+    const response = await apiFetch(endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ section, yaml: yamlText }),
+      body: JSON.stringify({ section, yaml: yamlText, revision: state.configRevision || null }),
     });
     const payload = await response.json();
     if (!response.ok) {
-      throw new Error(payload.status?.[0]?.message || `${uiText("requestFailedPrefix")}: ${response.status}`);
+      throw new Error(payload.message || payload.status?.[0]?.message || `${uiText("requestFailedPrefix")}: ${response.status}`);
     }
     if (persist) {
       applyReturnedConfigState(payload, section, page);
@@ -3336,14 +3401,14 @@ async function submitSettingsPanelYaml(page, section, endpoint, persist) {
 async function previewSettingsPanelSave(page, section) {
   try {
     const data = readSettingsPanelData(page, section);
-    const response = await fetch("/api/config/sections/preview", {
+    const response = await apiFetch("/api/config/sections/preview", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ section, data }),
+      body: JSON.stringify({ section, data, revision: state.configRevision || null }),
     });
     const payload = await response.json();
     if (!response.ok) {
-      throw new Error(payload.status?.[0]?.message || `${uiText("requestFailedPrefix")}: ${response.status}`);
+      throw new Error(payload.message || payload.status?.[0]?.message || `${uiText("requestFailedPrefix")}: ${response.status}`);
     }
     page.dataset.previewConfirmed = "true";
     const saveButton = page.querySelector('[data-setting-action="save"]');
@@ -3369,14 +3434,14 @@ async function confirmSettingsPanelSave(page, section) {
 async function saveSettingsPanel(page, section) {
   try {
     const data = readSettingsPanelData(page, section);
-    const response = await fetch("/api/config/sections", {
+    const response = await apiFetch("/api/config/sections", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ section, data }),
+      body: JSON.stringify({ section, data, revision: state.configRevision || null }),
     });
     const payload = await response.json();
     if (!response.ok) {
-      throw new Error(payload.status?.[0]?.message || `${uiText("requestFailedPrefix")}: ${response.status}`);
+      throw new Error(payload.message || payload.status?.[0]?.message || `${uiText("requestFailedPrefix")}: ${response.status}`);
     }
     applyReturnedConfigState(payload, section, page);
     page.dataset.previewConfirmed = "false";

@@ -30,6 +30,9 @@ jobs:
         with:
           python-version: "3.14"
 
+      - name: Check public repository hygiene
+        run: python scripts/check_public_repository.py
+
       - name: Install dependencies
         run: uv sync --frozen --dev
 

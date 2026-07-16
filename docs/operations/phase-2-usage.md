@@ -66,7 +66,7 @@ want_sources:
       id: douban-me
       label: 我
       enabled: true
-      user_name: LancerC
+      user_name: example-user
       max_pages: 1
     - provider: imdb
       id: imdb-weekend

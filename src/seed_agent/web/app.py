@@ -30,8 +30,10 @@ from seed_agent.config import (
 )
 from seed_agent.config import (
     SearchConfig,
+    SeedAgentConfig,
     SiteConfig,
     load_config,
+    resolve_runtime_secret_path,
 )
 from seed_agent.metrics import render_prometheus_metrics
 from seed_agent.models import IntentSource, RankedRelease, ReleaseCandidate
@@ -39,10 +41,12 @@ from seed_agent.quality_tags import matching_quality_tag_groups
 from seed_agent.search.base import SearchProvider
 from seed_agent.state import StateStore
 from seed_agent.web.settings import (
+    ConfigRevisionConflict,
     ConfigSectionDraft,
     ConfigSectionYamlDraft,
     TrackerDraft,
     build_tracker_status,
+    config_revision,
     config_section_yaml_fragment,
     config_section_yamls_payload,
     config_sections_payload,
@@ -50,10 +54,12 @@ from seed_agent.web.settings import (
     preview_config_section,
     preview_config_section_yaml,
     preview_tracker_draft,
+    redact_url_credentials,
     save_config_section,
     save_config_section_yaml,
     save_tracker_draft,
     tracker_draft_to_config,
+    validate_tracker_network_draft,
 )
 
 STATIC_ROOT = Path(__file__).parent / "static"
@@ -70,9 +76,11 @@ def make_handler(config_path: Path) -> type[BaseHTTPRequestHandler]:
 
     class SeedAgentWebHandler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
+            if self.path.startswith("/api/") and not self._authorize_api_request():
+                return
             try:
                 metrics_config = load_config(resolved_config_path).metrics
-            except (OSError, ValueError):
+            except OSError, ValueError:
                 metrics_config = None
             if metrics_config is not None and self.path == metrics_config.path:
                 if not metrics_config.enabled:
@@ -92,7 +100,7 @@ def make_handler(config_path: Path) -> type[BaseHTTPRequestHandler]:
                 self._send_json(payload, status=status)
                 return
             if self.path == "/api/config":
-                config = load_config(resolved_config_path)
+                config, revision = _load_config_snapshot(resolved_config_path)
                 self._send_json(
                     {
                         "config_path": str(resolved_config_path),
@@ -101,9 +109,8 @@ def make_handler(config_path: Path) -> type[BaseHTTPRequestHandler]:
                         "sections": config_sections_payload(config),
                         "section_yamls": config_section_yamls_payload(config),
                         "config_yaml": normalized_config_yaml(config),
-                        "scheduler_environment_overrides": (
-                            _scheduler_environment_overrides()
-                        ),
+                        "revision": revision,
+                        "scheduler_environment_overrides": (_scheduler_environment_overrides()),
                     }
                 )
                 return
@@ -134,10 +141,19 @@ def make_handler(config_path: Path) -> type[BaseHTTPRequestHandler]:
             self._send_json({"error": "not found"}, status=HTTPStatus.NOT_FOUND)
 
         def do_POST(self) -> None:
-            if not self._authorize_write_request():
+            if not self._authorize_api_request():
                 return
             try:
                 self._do_post()
+            except ConfigRevisionConflict as exc:
+                self._send_json(
+                    {
+                        "error": "config_conflict",
+                        "message": str(exc),
+                        "revision": exc.current,
+                    },
+                    status=HTTPStatus.CONFLICT,
+                )
             except Exception as exc:
                 self._send_json(
                     {"status": [{"level": "warning", "message": _friendly_error(exc)}]},
@@ -151,8 +167,9 @@ def make_handler(config_path: Path) -> type[BaseHTTPRequestHandler]:
                 return
             if self.path == "/api/config/sections":
                 draft = ConfigSectionDraft.model_validate(self._read_json())
-                saved = save_config_section(resolved_config_path, draft)
-                updated_config = load_config(resolved_config_path)
+                save_config_section(resolved_config_path, draft)
+                updated_config, revision = _load_config_snapshot(resolved_config_path)
+                saved = config_sections_payload(updated_config)[draft.section]
                 self._send_json(
                     {
                         "section": draft.section,
@@ -160,6 +177,7 @@ def make_handler(config_path: Path) -> type[BaseHTTPRequestHandler]:
                         "yaml": config_section_yaml_fragment(draft.section, saved),
                         "section_yamls": config_section_yamls_payload(updated_config),
                         "config_yaml": normalized_config_yaml(updated_config),
+                        "revision": revision,
                         "status": [{"level": "ok", "message": f"{draft.section} config saved"}],
                     }
                 )
@@ -181,13 +199,17 @@ def make_handler(config_path: Path) -> type[BaseHTTPRequestHandler]:
                 return
             if self.path == "/api/config/sections/yaml":
                 draft = ConfigSectionYamlDraft.model_validate(self._read_json())
-                saved = save_config_section_yaml(resolved_config_path, draft)
-                updated_config = load_config(resolved_config_path)
+                save_config_section_yaml(resolved_config_path, draft)
+                updated_config, revision = _load_config_snapshot(resolved_config_path)
+                saved = config_sections_payload(updated_config)[draft.section]
                 self._send_json(
                     {
-                        **saved,
+                        "section": draft.section,
+                        "data": saved,
+                        "yaml": config_section_yaml_fragment(draft.section, saved),
                         "section_yamls": config_section_yamls_payload(updated_config),
                         "config_yaml": normalized_config_yaml(updated_config),
+                        "revision": revision,
                         "status": [{"level": "ok", "message": f"{draft.section} YAML saved"}],
                     }
                 )
@@ -209,11 +231,16 @@ def make_handler(config_path: Path) -> type[BaseHTTPRequestHandler]:
                 return
             if self.path == "/api/trackers":
                 draft = TrackerDraft.model_validate(self._read_json())
-                site = save_tracker_draft(resolved_config_path, draft)
+                save_tracker_draft(resolved_config_path, draft)
+                updated_config, revision = _load_config_snapshot(resolved_config_path)
+                site = next(
+                    site for site in updated_config.tracker_sites if site.name == draft.name.strip()
+                )
                 self._send_json(
                     {
                         "tracker": _tracker_summary(site, root),
                         "status": build_tracker_status(draft, root),
+                        "revision": revision,
                     }
                 )
                 return
@@ -222,9 +249,7 @@ def make_handler(config_path: Path) -> type[BaseHTTPRequestHandler]:
                 self._send_json(
                     {
                         **preview_tracker_draft(resolved_config_path, draft),
-                        "status": [
-                            {"level": "ok", "message": "tracker config preview ready"}
-                        ],
+                        "status": [{"level": "ok", "message": "tracker config preview ready"}],
                     }
                 )
                 return
@@ -268,7 +293,7 @@ def make_handler(config_path: Path) -> type[BaseHTTPRequestHandler]:
         def log_message(self, format: str, *args: object) -> None:
             return
 
-        def _authorize_write_request(self) -> bool:
+        def _authorize_api_request(self) -> bool:
             if _write_request_authorized(dict(self.headers.items())):
                 return True
             self._send_json({"error": "unauthorized"}, status=HTTPStatus.UNAUTHORIZED)
@@ -301,6 +326,8 @@ def make_handler(config_path: Path) -> type[BaseHTTPRequestHandler]:
             self.send_response(status)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(payload)))
+            if content_type == "application/json":
+                self.send_header("Cache-Control", "no-store")
             self.end_headers()
             self.wfile.write(payload)
 
@@ -339,6 +366,16 @@ def _write_request_authorized(headers: dict[str, str]) -> bool:
     return bool(provided) and secrets.compare_digest(provided, expected)
 
 
+def _load_config_snapshot(config_path: Path) -> tuple[SeedAgentConfig, str]:
+    for _ in range(5):
+        before = config_revision(config_path)
+        config = load_config(config_path)
+        after = config_revision(config_path)
+        if before == after:
+            return config, after
+    raise RuntimeError("configuration changed repeatedly while reading")
+
+
 def serve(config_path: Path, host: str, port: int) -> None:
     server = ThreadingHTTPServer((host, port), make_handler(config_path))
     try:
@@ -353,11 +390,12 @@ def _tracker_summary(site: SiteConfig, root: Path) -> dict[str, Any]:
         "name": site.name,
         "type": site.type,
         "enabled": site.enabled,
-        "rss_url": site.rss_url,
+        "rss_url": redact_url_credentials(site.rss_url),
         "discovery_mode": site.discovery_mode,
         "api_key_ref": api_key_ref,
         "cookie_ref": site.cookie_ref,
-        "has_api_key": bool(api_key_ref and _resolve_repo_path(api_key_ref, root).exists()),
+        "auth_header": site.auth_header,
+        "has_api_key": bool(api_key_ref and _secret_ref_exists(api_key_ref, root)),
     }
 
 
@@ -397,8 +435,9 @@ def _site_probe_payload(
             "summary": {"command": "site-probe", "discovered": 0},
         }
     try:
-        site = tracker_draft_to_config(draft)
         config = load_config(config_path)
+        validate_tracker_network_draft(draft, config)
+        site = tracker_draft_to_config(draft)
         candidates = run(_discover_site_candidates(site, config.config_dir, config.pt_filters))
     except Exception as exc:
         return {
@@ -426,8 +465,9 @@ def _dry_run_payload(
             "summary": {"command": "dry-run", "discovered": 0, "accepted": 0},
         }
     try:
-        site = tracker_draft_to_config(draft)
         config = load_config(config_path)
+        validate_tracker_network_draft(draft, config)
+        site = tracker_draft_to_config(draft)
         candidates = run(_discover_site_candidates(site, config.config_dir, config.pt_filters))
         candidates = _apply_site_history_feedback(candidates, root)
         scored = score_candidates(candidates, config.pt_filters, config.pt_scoring)
@@ -732,12 +772,14 @@ def _enqueue_want_payload(
     intent_id: str,
 ) -> tuple[dict[str, Any], HTTPStatus]:
     from seed_agent.cli import (
+        _build_intent_enqueue_context_resolver,
         _build_release_download_resolver,
         _default_category_policy,
         _downloader_status_summary,
         _enqueue_pause_reasons,
         _enqueue_runtime_context,
         _intent_category_policy,
+        _intent_enqueue_pause_state,
         _NullDownloader,
         _pool_usage_item_summary,
         _ranked_release_summary,
@@ -781,6 +823,11 @@ def _enqueue_want_payload(
             pool_usage = None
             missing_reconciled = 0
             pause_reasons = []
+        enqueue_context_resolver = _build_intent_enqueue_context_resolver(
+            config,
+            live_torrents,
+            downloader_status,
+        )
         release_resolver = _build_release_download_resolver(config) if execute else None
         intent, ranked, enqueue_decisions = run(
             enqueue_intent(
@@ -794,6 +841,7 @@ def _enqueue_want_payload(
                 pause_reasons=pause_reasons,
                 release_resolver=release_resolver,
                 policy_resolver=lambda intent: _intent_category_policy(config, intent),
+                enqueue_context_resolver=enqueue_context_resolver,
                 release_id=release_id,
             )
         )
@@ -805,9 +853,7 @@ def _enqueue_want_payload(
     except MutationBatchError as exc:
         decisions.extend(exc.decisions)
         _write_audit_decisions(config, decisions)
-        failed_reasons = [
-            item.reason for item in decisions if item.action.endswith(".failed")
-        ]
+        failed_reasons = [item.reason for item in decisions if item.action.endswith(".failed")]
         message = failed_reasons[-1] if failed_reasons else str(exc)
         return {
             "error": str(exc),
@@ -822,6 +868,11 @@ def _enqueue_want_payload(
             ],
         }, HTTPStatus.BAD_REQUEST
 
+    effective_blocked, effective_block_reasons = _intent_enqueue_pause_state(
+        decisions,
+        fallback_paused=paused,
+        fallback_reasons=pause_reasons,
+    )
     payload: dict[str, Any] = {
         "execute": execute,
         "intent": _want_item(
@@ -836,22 +887,29 @@ def _enqueue_want_payload(
         "missing_from_qb_reconciled": missing_reconciled,
         "status": [
             {
-                "level": "ok",
-                "message": "已加入 qB" if execute else "入队试运行完成",
+                "level": "warning" if effective_blocked else "ok",
+                "message": (
+                    "入队被运行时安全门禁拒绝"
+                    if effective_blocked
+                    else "已加入 qB"
+                    if execute
+                    else "入队试运行完成"
+                ),
             }
         ],
     }
     if pool_usage is not None:
         payload["default_pool_usage"] = _pool_usage_item_summary(pool_usage)
-        payload["enqueue_paused_by_pool_policy"] = paused
+        payload["enqueue_paused_by_pool_policy"] = False
+        payload["enqueue_blocked_by_runtime_gate"] = effective_blocked
     if downloader_status is not None:
         payload["downloader_status"] = _downloader_status_summary(
             config,
             downloader_status,
             live_torrents,
         )
-    if pause_reasons:
-        payload["enqueue_paused_reasons"] = pause_reasons
+    if effective_block_reasons:
+        payload["enqueue_blocked_reasons"] = effective_block_reasons
     return payload, HTTPStatus.OK
 
 
@@ -1145,9 +1203,7 @@ def _candidate_matches_requirements(ranked: RankedRelease) -> bool:
         any(risk.startswith(prefix) for prefix in requirement_risk_prefixes)
         for risk in ranked.risks
     )
-    has_quality_penalty = any(
-        reason.startswith("quality tag score -") for reason in ranked.reasons
-    )
+    has_quality_penalty = any(reason.startswith("quality tag score -") for reason in ranked.reasons)
     return not has_requirement_risk and not has_quality_penalty
 
 
@@ -1291,9 +1347,7 @@ def _want_timestamp_precision(
         IntentSource.IMDB_WATCHLIST.value,
         IntentSource.LETTERBOXD.value,
     }
-    if source_is_date_only and (
-        "T00:00:00" in text or " 00:00:00" in text
-    ):
+    if source_is_date_only and ("T00:00:00" in text or " 00:00:00" in text):
         return "date"
     return "datetime"
 
@@ -1427,7 +1481,7 @@ def _schedule_backoff_status(root: Path) -> dict[str, Any]:
         return status
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except OSError, json.JSONDecodeError:
         return status
     if not isinstance(raw, dict):
         return status
@@ -1541,11 +1595,11 @@ def _repo_root_for_config(config_path: Path) -> Path:
     return config_dir
 
 
-def _resolve_repo_path(path_value: str, root: Path) -> Path:
-    path = Path(path_value)
-    if path.is_absolute():
-        return path
-    return root / path
+def _secret_ref_exists(path_value: str, root: Path) -> bool:
+    try:
+        return resolve_runtime_secret_path(path_value, root).is_file()
+    except ValueError:
+        return False
 
 
 def _content_type_for(path: Path) -> str:
@@ -1579,4 +1633,10 @@ def _has_blocking_tracker_status(status: list[dict[str, str]]) -> bool:
         "tracker name is required",
         "api_key_ref is required when discovery_mode=api",
     }
-    return any(item["message"] in blocking_messages for item in status)
+    return any(
+        item["message"] in blocking_messages
+        or "local/secrets" in item["message"]
+        or item["message"].endswith("file is missing")
+        for item in status
+        if item["level"] == "warning"
+    )

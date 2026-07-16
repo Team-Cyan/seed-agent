@@ -23,7 +23,7 @@ by completion period, and unfinished work is ordered by current priority.
 - Completed 2026-04 - qB category and budget safety
   - Category policy became the cleanup authority boundary.
   - Mutable `seed` pools and add-only media pools were separated.
-  - Shared budget pools can force paused enqueue without widening cleanup.
+  - Shared budget pools reject over-capacity enqueue without widening cleanup.
   - Runtime enqueue gates use score-prioritized headroom planning.
   - Stopped zero-progress placeholders are excluded from active download
     liability calculations.
@@ -274,8 +274,10 @@ by completion period, and unfinished work is ordered by current priority.
     `docs/plans/2026-07-11-runtime-hardening-refinement.md`.
 
 - Completed 2026-07 - Free-only billing safety hardening
-  - `allow_non_free=false` is now a fail-closed invariant at scoring and again
-    before M-Team token generation; only zero-cost FREE/2xFREE promotions pass.
+  - `allow_non_free=false` is now a fail-closed PT upload-farming invariant at
+    scoring and again before M-Team token generation; only zero-cost
+    FREE/2xFREE promotions pass that flow. Want List acquisition is intentionally
+    independent and may select paid releases for requested works.
   - Every incomplete managed qB task is eligible for bounded tracker refresh,
     including manually stopped downloads, with oldest-evidence rotation to
     avoid fixed-budget starvation.
@@ -292,19 +294,79 @@ by completion period, and unfinished work is ordered by current priority.
   - DockerMan and Compose no longer duplicate scheduler policy as environment
     overrides; YAML/Web UI is the deployment source of truth for those fields.
 
+- Completed 2026-07 - Whole-project safety review hardening
+  - Want List enqueue now has cross-process idempotency claims and uses the
+    selected category's projected pool, active-slot, amount-left, and disk
+    headroom across the complete batch.
+  - Scheduler ownership renews in the background through long phases, tracker
+    failures stop later API work without suppressing local fail-closed cleanup,
+    and category-filtered backfill still reconciles every live downloader hash.
+  - Incomplete paid/free-window billing risk takes precedence over ordinary
+    H&R/manual/media retention protection. Capacity reclaim targets and delete
+    limits are shared across mutable categories, while executed deletes recheck
+    category authority, reclassify fresh completion/activity state, and verify
+    file-removing completion.
+  - PT and Want List batch planning reserve projected pool, amount-left, and disk
+    liability only for candidates that pass every runtime gate. Rejected
+    candidates do not consume capacity needed by a later candidate that fits.
+  - M-Team clients propagate structured throttle/service errors, stop pagination
+    from raw page exhaustion, clear stale promotion expiry evidence, and keep a
+    shared one-second per-process request pacer.
+  - Web config writes use revisions and preserve explicit nulls and hidden
+    fields. API responses redact credentials, secret refs stay within runtime
+    `local/secrets`, tracker drafts cannot reuse unrelated credentials, and an
+    enabled Web token protects both read and write APIs.
+  - Transmission uses conservative label-to-category authority, SQLite
+    backup/restore verifies the complete migratable schema, and `main` Docker
+    publishing waits for successful CI on the exact current commit.
+  - GitHub Actions use current Node-compatible releases pinned to immutable
+    commits, bounded job timeouts, same-branch CI cancellation, and read-only
+    default repository workflow permissions.
+
+- Completed 2026-07 - Exact mutable-pool hard capacity enforcement
+  - Budget pool limits remain explicit deployment-owned configuration, while
+    enforcement measures qB's full committed torrent sizes with exact
+    integer-byte comparisons. The repository does not encode a personal NAS
+    capacity as a product default.
+  - Projected enqueue that would exceed a pool is rejected before qB is called;
+    legacy `add_paused` YAML is migrated to `reject` and newly saved config no
+    longer exposes paused enqueue as a capacity behavior.
+  - A pool already over its hard limit bypasses soft retention protections and
+    the optional per-run capacity delete limit, then re-reads qB after deletion
+    and fails closed if the committed total remains above the configured cap.
+  - Broken incomplete managed rows in qB error states are direct-delete cleanup
+    candidates, with error rows ranked ahead of ordinary eviction candidates.
+  - The scheduler runs a qB-only capacity guard between full tracker cycles;
+    it shares scheduler ownership, calls no tracker API, and only invokes prune
+    for a hard-cap violation or broken incomplete task.
+  - Prune summaries expose before/after pool usage, verified committed and
+    downloaded reclaim, hard-cap violations, and final invariant status.
+
+- Completed 2026-07 - Public repository hygiene
+  - Public examples use generic account and credential placeholders; personal
+    capacities, account identifiers, private IPs, and host paths stay in ignored
+    deployment files.
+  - Top-level runtime config, state, inbox payloads, secret files, database
+    files, cookies, private keys, and torrent files are ignored by default.
+  - CI scans tracked paths and content for private runtime files, local home
+    paths, RFC1918 addresses, private keys, and high-confidence access tokens.
+
 - Next P0 - Complete the live Unraid release gate
-  - Current read-only qB evidence shows the physical disk is overcommitted even
-    though the logical `downloads` pool is still under 10 TiB; new local
-    headroom planning reports this as `over_existing_liability`.
+  - The last read-only qB snapshot remained above the locally configured
+    `downloads` limit. Keep production untouched until this hard-cap release
+    passes the complete release gate, then preview and explicitly authorize
+    convergence.
   - The scheduler/Web integration, intent diagnostics, evidence replay, Web
     operations, scheduler ownership, backup/retention, container security, and
     optional metrics implementation is complete locally.
-  - Use current direct-delete cleanup semantics with a calculated reclaim target;
-    do not recreate paused cleanup placeholders as an operational stopgap.
+  - Use direct-delete cleanup with a calculated reclaim target and post-delete
+    qB verification; do not recreate paused enqueue or cleanup placeholders.
   - After the complete Apple `container` release gate, restore SSH access and
     perform read-only DockerMan, image, port, config, qB, and runtime provenance
     checks. Request explicit operator authorization before deployment or
     downloader mutation.
+  - The 2026-07-16 Apple `container` plugin path was repaired locally; the
+    `0.18.9` image builds and its healthcheck passes as UID/GID `1000:100`.
   - Keep the detailed acceptance matrix in
     `docs/plans/2026-07-11-runtime-hardening-refinement.md`.
 

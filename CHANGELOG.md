@@ -4,6 +4,71 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.18.9 - 2026-07-16
+
+### Added
+
+- Added a qB-only scheduler capacity guard between full tracker cycles, plus
+  hard-cap status, violation, and verified-reclaim observability.
+
+### Changed
+
+- Changed over-budget enqueue behavior from paused adds to pre-qB rejection.
+  Legacy `add_paused` YAML is normalized to `reject` when loaded. Capacity
+  limits remain deployment-owned YAML/Web UI values rather than repository
+  defaults.
+- Made mutable-pool hard capacity override soft retention protections and the
+  optional per-run capacity-delete limit.
+- Removed deployment-specific identities and machine paths from public examples,
+  expanded private runtime ignore rules, and added a CI repository-hygiene gate.
+
+### Fixed
+
+- Re-read qB after cleanup and fail closed when committed torrent sizes remain
+  above an exact integer-byte pool limit.
+- Delete broken incomplete managed torrents and rank qB error states ahead of
+  ordinary eviction candidates.
+- Prevent rejected candidates from reserving capacity that a later fitting
+  candidate can use, and align Web Want List feedback with rejected actions.
+
+## 0.18.8 - 2026-07-15
+
+### Added
+
+- Added atomic Want List enqueue claims and projected category/pool headroom
+  reservation across Web, CLI, and scheduled batches.
+- Added background scheduler lease renewal and full-schema SQLite backup/restore
+  verification.
+
+### Changed
+
+- Clarified that `pt_filters.allow_non_free` governs only PT upload-farming;
+  requested Want List releases may be paid while still honoring capacity gates.
+- Upgraded GitHub Actions to current Node-compatible releases, pinned every
+  external action to an immutable commit, added CI cancellation/timeouts, and
+  reduced the repository's default workflow token permission to read-only.
+- Made M-Team paging, promotion refresh, and structured throttle/service-error
+  handling fail closed without removing the shared one-second request pacer.
+- Gated `main` Docker publishing on successful CI for the exact current commit.
+
+### Fixed
+
+- Prevented stale or cross-tracker Web credentials, stale config overwrites,
+  explicit-null loss, and unauthenticated API reads when a Web token is enabled.
+- Prevented scheduler lease expiry during long phases, duplicate intent enqueue,
+  filtered backfill reconciliation gaps, and over-reservation across batches.
+- Prioritized incomplete paid/free-window deletion, shared capacity cleanup
+  limits across categories, and verified category ownership plus file deletion
+  before reporting cleanup success.
+- Reclassified cleanup candidates from fresh downloader state immediately before
+  deletion, preventing a torrent that just completed or resumed uploading from
+  being deleted using stale scan evidence.
+- Reserved projected disk, amount-left, and pool liability for paused PT enqueue
+  candidates so later candidates cannot reuse capacity already committed to the
+  queue.
+- Made Transmission category inference conservative and preserved successful
+  earlier decisions when a later mutation batch fails.
+
 ## 0.18.7 - 2026-07-12
 
 ### Changed

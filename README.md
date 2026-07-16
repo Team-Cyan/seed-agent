@@ -257,7 +257,7 @@ These guards help avoid:
   not auto-deleted,
 - tags are metadata applied to new torrents for audit/search convenience; tags
   alone do not grant cleanup permission outside the configured category,
-- shared budget pools can force paused enqueue behavior without widening cleanup.
+- shared budget pools reject over-capacity enqueue without widening cleanup.
 
 ## Documentation
 

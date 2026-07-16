@@ -42,6 +42,9 @@ Do not start by reading every spec or every plan.
 ## Safety
 
 - Keep secrets in gitignored local files such as `local/secrets/`.
+- Keep deployment-specific capacities, account identifiers, private IPs, and
+  host paths in `config/live-*.yaml` or other gitignored local runtime files.
+- Run `python scripts/check_public_repository.py` before commit or push.
 - Do not commit tokens, cookies, passkeys, or downloader credentials.
 - qBittorrent mutations must stay dry-run by default unless the user explicitly wants execution.
 - Cleanup actions are high risk. Do not widen delete or pause behavior casually.

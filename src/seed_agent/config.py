@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 import tempfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, ClassVar, Literal
 
 import yaml
@@ -336,8 +336,15 @@ class CategoryPolicyConfig(BaseModel):
     mode: Literal["mutable", "add_only"]
     budget_pool: str
     delete_enabled: bool
-    over_budget_behavior: Literal["add_paused"]
+    over_budget_behavior: Literal["reject"]
     tags: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_legacy_over_budget_behavior(cls, value: Any) -> Any:
+        if isinstance(value, dict) and value.get("over_budget_behavior") == "add_paused":
+            return {**value, "over_budget_behavior": "reject"}
+        return value
 
 
 class BudgetPoolConfig(BaseModel):
@@ -554,6 +561,7 @@ class SchedulerConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     interval_minutes: int = 60
+    capacity_guard_interval_seconds: int = 60
     min_free_window_minutes: int | None = None
     require_known_free_window: bool = True
     prune_enabled: bool = False
@@ -573,6 +581,8 @@ class SchedulerConfig(BaseModel):
     def validate_scheduler(self) -> SchedulerConfig:
         if self.interval_minutes < 1:
             raise ValueError("scheduler.interval_minutes must be >= 1")
+        if self.capacity_guard_interval_seconds < 10:
+            raise ValueError("scheduler.capacity_guard_interval_seconds must be >= 10")
         if self.min_free_window_minutes is not None and self.min_free_window_minutes < 0:
             raise ValueError("scheduler.min_free_window_minutes must be >= 0")
         if self.tracker_backfill_limit is not None and self.tracker_backfill_limit < 1:
@@ -665,6 +675,83 @@ def load_downloader_secret(path: Path) -> dict[str, str]:
     return {str(key): str(value) for key, value in loaded.items()}
 
 
+def validate_secret_ref(secret_ref: str) -> str:
+    value = secret_ref.strip()
+    path = PurePosixPath(value)
+    if (
+        not value
+        or "\\" in value
+        or path.is_absolute()
+        or len(path.parts) < 3
+        or path.parts[:2] != ("local", "secrets")
+        or ".." in path.parts
+    ):
+        raise ValueError("secret refs must be relative files under local/secrets")
+    return value
+
+
+def resolve_runtime_secret_path(secret_ref: str, runtime_root: Path) -> Path:
+    value = validate_secret_ref(secret_ref)
+    root = runtime_root.resolve()
+    secrets_root = (root / "local" / "secrets").resolve()
+    resolved = (root / Path(value)).resolve()
+    if (
+        not secrets_root.is_relative_to(root)
+        or resolved == secrets_root
+        or not resolved.is_relative_to(secrets_root)
+    ):
+        raise ValueError("secret refs must resolve to files under runtime local/secrets")
+    return resolved
+
+
+def model_dump_preserving_explicit_nulls(model: BaseModel) -> dict[str, Any]:
+    dumped = model.model_dump(mode="json", exclude_none=True)
+    _restore_explicit_nulls(dumped, model)
+    return dumped
+
+
+def _restore_explicit_nulls(dumped: Any, source: Any) -> None:
+    if isinstance(source, BaseModel) and isinstance(dumped, dict):
+        for field_name in type(source).model_fields:
+            value = getattr(source, field_name)
+            if value is None:
+                if field_name in source.model_fields_set:
+                    dumped[field_name] = None
+                continue
+            if field_name in dumped:
+                _restore_explicit_nulls(dumped[field_name], value)
+        return
+    if isinstance(source, list) and isinstance(dumped, list):
+        for dumped_item, source_item in zip(dumped, source, strict=False):
+            _restore_explicit_nulls(dumped_item, source_item)
+        return
+    if isinstance(source, dict) and isinstance(dumped, dict):
+        for key, source_value in source.items():
+            if key in dumped:
+                _restore_explicit_nulls(dumped[key], source_value)
+
+
+def _runtime_root_for_config(path: Path) -> Path:
+    config_dir = path.resolve().parent
+    return config_dir.parent if config_dir.name == "config" else config_dir
+
+
+def _validate_config_secret_refs(config: SeedAgentConfig, config_path: Path) -> None:
+    runtime_root = _runtime_root_for_config(config_path)
+    refs = [config.download_client.secret_ref]
+    refs.extend(site.cookie_ref for site in config.tracker_sites)
+    refs.extend(site.api_key_ref for site in config.tracker_sites)
+    refs.extend(
+        (
+            config.want_sources.telegram.secret_ref,
+            config.want_sources.wechat_bridge.secret_ref,
+        )
+    )
+    for secret_ref in refs:
+        if secret_ref:
+            resolve_runtime_secret_path(secret_ref, runtime_root)
+
+
 def load_config_mapping(path: Path) -> dict[str, Any]:
     loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
     data = loaded or {}
@@ -696,7 +783,8 @@ def atomic_write_text(path: Path, content: str, *, mode: int | None = None) -> N
 
 def write_config_mapping(path: Path, data: dict[str, Any]) -> SeedAgentConfig:
     config = SeedAgentConfig.model_validate(data)
-    normalized = config.model_dump(mode="json", exclude_none=True)
+    _validate_config_secret_refs(config, path)
+    normalized = model_dump_preserving_explicit_nulls(config)
     atomic_write_text(
         path,
         yaml.safe_dump(normalized, sort_keys=False, allow_unicode=True),
@@ -708,5 +796,6 @@ def write_config_mapping(path: Path, data: dict[str, Any]) -> SeedAgentConfig:
 def load_config(path: Path) -> SeedAgentConfig:
     data = load_config_mapping(path)
     config = SeedAgentConfig.model_validate(data)
+    _validate_config_secret_refs(config, path)
     config._config_dir = path.resolve().parent
     return config

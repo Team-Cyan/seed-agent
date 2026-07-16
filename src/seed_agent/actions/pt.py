@@ -6,6 +6,8 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
+import httpx
+
 from seed_agent.config import DiscoveryConfig, ScoringConfig, SeedAgentConfig
 from seed_agent.models import Discount, ManagedTorrent, ScoreBreakdown, TorrentCandidate
 from seed_agent.policies.scoring import score_candidate
@@ -34,6 +36,7 @@ class SiteDiscoveryWarning:
     message: str
     endpoint: str | None = None
     rate_limited: bool = False
+    unavailable: bool = False
 
 
 _LAST_DISCOVERY_WARNINGS: tuple[SiteDiscoveryWarning, ...] = ()
@@ -63,18 +66,19 @@ async def discover_candidates(config: SeedAgentConfig) -> list[TorrentCandidate]
             _LAST_DISCOVERY_WARNINGS = tuple(warnings)
             raise result
         if isinstance(result, Exception):
-            rate_limited = bool(
-                isinstance(result, MTeamApiResponseError) and result.rate_limited
+            rate_limited = bool(isinstance(result, MTeamApiResponseError) and result.rate_limited)
+            unavailable = bool(
+                (isinstance(result, MTeamApiResponseError) and result.unavailable)
+                or isinstance(result, (httpx.TimeoutException, httpx.NetworkError))
             )
             warnings.append(
                 SiteDiscoveryWarning(
                     site=site.name,
                     error_type=type(result).__name__,
                     message=_runtime_error_summary(result),
-                    endpoint=result.endpoint
-                    if isinstance(result, MTeamApiResponseError)
-                    else None,
+                    endpoint=result.endpoint if isinstance(result, MTeamApiResponseError) else None,
                     rate_limited=rate_limited,
+                    unavailable=unavailable,
                 )
             )
             continue
@@ -168,8 +172,7 @@ def score_candidates(
     scoring_config: ScoringConfig,
 ) -> list[ScoreBreakdown]:
     return [
-        score_candidate(candidate, discovery_config, scoring_config)
-        for candidate in candidates
+        score_candidate(candidate, discovery_config, scoring_config) for candidate in candidates
     ]
 
 
@@ -217,6 +220,7 @@ async def resolve_deferred_download_urls(
     }
     resolved: list[ScoreBreakdown] = []
     rate_limited = False
+    unavailable = False
     for item in scored_list:
         candidate = item.candidate
         if not item.accepted or not has_deferred_download_url(candidate):
@@ -234,9 +238,10 @@ async def resolve_deferred_download_urls(
             )
             continue
         if rate_limited:
-            resolved.append(
-                _reject_unresolved_download_url(item, "mteam api rate limited")
-            )
+            resolved.append(_reject_unresolved_download_url(item, "mteam api rate limited"))
+            continue
+        if unavailable:
+            resolved.append(_reject_unresolved_download_url(item, "mteam api unavailable"))
             continue
 
         api_key, api_key_header = api_credentials.get(
@@ -282,10 +287,38 @@ async def resolve_deferred_download_urls(
                         rate_limited=True,
                     )
                 )
-                resolved.append(
-                    _reject_unresolved_download_url(item, "mteam api rate limited")
-                )
+                resolved.append(_reject_unresolved_download_url(item, "mteam api rate limited"))
                 continue
+            if exc.retriable:
+                unavailable = True
+                _append_runtime_warning(
+                    SiteDiscoveryWarning(
+                        site=candidate.site,
+                        error_type=type(exc).__name__,
+                        message=_runtime_error_summary(exc),
+                        endpoint=exc.endpoint,
+                        unavailable=True,
+                    )
+                )
+                resolved.append(_reject_unresolved_download_url(item, "mteam api unavailable"))
+                continue
+            resolved.append(
+                _reject_unresolved_download_url(
+                    item,
+                    f"download_url unavailable from mteam api: {_error_summary(exc)}",
+                )
+            )
+            continue
+        except (httpx.TimeoutException, httpx.NetworkError) as exc:
+            unavailable = True
+            _append_runtime_warning(
+                SiteDiscoveryWarning(
+                    site=candidate.site,
+                    error_type=type(exc).__name__,
+                    message=_runtime_error_summary(exc),
+                    unavailable=True,
+                )
+            )
             resolved.append(
                 _reject_unresolved_download_url(
                     item,
@@ -513,9 +546,7 @@ def _evidence_outcome_buckets(
         if not isinstance(evidence, dict):
             continue
         bucket = bucket_fn(evidence)
-        entry = counts.setdefault(
-            bucket, {"total": 0, "uploaded_count": 0, "avg_uploaded_gb": 0.0}
-        )
+        entry = counts.setdefault(bucket, {"total": 0, "uploaded_count": 0, "avg_uploaded_gb": 0.0})
         entry["total"] = int(entry["total"]) + 1
         uploaded_gb = _as_float(item.get("uploaded_gb"))
         if uploaded_gb is not None and uploaded_gb > 0:
@@ -607,7 +638,7 @@ def _average(values: Sequence[float]) -> float:
 def _as_float(value: Any) -> float | None:
     try:
         return float(value)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
 
 

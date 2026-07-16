@@ -19,6 +19,27 @@ def test_web_brand_uses_the_canonical_runtime_icon() -> None:
     assert "favicon.svg" not in html
 
 
+def test_web_token_stays_in_memory_and_is_attached_to_api_requests() -> None:
+    html = (STATIC_ROOT / "index.html").read_text(encoding="utf-8")
+    script = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
+
+    assert "data-web-token-button" in html
+    assert "X-Seed-Agent-Token" in script
+    assert "apiFetch" in script
+    assert "localStorage" not in script
+    assert "sessionStorage" not in script
+
+
+def test_compose_keeps_read_only_root_but_mounts_web_config_paths_writable() -> None:
+    compose = Path("deploy/docker-compose.example.yml").read_text(encoding="utf-8")
+
+    assert "read_only: true" in compose
+    assert "../config:/app/config:ro" not in compose
+    assert "../local:/app/local:ro" not in compose
+    assert "../config:/app/config" in compose
+    assert "../local:/app/local" in compose
+
+
 def test_index_contains_tracker_first_ui_anchors() -> None:
     html = (STATIC_ROOT / "index.html").read_text(encoding="utf-8")
 
@@ -135,7 +156,7 @@ def test_non_tracker_sections_render_config_panels() -> None:
     assert "updateSettingsPanelStatus" in script
     assert "data-setting-field" in script
     assert "data-setting-action" in script
-    assert 'fetch("/api/config/sections"' in script
+    assert 'apiFetch("/api/config/sections"' in script
     assert "configSections" in script
     assert "newClientId" in script
     assert "globalThis.crypto?.randomUUID" in script
@@ -156,8 +177,8 @@ def test_non_tracker_sections_render_config_panels() -> None:
     assert "data-budget-pool-row" in script
     assert "removeprefix" not in script
     assert "renderWantsPanel" in script
-    assert 'fetch("/api/wants"' in script
-    assert 'fetch("/api/wants/sync"' in script
+    assert 'apiFetch("/api/wants"' in script
+    assert 'apiFetch("/api/wants/sync"' in script
     assert "manual-add" not in script
     assert "手动添加" not in script
     assert "coerceSettingValue" in script
@@ -190,7 +211,7 @@ def test_strategy_pages_expose_operator_summary_and_release_presets() -> None:
 def test_overview_reads_and_renders_ops_dashboard() -> None:
     script = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
 
-    assert 'fetch("/api/ops")' in script
+    assert 'apiFetch("/api/ops")' in script
     assert "renderOpsSummary" in script
     assert "opsDashboard" in script
     assert "trackerBackoff" in script
@@ -507,7 +528,7 @@ def test_non_tracker_section_save_uses_diff_preview_confirmation() -> None:
     script = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
     styles = (STATIC_ROOT / "styles.css").read_text(encoding="utf-8")
 
-    assert 'fetch("/api/config/sections/preview"' in script
+    assert 'apiFetch("/api/config/sections/preview"' in script
     assert "confirmSettingsPanelSave" in script
     assert 'page.addEventListener("change"' in script
     assert "保存确认" in script
@@ -543,9 +564,9 @@ def test_javascript_renders_readonly_overview_panel() -> None:
     script = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
     styles = (STATIC_ROOT / "styles.css").read_text(encoding="utf-8")
 
-    assert 'fetch("/api/health")' in script
-    assert 'fetch("/api/state/summary")' in script
-    assert 'fetch("/api/pools")' in script
+    assert 'apiFetch("/api/health")' in script
+    assert 'apiFetch("/api/state/summary")' in script
+    assert 'apiFetch("/api/pools")' in script
     assert "renderOverviewPanel" in script
     assert "renderStateChips" in script
     assert "renderBudgetPoolList" in script

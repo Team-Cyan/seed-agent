@@ -89,7 +89,7 @@ async def test_mteam_search_provider_keeps_non_matching_candidates_for_review() 
 
 
 @pytest.mark.asyncio
-async def test_mteam_search_provider_stops_on_api_response_error() -> None:
+async def test_mteam_search_provider_propagates_rate_limit() -> None:
     calls: list[dict[str, object]] = []
 
     async def fail_fetch_candidates(**kwargs):
@@ -107,16 +107,35 @@ async def test_mteam_search_provider_stops_on_api_response_error() -> None:
         fetch_candidates=fail_fetch_candidates,
     )
 
-    releases = await provider.search(
-        _intent(metadata={"external_ids": {"douban": "26799731", "imdb": "tt5726616"}})
-    )
+    intent = _intent(metadata={"external_ids": {"douban": "26799731", "imdb": "tt5726616"}})
+    with pytest.raises(MTeamApiResponseError) as exc_info:
+        await provider.search(intent)
 
-    assert releases == []
+    assert exc_info.value.rate_limited is True
     assert len(calls) == 1
+    assert provider.search_diagnostics == [
+        {
+            "site": "mt",
+            "intent_id": intent.intent_id,
+            "request_budget": 3,
+            "attempts": [
+                {
+                    "query_path": "douban_id",
+                    "status": "api_error",
+                    "code": "1",
+                    "rate_limited": True,
+                    "retriable": True,
+                    "unavailable": False,
+                }
+            ],
+            "requests_used": 1,
+            "release_count": 0,
+        }
+    ]
 
 
 @pytest.mark.asyncio
-async def test_mteam_search_provider_stops_on_network_error() -> None:
+async def test_mteam_search_provider_propagates_network_error() -> None:
     calls: list[dict[str, object]] = []
 
     async def fail_fetch_candidates(**kwargs):
@@ -130,12 +149,99 @@ async def test_mteam_search_provider_stops_on_network_error() -> None:
         fetch_candidates=fail_fetch_candidates,
     )
 
+    intent = _intent(metadata={"external_ids": {"douban": "26799731", "imdb": "tt5726616"}})
+    with pytest.raises(httpx.ReadTimeout):
+        await provider.search(intent)
+
+    assert len(calls) == 1
+    assert provider.search_diagnostics == [
+        {
+            "site": "mt",
+            "intent_id": intent.intent_id,
+            "request_budget": 3,
+            "attempts": [{"query_path": "douban_id", "status": "network_error"}],
+            "requests_used": 1,
+            "release_count": 0,
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_mteam_search_provider_propagates_unavailable_api_error() -> None:
+    calls: list[dict[str, object]] = []
+
+    async def fail_fetch_candidates(**kwargs):
+        calls.append(kwargs)
+        raise MTeamApiResponseError(
+            endpoint="torrent/search",
+            code="503",
+            message="Service Unavailable",
+            status_code=503,
+        )
+
+    provider = MTeamSearchProvider(
+        site="mt",
+        api_key="secret-api-key",
+        search_config=SearchConfig(),
+        fetch_candidates=fail_fetch_candidates,
+    )
+
+    with pytest.raises(MTeamApiResponseError) as exc_info:
+        await provider.search(_intent(metadata={"external_ids": {"douban": "26799731"}}))
+
+    assert exc_info.value.unavailable is True
+    assert exc_info.value.retriable is True
+    assert len(calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_mteam_search_provider_falls_back_after_identifier_business_errors() -> None:
+    calls: list[dict[str, object]] = []
+
+    async def fake_fetch_candidates(**kwargs):
+        calls.append(kwargs)
+        options = kwargs["options"]
+        if options.douban or options.imdb:
+            raise MTeamApiResponseError(
+                endpoint="torrent/search",
+                code="1001",
+                message="identifier query rejected",
+            )
+        return [
+            TorrentCandidate(
+                site="mt",
+                title="Call Me by Your Name 2017 1080p WEB-DL",
+                source_url="https://kp.m-team.cc/detail/99",
+                download_url="mteam-api://torrent/99",
+                size_bytes=8 * 1024**3,
+                seeders=100,
+                leechers=1,
+                discount=Discount.NORMAL,
+                metadata={
+                    "mteam_torrent_id": "99",
+                    "download_url_source": "mteam_api_deferred",
+                },
+            )
+        ]
+
+    provider = MTeamSearchProvider(
+        site="mt",
+        api_key="secret-api-key",
+        search_config=SearchConfig(),
+        fetch_candidates=fake_fetch_candidates,
+    )
+
     releases = await provider.search(
         _intent(metadata={"external_ids": {"douban": "26799731", "imdb": "tt5726616"}})
     )
 
-    assert releases == []
-    assert len(calls) == 1
+    assert len(calls) == 3
+    assert [release.discount for release in releases] == [Discount.NORMAL]
+    assert [attempt["status"] for attempt in provider.search_diagnostics[0]["attempts"]] == [
+        "api_error",
+        "api_error",
+        "ok",
+    ]
 
 
 @pytest.mark.asyncio
@@ -310,9 +416,7 @@ async def test_mteam_search_provider_bounds_and_reports_query_paths() -> None:
         fetch_candidates=fake_fetch_candidates,
     )
 
-    intent = _intent(
-        metadata={"external_ids": {"douban": "26799731", "imdb": "tt5726616"}}
-    )
+    intent = _intent(metadata={"external_ids": {"douban": "26799731", "imdb": "tt5726616"}})
     await provider.search(intent)
 
     assert len(calls) == 2
@@ -438,6 +542,7 @@ async def test_resolve_mteam_release_download_url_fetches_deferred_token(monkeyp
     )
 
     assert resolved is not None
+    assert resolved.discount == Discount.NORMAL
     assert resolved.download_url.startswith("https://dl.m-team.example/26799731")
     assert resolved.metadata["download_url_source"] == "mteam_api"
 

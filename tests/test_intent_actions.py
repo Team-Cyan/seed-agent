@@ -125,13 +125,13 @@ def test_add_intent_refreshes_metadata_without_resetting_existing_state(tmp_path
         source=IntentSource.DOUBAN_WANTED,
         source_event_id="douban:33404425",
         requested_at=REQUESTED_AT,
-        metadata={"media_type": "tv", "douban_user_name": "LancerC"},
+        metadata={"media_type": "tv", "douban_user_name": "example-user"},
     )
 
     assert decision.new_state["existed"] is True
     assert refreshed.state == IntentState.CONFIRMATION_REQUIRED
     assert refreshed.metadata["media_type"] == "tv"
-    assert refreshed.metadata["douban_user_name"] == "LancerC"
+    assert refreshed.metadata["douban_user_name"] == "example-user"
 
 
 def test_ingest_inbox_reads_jsonl_events_and_skips_invalid_lines(tmp_path: Path) -> None:
@@ -178,7 +178,7 @@ def test_ingest_events_persists_source_event_metadata(tmp_path: Path) -> None:
             requested_at=REQUESTED_AT,
             metadata={
                 "source_adapter": "douban_wanted_public",
-                "douban_user_name": "LancerC",
+                "douban_user_name": "example-user",
                 "media_type": "anime",
                 "external_ids": {"douban": "35797709"},
                 "source_config_id": "douban-me",
@@ -190,7 +190,7 @@ def test_ingest_events_persists_source_event_metadata(tmp_path: Path) -> None:
     ingested = ingest_events(events, store)
 
     assert len(ingested) == 1
-    assert ingested[0][0].metadata["douban_user_name"] == "LancerC"
+    assert ingested[0][0].metadata["douban_user_name"] == "example-user"
     assert ingested[0][0].metadata["media_type"] == "anime"
     assert store.find_intent_id_by_alias("douban:35797709") == ingested[0][0].intent_id
     evidence = store.list_intent_source_evidence(ingested[0][0].intent_id)

@@ -1,6 +1,8 @@
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
+import yaml
 from pydantic import ValidationError
 
 from seed_agent.config import SeedAgentConfig, load_config, write_config_mapping
@@ -89,12 +91,13 @@ def _valid_config_data(secret_ref: str) -> dict[str, object]:
 
 
 def test_load_config_accepts_example_shape(tmp_path: Path) -> None:
-    secret_path = tmp_path / "downloader.secret.yaml"
+    secret_path = tmp_path / "local" / "secrets" / "downloader.secret.yaml"
+    secret_path.parent.mkdir(parents=True)
     secret_path.write_text("username: qb\npassword: secret\n", encoding="utf-8")
 
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
-        f"""
+        """
 mode: balanced
 tracker_sites:
   - name: demo-free
@@ -143,7 +146,7 @@ download_client:
       max_size_tib: 10
     - name: media
       max_size_tib: 10
-  secret_ref: {secret_path.as_posix()}
+  secret_ref: local/secrets/downloader.secret.yaml
 seed_cleanup:
   cold_after_days: 7
   min_upload_delta_gb: 1
@@ -160,7 +163,7 @@ seed_cleanup:
     assert isinstance(config, SeedAgentConfig)
     assert len(config.enabled_sites) == 1
     assert config.enabled_sites[0].name == "demo-free"
-    assert config.download_client.secret_ref == secret_path.as_posix()
+    assert config.download_client.secret_ref == "local/secrets/downloader.secret.yaml"
     assert config.download_client.default_category == "seed"
     assert [policy.name for policy in config.download_client.category_policies] == ["seed", "movie"]
     assert [pool.name for pool in config.download_client.budget_pools] == ["downloads", "media"]
@@ -773,6 +776,26 @@ def test_scheduler_config_applies_only_explicit_overrides() -> None:
     assert resolved.prune_enabled is base.prune_enabled
 
 
+def test_legacy_add_paused_policy_is_normalized_to_reject() -> None:
+    config = SeedAgentConfig(**_valid_config_data("local/secrets/qb.yaml"))
+
+    assert {
+        policy.over_budget_behavior for policy in config.download_client.category_policies
+    } == {"reject"}
+    assert {
+        policy["over_budget_behavior"]
+        for policy in config.model_dump(mode="json")["download_client"]["category_policies"]
+    } == {"reject"}
+
+
+def test_scheduler_rejects_too_fast_capacity_guard() -> None:
+    data = _valid_config_data("local/secrets/qb.yaml")
+    data["scheduler"] = {"capacity_guard_interval_seconds": 9}
+
+    with pytest.raises(ValidationError, match="capacity_guard_interval_seconds"):
+        SeedAgentConfig(**data)
+
+
 def test_write_config_mapping_atomically_replaces_valid_config(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -799,3 +822,77 @@ def test_write_config_mapping_atomically_replaces_valid_config(
     written = path.read_text(encoding="utf-8")
     assert "scheduler:" in written
     assert "pause_before_delete_hours" not in written
+
+
+@pytest.mark.parametrize(
+    ("field_path", "unsafe_ref"),
+    [
+        (("tracker_sites", 0, "cookie_ref"), "/etc/passwd"),
+        (("tracker_sites", 0, "api_key_ref"), "local/secrets/../../outside.key"),
+        (("download_client", "secret_ref"), "../qb.yaml"),
+        (("want_sources", "telegram", "secret_ref"), "/tmp/telegram.yaml"),
+    ],
+)
+def test_load_config_rejects_secret_refs_outside_runtime_local_secrets(
+    tmp_path: Path,
+    field_path: tuple[str | int, ...],
+    unsafe_ref: str,
+) -> None:
+    data = deepcopy(_valid_config_data("local/secrets/qb.yaml"))
+    data["want_sources"] = {
+        "telegram": {"enabled": False, "secret_ref": "local/secrets/telegram.yaml"}
+    }
+    target: object = data
+    for part in field_path[:-1]:
+        target = target[part]  # type: ignore[index]
+    target[field_path[-1]] = unsafe_ref  # type: ignore[index]
+    path = tmp_path / "config.yaml"
+    path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="local/secrets"):
+        load_config(path)
+
+
+def test_load_config_rejects_secret_ref_symlink_escape(tmp_path: Path) -> None:
+    data = _valid_config_data("local/secrets/qb.yaml")
+    secrets_dir = tmp_path / "local" / "secrets"
+    secrets_dir.mkdir(parents=True)
+    outside = tmp_path / "outside.yaml"
+    outside.write_text("password: exposed\n", encoding="utf-8")
+    (secrets_dir / "qb.yaml").symlink_to(outside)
+    path = tmp_path / "config.yaml"
+    path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="runtime local/secrets"):
+        load_config(path)
+
+
+def test_write_config_mapping_preserves_explicit_null_values(tmp_path: Path) -> None:
+    data = _valid_config_data("local/secrets/qb.yaml")
+    data["tracker_sites"] = [
+        {
+            "name": "mt",
+            "type": "mteam",
+            "enabled": True,
+            "rss_url": "https://tracker.example/rss",
+            "discovery_mode": "api",
+            "api_key_ref": "local/secrets/mt.api-key",
+            "api_discovery": {
+                "mode": "adult",
+                "min_seeders": None,
+                "max_seeders": None,
+                "min_leechers": None,
+            },
+        }
+    ]
+    data["want_decision"] = {"default_resolution": None}
+    path = tmp_path / "config.yaml"
+
+    write_config_mapping(path, data)
+
+    written = yaml.safe_load(path.read_text(encoding="utf-8"))
+    discovery = written["tracker_sites"][0]["api_discovery"]
+    assert discovery["min_seeders"] is None
+    assert discovery["max_seeders"] is None
+    assert discovery["min_leechers"] is None
+    assert written["want_decision"]["default_resolution"] is None

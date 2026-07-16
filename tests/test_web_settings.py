@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import UTC, datetime, timedelta
 from http.client import HTTPConnection
 from pathlib import Path
 from socketserver import TCPServer
-from threading import Thread
+from threading import Event, Thread, current_thread
 from typing import Any
+
+import pytest
+import yaml
 
 from seed_agent.actions.intent import ingest_events
 from seed_agent.models import (
@@ -21,10 +25,13 @@ from seed_agent.models import (
 )
 from seed_agent.sources.base import SourceIntentEvent
 from seed_agent.state import StateStore
+from seed_agent.web import settings as web_settings
 from seed_agent.web.app import make_handler
 from seed_agent.web.settings import (
+    ConfigSectionDraft,
     TrackerDraft,
     build_tracker_status,
+    save_config_section,
     save_tracker_draft,
     tracker_draft_to_config,
 )
@@ -232,6 +239,83 @@ def test_http_post_can_require_web_token(
     assert "status" in allowed
 
 
+def test_sensitive_gets_require_web_token_and_remain_redacted(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = _write_minimal_config(tmp_path)
+    config_path.write_text(
+        config_path.read_text(encoding="utf-8").replace(
+            "tracker_sites: []",
+            """
+tracker_sites:
+  - name: rss
+    type: nexusphp
+    enabled: true
+    rss_url: "https://tracker.example/rss?id=42&passkey=secret-pass&token=secret-token&sign=secret-sign&credential=secret-credential"
+""".strip(),
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("SEED_AGENT_WEB_TOKEN", "local-token")
+
+    with _running_server(config_path) as base_url:
+        blocked = _request_json(
+            base_url,
+            "GET",
+            "/api/config",
+            expected_status=401,
+        )
+        payload = _request_json(
+            base_url,
+            "GET",
+            "/api/config",
+            headers={"X-Seed-Agent-Token": "local-token"},
+        )
+        wants_blocked = _request_json(
+            base_url,
+            "GET",
+            "/api/wants",
+            expected_status=401,
+        )
+
+    serialized = json.dumps(payload)
+    assert blocked == {"error": "unauthorized"}
+    assert wants_blocked == {"error": "unauthorized"}
+    assert "secret-pass" not in serialized
+    assert "secret-token" not in serialized
+    assert "secret-sign" not in serialized
+    assert "secret-credential" not in serialized
+    assert "id=42" in payload["trackers"][0]["rss_url"]
+    assert "passkey" not in payload["trackers"][0]["rss_url"]
+    assert "secret-pass" not in payload["config_yaml"]
+
+
+def test_config_get_without_token_keeps_local_compatibility_but_redacts_urls(
+    tmp_path: Path,
+) -> None:
+    config_path = _write_minimal_config(tmp_path)
+    config_path.write_text(
+        config_path.read_text(encoding="utf-8").replace(
+            "tracker_sites: []",
+            """
+tracker_sites:
+  - name: rss
+    type: nexusphp
+    enabled: true
+    rss_url: "https://tracker.example/rss?id=42&passkey=secret-pass"
+""".strip(),
+        ),
+        encoding="utf-8",
+    )
+
+    with _running_server(config_path) as base_url:
+        payload = _request_json(base_url, "GET", "/api/config")
+
+    assert "secret-pass" not in json.dumps(payload)
+    assert payload["trackers"][0]["rss_url"] == "https://tracker.example/rss?id=42"
+
+
 def test_http_ops_payload_exposes_scheduler_and_tracker_state(tmp_path: Path) -> None:
     config_path = _write_minimal_config(tmp_path)
     store = StateStore(tmp_path / ".seed-agent" / "state.db")
@@ -311,7 +395,7 @@ def test_http_wants_lists_canonical_source_rows_without_manual_add(tmp_path: Pat
                 source_event_id="douban:35797709",
                 requested_at=datetime(2025, 1, 2, tzinfo=UTC),
                 metadata={
-                    "douban_user_name": "LancerC",
+                    "douban_user_name": "example-user",
                     "media_type": "anime",
                     "douban_wish_date": "2025-01-02",
                     "external_ids": {"douban": "35797709"},
@@ -1394,9 +1478,7 @@ def test_http_config_section_preview_returns_diff_without_writing(
     assert config_path.read_text(encoding="utf-8") == before
     assert payload["section"] == "want_decision"
     assert payload["data"]["default_resolution"] == "2160p"
-    assert payload["status"] == [
-        {"level": "ok", "message": "want_decision config preview ready"}
-    ]
+    assert payload["status"] == [{"level": "ok", "message": "want_decision config preview ready"}]
     assert "-  default_resolution: 1080p" in payload["diff"]
     assert "+  default_resolution: 2160p" in payload["diff"]
     assert "secret-token" not in json.dumps(payload)
@@ -1475,7 +1557,7 @@ def test_http_config_section_save_updates_search_and_source_refs_without_secrets
                     "douban_wanted": {
                         "enabled": True,
                         "export_ref": "local/inbox/douban-wanted.json",
-                        "user_name": "LancerC",
+                        "user_name": "example-user",
                         "max_pages": 2,
                     },
                     "subscription": {
@@ -1493,7 +1575,7 @@ def test_http_config_section_save_updates_search_and_source_refs_without_secrets
         "webdl": -10,
     }
     assert sources_payload["data"]["telegram"]["enabled"] is True
-    assert sources_payload["data"]["douban_wanted"]["user_name"] == "LancerC"
+    assert sources_payload["data"]["douban_wanted"]["user_name"] == "example-user"
     assert sources_payload["data"]["douban_wanted"]["max_pages"] == 2
     saved = config_path.read_text(encoding="utf-8")
     assert "secret_ref: local/secrets/telegram.yaml" in saved
@@ -1529,7 +1611,7 @@ def test_http_config_section_save_updates_downloader_visual_fields(
                             "mode": "mutable",
                             "budget_pool": "downloads",
                             "delete_enabled": True,
-                            "over_budget_behavior": "add_paused",
+                            "over_budget_behavior": "reject",
                             "tags": ["seed-agent"],
                         },
                         {
@@ -1724,8 +1806,7 @@ def test_http_metrics_endpoint_is_optional_and_prometheus_compatible(tmp_path: P
         disabled = _request_json(base_url, "GET", "/metrics", expected_status=404)
 
     config_path.write_text(
-        config_path.read_text(encoding="utf-8")
-        + "\nmetrics:\n  enabled: true\n  path: /metrics\n",
+        config_path.read_text(encoding="utf-8") + "\nmetrics:\n  enabled: true\n  path: /metrics\n",
         encoding="utf-8",
     )
     with _running_server(config_path) as base_url:
@@ -1780,7 +1861,7 @@ def test_http_pools_reports_configured_budget_pools_without_live_polling(
                     "name": "seed",
                     "mode": "mutable",
                     "delete_enabled": True,
-                    "over_budget_behavior": "add_paused",
+                    "over_budget_behavior": "reject",
                 }
             ],
         }
@@ -1895,6 +1976,327 @@ def test_http_tracker_save_writes_config_and_secret(tmp_path: Path) -> None:
     assert (tmp_path / "local" / "secrets" / "mt.api-key").read_text(
         encoding="utf-8"
     ) == "secret-token"
+
+
+def test_tracker_save_preserves_unedited_advanced_mteam_fields(tmp_path: Path) -> None:
+    config_path = _write_minimal_config(tmp_path)
+    config_path.write_text(
+        config_path.read_text(encoding="utf-8").replace(
+            "tracker_sites: []",
+            """
+tracker_sites:
+  - name: mt
+    type: mteam
+    enabled: true
+    rss_url: https://rss.example/feed
+    discovery_mode: api
+    api_key_ref: local/secrets/mt.api-key
+    auth_header: X-Custom-Key
+    api_discovery:
+      mode: adult
+      modes: [adult, movie]
+      page_size: 123
+      max_pages: 4
+      min_seeders: null
+      max_seeders: null
+      min_leechers: null
+""".strip(),
+        ),
+        encoding="utf-8",
+    )
+
+    save_tracker_draft(
+        config_path,
+        TrackerDraft(
+            type="mteam",
+            name="mt",
+            enabled=False,
+            rss_url="https://rss.example/feed",
+            discovery_mode="api",
+            api_key_ref="local/secrets/mt.api-key",
+        ),
+    )
+
+    saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))["tracker_sites"][0]
+    assert saved["enabled"] is False
+    assert saved["auth_header"] == "X-Custom-Key"
+    assert saved["api_discovery"]["modes"] == ["adult", "movie"]
+    assert saved["api_discovery"]["page_size"] == 123
+    assert saved["api_discovery"]["max_pages"] == 4
+    assert saved["api_discovery"]["min_seeders"] is None
+
+
+def test_tracker_save_preserves_redacted_rss_credentials(tmp_path: Path) -> None:
+    config_path = _write_minimal_config(tmp_path)
+    original_url = "https://rss.example/feed?id=42&passkey=secret-pass"
+    config_path.write_text(
+        config_path.read_text(encoding="utf-8").replace(
+            "tracker_sites: []",
+            f"""
+tracker_sites:
+  - name: rss
+    type: nexusphp
+    enabled: true
+    rss_url: "{original_url}"
+""".strip(),
+        ),
+        encoding="utf-8",
+    )
+
+    with _running_server(config_path) as base_url:
+        loaded = _request_json(base_url, "GET", "/api/config")
+        tracker = loaded["trackers"][0]
+        saved = _request_json(
+            base_url,
+            "POST",
+            "/api/trackers",
+            {
+                "type": tracker["type"],
+                "name": tracker["name"],
+                "enabled": tracker["enabled"],
+                "rss_url": tracker["rss_url"],
+                "discovery_mode": tracker["discovery_mode"],
+                "revision": loaded["revision"],
+            },
+        )
+
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))["tracker_sites"][0]
+    assert saved["tracker"]["rss_url"] == "https://rss.example/feed?id=42"
+    assert raw["rss_url"] == original_url
+
+
+@pytest.mark.parametrize("endpoint", ["/api/trackers/site-probe", "/api/trackers/dry-run"])
+@pytest.mark.parametrize("cookie_ref", ["/etc/passwd", "local/secrets/../../etc/passwd"])
+def test_tracker_network_checks_reject_unsafe_cookie_refs_before_network(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    endpoint: str,
+    cookie_ref: str,
+) -> None:
+    from seed_agent.web import app as web_app
+
+    config_path = _write_minimal_config(tmp_path)
+
+    async def unexpected_discovery(*args: object, **kwargs: object) -> list[object]:
+        raise AssertionError("network discovery must not run for an unsafe secret ref")
+
+    monkeypatch.setattr(web_app, "_discover_site_candidates", unexpected_discovery)
+
+    with _running_server(config_path) as base_url:
+        payload = _request_json(
+            base_url,
+            "POST",
+            endpoint,
+            {
+                "type": "nexusphp",
+                "name": "unsafe",
+                "enabled": True,
+                "rss_url": "https://attacker.example/rss",
+                "discovery_mode": "rss",
+                "cookie_ref": cookie_ref,
+            },
+            expected_status=400,
+        )
+
+    assert "local/secrets" in payload["status"][0]["message"]
+
+
+def test_tracker_probe_rejects_secret_symlink_escape_before_network(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from seed_agent.web import app as web_app
+
+    config_path = _write_minimal_config(tmp_path)
+    secrets_dir = tmp_path / "local" / "secrets"
+    secrets_dir.mkdir(parents=True)
+    outside = tmp_path / "outside.cookie"
+    outside.write_text("session=exposed", encoding="utf-8")
+    (secrets_dir / "tracker.cookie").symlink_to(outside)
+
+    network_called = False
+
+    async def unexpected_discovery(*args: object, **kwargs: object) -> list[object]:
+        nonlocal network_called
+        network_called = True
+        return []
+
+    monkeypatch.setattr(web_app, "_discover_site_candidates", unexpected_discovery)
+
+    with _running_server(config_path) as base_url:
+        payload = _request_json(
+            base_url,
+            "POST",
+            "/api/trackers/site-probe",
+            {
+                "type": "nexusphp",
+                "name": "unsafe",
+                "enabled": True,
+                "rss_url": "https://attacker.example/rss",
+                "discovery_mode": "rss",
+                "cookie_ref": "local/secrets/tracker.cookie",
+            },
+        )
+
+    assert payload["summary"]["discovered"] == 0
+    assert network_called is False
+    assert any("local/secrets" in item["message"] for item in payload["status"])
+
+
+@pytest.mark.parametrize("endpoint", ["/api/trackers/site-probe", "/api/trackers/dry-run"])
+def test_tracker_network_checks_reject_cross_service_secret_refs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    endpoint: str,
+) -> None:
+    from seed_agent.web import app as web_app
+
+    config_path = _write_minimal_config(tmp_path)
+    secrets_dir = tmp_path / "local" / "secrets"
+    secrets_dir.mkdir(parents=True)
+    (secrets_dir / "qbittorrent.yaml").write_text("password: exposed", encoding="utf-8")
+    network_called = False
+
+    async def unexpected_discovery(*args: object, **kwargs: object) -> list[object]:
+        nonlocal network_called
+        network_called = True
+        return []
+
+    monkeypatch.setattr(web_app, "_discover_site_candidates", unexpected_discovery)
+
+    with _running_server(config_path) as base_url:
+        payload = _request_json(
+            base_url,
+            "POST",
+            endpoint,
+            {
+                "type": "nexusphp",
+                "name": "attacker",
+                "enabled": True,
+                "rss_url": "https://attacker.example/rss",
+                "discovery_mode": "rss",
+                "cookie_ref": "local/secrets/qbittorrent.yaml",
+            },
+        )
+
+    assert payload["summary"]["discovered"] == 0
+    assert network_called is False
+    assert any("already assigned" in item["message"] for item in payload["status"])
+
+
+def test_tracker_save_rejects_cross_service_cookie_ref(tmp_path: Path) -> None:
+    config_path = _write_minimal_config(tmp_path)
+    before = config_path.read_text(encoding="utf-8")
+
+    with _running_server(config_path) as base_url:
+        payload = _request_json(
+            base_url,
+            "POST",
+            "/api/trackers",
+            {
+                "type": "nexusphp",
+                "name": "attacker",
+                "enabled": True,
+                "rss_url": "https://attacker.example/rss",
+                "discovery_mode": "rss",
+                "cookie_ref": "local/secrets/qbittorrent.yaml",
+            },
+            expected_status=400,
+        )
+
+    assert "cannot assign an existing cookie" in payload["status"][0]["message"]
+    assert config_path.read_text(encoding="utf-8") == before
+
+
+def test_config_section_saves_serialize_full_read_modify_write_transaction(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = _write_minimal_config(tmp_path)
+    config = web_settings.SeedAgentConfig.model_validate(
+        web_settings.load_config_mapping(config_path)
+    )
+    filters = config.pt_filters.model_dump(mode="json")
+    filters["min_leechers"] = 9
+    cleanup = config.seed_cleanup.model_dump(mode="json", exclude_none=True)
+    cleanup["cold_after_days"] = 11
+    original_load = web_settings.load_config_mapping
+    first_loaded = Event()
+    release_first = Event()
+    errors: list[Exception] = []
+
+    def delayed_load(path: Path) -> dict[str, Any]:
+        loaded = original_load(path)
+        if current_thread().name == "first-config-save" and not first_loaded.is_set():
+            first_loaded.set()
+            if not release_first.wait(timeout=5):
+                raise TimeoutError("timed out waiting to release first config save")
+        return loaded
+
+    def save(section: str, data: dict[str, Any]) -> None:
+        try:
+            save_config_section(config_path, ConfigSectionDraft(section=section, data=data))
+        except Exception as exc:  # pragma: no cover - asserted below
+            errors.append(exc)
+
+    monkeypatch.setattr(web_settings, "load_config_mapping", delayed_load)
+    first = Thread(
+        target=save,
+        args=("pt_filters", filters),
+        name="first-config-save",
+    )
+    second = Thread(
+        target=save,
+        args=("seed_cleanup", cleanup),
+        name="second-config-save",
+    )
+    first.start()
+    assert first_loaded.wait(timeout=5)
+    second.start()
+    second.join(timeout=1)
+    release_first.set()
+    first.join(timeout=5)
+    second.join(timeout=5)
+
+    assert errors == []
+    saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    assert saved["pt_filters"]["min_leechers"] == 9
+    assert saved["seed_cleanup"]["cold_after_days"] == 11
+
+
+def test_stale_config_revision_is_rejected_without_overwriting_newer_save(
+    tmp_path: Path,
+) -> None:
+    config_path = _write_minimal_config(tmp_path)
+    revision = hashlib.sha256(config_path.read_bytes()).hexdigest()
+    config = web_settings.SeedAgentConfig.model_validate(
+        web_settings.load_config_mapping(config_path)
+    )
+    filters = config.pt_filters.model_dump(mode="json")
+    filters["min_leechers"] = 7
+    cleanup = config.seed_cleanup.model_dump(mode="json", exclude_none=True)
+    cleanup["cold_after_days"] = 12
+
+    with _running_server(config_path) as base_url:
+        first = _request_json(
+            base_url,
+            "POST",
+            "/api/config/sections",
+            {"section": "pt_filters", "data": filters, "revision": revision},
+        )
+        conflict = _request_json(
+            base_url,
+            "POST",
+            "/api/config/sections",
+            {"section": "seed_cleanup", "data": cleanup, "revision": revision},
+            expected_status=409,
+        )
+
+    assert first["revision"] != revision
+    assert conflict["error"] == "config_conflict"
+    saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    assert saved["pt_filters"]["min_leechers"] == 7
+    assert saved["seed_cleanup"]["cold_after_days"] == 7
 
 
 def test_http_tracker_save_rejects_secret_ref_outside_local_secrets(tmp_path: Path) -> None:

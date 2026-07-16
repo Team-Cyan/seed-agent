@@ -23,10 +23,9 @@ Implemented today:
   activity-based sorting
 - deferred `genDlToken` download URL generation for accepted API-discovered
   candidates during execute-mode enqueue
-- non-zero M-Team search API responses are surfaced as discovery warnings
-  rather than being treated as empty search results
-- intent search stops gracefully on non-zero M-Team search responses so
-  scheduled Want List polling does not crash on transient tracker throttling
+- non-zero M-Team responses are structured errors rather than empty results;
+  HTTP 429 and service/network failures stop later tracker calls in the cycle
+  and feed scheduler protection,
 - M-Team API-backed resource intent search, using the same search endpoint while
   keeping download-token resolution deferred until execute-mode intent enqueue
 - ID-first intent search through native M-Team `douban` and `imdb` filters when
@@ -57,6 +56,8 @@ Current fallback still present in code:
   default is one second and can be tuned with
   `SEED_AGENT_MTEAM_MIN_REQUEST_INTERVAL_SECONDS`; keep it conservative. Web
   and scheduler processes intentionally maintain separate limiters.
+- Pagination stops when the API page itself is exhausted, not when local
+  filtering leaves a short result list.
 - Treat timezone-naive M-Team API date strings as `Asia/Shanghai`; convert them
   to UTC before calculating or persisting free-window time.
 - Keep API discovery cheap: search/detail calls may run during discovery and
@@ -64,6 +65,9 @@ Current fallback still present in code:
   enqueue is executing.
 - Treat `discount=FREE` plus an explicit `discountEndTime=null` from the M-Team
   API as a known unlimited free window rather than an unknown expiry.
+- When refreshed tracker evidence no longer contains a promotion expiry, clear
+  the previously persisted finite left-time value instead of extending stale
+  free-window evidence.
 - Keep upload discovery knobs in `api_discovery`; credentials stay in
   `api_key_ref` / ignored local secret files. Intent search uses conservative
   search-specific defaults and should not inherit adult/freeleech upload
@@ -78,6 +82,9 @@ Current fallback still present in code:
   API keyword field. Fetch by Douban/IMDb ID first, supplement with a broad
   title/year keyword query, then apply generic quality preferences during
   ranking so lower-match candidates remain visible for operator override.
+- Want List search may return NORMAL/non-free releases because it represents a
+  requested acquisition. This does not weaken the separate PT upload-farming
+  free-only gate.
 
 ## Desired Future State
 

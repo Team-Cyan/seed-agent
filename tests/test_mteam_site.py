@@ -260,6 +260,50 @@ async def test_mteam_api_client_raises_rate_limit_for_download_token_response() 
     assert exc_info.value.rate_limited is True
 
 
+@pytest.mark.parametrize(
+    ("endpoint", "status_code"),
+    [
+        ("torrent/search", 429),
+        ("torrent/detail", 429),
+        ("torrent/genDlToken", 429),
+        ("torrent/search", 503),
+        ("torrent/detail", 503),
+        ("torrent/genDlToken", 503),
+    ],
+)
+@pytest.mark.asyncio
+@respx.mock
+async def test_mteam_api_client_classifies_retriable_http_errors(
+    endpoint: str,
+    status_code: int,
+) -> None:
+    url = f"https://api.m-team.cc/api/{endpoint}"
+    response = httpx.Response(
+        status_code,
+        json={"message": "Too Many Requests" if status_code == 429 else "Service Unavailable"},
+    )
+    respx.post(url).mock(return_value=response)
+
+    client = MTeamApiClient(
+        api_key="secret-api-key",
+        min_request_interval_seconds=0,
+    )
+
+    with pytest.raises(MTeamApiResponseError) as exc_info:
+        if endpoint == "torrent/search":
+            await client.discover_torrents(site="mt", options=MTeamApiDiscoveryOptions())
+        elif endpoint == "torrent/detail":
+            await client.fetch_torrent_detail("1171443")
+        else:
+            await client.fetch_download_url("1171443")
+
+    assert exc_info.value.endpoint == endpoint
+    assert exc_info.value.status_code == status_code
+    assert exc_info.value.rate_limited is (status_code == 429)
+    assert exc_info.value.unavailable is (status_code >= 500)
+    assert exc_info.value.retriable is True
+
+
 @pytest.mark.asyncio
 @respx.mock
 async def test_mteam_api_client_uses_custom_api_key_header() -> None:
@@ -381,7 +425,7 @@ async def test_mteam_api_client_discovers_multiple_pages() -> None:
             only_free=True,
             sort_field="leechers",
             sort_order="desc",
-            page_size=50,
+            page_size=1,
             max_pages=2,
             min_seeders=1,
             max_seeders=0,
@@ -399,6 +443,71 @@ async def test_mteam_api_client_discovers_multiple_pages() -> None:
         "Already Seen Candidate",
         "Second Page Candidate",
     ]
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_mteam_api_client_continues_after_filtered_full_page() -> None:
+    route = respx.post("https://api.m-team.cc/api/torrent/search").mock(
+        side_effect=[
+            httpx.Response(
+                200,
+                json={
+                    "code": "0",
+                    "data": {
+                        "data": [
+                            {
+                                "id": 111,
+                                "name": "Filtered First Page Candidate",
+                                "size": 10 * 1024**3,
+                                "discount": "FREE",
+                                "status": {
+                                    "seeders": 10,
+                                    "leechers": 0,
+                                    "timesCompleted": 12,
+                                },
+                            }
+                        ]
+                    },
+                },
+            ),
+            httpx.Response(
+                200,
+                json={
+                    "code": "0",
+                    "data": {
+                        "data": [
+                            {
+                                "id": 222,
+                                "name": "Qualified Second Page Candidate",
+                                "size": 11 * 1024**3,
+                                "discount": "FREE",
+                                "status": {
+                                    "seeders": 8,
+                                    "leechers": 6,
+                                    "timesCompleted": 9,
+                                },
+                            }
+                        ]
+                    },
+                },
+            ),
+        ]
+    )
+
+    client = MTeamApiClient(api_key="secret-api-key", min_request_interval_seconds=0)
+    candidates = await client.discover_torrents(
+        site="mt",
+        options=MTeamApiDiscoveryOptions(
+            page_size=1,
+            max_pages=2,
+            min_leechers=1,
+            max_seeders=0,
+        ),
+    )
+
+    assert route.call_count == 2
+    assert [candidate.title for candidate in candidates] == ["Qualified Second Page Candidate"]
 
 
 @pytest.mark.asyncio
@@ -763,6 +872,31 @@ def test_merge_detail_upgrades_open_ended_free_window() -> None:
     assert merged.metadata["left_time_source"] == "mteam_api_unlimited"
 
 
+def test_merge_detail_drops_stale_finite_window_when_expiry_is_missing() -> None:
+    candidate = _candidate(
+        discount="free",
+        left_time_minutes=300,
+        metadata={"mteam_discovery_mode": "api"},
+    )
+
+    merged = _merge_detail(
+        candidate,
+        {
+            "_auth_mode": "api_key",
+            "size": 9999,
+            "discount": "FREE",
+            "status": {
+                "seeders": 7,
+                "leechers": 2,
+                "timesCompleted": 11,
+            },
+        },
+    )
+
+    assert merged.left_time_minutes is None
+    assert merged.metadata["left_time_source"] == "mteam_api_missing"
+
+
 @pytest.mark.asyncio
 async def test_enrich_candidates_merges_mteam_detail() -> None:
     async def fake_fetch_detail(torrent_id: str) -> dict[str, object] | None:
@@ -895,6 +1029,49 @@ async def test_mteam_api_client_fetches_detail_with_api_key() -> None:
     assert detail is not None
     assert detail["size"] == "1234"
     assert detail["_auth_mode"] == "api_key"
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_mteam_api_client_raises_for_api_key_detail_business_error() -> None:
+    respx.post("https://api.m-team.cc/api/torrent/detail").mock(
+        return_value=httpx.Response(
+            200,
+            json={"code": "1", "message": "請求過於頻繁", "data": None},
+        )
+    )
+
+    client = MTeamApiClient(api_key="secret-api-key", min_request_interval_seconds=0)
+
+    with pytest.raises(MTeamApiResponseError) as exc_info:
+        await client.fetch_torrent_detail("1171443")
+
+    assert exc_info.value.endpoint == "torrent/detail"
+    assert exc_info.value.code == "1"
+    assert exc_info.value.rate_limited is True
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_mteam_cookie_detail_raises_for_rate_limit_business_error() -> None:
+    respx.get("https://api.m-team.cc/api/torrent/detail").mock(
+        return_value=httpx.Response(
+            200,
+            json={"code": "1", "message": "请求过于频繁", "data": None},
+        )
+    )
+
+    client = MTeamApiClient(
+        cookie="session=abc",
+        visitor_id="visitor-1",
+        min_request_interval_seconds=0,
+    )
+
+    with pytest.raises(MTeamApiResponseError) as exc_info:
+        await client.fetch_torrent_detail("1171443")
+
+    assert exc_info.value.endpoint == "torrent/detail"
+    assert exc_info.value.rate_limited is True
 
 
 @pytest.mark.asyncio

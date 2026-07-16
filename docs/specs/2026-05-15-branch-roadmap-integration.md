@@ -42,7 +42,7 @@ In scope:
 
 - Web Settings UI verification and small fixes needed for a coherent feature.
 - Version-policy check before any feature commit or release-facing push.
-- Roadmap update based on `/Users/lancer/Downloads/deep-research-report.md`.
+- Roadmap update based on an external review report.
 - Git integration into `main`.
 - Cleanup of already-merged feature branch worktrees after verification.
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import uuid
 from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -30,6 +31,10 @@ from seed_agent.state import StateStore
 
 ReleaseDownloadResolver = Callable[[ReleaseCandidate], Awaitable[ReleaseCandidate | None]]
 IntentPolicyResolver = Callable[[ResourceIntent], CategoryPolicyConfig]
+IntentEnqueueContextResolver = Callable[
+    [ResourceIntent, CategoryPolicyConfig, ScoreBreakdown],
+    tuple[bool, PoolUsage | None, list[str]],
+]
 
 
 @dataclass(frozen=True)
@@ -325,40 +330,97 @@ async def enqueue_intent(
     pause_reasons: list[str] | None = None,
     release_resolver: ReleaseDownloadResolver | None = None,
     policy_resolver: IntentPolicyResolver | None = None,
+    enqueue_context_resolver: IntentEnqueueContextResolver | None = None,
     release_id: str | None = None,
 ) -> tuple[ResourceIntent, RankedRelease, list[Decision]]:
-    intent, _ = _load_intent_with_selected(store, intent_id)
+    intent, selected_release_id = _load_intent_with_selected(store, intent_id)
     selected_policy = policy_resolver(intent) if policy_resolver is not None else policy
+    effective_release_id = (
+        release_id
+        if release_id is not None
+        else selected_release_id
+        if intent.state == IntentState.ENQUEUED
+        else None
+    )
     ranked = _enqueueable_release(
         intent,
-        release_id,
+        effective_release_id,
         store.list_release_candidates(intent.intent_id),
     )
-    if execute and (release_resolver is not None or _requires_download_resolution(ranked.release)):
-        if release_resolver is None:
-            raise ValueError("selected release download URL could not be resolved")
-        resolved_release = await release_resolver(ranked.release)
-        if resolved_release is None:
-            raise ValueError("selected release download URL could not be resolved")
-        ranked = ranked.model_copy(update={"release": resolved_release})
-        store.save_ranked_releases([ranked])
-    decisions = await enqueue_candidates(
-        [_score_breakdown_from_ranked(ranked)],
-        downloader,
-        selected_policy,
-        execute,
-        paused=paused,
-        pool_usage=pool_usage,
-        pause_reasons=pause_reasons,
-    )
+    if execute and intent.state == IntentState.ENQUEUED:
+        if selected_release_id and ranked.release.release_id != selected_release_id:
+            raise ValueError(f"intent already enqueued with release: {selected_release_id}")
+        return intent, ranked, [_enqueue_skip_decision(intent, ranked, "already enqueued")]
+
+    claim_owner_id: str | None = None
+    if execute:
+        claim_owner_id = f"intent-enqueue:{uuid.uuid4().hex}"
+        claim = store.acquire_intent_enqueue_claim(
+            intent.intent_id,
+            ranked.release.release_id,
+            claim_owner_id,
+            ttl_seconds=3600,
+        )
+        if not claim["acquired"]:
+            status = str(claim.get("status") or "in_progress")
+            if status == "already_enqueued":
+                refreshed, _ = _load_intent_with_selected(store, intent.intent_id)
+                return (
+                    refreshed,
+                    ranked,
+                    [_enqueue_skip_decision(refreshed, ranked, "already enqueued")],
+                )
+            if status == "in_progress":
+                return (
+                    intent,
+                    ranked,
+                    [_enqueue_skip_decision(intent, ranked, "enqueue already in progress")],
+                )
+            raise ValueError(f"unable to claim intent enqueue: {status}")
+
+    try:
+        if execute and (
+            release_resolver is not None or _requires_download_resolution(ranked.release)
+        ):
+            if release_resolver is None:
+                raise ValueError("selected release download URL could not be resolved")
+            resolved_release = await release_resolver(ranked.release)
+            if resolved_release is None:
+                raise ValueError("selected release download URL could not be resolved")
+            ranked = ranked.model_copy(update={"release": resolved_release})
+            store.save_ranked_releases([ranked])
+        score_breakdown = _score_breakdown_from_ranked(ranked)
+        if enqueue_context_resolver is not None:
+            paused, pool_usage, pause_reasons = enqueue_context_resolver(
+                intent,
+                selected_policy,
+                score_breakdown,
+            )
+        decisions = await enqueue_candidates(
+            [score_breakdown],
+            downloader,
+            selected_policy,
+            execute,
+            paused=paused,
+            pool_usage=pool_usage,
+            pause_reasons=pause_reasons,
+        )
+    except Exception:
+        if claim_owner_id is not None:
+            store.release_intent_enqueue_claim(intent.intent_id, claim_owner_id)
+        raise
     updated = intent
     if execute and any(decision.action == "qb.enqueue" for decision in decisions):
-        store.update_intent_state(
+        assert claim_owner_id is not None
+        if not store.complete_intent_enqueue_claim(
             intent.intent_id,
-            IntentState.ENQUEUED,
-            selected_release_id=ranked.release.release_id,
-        )
+            ranked.release.release_id,
+            claim_owner_id,
+        ):
+            raise RuntimeError("intent enqueue claim was lost before state commit")
         updated = intent.model_copy(update={"state": IntentState.ENQUEUED})
+    elif claim_owner_id is not None:
+        store.release_intent_enqueue_claim(intent.intent_id, claim_owner_id)
     return updated, ranked, decisions
 
 
@@ -378,6 +440,7 @@ async def run_intent_once(
     source_events: Iterable[SourceIntentEvent] = (),
     release_resolver: ReleaseDownloadResolver | None = None,
     policy_resolver: IntentPolicyResolver | None = None,
+    enqueue_context_resolver: IntentEnqueueContextResolver | None = None,
     search_ingested: bool = True,
 ) -> IntentRunResult:
     ingested_pairs = ingest_inbox(inbox_path, store) if inbox_path is not None else []
@@ -419,6 +482,7 @@ async def run_intent_once(
                 pause_reasons=pause_reasons,
                 release_resolver=release_resolver,
                 policy_resolver=policy_resolver,
+                enqueue_context_resolver=enqueue_context_resolver,
             )
             enqueue_selected.append(selected)
             decisions.extend(enqueue_decisions)
@@ -581,6 +645,25 @@ def _score_breakdown_from_ranked(ranked: RankedRelease) -> ScoreBreakdown:
         accepted=True,
         reasons=[*ranked.reasons, "selected for intent enqueue"],
         candidate=candidate,
+    )
+
+
+def _enqueue_skip_decision(
+    intent: ResourceIntent,
+    ranked: RankedRelease,
+    reason: str,
+) -> Decision:
+    return Decision(
+        action="qb.enqueue.skip",
+        target_id=ranked.release.release_id,
+        execute=True,
+        reason=reason,
+        old_state={"intent_state": intent.state.value},
+        new_state={
+            "intent_id": intent.intent_id,
+            "release_id": ranked.release.release_id,
+            "mutated": False,
+        },
     )
 
 

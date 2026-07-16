@@ -4,8 +4,8 @@ This document captures the durable handoff state from the initial `seed-agent` p
 
 ## Repository State
 
-- Local repository: `/Users/lancer/projects/seed-agent`
-- Implementation worktree: `/Users/lancer/.config/superpowers/worktrees/seed-agent/phase-1-pt-upload-loop`
+- Repository: this checkout
+- Implementation worktree: `$HOME/.config/superpowers/worktrees/seed-agent/phase-1-pt-upload-loop`
 - Implementation branch: `feat/phase-1-pt-upload-loop`
 - GitHub remote: `git@github.com:Team-Cyan/seed-agent.git`
 - Default branch: `main`
@@ -48,7 +48,7 @@ This document captures the durable handoff state from the initial `seed-agent` p
 
 - Current plan: `docs/plans/2026-04-20-phase-1-pt-upload-loop.md`.
 - Current implementation branch: `feat/phase-2-resource-intent-loop`.
-- Current implementation worktree: `/Users/lancer/.config/superpowers/worktrees/seed-agent/phase-2-resource-intent-loop`.
+- Current implementation worktree: `$HOME/.config/superpowers/worktrees/seed-agent/phase-2-resource-intent-loop`.
 - Latest Phase 1 safety baseline before Phase 2 planning: `970b49d fix: preserve audit state during batch failures`.
 - Current Phase 2 plan: `docs/plans/2026-04-22-phase-2-resource-intent-loop.md`.
 - Phase 1 is implemented as a CLI-first Python package under `src/seed_agent/`.
@@ -97,14 +97,14 @@ Review performed before Phase 2 planning:
 Recommended next branch:
 
 - `feat/phase-2-resource-intent-loop`
-- Suggested worktree: `/Users/lancer/.config/superpowers/worktrees/seed-agent/phase-2-resource-intent-loop`
+- Suggested worktree: `$HOME/.config/superpowers/worktrees/seed-agent/phase-2-resource-intent-loop`
 
 ## Phase 2 Implementation Handoff
 
 Phase 2 has started on:
 
 - Branch: `feat/phase-2-resource-intent-loop`
-- Worktree: `/Users/lancer/.config/superpowers/worktrees/seed-agent/phase-2-resource-intent-loop`
+- Worktree: `$HOME/.config/superpowers/worktrees/seed-agent/phase-2-resource-intent-loop`
 
 Completed Phase 2 slices:
 
@@ -168,27 +168,6 @@ Initial source projects discussed as inspiration:
 - Additional inspiration named during brainstorming: `flexget-nexusphp`, `qb-rss-manager`, `Auto_Bangumi`, `ani-rss`, and `bgmi`.
 
 The strongest Phase 1 inspirations were `pt-tools` and `flexget-nexusphp`; the strongest Phase 2 inspirations were `PT-Plugin-Plus`, `Auto_Bangumi`, `ani-rss`, and `bgmi`; later roadmap inspiration includes `qb-rss-manager`, `IYUUAutoReseed`, MoviePilot, vertex, and nas-tools.
-
-## Git And SSH Setup Notes
-
-GitHub SSH was fixed on this machine during setup:
-
-- The local Ed25519 key was added to `ssh-agent` and macOS Keychain.
-- `~/.ssh/config` was adjusted so `github.com` uses `ssh.github.com` on port `443`.
-- Authentication was verified as GitHub user `CNlancer` with `ssh -T git@github.com`.
-- `git push -u origin main` succeeded after local and remote histories were aligned.
-
-If GitHub SSH fails after a reboot, first try:
-
-```bash
-ssh -T git@github.com
-```
-
-If the key is not loaded, this machine should normally recover through Keychain automatically. A manual fallback is:
-
-```bash
-ssh-add --apple-load-keychain
-```
 
 ## What Is Not Preserved Here
 

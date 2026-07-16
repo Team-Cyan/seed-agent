@@ -24,7 +24,18 @@ DiscoverFetcher = Callable[..., Awaitable[list[TorrentCandidate]]]
 DownloadUrlFetcher = Callable[[str], Awaitable[str | None]]
 
 DEFERRED_DOWNLOAD_URL_PREFIX = "mteam-api://torrent/"
-MTEAM_RATE_LIMIT_MARKERS = ("請求過於頻繁", "请求过于频繁")
+MTEAM_RATE_LIMIT_MARKERS = (
+    "請求過於頻繁",
+    "请求过于频繁",
+    "too many requests",
+    "rate limit",
+)
+MTEAM_UNAUTHORIZED_MARKERS = (
+    "authentication is required",
+    "unauthorized",
+    "未登录",
+    "未登錄",
+)
 MTEAM_LOCAL_TIMEZONE = ZoneInfo("Asia/Shanghai")
 MTEAM_MIN_REQUEST_INTERVAL_ENV = "SEED_AGENT_MTEAM_MIN_REQUEST_INTERVAL_SECONDS"
 _MTEAM_REQUEST_LOCK = threading.Lock()
@@ -32,19 +43,77 @@ _MTEAM_LAST_REQUEST_AT = 0.0
 
 
 class MTeamApiResponseError(RuntimeError):
-    def __init__(self, *, endpoint: str, code: str, message: str) -> None:
+    def __init__(
+        self,
+        *,
+        endpoint: str,
+        code: str,
+        message: str,
+        status_code: int | None = None,
+    ) -> None:
         self.endpoint = endpoint
         self.code = code
         self.message = message
+        self.status_code = status_code
         super().__init__(f"{endpoint} failed: code={code} message={message}")
 
     @property
     def rate_limited(self) -> bool:
-        return is_mteam_rate_limit_message(self.message)
+        return (
+            self.status_code == 429
+            or self.code == "429"
+            or is_mteam_rate_limit_message(self.message)
+        )
+
+    @property
+    def unavailable(self) -> bool:
+        status_code = self.status_code
+        if status_code is None:
+            try:
+                status_code = int(self.code)
+            except ValueError:
+                return False
+        return 500 <= status_code < 600
+
+    @property
+    def retriable(self) -> bool:
+        return self.rate_limited or self.unavailable
 
 
 def is_mteam_rate_limit_message(message: str) -> bool:
-    return any(marker in message for marker in MTEAM_RATE_LIMIT_MARKERS)
+    normalized = message.casefold()
+    return any(marker in normalized for marker in MTEAM_RATE_LIMIT_MARKERS)
+
+
+def _raise_for_mteam_http_status(response: httpx.Response, *, endpoint: str) -> None:
+    status_code = response.status_code
+    if status_code == 429 or 500 <= status_code < 600:
+        raise MTeamApiResponseError(
+            endpoint=endpoint,
+            code=str(status_code),
+            message=_mteam_http_error_message(response),
+            status_code=status_code,
+        )
+    response.raise_for_status()
+
+
+def _mteam_http_error_message(response: httpx.Response) -> str:
+    try:
+        payload = response.json()
+    except ValueError:
+        payload = None
+    if isinstance(payload, dict):
+        message = str(payload.get("message") or "").strip()
+        if message:
+            return message
+    return response.reason_phrase or f"HTTP {response.status_code}"
+
+
+def _is_mteam_unauthorized_response(code: str, message: str) -> bool:
+    if code in {"401", "403"}:
+        return True
+    normalized = message.casefold()
+    return any(marker in normalized for marker in MTEAM_UNAUTHORIZED_MARKERS)
 
 
 class MTeamApiDiscoveryOptions(BaseModel):
@@ -133,18 +202,18 @@ class MTeamApiClient:
                 options.page_number + options.max_pages,
             ):
                 page_options = options.model_copy(update={"page_number": page_number})
-                page_candidates = await self._discover_torrent_page(
+                page_candidates, raw_row_count = await self._discover_torrent_page(
                     client,
                     site=site,
                     options=page_options,
                 )
-                if not page_candidates:
-                    break
                 for candidate in page_candidates:
                     if candidate.stable_id in seen_ids:
                         continue
                     candidates.append(candidate)
                     seen_ids.add(candidate.stable_id)
+                if raw_row_count < options.page_size:
+                    break
         return candidates
 
     async def _discover_torrent_page(
@@ -153,7 +222,7 @@ class MTeamApiClient:
         *,
         site: str,
         options: MTeamApiDiscoveryOptions,
-    ) -> list[TorrentCandidate]:
+    ) -> tuple[list[TorrentCandidate], int]:
         candidates: list[TorrentCandidate] = []
         await self._wait_for_request_slot()
         response = await client.post(
@@ -167,7 +236,7 @@ class MTeamApiClient:
             },
             json=_search_payload(options),
         )
-        response.raise_for_status()
+        _raise_for_mteam_http_status(response, endpoint="torrent/search")
 
         payload = response.json()
         if not isinstance(payload, dict):
@@ -191,7 +260,7 @@ class MTeamApiClient:
             if candidate is None:
                 continue
             candidates.append(candidate)
-        return candidates
+        return candidates, len(rows)
 
     async def fetch_torrent_detail(self, torrent_id: str) -> dict[str, Any] | None:
         if self.api_key:
@@ -224,13 +293,28 @@ class MTeamApiClient:
                 params=params,
                 headers=headers,
             )
-            response.raise_for_status()
+            _raise_for_mteam_http_status(response, endpoint="torrent/detail")
 
         payload = response.json()
         if not isinstance(payload, dict):
-            return None
-        if int(payload.get("code", -1)) != 0:
-            return None
+            raise MTeamApiResponseError(
+                endpoint="torrent/detail",
+                code="invalid_response",
+                message="expected object response",
+            )
+        code = str(payload.get("code"))
+        if code != "0":
+            message = str(payload.get("message") or "")
+            error = MTeamApiResponseError(
+                endpoint="torrent/detail",
+                code=code,
+                message=message,
+            )
+            if error.rate_limited:
+                raise error
+            if _is_mteam_unauthorized_response(code, message):
+                return None
+            raise error
         data = payload.get("data")
         if not isinstance(data, dict):
             return None
@@ -251,13 +335,21 @@ class MTeamApiClient:
                 params={"id": torrent_id},
                 headers=headers,
             )
-            response.raise_for_status()
+            _raise_for_mteam_http_status(response, endpoint="torrent/detail")
 
         payload = response.json()
         if not isinstance(payload, dict):
-            return None
+            raise MTeamApiResponseError(
+                endpoint="torrent/detail",
+                code="invalid_response",
+                message="expected object response",
+            )
         if str(payload.get("code")) != "0":
-            return None
+            raise MTeamApiResponseError(
+                endpoint="torrent/detail",
+                code=str(payload.get("code")),
+                message=str(payload.get("message") or ""),
+            )
         data = payload.get("data")
         if not isinstance(data, dict):
             return None
@@ -282,7 +374,7 @@ class MTeamApiClient:
                 headers=headers,
                 content=f"id={torrent_id}",
             )
-            response.raise_for_status()
+            _raise_for_mteam_http_status(response, endpoint="torrent/genDlToken")
 
         payload = response.json()
         if not isinstance(payload, dict):
@@ -494,9 +586,8 @@ def _merge_detail(candidate: TorrentCandidate, detail: dict[str, Any]) -> Torren
     leechers = _coerce_int(status_data.get("leechers")) or candidate.leechers
     discount = _normalize_discount_label(_row_discount(detail))
     left_time_minutes = _left_time_minutes_from_api_row(detail)
-    if left_time_minutes is not None:
-        metadata.pop("left_time_source", None)
-    elif discount in {Discount.FREE, Discount.TWO_X_FREE}:
+    metadata.pop("left_time_source", None)
+    if left_time_minutes is None and discount in {Discount.FREE, Discount.TWO_X_FREE}:
         metadata["left_time_source"] = _left_time_source_from_api_row(detail)
 
     return candidate.model_copy(
@@ -505,9 +596,7 @@ def _merge_detail(candidate: TorrentCandidate, detail: dict[str, Any]) -> Torren
             "seeders": seeders,
             "leechers": leechers,
             "discount": discount,
-            "left_time_minutes": (
-                left_time_minutes if left_time_minutes is not None else candidate.left_time_minutes
-            ),
+            "left_time_minutes": left_time_minutes,
             "metadata": metadata,
         }
     )

@@ -46,6 +46,30 @@ def classify_cleanup(
         )
 
     metadata = torrent.metadata or {}
+    # Billing safety outranks retention protection for incomplete downloads.
+    # Completed H&R, manual, and media-library torrents remain protected below.
+    free_window_decision = _free_window_decision(torrent, cleanup, metadata)
+    if free_window_decision is not None:
+        return free_window_decision
+
+    if _is_broken_incomplete(torrent, metadata):
+        return CleanupDecision(
+            action="delete",
+            reason=_reason("broken incomplete managed torrent deleted"),
+            managed=True,
+        )
+
+    # A mutable pool's configured maximum is a hard invariant. Explicit
+    # retention markers and current upload activity remain soft policy signals
+    # inside a mutable category and cannot leave its pool above the byte limit.
+    if space_reclamation_required:
+        return CleanupDecision(
+            action="delete",
+            reason=_reason("managed torrent deleted to satisfy hard pool capacity"),
+            managed=True,
+            capacity_reclamation=True,
+        )
+
     for rule in _protection_rules(cleanup, metadata):
         return CleanupDecision(
             action="protect",
@@ -53,10 +77,6 @@ def classify_cleanup(
             managed=True,
             protected=True,
         )
-
-    free_window_decision = _free_window_decision(torrent, cleanup, metadata)
-    if free_window_decision is not None:
-        return free_window_decision
 
     if _is_currently_uploading(metadata):
         return CleanupDecision(
@@ -125,6 +145,15 @@ def classify_cleanup(
         reason=_reason("cold managed torrent retained; space reclamation not required"),
         managed=True,
     )
+
+
+def _is_broken_incomplete(torrent: ManagedTorrent, metadata: dict[str, object]) -> bool:
+    if torrent.state.strip().lower() not in {"error", "missingfiles", "unknown"}:
+        return False
+    amount_left = metadata.get("amount_left_bytes")
+    if isinstance(amount_left, int | float):
+        return amount_left > 0
+    return torrent.downloaded_bytes < torrent.size_bytes
 
 
 def _no_upload_observation_decision(

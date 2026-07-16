@@ -208,7 +208,7 @@ def test_intent_run_once_ingests_configured_douban_source(
     config_path = _write_config(tmp_path)
     content = config_path.read_text(encoding="utf-8").replace(
         "enabled: false\n    export_ref: null",
-        "enabled: true\n    export_ref: null\n    user_name: LancerC",
+        "enabled: true\n    export_ref: null\n    user_name: example-user",
     )
     config_path.write_text(content, encoding="utf-8")
 
@@ -239,8 +239,7 @@ def test_intent_run_once_ingests_configured_letterboxd_source(
     config_path = _write_config(tmp_path)
     export = tmp_path / "local" / "inbox" / "letterboxd-watchlist.csv"
     export.write_text(
-        "Date,Name,Year,Letterboxd URI\n"
-        "2025-02-01,Inception,2010,https://boxd.it/demo\n",
+        "Date,Name,Year,Letterboxd URI\n2025-02-01,Inception,2010,https://boxd.it/demo\n",
         encoding="utf-8",
     )
     content = config_path.read_text(encoding="utf-8").replace(
@@ -296,9 +295,7 @@ def test_intent_run_once_dry_run_reports_runtime_activity_when_qb_visible(
     )
 
     class FakeDownloader(_DummyDownloader):
-        async def list_torrents(
-            self, category: str | None = None, tags: set[str] | None = None
-        ):
+        async def list_torrents(self, category: str | None = None, tags: set[str] | None = None):
             return [
                 ManagedTorrent(
                     hash="seed-active",
@@ -351,9 +348,7 @@ def test_intent_run_once_dry_run_reports_pause_reasons_when_runtime_gate_exceede
     )
 
     class FakeDownloader(_DummyDownloader):
-        async def list_torrents(
-            self, category: str | None = None, tags: set[str] | None = None
-        ):
+        async def list_torrents(self, category: str | None = None, tags: set[str] | None = None):
             return [
                 ManagedTorrent(
                     hash="seed-active",
@@ -379,6 +374,7 @@ def test_intent_run_once_dry_run_reports_pause_reasons_when_runtime_gate_exceede
 
     assert result.exit_code == 0
     payload = _json_output(result)
-    assert payload["enqueue_paused_by_pool_policy"] is True
-    assert payload["enqueue_paused_reasons"] == ["active downloads 1 > max 0"]
-    assert "paused_by_policy=active downloads 1 > max 0" in payload["decisions"][-1]["reason"]
+    assert payload["enqueue_paused_by_pool_policy"] is False
+    assert payload["enqueue_blocked_by_runtime_gate"] is True
+    assert payload["enqueue_blocked_reasons"] == ["active downloads 1 >= max 0"]
+    assert payload["decisions"][-1]["action"] == "qb.enqueue.rejected"

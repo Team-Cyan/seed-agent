@@ -540,7 +540,7 @@ Before considering Phase 2 done:
 Use a new worktree/branch:
 
 ```bash
-git worktree add /Users/lancer/.config/superpowers/worktrees/seed-agent/phase-2-resource-intent-loop -b feat/phase-2-resource-intent-loop
+git worktree add $HOME/.config/superpowers/worktrees/seed-agent/phase-2-resource-intent-loop -b feat/phase-2-resource-intent-loop
 ```
 
 Keep Phase 2 commits task-sized and review each mutation boundary before moving to the next task.

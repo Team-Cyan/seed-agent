@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Iterable, Sequence
 
 from seed_agent.config import CategoryPolicyConfig, CleanupConfig
@@ -54,6 +55,23 @@ async def enqueue_candidates(
         if pause_reasons_list:
             new_state["pause_reasons"] = pause_reasons_list
         new_state.update(_pool_usage_state(pool_usage))
+
+        if paused:
+            new_state.update({"paused": False, "rejected": True})
+            decisions.append(
+                Decision(
+                    action="qb.enqueue.rejected",
+                    target_id=item.candidate_id,
+                    execute=execute,
+                    reason=(
+                        "enqueue rejected by hard runtime gate: "
+                        + "; ".join(pause_reasons_list or ["runtime capacity unavailable"])
+                    ),
+                    new_state=new_state,
+                    rollback=None,
+                )
+            )
+            continue
 
         torrent_hash = None
         if execute:
@@ -166,6 +184,7 @@ async def prune_cold_torrents(
     force_space_reclamation: bool = False,
     completed_low_upload_requires_reclamation: bool = False,
     reclaim_target_bytes: int | None = None,
+    capacity_delete_limit: int | None = None,
 ) -> list[Decision]:
     if policy.mode != "mutable" or not policy.delete_enabled:
         return [
@@ -173,9 +192,7 @@ async def prune_cold_torrents(
                 action="qb.cleanup.protect",
                 target_id=torrent.hash,
                 execute=execute,
-                reason=(
-                    f"cleanup protect: category {policy.name} is add_only or delete-disabled"
-                ),
+                reason=(f"cleanup protect: category {policy.name} is add_only or delete-disabled"),
                 old_state=torrent.model_dump(mode="json"),
                 new_state={
                     "torrent_hash": torrent.hash,
@@ -204,38 +221,81 @@ async def prune_cold_torrents(
     reclaim_target_bytes = max(int(reclaim_target_bytes), 0)
     reclaimed_bytes = 0
     capacity_delete_count = 0
+    effective_capacity_delete_limit = (
+        len(torrents)
+        if pool_usage is not None and pool_usage.over_budget
+        else cleanup.max_capacity_deletes_per_run
+        if capacity_delete_limit is None
+        else max(int(capacity_delete_limit), 0)
+    )
 
     for torrent in rank_eviction_candidates(list(torrents)):
         if free_window_min_remaining_minutes is not None:
             metadata = dict(torrent.metadata)
             metadata["free_window_min_remaining_minutes"] = free_window_min_remaining_minutes
             torrent = torrent.model_copy(update={"metadata": metadata})
-        reclamation_needed = (
-            space_reclamation_required and reclaimed_bytes < reclaim_target_bytes
-        )
+        reclamation_needed = space_reclamation_required and reclaimed_bytes < reclaim_target_bytes
         classification = classify_cleanup(
             torrent,
             cleanup,
             policy.name,
             tags,
             space_reclamation_required=reclamation_needed,
-            completed_low_upload_requires_reclamation=(
-                completed_low_upload_requires_reclamation
-            ),
+            completed_low_upload_requires_reclamation=(completed_low_upload_requires_reclamation),
         )
         if (
             classification.action == "delete"
             and classification.capacity_reclamation
-            and capacity_delete_count >= cleanup.max_capacity_deletes_per_run
+            and capacity_delete_count >= effective_capacity_delete_limit
         ):
             classification = CleanupDecision(
                 action="keep",
                 reason=(
                     "capacity deletion limit reached: "
-                    f"{cleanup.max_capacity_deletes_per_run} per run"
+                    f"{effective_capacity_delete_limit} remaining for this run"
                 ),
                 managed=True,
             )
+
+        if execute and classification.action == "delete":
+            current_supported, current = await _current_torrent(downloader, torrent.hash)
+            if current_supported and current is None:
+                classification = CleanupDecision(
+                    action="keep",
+                    reason="torrent disappeared before cleanup mutation",
+                    managed=True,
+                )
+            elif current is not None and current.category != policy.name:
+                classification = CleanupDecision(
+                    action="protect",
+                    reason=(
+                        "torrent category changed before cleanup mutation: "
+                        f"{current.category or 'unassigned'}"
+                    ),
+                    managed=False,
+                    protected=True,
+                )
+            elif current is not None:
+                current = current.model_copy(
+                    update={
+                        "metadata": {
+                            **torrent.metadata,
+                            **current.metadata,
+                        }
+                    }
+                )
+                torrent = current
+                classification = classify_cleanup(
+                    torrent,
+                    cleanup,
+                    policy.name,
+                    tags,
+                    space_reclamation_required=reclamation_needed,
+                    completed_low_upload_requires_reclamation=(
+                        completed_low_upload_requires_reclamation
+                    ),
+                )
+
         decision = _decision_for_cleanup(
             torrent,
             classification,
@@ -244,9 +304,7 @@ async def prune_cold_torrents(
             pool_usage=pool_usage,
             space_reclamation_required=reclamation_needed,
             force_space_reclamation=force_space_reclamation,
-            completed_low_upload_requires_reclamation=(
-                completed_low_upload_requires_reclamation
-            ),
+            completed_low_upload_requires_reclamation=(completed_low_upload_requires_reclamation),
             reclaim_target_bytes=reclaim_target_bytes,
             reclaimed_bytes=reclaimed_bytes,
         )
@@ -261,6 +319,8 @@ async def prune_cold_torrents(
         try:
             if classification.action == "delete":
                 await downloader.delete(torrent.hash, delete_files=True)
+                if not await _delete_is_absent(downloader, torrent.hash):
+                    raise RuntimeError("delete verification failed: torrent still present")
         except Exception as exc:
             decisions.append(
                 _failed_cleanup_decision(
@@ -289,6 +349,30 @@ async def prune_cold_torrents(
     return decisions
 
 
+async def _current_torrent(
+    downloader: Downloader,
+    torrent_hash: str,
+) -> tuple[bool, ManagedTorrent | None]:
+    list_torrents = getattr(downloader, "list_torrents", None)
+    if not callable(list_torrents):
+        return False, None
+    torrents = await list_torrents(None, None)
+    return True, next((item for item in torrents if item.hash == torrent_hash), None)
+
+
+async def _delete_is_absent(downloader: Downloader, torrent_hash: str) -> bool:
+    list_torrents = getattr(downloader, "list_torrents", None)
+    if not callable(list_torrents):
+        return True
+    for attempt in range(3):
+        torrents = await list_torrents(None, None)
+        if all(item.hash != torrent_hash for item in torrents):
+            return True
+        if attempt < 2:
+            await asyncio.sleep(0.25)
+    return False
+
+
 def _decision_for_cleanup(
     torrent: ManagedTorrent,
     classification: CleanupDecision,
@@ -315,6 +399,7 @@ def _decision_for_cleanup(
             "cleanup_action": classification.action,
             "managed": classification.managed,
             "protected": classification.protected,
+            "capacity_reclamation": classification.capacity_reclamation,
             "space_reclamation_required": space_reclamation_required,
             "force_space_reclamation": force_space_reclamation,
             "completed_low_upload_requires_reclamation": (
@@ -354,6 +439,7 @@ def _failed_cleanup_decision(
             "cleanup_action": classification.action,
             "managed": classification.managed,
             "protected": classification.protected,
+            "capacity_reclamation": classification.capacity_reclamation,
             "error": error,
             "space_reclamation_required": space_reclamation_required,
             "force_space_reclamation": force_space_reclamation,

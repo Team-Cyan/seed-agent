@@ -97,7 +97,7 @@ Important nuance:
 - `seed-agent` local state explains policy and intent lifecycle.
 - Category policies separate mutable seed pools from add-only media pools.
 - Logical budget pools and downloader-reported free disk headroom affect enqueue
-  pause behavior and cleanup visibility.
+  rejection and cleanup visibility.
 - A `mutable` qB category is the operator-granted management boundary. When the
   user explicitly authorizes the seed category, current and future torrents in
   that category may be managed by the agent; tags remain audit/search metadata,

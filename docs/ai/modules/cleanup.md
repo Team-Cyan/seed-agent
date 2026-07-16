@@ -14,9 +14,13 @@ balanced safety policy.
 
 ## Expectations
 
-- protect H&R torrents,
-- protect manual torrents,
-- protect media-library-associated torrents,
+- protect H&R torrents, manual torrents, media-library-associated torrents,
+  and active uploads during ordinary retention cleanup; these are soft
+  protections inside a mutable category and do not override its hard byte cap,
+- evaluate incomplete paid/free-window billing risk before those retention
+  protections. A managed incomplete task that is known non-free or will cross
+  the safety horizon must be deleted; completed protected tasks remain
+  protected because they no longer create paid download exposure,
 - treat qB category membership as the cleanup ownership boundary,
 - never treat tags alone as cleanup authorization outside the configured category,
 - observe zero-total-upload managed torrents from qB `added_at` for
@@ -42,10 +46,19 @@ balanced safety policy.
   can opt into requiring space reclamation for this completed low-upload rule,
   so low-demand completed seeds are kept when there is no better candidate
   waiting for capacity,
-- keep currently uploading managed torrents even if a stale no-upload marker is
-  present,
+- delete managed incomplete qB rows in `error`, `missingFiles`, or `unknown`
+  state even without capacity pressure so failed downloads cannot remain stuck,
 - delete capacity-eviction candidates directly; pruning does not use a paused
   observation stage because pausing does not reclaim occupied capacity,
+- share the reclaim-byte target and capacity-delete count across all mutable
+  category policies in one prune run. Mandatory incomplete billing-risk deletes
+  do not consume the optional capacity-eviction count, and a pool already above
+  its hard cap bypasses the optional per-run delete limit,
+- immediately before an executed delete, re-read downloader state and require
+  the torrent to remain present in the authorized category, then rerun the full
+  cleanup classification with its latest completion/activity state and retained
+  tracker evidence. Always request file deletion, then re-read state and report
+  mutation failure if the hash remains,
 - keep policy reasoning auditable.
 - distinguish automated lifecycle cleanup from explicit operator cleanup. When
   the user gives a concrete category and age boundary, execute only that bounded
@@ -60,10 +73,16 @@ balanced safety policy.
   prune may preview deletion, but only when the mutable category's budget pool
   is over budget and space reclamation is needed.
 - Capacity-pressure prune is the aggressive mode. It is triggered by enqueue
-  planning when accepted candidates would be paused by runtime gates, forces
+  planning when accepted candidates would be rejected by runtime gates, forces
   space reclamation for mutable delete-enabled categories, deletes in eviction
   order only until the calculated reclaim target is met, and then lets the
   caller refresh qB runtime state before enqueueing.
+- Execute-mode prune re-reads qB after mutation and fails closed unless every
+  mutable delete-enabled pool is at or below its exact integer-byte limit.
+  The scheduler also runs a qB-only capacity guard between full tracker cycles;
+  it does not call tracker APIs and only prunes when a hard-cap violation or a
+  broken incomplete task is present. It remains read-only unless both scheduler
+  execute mode and `scheduler.prune_enabled` are active.
 - Existing torrent deletion order is driven by
   `policies.quality.torrent_retention_quality_score()` and
   `torrent_eviction_pressure_score()`. Tune those methods when upload-density

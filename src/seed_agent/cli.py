@@ -9,6 +9,7 @@ import json
 import os
 import re
 import signal
+import threading
 import time
 import uuid
 from collections.abc import Awaitable, Callable
@@ -362,9 +363,10 @@ def enqueue(
         )
     if pool_usage is not None:
         payload["default_pool_usage"] = _pool_usage_item_summary(pool_usage)
-        payload["enqueue_paused_by_pool_policy"] = paused
+        payload["enqueue_paused_by_pool_policy"] = False
+        payload["enqueue_blocked_by_runtime_gate"] = paused
     if pause_reasons:
-        payload["enqueue_paused_reasons"] = pause_reasons
+        payload["enqueue_blocked_reasons"] = pause_reasons
     if batch_error is not None:
         payload["error"] = str(batch_error)
     _attach_discovery_warnings(payload)
@@ -544,6 +546,11 @@ def intent_enqueue(
         pool_usage,
         downloader_status,
     )
+    enqueue_context_resolver = _build_intent_enqueue_context_resolver(
+        loaded,
+        live_torrents,
+        downloader_status,
+    )
     try:
         release_resolver = _build_release_download_resolver(loaded)
         intent, ranked, decisions = _run(
@@ -558,6 +565,7 @@ def intent_enqueue(
                 pause_reasons=pause_reasons,
                 release_resolver=release_resolver,
                 policy_resolver=policy_resolver,
+                enqueue_context_resolver=enqueue_context_resolver,
                 release_id=release_id,
             )
         )
@@ -568,6 +576,11 @@ def intent_enqueue(
         ranked = None
         decisions = exc.decisions
         batch_error = exc
+    effective_paused, effective_pause_reasons = _intent_enqueue_pause_state(
+        decisions,
+        fallback_paused=paused,
+        fallback_reasons=pause_reasons,
+    )
     _write_audit_decisions(loaded, decisions)
     payload = {
         "command": "intent-enqueue",
@@ -588,9 +601,10 @@ def intent_enqueue(
         )
     if pool_usage is not None:
         payload["default_pool_usage"] = _pool_usage_item_summary(pool_usage)
-        payload["enqueue_paused_by_pool_policy"] = paused
-    if pause_reasons:
-        payload["enqueue_paused_reasons"] = pause_reasons
+        payload["enqueue_paused_by_pool_policy"] = False
+        payload["enqueue_blocked_by_runtime_gate"] = effective_paused
+    if effective_pause_reasons:
+        payload["enqueue_blocked_reasons"] = effective_pause_reasons
     if batch_error is not None:
         payload["error"] = str(batch_error)
     _print_json(payload)
@@ -830,9 +844,7 @@ def state_backup(
     loaded = load_config(config)
     runtime_root = _runtime_root(loaded)
     destination = output or (
-        runtime_root
-        / "backups"
-        / f"state-{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}.db"
+        runtime_root / "backups" / f"state-{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}.db"
     )
     verification = backup_sqlite_database(_state_path(loaded), destination)
     removed = enforce_retention(
@@ -1014,9 +1026,7 @@ def config_import(
     current_rules = _config_rules_payload(load_config(config))
     incoming_raw = _load_yaml_mapping(rules)
     incoming = (
-        incoming_raw.get("rules")
-        if isinstance(incoming_raw.get("rules"), dict)
-        else incoming_raw
+        incoming_raw.get("rules") if isinstance(incoming_raw.get("rules"), dict) else incoming_raw
     )
     updates = {
         key: incoming[key]
@@ -1099,8 +1109,7 @@ def headroom_report(
     disk_headroom = _disk_headroom_state(loaded, downloader_status, live_torrents)
     pool_over_after_accepts = accepted_size_bytes > headroom_bytes
     disk_over_after_accepts = (
-        disk_headroom is not None
-        and accepted_size_bytes > disk_headroom["available_for_new_bytes"]
+        disk_headroom is not None and accepted_size_bytes > disk_headroom["available_for_new_bytes"]
     )
     _print_json(
         {
@@ -1115,7 +1124,7 @@ def headroom_report(
                 "headroom_gb": round(headroom_bytes / 1024**3, 2),
                 "over_budget_after_accepts": pool_over_after_accepts,
                 "over_disk_after_accepts": disk_over_after_accepts,
-                "recommended_enqueue_mode": "add_paused"
+                "recommended_enqueue_mode": "reject"
                 if pool_over_after_accepts or disk_over_after_accepts
                 else "normal",
             },
@@ -1178,9 +1187,7 @@ def quality_replay_report(
     )
     current = sorted(
         torrents,
-        key=lambda torrent: float(
-            torrent_eviction_evidence(torrent)["eviction_pressure_score"]
-        ),
+        key=lambda torrent: float(torrent_eviction_evidence(torrent)["eviction_pressure_score"]),
         reverse=True,
     )
     legacy = sorted(
@@ -1232,6 +1239,82 @@ def _torrent_deletion_provenance(store: StateStore, torrent_hash: str) -> str:
     return "active"
 
 
+class _SchedulerLeaseHeartbeat:
+    def __init__(
+        self,
+        store: StateStore,
+        owner_id: str,
+        *,
+        ttl_seconds: int,
+    ) -> None:
+        self._store = store
+        self._owner_id = owner_id
+        self._ttl_seconds = max(int(ttl_seconds), 1)
+        self._ttl_lock = threading.Lock()
+        self._renew_lock = threading.Lock()
+        self._stop = threading.Event()
+        self._lost = threading.Event()
+        self._error: str | None = None
+        self._thread = threading.Thread(
+            target=self._run,
+            name="seed-agent-scheduler-lease",
+            daemon=True,
+        )
+
+    def start(self) -> None:
+        self._thread.start()
+
+    def update_ttl(self, ttl_seconds: int) -> None:
+        with self._ttl_lock:
+            self._ttl_seconds = max(int(ttl_seconds), 1)
+
+    def renew(self, *, ttl_seconds: int | None = None) -> dict[str, Any]:
+        if ttl_seconds is not None:
+            self.update_ttl(ttl_seconds)
+        with self._renew_lock:
+            with self._ttl_lock:
+                current_ttl = self._ttl_seconds
+            try:
+                lease = self._store.acquire_scheduler_lease(
+                    self._owner_id,
+                    ttl_seconds=current_ttl,
+                )
+            except Exception as exc:
+                self._error = f"{type(exc).__name__}: {exc}"
+                self._lost.set()
+                raise
+            if not lease.get("acquired"):
+                self._error = (
+                    "scheduler lease ownership changed to "
+                    f"{lease.get('owner_id') or 'another owner'}"
+                )
+                self._lost.set()
+            return lease
+
+    def ensure_owned(self) -> None:
+        if self._lost.is_set():
+            raise RuntimeError(self._error or "scheduler lease was lost")
+
+    def stop(self) -> None:
+        self._stop.set()
+        if self._thread.is_alive():
+            self._thread.join(timeout=5)
+
+    def _run(self) -> None:
+        while True:
+            with self._ttl_lock:
+                ttl_seconds = self._ttl_seconds
+            renew_after_seconds = max(min(ttl_seconds / 3, 30), 1)
+            if self._stop.wait(renew_after_seconds):
+                return
+            try:
+                self.renew()
+            except Exception:
+                return
+            if self._lost.is_set():
+                return
+
+
 @app.command(name="schedule-run")
 def schedule_run(
     config: Annotated[Path, typer.Option("--config")] = DEFAULT_CONFIG,
@@ -1269,9 +1352,7 @@ def schedule_run(
         "intent_execute": intent_execute,
     }
     scheduler_cli_overrides = sorted(
-        name
-        for name, value in scheduler_option_overrides.items()
-        if value is not None
+        name for name, value in scheduler_option_overrides.items() if value is not None
     )
     if max_cycles is not None and max_cycles < 1:
         raise typer.BadParameter("max_cycles must be >= 1")
@@ -1294,6 +1375,12 @@ def schedule_run(
             }
         )
         raise typer.Exit(code=1)
+    lease_heartbeat = _SchedulerLeaseHeartbeat(
+        lease_store,
+        lease_owner_id,
+        ttl_seconds=initial_scheduler.lease_ttl_minutes * 60,
+    )
+    lease_heartbeat.start()
     lease_released = False
     previous_sigterm_handler = signal.getsignal(signal.SIGTERM)
 
@@ -1301,6 +1388,7 @@ def schedule_run(
         nonlocal lease_released
         if lease_released:
             return
+        lease_heartbeat.stop()
         lease_store.release_scheduler_lease(lease_owner_id)
         lease_released = True
 
@@ -1318,10 +1406,23 @@ def schedule_run(
         run_id = _new_schedule_run_id()
         loaded_for_run = load_config(config)
         scheduler = loaded_for_run.scheduler.with_overrides(scheduler_option_overrides)
-        lease = lease_store.acquire_scheduler_lease(
-            lease_owner_id,
+        lease = lease_heartbeat.renew(
             ttl_seconds=scheduler.lease_ttl_minutes * 60,
         )
+        if not lease["acquired"]:
+            _print_json(
+                {
+                    "command": "schedule-run",
+                    "config": str(config),
+                    "error": "scheduler lease was lost",
+                    "scheduler_lease": lease,
+                }
+            )
+            release_scheduler_lease()
+            atexit.unregister(release_scheduler_lease)
+            signal.signal(signal.SIGTERM, previous_sigterm_handler)
+            raise typer.Exit(code=1)
+        lease_heartbeat.ensure_owned()
         interval_minutes = scheduler.interval_minutes
         min_free_window_minutes = _schedule_free_window_safety_minutes(
             interval_minutes=interval_minutes,
@@ -1389,6 +1490,7 @@ def schedule_run(
                 run_id=run_id,
             )
             if prune:
+                lease_heartbeat.ensure_owned()
                 _record_schedule_phase(
                     store_for_run,
                     run_id=run_id,
@@ -1401,6 +1503,7 @@ def schedule_run(
                     execute=execute,
                     free_window_min_remaining_minutes=min_free_window_minutes,
                     completed_low_upload_requires_reclamation=True,
+                    fail_closed_unknown_incomplete=True,
                 )
                 payload["prune"] = prune_payload
                 _record_schedule_phase(
@@ -1416,6 +1519,7 @@ def schedule_run(
             tracker_backfill_payload: dict[str, Any] | None = None
             payload: dict[str, Any] = {}
             if tracker_backfill:
+                lease_heartbeat.ensure_owned()
                 _record_schedule_phase(
                     store_for_run,
                     run_id=run_id,
@@ -1439,9 +1543,7 @@ def schedule_run(
                     run_id=run_id,
                     phase="tracker_source_backfill",
                     event="end",
-                    payload=_tracker_source_backfill_payload_summary(
-                        tracker_backfill_payload
-                    ),
+                    payload=_tracker_source_backfill_payload_summary(tracker_backfill_payload),
                 )
                 payload["tracker_source_backfill"] = tracker_backfill_payload
                 if _tracker_source_backfill_has_rate_limit(tracker_backfill_payload):
@@ -1468,9 +1570,7 @@ def schedule_run(
                         message="mteam rate limited",
                         payload={"schedule_backoff": payload["schedule_backoff"]},
                     )
-                elif _tracker_source_backfill_has_network_unavailable(
-                    tracker_backfill_payload
-                ):
+                elif _tracker_source_backfill_has_network_unavailable(tracker_backfill_payload):
                     payload["schedule_backoff"] = _record_schedule_network_backoff(
                         config,
                         endpoint="torrent/search",
@@ -1497,10 +1597,9 @@ def schedule_run(
 
             prune_payload: dict[str, Any] | None = None
             if prune and "error" not in payload:
+                lease_heartbeat.ensure_owned()
                 unresolved_risk_hashes = (
-                    _tracker_source_backfill_unresolved_risk_hashes(
-                        tracker_backfill_payload
-                    )
+                    _tracker_source_backfill_unresolved_risk_hashes(tracker_backfill_payload)
                     if tracker_backfill_payload is not None
                     else set()
                 )
@@ -1515,6 +1614,11 @@ def schedule_run(
                     execute=execute,
                     free_window_min_remaining_minutes=min_free_window_minutes,
                     completed_low_upload_requires_reclamation=True,
+                    **(
+                        {"fail_closed_unknown_incomplete": True}
+                        if payload.get("schedule_backoff")
+                        else {}
+                    ),
                     **(
                         {"unknown_free_risk_hashes": unresolved_risk_hashes}
                         if unresolved_risk_hashes
@@ -1543,6 +1647,7 @@ def schedule_run(
                     payload.setdefault("prune", prune_payload)
 
             if "error" not in payload and "schedule_backoff" not in payload:
+                lease_heartbeat.ensure_owned()
                 _record_schedule_phase(
                     store_for_run,
                     run_id=run_id,
@@ -1553,9 +1658,7 @@ def schedule_run(
                     config,
                     execute=execute,
                     min_free_window_minutes=min_free_window_minutes,
-                    require_known_free_window=require_known_free_window
-                    if execute
-                    else False,
+                    require_known_free_window=require_known_free_window if execute else False,
                     prune=False,
                     capacity_prune=prune,
                 )
@@ -1631,6 +1734,9 @@ def schedule_run(
         payload["run_id"] = run_id
         payload["cycle"] = cycle
         payload["interval_minutes"] = interval_minutes
+        payload["capacity_guard_interval_seconds"] = (
+            scheduler.capacity_guard_interval_seconds
+        )
         payload["scheduled_at"] = datetime.now(UTC).isoformat()
         payload["min_free_window_minutes"] = min_free_window_minutes
         payload["require_known_free_window"] = require_known_free_window if execute else False
@@ -1654,6 +1760,7 @@ def schedule_run(
                     run_id=run_id,
                 )
         elif intent and "error" not in payload:
+            lease_heartbeat.ensure_owned()
             intent_search = _scheduled_intent_search_due(
                 mode=scheduler.intent_search_mode,
                 hour=scheduler.intent_search_hour,
@@ -1692,6 +1799,7 @@ def schedule_run(
             )
             payload["heartbeat_file"] = str(heartbeat_file)
         summary = _schedule_log_summary(payload)
+        lease_heartbeat.ensure_owned()
         store_for_run.finish_scheduler_run(
             run_id=run_id,
             status=_schedule_run_status(summary),
@@ -1709,7 +1817,128 @@ def schedule_run(
             atexit.unregister(release_scheduler_lease)
             signal.signal(signal.SIGTERM, previous_sigterm_handler)
             return
-        time.sleep(interval_minutes * 60)
+        _wait_for_next_schedule_cycle(
+            config,
+            execute=execute and prune,
+            interval_seconds=interval_minutes * 60,
+            guard_interval_seconds=scheduler.capacity_guard_interval_seconds,
+            lease_heartbeat=lease_heartbeat,
+        )
+
+
+def _wait_for_next_schedule_cycle(
+    config_path: Path,
+    *,
+    execute: bool,
+    interval_seconds: int,
+    guard_interval_seconds: int,
+    lease_heartbeat: _SchedulerLeaseHeartbeat,
+) -> None:
+    remaining_seconds = max(int(interval_seconds), 0)
+    guard_interval_seconds = max(int(guard_interval_seconds), 10)
+    while remaining_seconds > 0:
+        sleep_seconds = min(guard_interval_seconds, remaining_seconds)
+        time.sleep(sleep_seconds)
+        remaining_seconds -= sleep_seconds
+        if remaining_seconds <= 0:
+            return
+        lease_heartbeat.ensure_owned()
+        try:
+            payload = _capacity_guard_payload(config_path, execute=execute)
+        except Exception as exc:
+            payload = {
+                "command": "capacity-guard",
+                "execute": execute,
+                "triggered": False,
+                "error": _runtime_error_summary(exc),
+            }
+        _print_json(_capacity_guard_payload_summary(payload))
+
+
+def _capacity_guard_payload(config_path: Path, *, execute: bool) -> dict[str, Any]:
+    loaded = load_config(config_path)
+    downloader = build_downloader(loaded) if execute else _maybe_build_downloader(loaded)
+    if downloader is None:
+        return {
+            "command": "capacity-guard",
+            "config": str(config_path),
+            "execute": execute,
+            "triggered": False,
+            "error": "downloader unavailable for capacity guard",
+        }
+
+    torrents = _load_policy_torrents(downloader, loaded)
+    mutable_policies = [
+        policy
+        for policy in loaded.download_client.category_policies
+        if policy.mode == "mutable" and policy.delete_enabled
+    ]
+    mutable_categories = {policy.name for policy in mutable_policies}
+    usage = usage_by_pool(
+        loaded.download_client.category_policies,
+        loaded.download_client.budget_pools,
+        torrents,
+    )
+    enforceable_pools = {policy.budget_pool for policy in mutable_policies}
+    over_budget_pools = sorted(
+        name for name, item in usage.items() if name in enforceable_pools and item.over_budget
+    )
+    broken_incomplete_hashes = sorted(
+        torrent.hash
+        for torrent in torrents
+        if torrent.category in mutable_categories and _is_broken_incomplete_torrent(torrent)
+    )
+    if not over_budget_pools and not broken_incomplete_hashes:
+        return {
+            "command": "capacity-guard",
+            "config": str(config_path),
+            "execute": execute,
+            "triggered": False,
+            "hard_cap_satisfied": True,
+            "pool_usage": {
+                name: _pool_usage_item_summary(item) for name, item in usage.items()
+            },
+        }
+
+    payload = _prune_payload(
+        config_path,
+        execute=execute,
+        completed_low_upload_requires_reclamation=True,
+        fail_closed_unknown_incomplete=True,
+    )
+    payload["command"] = "capacity-guard"
+    payload["triggered"] = True
+    payload["trigger_over_budget_pools"] = over_budget_pools
+    payload["trigger_broken_incomplete_hashes"] = broken_incomplete_hashes
+    return payload
+
+
+def _is_broken_incomplete_torrent(torrent: ManagedTorrent) -> bool:
+    if torrent.state.strip().lower() not in {"error", "missingfiles", "unknown"}:
+        return False
+    amount_left = torrent.metadata.get("amount_left_bytes")
+    if isinstance(amount_left, int | float):
+        return amount_left > 0
+    return torrent.downloaded_bytes < torrent.size_bytes
+
+
+def _capacity_guard_payload_summary(payload: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "command": "capacity-guard",
+        "execute": payload.get("execute"),
+        "triggered": payload.get("triggered"),
+        "trigger_over_budget_pools": payload.get("trigger_over_budget_pools", []),
+        "trigger_broken_incomplete_count": len(
+            payload.get("trigger_broken_incomplete_hashes") or []
+        ),
+        "hard_cap_satisfied": payload.get("hard_cap_satisfied"),
+        "hard_cap_violations_by_pool": payload.get("hard_cap_violations_by_pool", {}),
+        "verified_committed_reclaim_by_pool": payload.get(
+            "verified_committed_reclaim_by_pool", {}
+        ),
+        "pool_usage": payload.get("pool_usage"),
+        "error": payload.get("error"),
+    }
 
 
 def _scheduled_intent_search_due(
@@ -1747,7 +1976,7 @@ def _latest_scheduled_intent_search_at(store: StateStore) -> datetime | None:
             continue
         try:
             searched_at = datetime.fromisoformat(str(row["finished_at"]).replace("Z", "+00:00"))
-        except (KeyError, ValueError):
+        except KeyError, ValueError:
             continue
         return searched_at
     return None
@@ -1816,7 +2045,7 @@ def _schedule_backoff_status(
         return status
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except OSError, json.JSONDecodeError:
         return status
     if not isinstance(raw, dict):
         return status
@@ -1978,11 +2207,7 @@ def _payload_has_mteam_rate_limit(payload: dict[str, Any]) -> bool:
             messages.append(str(warning))
     if payload.get("error"):
         messages.append(str(payload["error"]))
-    return any(
-        marker in message
-        for message in messages
-        for marker in MTEAM_RATE_LIMIT_MARKERS
-    )
+    return any(marker in message for message in messages for marker in MTEAM_RATE_LIMIT_MARKERS)
 
 
 def _payload_has_mteam_network_unavailable(payload: dict[str, Any]) -> bool:
@@ -1993,6 +2218,8 @@ def _payload_has_mteam_network_unavailable(payload: dict[str, Any]) -> bool:
             continue
         if warning.get("rate_limited") is True:
             continue
+        if warning.get("unavailable") is True:
+            return True
         error_type = str(warning.get("error_type") or "")
         message = str(warning.get("message") or "")
         if error_type in MTEAM_NETWORK_ERROR_TYPES or _is_mteam_network_message(message):
@@ -2084,6 +2311,7 @@ def _prune_payload(
     completed_low_upload_requires_reclamation: bool = False,
     reclaim_targets_by_pool: dict[str, int] | None = None,
     unknown_free_risk_hashes: set[str] | None = None,
+    fail_closed_unknown_incomplete: bool = False,
 ) -> dict[str, Any]:
     loaded = load_config(config_path)
     store = StateStore(_state_path(loaded))
@@ -2109,7 +2337,9 @@ def _prune_payload(
     else:
         all_torrents, missing_reconciled = _apply_live_torrent_state(store, all_torrents)
         candidate_reconciliation = _persist_live_torrent_candidates(store, all_torrents)
-    unknown_free_risk_hashes = unknown_free_risk_hashes or set()
+    unknown_free_risk_hashes = set(unknown_free_risk_hashes or set())
+    if fail_closed_unknown_incomplete:
+        unknown_free_risk_hashes.update(_incomplete_unknown_free_hashes(all_torrents))
     if unknown_free_risk_hashes:
         all_torrents = [
             _mark_unknown_free_status_high_risk(torrent)
@@ -2135,6 +2365,7 @@ def _prune_payload(
             effective_reclaim_targets.get(name, 0), int(target), 0
         )
     reclaimed_by_pool = {name: 0 for name in effective_reclaim_targets}
+    remaining_capacity_deletes = loaded.seed_cleanup.max_capacity_deletes_per_run
     torrents_by_category: dict[str, list[ManagedTorrent]] = {}
     for torrent in torrents:
         if torrent.category is None:
@@ -2162,9 +2393,14 @@ def _prune_payload(
                         completed_low_upload_requires_reclamation
                     ),
                     reclaim_target_bytes=remaining_reclaim_target,
+                    capacity_delete_limit=remaining_capacity_deletes,
                 )
             )
             decisions.extend(policy_decisions)
+            remaining_capacity_deletes = max(
+                remaining_capacity_deletes - _capacity_delete_count(policy_decisions),
+                0,
+            )
             reclaimed_by_pool[policy.budget_pool] = reclaimed_by_pool.get(
                 policy.budget_pool, 0
             ) + _reclaimed_capacity_bytes(policy_decisions)
@@ -2175,28 +2411,70 @@ def _prune_payload(
     _write_audit_decisions(loaded, decisions)
     if execute:
         _persist_prune_state(store, decisions)
+    final_torrents = all_torrents
+    if execute and batch_error is None:
+        final_torrents = _load_policy_torrents(downloader, loaded)
+        final_torrents, _ = _apply_live_torrent_state(store, final_torrents)
+    final_usage_by_name = usage_by_pool(
+        loaded.download_client.category_policies,
+        loaded.download_client.budget_pools,
+        final_torrents,
+    )
+    enforceable_pools = {
+        policy.budget_pool
+        for policy in mutable_policies
+        if policy.mode == "mutable" and policy.delete_enabled
+    }
+    hard_cap_violations = {
+        name: item.size_bytes - item.max_size_bytes
+        for name, item in final_usage_by_name.items()
+        if name in enforceable_pools and item.over_budget
+    }
+    verified_reclaimed_by_pool = {
+        name: max(
+            pool_usage_by_name[name].size_bytes - final_usage_by_name[name].size_bytes,
+            0,
+        )
+        for name in final_usage_by_name
+        if name in pool_usage_by_name
+    }
     preview = _prune_preview(decisions, torrents, store)
     payload = {
         "command": "prune",
         "config": str(config_path),
         "execute": execute,
         "force_space_reclamation": force_space_reclamation,
-        "completed_low_upload_requires_reclamation": (
-            completed_low_upload_requires_reclamation
-        ),
+        "completed_low_upload_requires_reclamation": (completed_low_upload_requires_reclamation),
         "reclaim_targets_by_pool": effective_reclaim_targets,
         "reclaimed_capacity_by_pool": reclaimed_by_pool,
+        "verified_committed_reclaim_by_pool": verified_reclaimed_by_pool,
+        "verified_downloaded_reclaim_by_pool": _reclaimed_downloaded_bytes_by_pool(
+            decisions
+        ),
+        "hard_cap_satisfied": not hard_cap_violations,
+        "hard_cap_violations_by_pool": hard_cap_violations,
         "unknown_free_risk_count": len(unknown_free_risk_hashes),
+        "capacity_deletes_remaining": remaining_capacity_deletes,
         "managed_count": len(torrents),
         "missing_from_qb_reconciled": missing_reconciled,
         "candidate_reconciliation": candidate_reconciliation,
-        "pool_usage": _pool_usage_summary(loaded, all_torrents),
+        "pool_usage_before": _pool_usage_summary(loaded, all_torrents),
+        "pool_usage": {
+            name: _pool_usage_item_summary(item)
+            for name, item in final_usage_by_name.items()
+        },
         "decisions": [_decision_summary(item) for item in decisions],
         "preview": preview,
         "cleanup_evidence": _cleanup_decision_evidence(preview),
     }
     if batch_error is not None:
         payload["error"] = str(batch_error)
+    elif execute and hard_cap_violations:
+        details = ", ".join(
+            f"{name} over by {round(value / 1024**3, 3)} GiB"
+            for name, value in sorted(hard_cap_violations.items())
+        )
+        payload["error"] = f"hard pool capacity invariant not satisfied: {details}"
     return payload
 
 
@@ -2211,6 +2489,44 @@ def _reclaimed_capacity_bytes(decisions: list[Decision]) -> int:
         if isinstance(size_bytes, int | float):
             reclaimed += max(int(size_bytes), 0)
     return reclaimed
+
+
+def _reclaimed_downloaded_bytes_by_pool(decisions: list[Decision]) -> dict[str, int]:
+    reclaimed: dict[str, int] = {}
+    for decision in decisions:
+        if decision.action != "qb.cleanup.delete":
+            continue
+        pool = str(decision.new_state.get("budget_pool") or "")
+        if not pool:
+            continue
+        downloaded = decision.old_state.get("downloaded_bytes", 0)
+        if isinstance(downloaded, int | float):
+            reclaimed[pool] = reclaimed.get(pool, 0) + max(int(downloaded), 0)
+    return reclaimed
+
+
+def _capacity_delete_count(decisions: list[Decision]) -> int:
+    return sum(
+        1
+        for decision in decisions
+        if decision.action == "qb.cleanup.delete"
+        and bool(decision.new_state.get("capacity_reclamation"))
+    )
+
+
+def _incomplete_unknown_free_hashes(torrents: list[ManagedTorrent]) -> set[str]:
+    hashes: set[str] = set()
+    for torrent in torrents:
+        amount_left = int(torrent.metadata.get("amount_left_bytes", 0) or 0)
+        if amount_left <= 0:
+            continue
+        discount = str(torrent.metadata.get("discount") or "").strip().lower()
+        if discount in {"free", "2xfree", "2x_free", "normal", "50%", "half", "2x50%"}:
+            continue
+        if torrent.metadata.get("free_window_expires_at"):
+            continue
+        hashes.add(torrent.hash)
+    return hashes
 
 
 def _mark_unknown_free_status_high_risk(torrent: ManagedTorrent) -> ManagedTorrent:
@@ -2314,7 +2630,7 @@ def _run_once_payload(
             config_path,
             execute=execute,
             force_space_reclamation=True,
-            completed_low_upload_requires_reclamation=False,
+            completed_low_upload_requires_reclamation=True,
             reclaim_targets_by_pool={default_policy.budget_pool: reclaim_target},
         )
         if "error" in capacity_prune_payload:
@@ -2380,7 +2696,8 @@ def _run_once_payload(
     }
     if pool_usage is not None:
         payload["default_pool_usage"] = _pool_usage_item_summary(pool_usage)
-        payload["enqueue_paused_by_pool_policy"] = paused
+        payload["enqueue_paused_by_pool_policy"] = False
+        payload["enqueue_blocked_by_runtime_gate"] = paused
     if downloader_status is not None:
         payload["downloader_status"] = _downloader_status_summary(
             loaded,
@@ -2388,7 +2705,7 @@ def _run_once_payload(
             live_torrents,
         )
     if pause_reasons:
-        payload["enqueue_paused_reasons"] = pause_reasons
+        payload["enqueue_blocked_reasons"] = pause_reasons
     if min_free_window_minutes is not None:
         payload["min_free_window_minutes"] = min_free_window_minutes
     if require_known_free_window:
@@ -2443,6 +2760,11 @@ def _intent_run_once_payload(
         pool_usage,
         downloader_status,
     )
+    enqueue_context_resolver = _build_intent_enqueue_context_resolver(
+        loaded,
+        live_torrents,
+        downloader_status,
+    )
     source_warnings: list[dict[str, str]] = []
     try:
         source_events = _read_configured_source_events(loaded)
@@ -2473,6 +2795,7 @@ def _intent_run_once_payload(
                 source_events=source_events,
                 release_resolver=release_resolver,
                 policy_resolver=policy_resolver,
+                enqueue_context_resolver=enqueue_context_resolver,
                 search_ingested=search_ingested,
             )
         )
@@ -2481,6 +2804,11 @@ def _intent_run_once_payload(
         result = None
         decisions = exc.decisions
         batch_error = exc
+    effective_paused, effective_pause_reasons = _intent_enqueue_pause_state(
+        decisions,
+        fallback_paused=paused,
+        fallback_reasons=pause_reasons,
+    )
     _write_audit_decisions(loaded, decisions)
     payload = {
         "command": "intent-run-once",
@@ -2498,15 +2826,16 @@ def _intent_run_once_payload(
     }
     if pool_usage is not None:
         payload["default_pool_usage"] = _pool_usage_item_summary(pool_usage)
-        payload["enqueue_paused_by_pool_policy"] = paused
+        payload["enqueue_paused_by_pool_policy"] = False
+        payload["enqueue_blocked_by_runtime_gate"] = effective_paused
     if downloader_status is not None:
         payload["downloader_status"] = _downloader_status_summary(
             loaded,
             downloader_status,
             live_torrents,
         )
-    if pause_reasons:
-        payload["enqueue_paused_reasons"] = pause_reasons
+    if effective_pause_reasons:
+        payload["enqueue_blocked_reasons"] = effective_pause_reasons
     if result is not None:
         _record_intent_search_runs(
             store,
@@ -2894,9 +3223,7 @@ def _runtime_status_payload(
                     "target": loaded.download_client.target,
                     "default_category": loaded.download_client.default_category,
                     "credential_ref_set": loaded.download_client.secret_ref is not None,
-                    "credential_file_present": bool(
-                        credential_path and credential_path.exists()
-                    ),
+                    "credential_file_present": bool(credential_path and credential_path.exists()),
                     "budget_pools": [
                         {"name": pool.name, "max_size_tib": pool.max_size_tib}
                         for pool in loaded.download_client.budget_pools
@@ -2967,8 +3294,7 @@ def _config_status_payload(config_path: Path) -> dict[str, Any]:
                 "discovery_mode": site.discovery_mode,
                 "api_key_ref": site.api_key_ref,
                 "has_api_key": bool(
-                    site.api_key_ref
-                    and _resolve_path(site.api_key_ref, loaded.config_dir).exists()
+                    site.api_key_ref and _resolve_path(site.api_key_ref, loaded.config_dir).exists()
                 ),
             }
             for site in loaded.tracker_sites
@@ -2983,8 +3309,7 @@ def _config_status_payload(config_path: Path) -> dict[str, Any]:
             "target": loaded.download_client.target,
             "default_category": loaded.download_client.default_category,
             "budget_pools": [
-                pool.model_dump(mode="json")
-                for pool in loaded.download_client.budget_pools
+                pool.model_dump(mode="json") for pool in loaded.download_client.budget_pools
             ],
             "category_policies": [
                 policy.model_dump(mode="json")
@@ -3012,9 +3337,7 @@ def _current_release_profile(config: SeedAgentConfig) -> dict[str, Any]:
         "series_search_mode": config.want_decision.series_search_mode,
         "quality_tag_scores": config.release_preferences.quality_tag_scores,
         "site_priority": config.release_preferences.site_priority,
-        "source_ids": [
-            source.id for source in config.want_sources.want_lists if source.enabled
-        ],
+        "source_ids": [source.id for source in config.want_sources.want_lists if source.enabled],
     }
 
 
@@ -3024,10 +3347,8 @@ def _resolved_release_profile(
 ) -> dict[str, Any]:
     current = _current_release_profile(config)
     return {
-        "default_resolution": profile.get("default_resolution")
-        or current["default_resolution"],
-        "series_search_mode": profile.get("series_search_mode")
-        or current["series_search_mode"],
+        "default_resolution": profile.get("default_resolution") or current["default_resolution"],
+        "series_search_mode": profile.get("series_search_mode") or current["series_search_mode"],
         "quality_tag_scores": {
             **dict(current["quality_tag_scores"]),
             **dict(profile.get("quality_tag_scores") or {}),
@@ -3053,11 +3374,7 @@ def _reseed_candidates(
         if not isinstance(score, int) or score < config.pt_scoring.min_score_to_enqueue:
             continue
         torrent_hash = row.get("torrent_hash")
-        runtime = (
-            store.get_torrent_runtime(str(torrent_hash))
-            if torrent_hash is not None
-            else None
-        )
+        runtime = store.get_torrent_runtime(str(torrent_hash)) if torrent_hash is not None else None
         reason = _reseed_reason(row, runtime)
         candidates.append(
             {
@@ -3068,12 +3385,8 @@ def _reseed_candidates(
                 "score": score,
                 "torrent_hash": torrent_hash,
                 "reason": reason,
-                "missing_from_downloader": bool(
-                    runtime and runtime.get("missing_from_qb_at")
-                ),
-                "no_upload_since_at": runtime.get("no_upload_since_at")
-                if runtime
-                else None,
+                "missing_from_downloader": bool(runtime and runtime.get("missing_from_qb_at")),
+                "no_upload_since_at": runtime.get("no_upload_since_at") if runtime else None,
                 "updated_at": row["updated_at"],
             }
         )
@@ -3181,11 +3494,14 @@ def _tracker_source_backfill_payload(
             "execute": execute,
             "error": "qB secret missing or unreadable",
         }
-    torrents = _load_policy_torrents(downloader, config)
-    if category is not None:
-        torrents = [torrent for torrent in torrents if torrent.category == category]
-    torrents, missing_reconciled = _apply_live_torrent_state(store, torrents)
-    candidate_reconciliation = _persist_live_torrent_candidates(store, torrents)
+    all_torrents = _load_policy_torrents(downloader, config)
+    all_torrents, missing_reconciled = _apply_live_torrent_state(store, all_torrents)
+    candidate_reconciliation = _persist_live_torrent_candidates(store, all_torrents)
+    torrents = (
+        [torrent for torrent in all_torrents if torrent.category == category]
+        if category is not None
+        else all_torrents
+    )
     candidates = _qb_only_backfill_targets(store, torrents)
     if limit is not None:
         candidates = candidates[:limit]
@@ -3448,7 +3764,7 @@ def _tracker_source_backfill_unresolved_risk_hashes(payload: dict[str, Any]) -> 
         if not isinstance(result, dict) or not bool(result.get("incomplete")):
             continue
         status = str(result.get("status") or "")
-        if status in {"not_found", "ambiguous"}:
+        if status in {"not_found", "ambiguous", "error"}:
             torrent_hash = str(result.get("hash") or "")
             if torrent_hash:
                 hashes.add(torrent_hash)
@@ -3555,6 +3871,13 @@ async def _find_mteam_match_for_torrent(
                         "reason": exc.message,
                         "searched": searched_keywords,
                     }
+                if exc.unavailable or exc.retriable:
+                    request_budget["remaining"] = 0
+                    return {
+                        "status": "unavailable",
+                        "reason": exc.message,
+                        "searched": searched_keywords,
+                    }
                 return {
                     "status": "error",
                     "reason": str(exc),
@@ -3628,6 +3951,13 @@ async def _find_mteam_match_by_tracker_id(
             request_budget["remaining"] = 0
             return {
                 "status": "rate_limited",
+                "reason": exc.message,
+                "searched": [f"detail:{torrent_id}"],
+            }
+        if exc.unavailable or exc.retriable:
+            request_budget["remaining"] = 0
+            return {
+                "status": "unavailable",
                 "reason": exc.message,
                 "searched": [f"detail:{torrent_id}"],
             }
@@ -3715,7 +4045,7 @@ def _decode_mteam_tracker_credential(value: str) -> str | None:
     for decoder in (base64.b64decode, base64.urlsafe_b64decode):
         try:
             return decoder(padded).decode("utf-8", errors="ignore")
-        except (binascii.Error, ValueError, TypeError):
+        except binascii.Error, ValueError, TypeError:
             continue
     return None
 
@@ -3815,15 +4145,11 @@ def _torrent_contribution_item(torrent: ManagedTorrent) -> dict[str, Any]:
         "uploaded_gb": round(torrent.uploaded_bytes / 1024**3, 2),
         "downloaded_gb": round(downloaded / 1024**3, 2) if downloaded else 0,
         "ratio": round(ratio, 4) if ratio is not None else None,
-        "recent_upload_gb": round(float(recent_upload), 3)
-        if recent_upload is not None
-        else None,
+        "recent_upload_gb": round(float(recent_upload), 3) if recent_upload is not None else None,
         "progress": torrent.metadata.get("progress"),
         "upspeed": torrent.metadata.get("upspeed"),
         "eta_seconds": torrent.metadata.get("eta_seconds"),
-        "no_upload_since_at": _metadata_datetime_string(
-            torrent.metadata.get("no_upload_since_at")
-        ),
+        "no_upload_since_at": _metadata_datetime_string(torrent.metadata.get("no_upload_since_at")),
         "tags": list(torrent.tags),
     }
 
@@ -3917,6 +4243,7 @@ def _schedule_log_summary(payload: dict[str, Any]) -> dict[str, Any]:
         "execute",
         "cycle",
         "interval_minutes",
+        "capacity_guard_interval_seconds",
         "scheduled_at",
         "min_free_window_minutes",
         "require_known_free_window",
@@ -3937,6 +4264,8 @@ def _schedule_log_summary(payload: dict[str, Any]) -> dict[str, Any]:
         "accepted",
         "enqueued",
         "enqueue_paused_by_pool_policy",
+        "enqueue_blocked_by_runtime_gate",
+        "enqueue_blocked_reasons",
         "default_pool_usage",
         "runtime_activity",
         "discovery_warnings",
@@ -3973,12 +4302,22 @@ def _prune_payload_summary(payload: object) -> dict[str, Any] | None:
         ),
         "reclaim_targets_by_pool": payload.get("reclaim_targets_by_pool"),
         "reclaimed_capacity_by_pool": payload.get("reclaimed_capacity_by_pool"),
+        "verified_committed_reclaim_by_pool": payload.get(
+            "verified_committed_reclaim_by_pool"
+        ),
+        "verified_downloaded_reclaim_by_pool": payload.get(
+            "verified_downloaded_reclaim_by_pool"
+        ),
+        "hard_cap_satisfied": payload.get("hard_cap_satisfied"),
+        "hard_cap_violations_by_pool": payload.get("hard_cap_violations_by_pool"),
         "unknown_free_risk_count": payload.get("unknown_free_risk_count"),
         "delete_count": (payload.get("cleanup_evidence") or {}).get("delete_count"),
         "managed_count": payload.get("managed_count"),
         "decisions_count": len(payload.get("decisions") or []),
         "preview_count": len(payload.get("preview") or []),
+        "pool_usage_before": payload.get("pool_usage_before"),
         "pool_usage": payload.get("pool_usage"),
+        "error": payload.get("error"),
     }
 
 
@@ -4119,9 +4458,7 @@ def _managed_torrent_summary(
     uploaded_session = int(torrent.metadata.get("uploaded_session_bytes", 0) or 0)
     amount_left = int(torrent.metadata.get("amount_left_bytes", 0) or 0)
     ratio = (
-        torrent.uploaded_bytes / torrent.downloaded_bytes
-        if torrent.downloaded_bytes > 0
-        else None
+        torrent.uploaded_bytes / torrent.downloaded_bytes if torrent.downloaded_bytes > 0 else None
     )
     no_upload_since_at = torrent.metadata.get("no_upload_since_at")
     summary = {
@@ -4232,9 +4569,9 @@ def _intent_category_policy(
     intent: ResourceIntent,
 ) -> CategoryPolicyConfig:
     policies = _policy_lookup(config)
-    media_type = str(
-        intent.metadata.get("media_type") or intent.metadata.get("kind") or ""
-    ).strip().lower()
+    media_type = (
+        str(intent.metadata.get("media_type") or intent.metadata.get("kind") or "").strip().lower()
+    )
     if media_type == "anime":
         mapped_category = config.download_client.media_category_map.get("anime")
         if mapped_category and mapped_category in policies:
@@ -4270,7 +4607,15 @@ def _load_policy_torrents(
     torrents: list[ManagedTorrent] = []
     seen_hashes: set[str] = set()
     category_filter = next(iter(policy_names)) if len(policy_names) == 1 else None
-    for torrent in _run(downloader.list_torrents(category_filter, None)):
+    if isinstance(downloader, TransmissionClient):
+        listed = downloader.list_torrents(
+            category_filter,
+            None,
+            known_policy_categories=policy_names,
+        )
+    else:
+        listed = downloader.list_torrents(category_filter, None)
+    for torrent in _run(listed):
         if torrent.category not in policy_names:
             continue
         if torrent.hash in seen_hashes:
@@ -4317,11 +4662,7 @@ def _default_category_budget_state_from_torrents(
         torrents,
     )
     pool_usage = usage[default_policy.budget_pool]
-    paused = (
-        pool_usage.over_budget
-        and default_policy.over_budget_behavior == "add_paused"
-        and config.pt_filters.max_total_amount_left_gb is None
-    )
+    paused = pool_usage.over_budget and config.pt_filters.max_total_amount_left_gb is None
     return paused, pool_usage
 
 
@@ -4360,6 +4701,89 @@ def _enqueue_runtime_context(
     return live_downloader, live_torrents, downloader_status, paused, pool_usage, missing_reconciled
 
 
+def _build_intent_enqueue_context_resolver(
+    config: SeedAgentConfig,
+    torrents: list[ManagedTorrent],
+    downloader_status: DownloaderStatus | None,
+) -> Callable[
+    [ResourceIntent, CategoryPolicyConfig, ScoreBreakdown],
+    tuple[bool, PoolUsage | None, list[str]],
+]:
+    pool_usage_by_name = usage_by_pool(
+        config.download_client.category_policies,
+        config.download_client.budget_pools,
+        torrents,
+    )
+    reserved_pool_bytes: dict[str, int] = {}
+    reserved_download_bytes = 0
+    reserved_active_downloads = 0
+    existing_download_bytes = sum(_download_liability_bytes(item) for item in torrents)
+    existing_active_downloads = int(_runtime_activity_summary(torrents)["active_download_count"])
+    disk_state = _disk_headroom_state(config, downloader_status, torrents)
+    max_active_downloads = config.pt_filters.max_active_downloads
+    max_download_bytes = (
+        int(config.pt_filters.max_total_amount_left_gb * 1024**3)
+        if config.pt_filters.max_total_amount_left_gb is not None
+        else None
+    )
+
+    def resolve(
+        intent: ResourceIntent,
+        policy: CategoryPolicyConfig,
+        score: ScoreBreakdown,
+    ) -> tuple[bool, PoolUsage | None, list[str]]:
+        nonlocal reserved_active_downloads, reserved_download_bytes
+        del intent
+        candidate_bytes = max(int(score.candidate.size_bytes), 0)
+        base_pool_usage = pool_usage_by_name.get(policy.budget_pool)
+        reserved_for_pool = reserved_pool_bytes.get(policy.budget_pool, 0)
+        pool_usage = (
+            PoolUsage(
+                pool_name=base_pool_usage.pool_name,
+                size_bytes=base_pool_usage.size_bytes + reserved_for_pool,
+                max_size_bytes=base_pool_usage.max_size_bytes,
+            )
+            if base_pool_usage is not None
+            else None
+        )
+        reasons: list[str] = []
+        if (
+            pool_usage is not None
+            and pool_usage.size_bytes + candidate_bytes > pool_usage.max_size_bytes
+        ):
+            reasons.append(
+                f"budget pool {pool_usage.pool_name} projected usage "
+                f"{round((pool_usage.size_bytes + candidate_bytes) / 1024**4, 4)} TiB "
+                f"> max {round(pool_usage.max_size_bytes / 1024**4, 4)} TiB"
+            )
+        projected_active_downloads = existing_active_downloads + reserved_active_downloads
+        if max_active_downloads is not None and projected_active_downloads >= max_active_downloads:
+            reasons.append(
+                f"active downloads {projected_active_downloads} >= max {max_active_downloads}"
+            )
+        projected_download_bytes = (
+            existing_download_bytes + reserved_download_bytes + candidate_bytes
+        )
+        if max_download_bytes is not None and projected_download_bytes > max_download_bytes:
+            reasons.append(
+                f"projected remaining download "
+                f"{round(projected_download_bytes / 1024**3, 4)} GiB > max "
+                f"{config.pt_filters.max_total_amount_left_gb} GiB"
+            )
+        if disk_state is not None and reserved_download_bytes + candidate_bytes > int(
+            disk_state["available_for_new_bytes"]
+        ):
+            reasons.append(_disk_headroom_batch_reason(disk_state))
+
+        if not reasons:
+            reserved_pool_bytes[policy.budget_pool] = reserved_for_pool + candidate_bytes
+            reserved_download_bytes += candidate_bytes
+            reserved_active_downloads += 1
+        return bool(reasons), pool_usage, reasons
+
+    return resolve
+
+
 async def _enqueue_candidate_batches_action(
     batches: list[tuple[list[ScoreBreakdown], bool, list[str]]],
     downloader: Downloader | _NullDownloader,
@@ -4372,8 +4796,8 @@ async def _enqueue_candidate_batches_action(
     for batch, paused, pause_reasons in batches:
         if not batch:
             continue
-        decisions.extend(
-            await enqueue_candidates(
+        try:
+            batch_decisions = await enqueue_candidates(
                 batch,
                 downloader,
                 policy,
@@ -4382,7 +4806,12 @@ async def _enqueue_candidate_batches_action(
                 pool_usage=pool_usage,
                 pause_reasons=pause_reasons,
             )
-        )
+        except MutationBatchError as exc:
+            raise MutationBatchError(
+                str(exc),
+                [*decisions, *exc.decisions],
+            ) from exc
+        decisions.extend(batch_decisions)
     return decisions
 
 
@@ -4419,30 +4848,67 @@ def _enqueue_candidate_batches(
     )
     planned_left_bytes = sum(_download_liability_bytes(torrent) for torrent in torrents)
     planned_new_bytes = 0
+    runtime = _runtime_activity_summary(torrents)
+    planned_active_downloads = int(runtime["active_download_count"])
+    max_active_downloads = config.pt_filters.max_active_downloads
+    planned_pool_new_bytes = 0
     active: list[ScoreBreakdown] = []
     paused_for_amount: list[ScoreBreakdown] = []
     paused_for_disk: list[ScoreBreakdown] = []
+    paused_for_active: list[ScoreBreakdown] = []
+    paused_for_pool: list[ScoreBreakdown] = []
     for item in accepted:
         candidate_left = max(int(item.candidate.size_bytes), 0)
-        if (
-            max_left_bytes is not None
-            and planned_left_bytes + candidate_left > max_left_bytes
+        if max_active_downloads is not None and planned_active_downloads >= max_active_downloads:
+            paused_for_active.append(item)
+        elif (
+            pool_usage is not None
+            and pool_usage.size_bytes + planned_pool_new_bytes + candidate_left
+            > pool_usage.max_size_bytes
         ):
+            paused_for_pool.append(item)
+        elif max_left_bytes is not None and planned_left_bytes + candidate_left > max_left_bytes:
             paused_for_amount.append(item)
-            continue
-        if (
+        elif (
             disk_max_new_bytes is not None
             and planned_new_bytes + candidate_left > disk_max_new_bytes
         ):
             paused_for_disk.append(item)
-            continue
-        active.append(item)
-        planned_left_bytes += candidate_left
-        planned_new_bytes += candidate_left
+        else:
+            active.append(item)
+            planned_active_downloads += 1
+
+            planned_pool_new_bytes += candidate_left
+            planned_left_bytes += candidate_left
+            planned_new_bytes += candidate_left
 
     batches: list[tuple[list[ScoreBreakdown], bool, list[str]]] = []
     if active:
         batches.append((active, False, []))
+    if paused_for_active:
+        batches.append(
+            (
+                paused_for_active,
+                True,
+                [
+                    f"active download slots reserved for higher-score candidates "
+                    f"({planned_active_downloads} / max {max_active_downloads})"
+                ],
+            )
+        )
+    if paused_for_pool and pool_usage is not None:
+        batches.append(
+            (
+                paused_for_pool,
+                True,
+                [
+                    f"budget pool {pool_usage.pool_name} capacity reserved for "
+                    f"higher-score candidates "
+                    f"({round((pool_usage.size_bytes + planned_pool_new_bytes) / 1024**4, 4)} "
+                    f"/ max {round(pool_usage.max_size_bytes / 1024**4, 4)} TiB)"
+                ],
+            )
+        )
     if paused_for_amount:
         batches.append(
             (
@@ -4478,6 +4944,36 @@ def _batch_pause_reasons(
     return reasons
 
 
+def _intent_enqueue_pause_state(
+    decisions: list[Decision],
+    *,
+    fallback_paused: bool,
+    fallback_reasons: list[str],
+) -> tuple[bool, list[str]]:
+    enqueue_states = [
+        decision.new_state
+        for decision in decisions
+        if decision.action in {"qb.enqueue", "qb.enqueue.failed", "qb.enqueue.rejected"}
+        and isinstance(decision.new_state, dict)
+    ]
+    if not enqueue_states:
+        return fallback_paused, list(fallback_reasons)
+    paused = any(
+        bool(state.get("paused")) or bool(state.get("rejected"))
+        for state in enqueue_states
+    )
+    reasons: list[str] = []
+    for state in enqueue_states:
+        raw_reasons = state.get("pause_reasons")
+        if not isinstance(raw_reasons, list):
+            continue
+        for reason in raw_reasons:
+            text = str(reason)
+            if text and text not in reasons:
+                reasons.append(text)
+    return paused, reasons
+
+
 def _enqueue_pause_reasons(
     config: SeedAgentConfig,
     torrents: list[ManagedTorrent],
@@ -4487,11 +4983,7 @@ def _enqueue_pause_reasons(
     include_amount: bool = True,
 ) -> list[str]:
     reasons: list[str] = []
-    if (
-        pool_usage is not None
-        and pool_usage.over_budget
-        and config.pt_filters.max_total_amount_left_gb is None
-    ):
+    if pool_usage is not None and pool_usage.over_budget:
         reasons.append(
             f"budget pool {pool_usage.pool_name} over budget "
             f"({round(pool_usage.size_bytes / 1024**4, 2)} / "
@@ -4499,9 +4991,12 @@ def _enqueue_pause_reasons(
         )
     runtime = _runtime_activity_summary(torrents)
     max_active_downloads = config.pt_filters.max_active_downloads
-    if max_active_downloads is not None and runtime["active_download_count"] > max_active_downloads:
+    if (
+        max_active_downloads is not None
+        and runtime["active_download_count"] >= max_active_downloads
+    ):
         reasons.append(
-            f"active downloads {runtime['active_download_count']} > max {max_active_downloads}"
+            f"active downloads {runtime['active_download_count']} >= max {max_active_downloads}"
         )
     disk_state = _disk_headroom_state(config, downloader_status, torrents)
     if disk_state is not None and bool(disk_state["over_existing_liability"]):
@@ -4526,14 +5021,10 @@ def _capacity_reclaim_target_bytes(
     pool_usage: PoolUsage | None,
     downloader_status: DownloaderStatus | None,
 ) -> int:
-    accepted_bytes = sum(
-        max(int(item.candidate.size_bytes), 0) for item in scored if item.accepted
-    )
+    accepted_bytes = sum(max(int(item.candidate.size_bytes), 0) for item in scored if item.accepted)
     targets: list[int] = []
     if pool_usage is not None:
-        targets.append(
-            max(pool_usage.size_bytes + accepted_bytes - pool_usage.max_size_bytes, 0)
-        )
+        targets.append(max(pool_usage.size_bytes + accepted_bytes - pool_usage.max_size_bytes, 0))
 
     existing_liability = sum(_download_liability_bytes(torrent) for torrent in torrents)
     max_total_amount_left_gb = config.pt_filters.max_total_amount_left_gb
@@ -4550,9 +5041,7 @@ def _capacity_reclaim_target_bytes(
     if disk_state is not None:
         targets.append(
             max(
-                existing_liability
-                + accepted_bytes
-                - int(disk_state["usable_free_bytes"]),
+                existing_liability + accepted_bytes - int(disk_state["usable_free_bytes"]),
                 0,
             )
         )
@@ -4675,9 +5164,7 @@ def _persist_live_torrent_candidates(
             marked_present += 1
             continue
         tracker_id = _mteam_torrent_id_from_tracker(torrent)
-        linked_row = (
-            unlinked_by_mteam_id.get(tracker_id) if tracker_id is not None else None
-        )
+        linked_row = unlinked_by_mteam_id.get(tracker_id) if tracker_id is not None else None
         if linked_row is None:
             linked_row = unlinked_by_identity.get(_live_torrent_identity(torrent))
         if linked_row is not None:
@@ -4724,7 +5211,7 @@ def _unlinked_candidate_identity_map(store: StateStore) -> dict[tuple[str, int],
             continue
         try:
             identity = (_normalize_torrent_title(str(row["title"])), int(size_bytes))
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             continue
         candidates.setdefault(identity, row)
     return candidates
@@ -5057,7 +5544,7 @@ def _read_configured_telegram_events(config: SeedAgentConfig) -> list[SourceInte
 def _optional_int(value: object) -> int | None:
     try:
         return int(str(value))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
 
 

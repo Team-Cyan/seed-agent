@@ -41,6 +41,15 @@ Convert human requests into search/rank/reject/enqueue workflows.
 - keep search providers modular. M-Team remains the reference API provider;
   Torznab is available as the first non-M-Team provider to validate the
   `SearchProvider` boundary,
+- keep Want List acquisition independent from the PT upload-farming
+  `pt_filters.allow_non_free` switch. A requested work may use a paid release,
+  while PT discovery remains free-only when that switch is false,
+- apply the selected movie/TV/seed category policy, shared pool size, active
+  slot, amount-left, and disk-reserve gates before enqueue. Reserve each
+  accepted candidate in the same batch so later candidates cannot reuse its
+  projected headroom,
+- use the durable enqueue claim keyed by intent and release so concurrent Web,
+  CLI, or scheduler workers cannot add the same release twice,
 - do not entangle source ingestion with downloader logic.
 
 ## Verification

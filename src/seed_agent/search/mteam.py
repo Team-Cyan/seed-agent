@@ -79,13 +79,22 @@ class MTeamSearchProvider:
                 attempt.update(
                     {
                         "status": "api_error",
+                        "code": exc.code,
                         "rate_limited": exc.rate_limited,
+                        "retriable": exc.retriable,
+                        "unavailable": exc.unavailable,
                     }
                 )
+                if exc.retriable:
+                    self._record_diagnostic(diagnostic, releases)
+                    raise
+                if attempt["query_path"] != "title_year":
+                    continue
                 break
-            except (httpx.TimeoutException, httpx.NetworkError):
+            except httpx.TimeoutException, httpx.NetworkError:
                 attempt["status"] = "network_error"
-                break
+                self._record_diagnostic(diagnostic, releases)
+                raise
             attempt.update({"status": "ok", "result_count": len(candidates)})
             for candidate in candidates:
                 release = _release_from_candidate(candidate)
@@ -97,10 +106,17 @@ class MTeamSearchProvider:
                     break
             if len(releases) >= self.search_config.max_results_per_site:
                 break
+        self._record_diagnostic(diagnostic, releases)
+        return releases
+
+    def _record_diagnostic(
+        self,
+        diagnostic: dict[str, Any],
+        releases: list[ReleaseCandidate],
+    ) -> None:
         diagnostic["requests_used"] = len(diagnostic["attempts"])
         diagnostic["release_count"] = len(releases)
         self.search_diagnostics.append(diagnostic)
-        return releases
 
 
 def _query_path(options: MTeamApiDiscoveryOptions) -> str:

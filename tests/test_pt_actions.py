@@ -214,6 +214,7 @@ async def test_discover_candidates_keeps_going_when_one_site_fails(monkeypatch) 
             "message": "boom",
             "endpoint": None,
             "rate_limited": False,
+            "unavailable": False,
         }
     ]
 
@@ -993,9 +994,7 @@ async def test_execute_free_only_guard_rejects_before_preflight_or_token(
 
     assert resolved[0].accepted is False
     assert resolved[0].score == 0
-    assert resolved[0].reasons[-1] == (
-        "discount 50% rejected by execute free-only policy"
-    )
+    assert resolved[0].reasons[-1] == ("discount 50% rejected by execute free-only policy")
 
 
 def test_mteam_preflight_reapplies_execute_free_window_threshold() -> None:
@@ -1018,9 +1017,33 @@ def test_mteam_preflight_reapplies_execute_free_window_threshold() -> None:
 
     assert result.accepted is False
     assert result.score == 0
-    assert result.reasons[-1] == (
-        "mteam promotion preflight left_time 150 < execute safety 180"
+    assert result.reasons[-1] == ("mteam promotion preflight left_time 150 < execute safety 180")
+
+
+def test_mteam_preflight_rejects_missing_refreshed_free_window() -> None:
+    from seed_agent.actions import pt as pt_actions
+
+    candidate = _candidate(
+        left_time_minutes=None,
+        metadata={"left_time_source": "mteam_api_missing"},
     )
+    item = ScoreBreakdown(
+        candidate_id=candidate.stable_id,
+        score=95,
+        accepted=True,
+        reasons=["mteam promotion preflight accepted"],
+        candidate=candidate,
+    )
+
+    result = pt_actions._apply_mteam_preflight_free_window(
+        item,
+        min_free_window_minutes=180,
+        require_known_free_window=True,
+    )
+
+    assert result.accepted is False
+    assert result.score == 0
+    assert result.reasons[-1] == "mteam promotion preflight requires known free window"
 
 
 @pytest.mark.asyncio
@@ -1201,6 +1224,110 @@ async def test_resolve_deferred_download_urls_stops_after_mteam_rate_limit(
             "message": "torrent/genDlToken failed: code=1 message=請求過於頻繁",
             "endpoint": "torrent/genDlToken",
             "rate_limited": True,
+            "unavailable": False,
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_resolve_deferred_download_urls_stops_after_mteam_unavailable(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from seed_agent.actions import pt as pt_actions
+    from seed_agent.sites.mteam import MTeamApiResponseError
+
+    monkeypatch.setattr(pt_actions, "_LAST_DISCOVERY_WARNINGS", ())
+    api_key_path = tmp_path / "mt.api-key"
+    api_key_path.write_text("secret-api-key\n", encoding="utf-8")
+    config = SeedAgentConfig(
+        **{
+            **_config().model_dump(),
+            "tracker_sites": [
+                {
+                    "name": "mt",
+                    "type": "mteam",
+                    "enabled": True,
+                    "rss_url": "https://rss.m-team.cc/api/rss/fetch?dl=1",
+                    "api_key_ref": str(api_key_path),
+                    "discovery_mode": "api",
+                    "api_discovery": {
+                        "mode": "adult",
+                        "only_free": True,
+                        "sort_field": "downloads",
+                        "sort_order": "desc",
+                        "page_size": 50,
+                        "min_seeders": 0,
+                        "max_seeders": 200,
+                        "min_leechers": 0,
+                        "min_times_completed": 0,
+                    },
+                }
+            ],
+        }
+    )
+    candidates = [
+        _candidate(
+            site="mt",
+            source_url=f"https://kp.m-team.cc/detail/{torrent_id}",
+            download_url=f"mteam-api://torrent/{torrent_id}",
+            metadata={
+                "mteam_discovery_mode": "api",
+                "download_url_source": "mteam_api_deferred",
+                "mteam_torrent_id": str(torrent_id),
+            },
+        )
+        for torrent_id in (1171443, 1171444)
+    ]
+    scored = [
+        ScoreBreakdown(
+            candidate_id=candidate.stable_id,
+            score=95,
+            accepted=True,
+            reasons=["ok"],
+            candidate=candidate,
+        )
+        for candidate in candidates
+    ]
+    calls: list[str] = []
+
+    async def fake_resolve_deferred_download_url(
+        candidate: TorrentCandidate,
+        *,
+        api_key: str,
+        api_key_header: str,
+    ) -> TorrentCandidate | None:
+        calls.append(candidate.stable_id)
+        raise MTeamApiResponseError(
+            endpoint="torrent/genDlToken",
+            code="503",
+            message="Service Unavailable",
+            status_code=503,
+        )
+
+    monkeypatch.setattr(pt_actions, "_revalidate_mteam_candidate", _accept_mteam_preflight)
+    monkeypatch.setattr(
+        pt_actions,
+        "resolve_deferred_download_url",
+        fake_resolve_deferred_download_url,
+    )
+
+    resolved = await pt_actions.resolve_deferred_download_urls(scored, config)
+
+    assert calls == [candidates[0].stable_id]
+    assert [item.accepted for item in resolved] == [False, False]
+    assert [item.reasons[-1] for item in resolved] == [
+        "mteam api unavailable",
+        "mteam api unavailable",
+    ]
+    assert pt_actions.get_last_discovery_warnings() == [
+        {
+            "site": "mt",
+            "error_type": "MTeamApiResponseError",
+            "message": "torrent/genDlToken failed: code=503 message=Service Unavailable",
+            "endpoint": "torrent/genDlToken",
+            "rate_limited": False,
+            "unavailable": True,
         }
     ]
 
@@ -1246,7 +1373,9 @@ def test_daily_report_returns_stable_counts() -> None:
             score=40,
             accepted=False,
             reasons=["reject"],
-            candidate=_candidate(title="Cold Torrent", source_url="https://tracker.example/details.php?id=2"),
+            candidate=_candidate(
+                title="Cold Torrent", source_url="https://tracker.example/details.php?id=2"
+            ),
         ),
     ]
     managed = [

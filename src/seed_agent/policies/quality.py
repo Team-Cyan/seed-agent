@@ -70,7 +70,8 @@ def torrent_eviction_pressure_score(torrent: ManagedTorrent) -> float:
     stale_penalty = 3.0 if torrent.last_activity_at is None else 0.0
     incomplete_pressure = amount_left_gib * 0.03
     size_pressure = size_gib * 0.005
-    return stale_penalty + incomplete_pressure + size_pressure - quality
+    error_pressure = _error_state_pressure(torrent)
+    return error_pressure + stale_penalty + incomplete_pressure + size_pressure - quality
 
 
 def torrent_eviction_evidence(torrent: ManagedTorrent) -> dict[str, float | int | bool]:
@@ -79,19 +80,29 @@ def torrent_eviction_evidence(torrent: ManagedTorrent) -> dict[str, float | int 
     stale_penalty = 3.0 if torrent.last_activity_at is None else 0.0
     incomplete_pressure = amount_left_gib * 0.03
     size_pressure = float(quality["size_gib"]) * 0.005
+    error_pressure = _error_state_pressure(torrent)
     return {
         **quality,
         "amount_left_gib": amount_left_gib,
         "stale_penalty": stale_penalty,
         "incomplete_pressure": incomplete_pressure,
         "size_pressure": size_pressure,
+        "error_pressure": error_pressure,
         "eviction_pressure_score": (
-            stale_penalty
+            error_pressure
+            + stale_penalty
             + incomplete_pressure
             + size_pressure
             - float(quality["retention_quality_score"])
         ),
     }
+
+
+def _error_state_pressure(torrent: ManagedTorrent) -> float:
+    state = torrent.state.strip().lower()
+    if state in {"error", "missingfiles", "unknown"}:
+        return 1_000_000.0
+    return 0.0
 
 
 def candidate_value_score(item: ScoreBreakdown) -> float:

@@ -79,22 +79,23 @@ download_client:
       mode: mutable
       budget_pool: downloads
       delete_enabled: true
-      over_budget_behavior: add_paused
+      over_budget_behavior: reject
       tags: [seed-agent, seed]
     - name: movie
       mode: add_only
       budget_pool: media
       delete_enabled: false
-      over_budget_behavior: add_paused
+      over_budget_behavior: reject
       tags: [seed-agent, movie]
     - name: tv
       mode: add_only
       budget_pool: media
       delete_enabled: false
-      over_budget_behavior: add_paused
+      over_budget_behavior: reject
       tags: [seed-agent, tv]
 
   budget_pools:
+    # Illustrative values only; deployments choose their own limits.
     - name: downloads
       max_size_tib: 10
     - name: media
@@ -107,7 +108,8 @@ Expected `CategoryPolicy` fields:
 - `mode`: `mutable` or `add_only`.
 - `budget_pool`: name of the shared logical capacity pool for this category.
 - `delete_enabled`: explicit deletion permission gate.
-- `over_budget_behavior`: initial supported value is `add_paused`.
+- `over_budget_behavior`: supported value is `reject`; legacy `add_paused`
+  input is migrated during config loading.
 - `tags`: tags that should be attached to new torrents enqueued into this category.
 
 Expected `BudgetPool` fields:
@@ -174,20 +176,22 @@ These categories still benefit from policies because the system should know:
 - which budget pool that category consumes,
 - what tags to attach,
 - how large the shared pool is allowed to grow logically,
-- and whether newly added torrents should start paused when over budget.
+- and whether enqueue must be rejected when the projected total is over budget.
 
 ## Over-Budget Behavior
 
-The initial over-budget behavior is `add_paused`.
+The current over-budget behavior is `reject`.
 
 When a category is over budget:
 
-- `seed-agent` may still add a candidate torrent to qB,
-- but the torrent should be added in a paused state or paused immediately after add,
+- `seed-agent` must reject the candidate before calling qB,
+- a mutable delete-enabled pool should run direct cleanup and verify its live
+  committed total after deletion,
 - the audit trail should record that the category's budget pool was already over budget,
 - and the category should be marked as needing operator attention once a notification system exists.
 
-This behavior applies to both `mutable` and `add_only` categories in the first version.
+This behavior applies to both `mutable` and `add_only` categories. Add-only
+categories cannot self-reclaim, so they remain blocked until capacity exists.
 
 For `mutable` categories, over-budget state may also trigger candidate eviction work before or after enqueue, depending on the execution flow. For `add_only` categories, over-budget state must never trigger automatic deletion; it only changes start behavior and future operator visibility.
 
