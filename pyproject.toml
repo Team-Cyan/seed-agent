@@ -43,3 +43,6 @@ select = ["E", "F", "I", "UP", "B"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/seed_agent"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"docs/assets/icon.png" = "seed_agent/web/static/icon.png"

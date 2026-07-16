@@ -12,6 +12,13 @@ def test_static_assets_exist() -> None:
     assert (STATIC_ROOT / "app.js").exists()
 
 
+def test_web_brand_uses_the_canonical_runtime_icon() -> None:
+    html = (STATIC_ROOT / "index.html").read_text(encoding="utf-8")
+
+    assert html.count("/static/icon.png") == 2
+    assert "favicon.svg" not in html
+
+
 def test_index_contains_tracker_first_ui_anchors() -> None:
     html = (STATIC_ROOT / "index.html").read_text(encoding="utf-8")
 

@@ -57,6 +57,10 @@ from seed_agent.web.settings import (
 )
 
 STATIC_ROOT = Path(__file__).parent / "static"
+CANONICAL_ICON_NAME = "icon.png"
+CANONICAL_ICON_SOURCE = (
+    Path(__file__).resolve().parents[3] / "docs" / "assets" / CANONICAL_ICON_NAME
+)
 SCHEDULE_BACKOFF_FILE = "schedule-backoff.json"
 
 
@@ -304,7 +308,7 @@ def make_handler(config_path: Path) -> type[BaseHTTPRequestHandler]:
             if "/" in asset_name or "\\" in asset_name:
                 self._send_json({"error": "not found"}, status=HTTPStatus.NOT_FOUND)
                 return
-            path = STATIC_ROOT / asset_name
+            path = _static_asset_path(asset_name)
             if not path.exists() or not path.is_file():
                 self._send_json({"error": "not found"}, status=HTTPStatus.NOT_FOUND)
                 return
@@ -312,6 +316,15 @@ def make_handler(config_path: Path) -> type[BaseHTTPRequestHandler]:
             self._send_bytes(path.read_bytes(), content_type=content_type)
 
     return SeedAgentWebHandler
+
+
+def _static_asset_path(asset_name: str) -> Path:
+    packaged_path = STATIC_ROOT / asset_name
+    if packaged_path.is_file():
+        return packaged_path
+    if asset_name == CANONICAL_ICON_NAME and CANONICAL_ICON_SOURCE.is_file():
+        return CANONICAL_ICON_SOURCE
+    return packaged_path
 
 
 def _write_request_authorized(headers: dict[str, str]) -> bool:

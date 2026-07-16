@@ -18,3 +18,8 @@ tests
 dist
 build
 htmlcov
+!docs
+docs/*
+!docs/assets
+docs/assets/*
+!docs/assets/icon.png

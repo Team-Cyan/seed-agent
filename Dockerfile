@@ -11,7 +11,7 @@ LABEL org.opencontainers.image.title="seed-agent" \
     org.opencontainers.image.description="Docker-first PT automation for NAS and homelab downloader operations" \
     org.opencontainers.image.url="https://github.com/Team-Cyan/seed-agent" \
     org.opencontainers.image.source="https://github.com/Team-Cyan/seed-agent" \
-    org.opencontainers.image.icon="https://raw.githubusercontent.com/Team-Cyan/seed-agent/main/docs/assets/seed-agent-icon-transparent.png" \
+    org.opencontainers.image.icon="https://raw.githubusercontent.com/Team-Cyan/seed-agent/main/docs/assets/icon.png" \
     org.opencontainers.image.version="${VERSION}" \
     org.opencontainers.image.revision="${REVISION}" \
     org.opencontainers.image.created="${BUILD_DATE}"
@@ -29,6 +29,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --no-editable --no-install-project
 
 COPY src /app/src
+COPY docs/assets/icon.png /app/docs/assets/icon.png
 COPY docker /app/docker
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --no-editable \

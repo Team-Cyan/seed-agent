@@ -14,12 +14,31 @@ icon family standard.
 
 ## Canonical Assets
 
-- Editable source: `docs/assets/seed-agent-icon.svg`
-- Published runtime asset: `docs/assets/seed-agent-icon-transparent.png`
-- Secondary PNG copies must be rendered from the same SVG source.
+- Editable source: `docs/assets/icon.svg`
+- Published runtime asset: `docs/assets/icon.png`
+
+These are the only tracked icon files. Do not add a second PNG, repository-icon
+copy, favicon copy, or another editable source. The separate logo and social
+preview assets are compositions for different surfaces, not icon sources.
+
+The Web UI uses `/static/icon.png`. The wheel build
+includes the canonical PNG at that runtime path, while source-checkout serving
+falls back to `docs/assets/`. Do not restore a tracked `favicon.svg` mirror.
 
 The SVG is the source of truth. Do not regenerate the center mark with an image
 model or edit a PNG as the canonical source.
+
+## Reference Contract
+
+- Public URL:
+  `https://raw.githubusercontent.com/Team-Cyan/seed-agent/main/docs/assets/icon.png`
+- DockerMan template: `deploy/unraid/seed-agent.xml`
+- OCI image metadata: `Dockerfile`
+- Compose OCI metadata: `deploy/docker-compose.example.yml`
+- Web UI favicon and sidebar: `/static/icon.png`
+
+All runtime and deployment consumers reference the transparent PNG. The SVG is
+never used as the DockerMan or OCI icon URL.
 
 ## Shared Canvas And Background
 
