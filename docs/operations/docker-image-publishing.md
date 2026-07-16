@@ -74,7 +74,8 @@ docker push ghcr.io/team-cyan/seed-agent:0.1.3
 
 This repository now includes `.github/workflows/docker-publish.yml`.
 
-On every push to `main`, GitHub Actions publishes a multi-arch image to:
+After the repository CI workflow succeeds for the current `main` commit, the
+Docker workflow publishes a multi-arch image to:
 
 - `ghcr.io/team-cyan/seed-agent:latest`
 - `ghcr.io/team-cyan/seed-agent:main`
@@ -88,6 +89,18 @@ On version tags such as `v0.1.3`, the same workflow also publishes:
 
 The tag workflow checks that the git tag matches the repository `VERSION` file
 before publishing.
+
+The `main` publish job rejects stale `workflow_run` events whose commit is no
+longer the current `main` head. Manual `main` publishing also requires a
+successful CI run for that exact commit. Publishing is serialized so an older
+image cannot finish after and replace a newer one.
+
+All workflow actions are pinned to full commit SHAs, with the corresponding
+release tag kept in a comment for reviewability. Repository-level workflow
+permissions default to read-only; only Docker publish requests `packages: write`
+and only the tag release workflow requests `contents: write`. CI cancels an
+older in-progress run when a newer commit arrives on the same branch, and every
+job has an explicit timeout.
 
 This is the path that lets Unraid treat `seed-agent` like a normal third-party
 container with remote update checks.
