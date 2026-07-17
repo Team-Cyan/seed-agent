@@ -100,14 +100,33 @@ uv run seed-agent schedule-run --config config/example.yaml --execute \
 
 `--prune` reuses the same conservative cleanup policy as the standalone
 `prune` command: only mutable managed categories are eligible, completed seeds
-remain available for upload, and cold incomplete torrents are paused before they
-can be deleted in a later pass.
+remain available for upload unless capacity reclamation requires eviction, and
+selected cleanup tasks are deleted with their files rather than left as paused
+placeholders.
 
 When `schedule-run --prune` is used, the scheduler interval also becomes the
 free-window safety horizon for incomplete managed downloads. A torrent with
 persisted `free_window_expires_at` that cannot survive until the next scheduled
-check is paused before the paid period; completed seeds remain available for
-upload.
+check is deleted with its files before the paid period; completed seeds remain
+available for upload unless the configured hard-cap policy requires reclaiming
+space.
+
+To ask an already-running scheduler to start one cycle immediately, use:
+
+```bash
+uv run seed-agent schedule-trigger --config config/example.yaml
+```
+
+The request is accepted only while the lease owner is waiting. It never starts
+a second scheduler process, and the next interval is measured from the manual
+cycle start. After a bounded tracker probe confirms a recorded backoff is stale,
+clear only the current backoff with:
+
+```bash
+uv run seed-agent scheduler-backoff-clear --config config/example.yaml
+```
+
+This does not disable the M-Team request pacer or future automatic backoff.
 
 For unattended runs, prefer adding free-window safety flags:
 

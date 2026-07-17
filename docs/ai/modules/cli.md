@@ -69,6 +69,13 @@ Expose the operator-facing command surface and safe summaries.
   single-item Want List searches manually from the Web UI. Scheduled resource
   enqueue remains a dry-run unless `--intent-execute` is explicitly set, and the
   loop can be disabled with `--no-intent`,
+- `schedule-trigger` asks the already-running scheduler process to start one
+  cycle immediately. The durable scheduler control state rejects the request
+  while a cycle is already running, so the command cannot create a concurrent
+  second scheduler. A manual cycle resets the next interval from that cycle's
+  start time,
+- `scheduler-backoff-clear` deactivates the current M-Team scheduler backoff
+  without disabling the shared request pacer or future automatic protection,
 - `schedule-run` records a persistent scheduler backoff when M-Team returns
   "request too frequent" responses. While that backoff is active, the scheduler
   keeps writing heartbeat output, skips tracker/API discovery and Want List
@@ -80,11 +87,10 @@ Expose the operator-facing command surface and safe summaries.
   `schedule-run --prune`. Standalone `run-once --prune` keeps the historical
   post-enqueue cleanup behavior; scheduled cycles run conservative prune before
   PT discovery/enqueue, then run the resource intent loop last,
-- scheduled cycles first run an API-budgeted tracker source backfill for
+- scheduled cycles first run an unbounded tracker source backfill for
   qB-only live torrents, then conservative prune, then PT discovery/enqueue,
-  then the resource intent loop. The backfill phase is enabled by default with
-  bounded `--tracker-backfill-limit` and `--tracker-backfill-max-api-requests`
-  controls,
+  then the resource intent loop. The backfill phase stops on the first
+  rate-limit or network failure and relies on the shared request pacer,
 - scheduled PT enqueue can run one capacity-pressure prune when accepted
   candidates would otherwise be rejected by runtime gates. That pass uses
   forced space reclamation, refreshes qB state afterward, and recomputes enqueue
@@ -114,6 +120,8 @@ Expose the operator-facing command surface and safe summaries.
 - preserve stable command names unless intentionally versioned,
 - keep `run-once` and `schedule-run` payload shapes aligned enough for external
   schedulers and log collectors,
+- route manual scheduler triggers through the active scheduler lease and
+  durable `running`/`waiting` state; never start a parallel one-shot process,
 - keep site discovery warnings visible in both full JSON payloads and
   `schedule-run` summaries so transient tracker errors are diagnosable without
   forcing a container restart,

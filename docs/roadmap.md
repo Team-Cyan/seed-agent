@@ -351,22 +351,17 @@ by completion period, and unfinished work is ordered by current priority.
   - CI scans tracked paths and content for private runtime files, local home
     paths, RFC1918 addresses, private keys, and high-confidence access tokens.
 
-- Next P0 - Complete the live Unraid release gate
-  - The last read-only qB snapshot remained above the locally configured
-    `downloads` limit. Keep production untouched until this hard-cap release
-    passes the complete release gate, then preview and explicitly authorize
-    convergence.
-  - The scheduler/Web integration, intent diagnostics, evidence replay, Web
-    operations, scheduler ownership, backup/retention, container security, and
-    optional metrics implementation is complete locally.
-  - Use direct-delete cleanup with a calculated reclaim target and post-delete
-    qB verification; do not recreate paused enqueue or cleanup placeholders.
-  - After the complete Apple `container` release gate, restore SSH access and
-    perform read-only DockerMan, image, port, config, qB, and runtime provenance
-    checks. Request explicit operator authorization before deployment or
-    downloader mutation.
-  - The 2026-07-16 Apple `container` plugin path was repaired locally; the
-    `0.18.9` image builds and its healthcheck passes as UID/GID `1000:100`.
+- Completed 2026-07 - Live Unraid hard-cap release gate
+  - The `0.18.9` image passed the Apple `container` gate as a non-root runtime
+    and was deployed through the DockerMan-managed template path.
+  - Production cleanup converged the mutable downloads pool below its configured
+    hard cap with direct file deletion and post-delete qB verification.
+  - DockerMan metadata, runtime config provenance, heartbeat version, container
+    health, qB error state, and logical pool usage were verified after deploy.
+  - Scheduler manual control now signals the existing lease owner through
+    durable `running`/`waiting` state. CLI/Web triggers reject overlapping
+    cycles, reset the next interval from the manual cycle start, and expose an
+    explicit stale-backoff clear action without disabling future protection.
   - Keep the detailed acceptance matrix in
     `docs/plans/2026-07-11-runtime-hardening-refinement.md`.
 
@@ -410,16 +405,6 @@ by completion period, and unfinished work is ordered by current priority.
     history changes suddenly.
   - Prefer read-only contribution and headroom reports before changing cleanup
     thresholds or executing deletions.
-
-- Next P1 - Runtime ownership, recovery, and telemetry
-  - Enforce one mutable scheduler per SQLite/downloader runtime with an expiring
-    durable lease while preserving read-only command access.
-  - Add SQLite-safe backup/verify/preview-first restore and append-only audit
-    archival with doctor health evidence.
-  - Run the image as a non-root UID/GID with read-only-root compatibility after
-    verifying mounted runtime ownership on Apple `container` and Unraid.
-  - Expose optional low-cardinality Prometheus metrics without torrent, tracker,
-    URL, or secret labels.
 
 - Deferred / intentionally not in scope
   - Dashboard-first product work.

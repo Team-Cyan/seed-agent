@@ -4,6 +4,21 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.18.10 - 2026-07-17
+
+### Added
+
+- Added CLI and Web scheduler controls for triggering one immediate cycle and
+  explicitly clearing a stale M-Team backoff.
+
+### Fixed
+
+- Route manual cycles through the active scheduler lease with transactional
+  `running`/`waiting` state, reject overlapping triggers, and reset the next
+  interval from the manual cycle start instead of requiring a container restart.
+- Preserve M-Team request pacing and future automatic backoff after an operator
+  clears only the currently recorded cooldown.
+
 ## 0.18.9 - 2026-07-16
 
 ### Added

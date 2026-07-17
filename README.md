@@ -224,7 +224,10 @@ List refresh/search may read configured sources, tracker search APIs, local
 state, and downloader-adjacent runtime context without adding torrents to
 qBittorrent. qB enqueue from the Web UI is limited to an explicit
 candidate-level confirmation after preview; cleanup and broad batch execution
-remain CLI-owned. See the [Web UI Operator Guide](docs/operations/web-ui-operator-guide.md)
+remain CLI-owned. The Scheduler page can signal the existing scheduler to run
+one immediate non-overlapping cycle and can explicitly clear a stale M-Team
+backoff without disabling future rate-limit protection. See the
+[Web UI Operator Guide](docs/operations/web-ui-operator-guide.md)
 for the Web UI vs CLI decision path and runtime provenance checks.
 
 ## Runtime Safety Defaults

@@ -12,6 +12,7 @@ operations.
 | Surface | Primary use | Risk level | Notes |
 | --- | --- | --- | --- |
 | Status and health | Read scheduler heartbeat, state summary, budget-pool config, and Want List state. | Read-only | Safe for routine checks. It reads mounted runtime files and may show stale or missing state when the container is pointed at the wrong workspace. |
+| Scheduler controls | Trigger one immediate cycle or clear the current M-Team backoff. | Controlled runtime mutation | Trigger requests are accepted only while the existing scheduler is waiting; an active cycle returns `409` instead of starting another process. Clearing backoff uses an inline confirmation and does not disable future rate-limit protection. |
 | Settings pages | Edit tracker, downloader, discovery, cleanup, acquisition, and Want List source settings. | Preview-first config mutation | Non-tracker sections show a before/after diff preview and validate the full config before saving. Secret values stay in local secret files or secret refs. |
 | Tracker actions | Validate a tracker draft, run site probe, or dry-run a tracker-local discovery preview. | Preview/read-only network access | These actions may call tracker APIs or RSS endpoints, but they must not enqueue to qBittorrent or clean up torrents. |
 | Want List refresh | Sync configured Douban/IMDb sources into local intent state. | Local state mutation | It may read public/export source data and update `.seed-agent/state.db`, but it does not contact qBittorrent. |
@@ -54,6 +55,8 @@ Use the Web UI when the work is interactive and narrow:
 
 - reviewing scheduler health, state counts, budget-pool setup, and Want List
   status,
+- triggering one immediate scheduler cycle or clearing a verified-stale
+  M-Team backoff,
 - editing routine config sections and checking the diff before save,
 - adjusting Want List source configuration or media-type routing,
 - refreshing/searching a small filtered Want List set,
@@ -61,7 +64,8 @@ Use the Web UI when the work is interactive and narrow:
 
 Use the CLI when the work is batch-oriented, unattended, or high risk:
 
-- running `schedule-run` or changing scheduler flags,
+- starting/stopping the long-running `schedule-run` process or changing
+  scheduler flags,
 - running PT discovery/enqueue/prune loops,
 - checking full JSON payloads for `run-once`, `review`, `daily-report`,
   `strategy-report`, `healthcheck`, or `runtime-status`,
@@ -139,6 +143,11 @@ cases:
 
 - Keep qBittorrent mutations deliberate. Web UI search and candidate preview
   actions are not approval to enqueue or clean up.
+- Use the Scheduler page's immediate-run action instead of restarting the
+  container. It signals the current scheduler, rejects overlapping cycles, and
+  resets the next interval from the manual cycle start.
+- Clear backoff only after a bounded tracker probe confirms the service is
+  responding again. The one-second M-Team request pacer remains active.
 - Treat cleanup as CLI-owned until a dedicated Web UI cleanup surface exists.
 - Check `runtime-status` when Web UI state disagrees with logs, qB, or expected
   mounted files.
