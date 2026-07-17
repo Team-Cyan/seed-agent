@@ -184,10 +184,11 @@ by completion period, and unfinished work is ordered by current priority.
   - Terminal tracker-backfill misses for incomplete torrents are passed to prune
     as high-risk unknown-free evidence; network outages remain deferred instead
     of triggering blind deletion.
-  - Scheduled tracker backfill now processes all outstanding qB tasks without a
-    per-cycle task or request cap. The shared 1.25-second M-Team request pacer
-    remains mandatory, and rate-limit or network failures stop the rest of the
-    cycle and activate scheduler protection.
+  - Scheduled tracker backfill rotates all outstanding qB tasks by risk and
+    oldest evidence under a configurable per-cycle API budget (default 20).
+    The shared 1.25-second M-Team request pacer remains mandatory, and
+    rate-limit or network failures stop the rest of the cycle and activate
+    scheduler protection.
   - Scheduled conservative cleanup keeps completed low-upload seeds unless space
     reclamation is needed, while the explicit low-upload deletion policy remains
     available for normal prune callers.
@@ -312,7 +313,9 @@ by completion period, and unfinished work is ordered by current priority.
     candidates do not consume capacity needed by a later candidate that fits.
   - M-Team clients propagate structured throttle/service errors, stop pagination
     from raw page exhaustion, clear stale promotion expiry evidence, and keep a
-    shared 1.25-second per-process request pacer.
+    shared 1.25-second per-process request pacer. Scheduled source backfill also
+    has a 20-request default budget because pacing alone does not bound
+    longer-window cumulative quotas.
   - Web config writes use revisions and preserve explicit nulls and hidden
     fields. API responses redact credentials, secret refs stay within runtime
     `local/secrets`, tracker drafts cannot reuse unrelated credentials, and an

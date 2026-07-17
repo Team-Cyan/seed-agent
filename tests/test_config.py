@@ -5,7 +5,12 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
-from seed_agent.config import SeedAgentConfig, load_config, write_config_mapping
+from seed_agent.config import (
+    SchedulerConfig,
+    SeedAgentConfig,
+    load_config,
+    write_config_mapping,
+)
 
 
 def _valid_config_data(secret_ref: str) -> dict[str, object]:
@@ -749,7 +754,13 @@ def test_scheduler_config_defaults_preserve_existing_cli_behavior() -> None:
     assert config.scheduler.interval_minutes == 60
     assert config.scheduler.prune_enabled is False
     assert config.scheduler.tracker_backfill_enabled is True
+    assert config.scheduler.tracker_backfill_max_api_requests == 20
     assert config.scheduler.intent_search_mode == "daily"
+
+
+def test_scheduler_config_rejects_zero_backfill_api_budget() -> None:
+    with pytest.raises(ValidationError, match="tracker_backfill_max_api_requests"):
+        SchedulerConfig(tracker_backfill_max_api_requests=0)
 
 
 def test_scheduler_config_rejects_invalid_daily_search_hour() -> None:

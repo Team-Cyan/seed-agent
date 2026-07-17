@@ -4,6 +4,16 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.18.12 - 2026-07-17
+
+### Fixed
+
+- Restored the YAML/Web-configurable scheduled tracker-backfill API budget with
+  a safe default of 20 requests per cycle. Production showed that 1.25-second
+  pacing prevents short bursts but cannot by itself bound M-Team's longer
+  cumulative quota window; outstanding tasks continue across later cycles by
+  risk and oldest evidence.
+
 ## 0.18.11 - 2026-07-17
 
 ### Fixed

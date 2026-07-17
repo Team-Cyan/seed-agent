@@ -498,6 +498,7 @@ def test_scheduler_controls_are_single_process_and_inline_confirmed() -> None:
     assert '"/api/scheduler/trigger"' in script
     assert '"/api/scheduler/backoff/clear"' in script
     assert "schedulerConfirmClearBackoff" in script
+    assert '"tracker_backfill_max_api_requests"' in script
     assert "window.confirm" not in script
     assert '.toggleAttribute("disabled", phase !== "waiting")' in script
     assert ".scheduler-controls" in styles

@@ -47,6 +47,11 @@ do not reduce it on unattended deployments without a bounded live probe. The
 default adds headroom after production rejected the 51st continuous request at
 one-second spacing. Web and scheduler processes use independent limiters.
 
+Pacing alone does not protect longer tracker quota windows. Scheduled source
+backfill therefore also uses `scheduler.tracker_backfill_max_api_requests`,
+defaulting to `20` calls per cycle. Outstanding qB tasks remain eligible and
+rotate across later cycles by risk and oldest tracker evidence.
+
 Both variables must be configured together. Existing DockerMan installations
 that predate these template fields and provide neither variable retain their
 legacy container user until the operator adds matching IDs; this avoids making

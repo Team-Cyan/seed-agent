@@ -172,6 +172,7 @@ tracker_sites:
 
     assert payload["trackers"][0]["name"] == "mt"
     assert payload["sections"]["download_client"]["target"] == "local"
+    assert payload["sections"]["scheduler"]["tracker_backfill_max_api_requests"] == 20
     assert payload["sections"]["want_decision"]["inbox_ref"] == "local/inbox/intents.jsonl"
     assert payload["runtime_root"] == str(tmp_path)
     assert payload["trackers"][0]["has_api_key"] is True

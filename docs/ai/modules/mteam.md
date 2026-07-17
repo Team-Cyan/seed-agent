@@ -57,6 +57,8 @@ Current fallback still present in code:
   at one-second spacing, and can be tuned with
   `SEED_AGENT_MTEAM_MIN_REQUEST_INTERVAL_SECONDS`; keep it conservative. Web
   and scheduler processes intentionally maintain separate limiters.
+- Scheduler source backfill also has a per-cycle API budget, defaulting to 20.
+  Pacing controls bursts; the budget limits longer-window cumulative usage.
 - Pagination stops when the API page itself is exhausted, not when local
   filtering leaves a short result list.
 - Treat timezone-naive M-Team API date strings as `Asia/Shanghai`; convert them

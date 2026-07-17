@@ -147,7 +147,8 @@ cases:
   container. It signals the current scheduler, rejects overlapping cycles, and
   resets the next interval from the manual cycle start.
 - Clear backoff only after a bounded tracker probe confirms the service is
-  responding again. The 1.25-second M-Team request pacer remains active.
+  responding again. The 1.25-second M-Team request pacer and scheduled backfill
+  API budget remain active.
 - Treat cleanup as CLI-owned until a dedicated Web UI cleanup surface exists.
 - Check `runtime-status` when Web UI state disagrees with logs, qB, or expected
   mounted files.

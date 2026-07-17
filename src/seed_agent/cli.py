@@ -1582,7 +1582,7 @@ def schedule_run(
                     payload={
                         "category": tracker_backfill_category,
                         "limit": None,
-                        "max_api_requests": None,
+                        "max_api_requests": scheduler.tracker_backfill_max_api_requests,
                     },
                 )
                 tracker_backfill_payload = _tracker_source_backfill_payload(
@@ -1590,7 +1590,7 @@ def schedule_run(
                     execute=execute,
                     limit=None,
                     category=tracker_backfill_category,
-                    max_api_requests=None,
+                    max_api_requests=scheduler.tracker_backfill_max_api_requests,
                 )
                 _record_schedule_phase(
                     store_for_run,
@@ -1797,7 +1797,10 @@ def schedule_run(
         payload["prune_enabled"] = prune
         payload["tracker_backfill_enabled"] = tracker_backfill
         payload["tracker_backfill_category"] = tracker_backfill_category
-        payload["tracker_backfill_unbounded"] = True
+        payload["tracker_backfill_unbounded"] = False
+        payload["tracker_backfill_max_api_requests"] = (
+            scheduler.tracker_backfill_max_api_requests
+        )
         payload["intent_enabled"] = intent
         payload["intent_execute"] = intent_execute
         payload["scheduler_config_source"] = (
@@ -4367,6 +4370,7 @@ def _schedule_log_summary(payload: dict[str, Any]) -> dict[str, Any]:
         "tracker_backfill_enabled",
         "tracker_backfill_category",
         "tracker_backfill_unbounded",
+        "tracker_backfill_max_api_requests",
         "intent_enabled",
         "intent_execute",
         "scheduler_config_source",

@@ -1885,7 +1885,7 @@ scheduler:
     assert result.exit_code == 0
     payload = _json_output(result)
     assert seen == [
-        ("tracker_backfill", (None, None, None)),
+        ("tracker_backfill", (None, None, 20)),
         ("prune", 120),
         ("run_once", (False, True)),
         ("intent", False),
