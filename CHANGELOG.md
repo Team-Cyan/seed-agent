@@ -4,6 +4,15 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.18.11 - 2026-07-17
+
+### Fixed
+
+- Raised the default process-wide M-Team request interval from one second to
+  1.25 seconds after production accepted 50 continuous requests and rejected
+  the 51st. Scheduled backfill remains unbounded in total and still stops on a
+  real rate-limit response.
+
 ## 0.18.10 - 2026-07-17
 
 ### Added

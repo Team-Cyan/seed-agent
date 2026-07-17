@@ -42,9 +42,10 @@ On the reference Unraid deployment, qBittorrent and Plex use `PUID=1000` and
 appdata remains writable without running the application as root.
 
 M-Team search, detail, and token requests share a per-process minimum request
-interval. `SEED_AGENT_MTEAM_MIN_REQUEST_INTERVAL_SECONDS` defaults to `1`; do
-not reduce it on unattended deployments without a bounded live probe. Web and
-scheduler processes use independent limiters.
+interval. `SEED_AGENT_MTEAM_MIN_REQUEST_INTERVAL_SECONDS` defaults to `1.25`;
+do not reduce it on unattended deployments without a bounded live probe. The
+default adds headroom after production rejected the 51st continuous request at
+one-second spacing. Web and scheduler processes use independent limiters.
 
 Both variables must be configured together. Existing DockerMan installations
 that predate these template fields and provide neither variable retain their

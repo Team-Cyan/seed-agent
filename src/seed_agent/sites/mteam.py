@@ -38,6 +38,7 @@ MTEAM_UNAUTHORIZED_MARKERS = (
 )
 MTEAM_LOCAL_TIMEZONE = ZoneInfo("Asia/Shanghai")
 MTEAM_MIN_REQUEST_INTERVAL_ENV = "SEED_AGENT_MTEAM_MIN_REQUEST_INTERVAL_SECONDS"
+MTEAM_DEFAULT_MIN_REQUEST_INTERVAL_SECONDS = 1.25
 _MTEAM_REQUEST_LOCK = threading.Lock()
 _MTEAM_LAST_REQUEST_AT = 0.0
 
@@ -920,11 +921,14 @@ def _parse_api_datetime(value: Any) -> datetime | None:
 
 
 def _mteam_min_request_interval_seconds() -> float:
-    raw = os.getenv(MTEAM_MIN_REQUEST_INTERVAL_ENV, "1.0").strip()
+    raw = os.getenv(
+        MTEAM_MIN_REQUEST_INTERVAL_ENV,
+        str(MTEAM_DEFAULT_MIN_REQUEST_INTERVAL_SECONDS),
+    ).strip()
     try:
         return max(float(raw), 0.0)
     except ValueError:
-        return 1.0
+        return MTEAM_DEFAULT_MIN_REQUEST_INTERVAL_SECONDS
 
 
 def _wait_for_mteam_request_slot(interval_seconds: float) -> None:

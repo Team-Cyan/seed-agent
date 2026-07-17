@@ -53,7 +53,8 @@ Current fallback still present in code:
 - Do not reintroduce browser-login assumptions into the main flow.
 - Treat M-Team API key as the long-term preferred authenticated path.
 - All M-Team API clients within one process share a request-start interval. The
-  default is one second and can be tuned with
+  default is 1.25 seconds after production rejected the 51st continuous request
+  at one-second spacing, and can be tuned with
   `SEED_AGENT_MTEAM_MIN_REQUEST_INTERVAL_SECONDS`; keep it conservative. Web
   and scheduler processes intentionally maintain separate limiters.
 - Pagination stops when the API page itself is exhausted, not when local

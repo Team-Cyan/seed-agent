@@ -339,7 +339,7 @@ wheels = [
 
 [[package]]
 name = "seed-agent"
-version = "0.18.10"
+version = "0.18.11"
 source = { editable = "." }
 dependencies = [
     { name = "feedparser" },

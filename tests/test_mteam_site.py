@@ -58,6 +58,16 @@ def test_process_wide_request_slot_enforces_minimum_spacing(monkeypatch) -> None
     assert mteam._MTEAM_LAST_REQUEST_AT == 11.5
 
 
+def test_mteam_request_interval_defaults_to_rate_safe_value(monkeypatch) -> None:
+    from seed_agent.sites import mteam
+
+    monkeypatch.delenv(mteam.MTEAM_MIN_REQUEST_INTERVAL_ENV, raising=False)
+    assert mteam._mteam_min_request_interval_seconds() == 1.25
+
+    monkeypatch.setenv(mteam.MTEAM_MIN_REQUEST_INTERVAL_ENV, "invalid")
+    assert mteam._mteam_min_request_interval_seconds() == 1.25
+
+
 def _candidate(**overrides: object) -> TorrentCandidate:
     data: dict[str, object] = {
         "site": "mt",
