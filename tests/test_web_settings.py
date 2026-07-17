@@ -355,6 +355,74 @@ def test_http_ops_payload_exposes_scheduler_and_tracker_state(tmp_path: Path) ->
     assert payload["want_search_runs"][0]["intent_id"] == "intent-web"
 
 
+def test_http_scheduler_trigger_rejects_running_cycle_and_queues_waiting_cycle(
+    tmp_path: Path,
+) -> None:
+    config_path = _write_minimal_config(tmp_path)
+    store = StateStore(tmp_path / ".seed-agent" / "state.db")
+    store.acquire_scheduler_lease("test-owner", ttl_seconds=60)
+    store.begin_scheduler_cycle()
+
+    with _running_server(config_path) as base_url:
+        running = _request_json(
+            base_url,
+            "POST",
+            "/api/scheduler/trigger",
+            {},
+            expected_status=409,
+        )
+        store.mark_scheduler_waiting()
+        waiting = _request_json(
+            base_url,
+            "POST",
+            "/api/scheduler/trigger",
+            {},
+            expected_status=202,
+        )
+
+    assert running["queued"] is False
+    assert waiting["queued"] is True
+    assert store.get_scheduler_trigger()["source"] == "web"  # type: ignore[index]
+
+
+def test_http_scheduler_backoff_clear_preserves_inactive_history(tmp_path: Path) -> None:
+    config_path = _write_minimal_config(tmp_path)
+    state_path = tmp_path / ".seed-agent" / "state.db"
+    store = StateStore(state_path)
+    store.set_tracker_backoff(
+        site="mteam",
+        endpoint="torrent/search",
+        until=(datetime.now(UTC) + timedelta(hours=24)).isoformat(),
+        reason="mteam request too frequent",
+    )
+    backoff_path = tmp_path / ".seed-agent" / "schedule-backoff.json"
+    backoff_path.write_text(
+        json.dumps(
+            {
+                "active": True,
+                "until": (datetime.now(UTC) + timedelta(hours=24)).isoformat(),
+                "reason": "mteam request too frequent",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with _running_server(config_path) as base_url:
+        payload = _request_json(
+            base_url,
+            "POST",
+            "/api/scheduler/backoff/clear",
+            {},
+        )
+
+    assert payload["cleared"] is True
+    assert payload["schedule_backoff"]["active"] is False
+    assert not backoff_path.exists()
+    backoff = store.get_tracker_backoff("mteam", "torrent/search")
+    assert backoff is not None
+    assert backoff["active"] == 0
+
+
 def test_http_config_section_save_updates_safe_phase2_fields(tmp_path: Path) -> None:
     config_path = _write_minimal_config(tmp_path)
 

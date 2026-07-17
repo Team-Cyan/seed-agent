@@ -315,6 +315,18 @@ const copy = {
       trackerCancel: "取消",
       trackerApiEvents: "站点 API",
       trackerBackoff: "站点退避",
+      schedulerPhase: "Scheduler 状态",
+      schedulerRunning: "正在执行",
+      schedulerWaiting: "等待下一轮",
+      schedulerUnavailable: "状态不可用",
+      schedulerTriggerNow: "立即执行一轮",
+      schedulerTriggering: "正在触发",
+      schedulerTriggerQueued: "已触发，后台将立即执行",
+      schedulerClearBackoff: "清除限流",
+      schedulerClearingBackoff: "正在清除限流",
+      schedulerBackoffCleared: "限流状态已清除",
+      schedulerConfirmClearBackoff: "确认清除限流",
+      schedulerClearBackoffConfirm: "确认清除当前 M-Team backoff？真实限流保护仍会保留。",
       trackerConfigMteam: "M-Team 配置",
       trackerConfigNexusphp: "NexusPHP 配置",
       trackerDryRun: "试运行预览",
@@ -582,6 +594,18 @@ const copy = {
       trackerCancel: "Cancel",
       trackerApiEvents: "Tracker API",
       trackerBackoff: "Tracker backoff",
+      schedulerPhase: "Scheduler state",
+      schedulerRunning: "Running",
+      schedulerWaiting: "Waiting",
+      schedulerUnavailable: "Unavailable",
+      schedulerTriggerNow: "Run one cycle now",
+      schedulerTriggering: "Triggering",
+      schedulerTriggerQueued: "Triggered; the scheduler will run immediately",
+      schedulerClearBackoff: "Clear backoff",
+      schedulerClearingBackoff: "Clearing backoff",
+      schedulerBackoffCleared: "Backoff cleared",
+      schedulerConfirmClearBackoff: "Confirm clear backoff",
+      schedulerClearBackoffConfirm: "Clear the current M-Team backoff? Future rate-limit protection remains enabled.",
       trackerConfigMteam: "M-Team config",
       trackerConfigNexusphp: "NexusPHP config",
       trackerDryRun: "Dry-run preview",
@@ -1371,8 +1395,12 @@ function renderOpsSummary(ops) {
   const events = ops.tracker_api_events || [];
   const wantRuns = ops.want_search_runs || [];
   const backoff = ops.schedule_backoff || {};
+  const control = ops.scheduler_control || {};
+  const pendingTrigger = ops.scheduler_trigger || null;
   const rows = [
     [uiText("trackerBackoff"), backoff.active ? `${backoff.endpoint || "mteam"} · ${backoff.remaining_minutes ?? "?"}m` : uiText("inactive")],
+    [uiText("schedulerPhase"), control.phase === "running" ? uiText("schedulerRunning") : control.phase === "waiting" ? uiText("schedulerWaiting") : uiText("schedulerUnavailable")],
+    [uiText("schedulerTriggerNow"), pendingTrigger ? pendingTrigger.requested_at : uiText("inactive")],
     [uiText("recentSchedulerRuns"), runs.length ? `${runs[0].status || "unknown"} · ${runs[0].run_id || ""}` : uiText("noData")],
     [uiText("trackerApiEvents"), events.length],
     [uiText("wantSearchRuns"), wantRuns.length ? `${wantRuns[0].status || "unknown"} · ${wantRuns[0].source || ""}` : uiText("noData")],
@@ -3045,6 +3073,7 @@ function renderSettingsPanel(section) {
       <span class="badge">${escapeHtml(configSourceLabel)}</span>
     </div>
     ${schedulerOverrideEntries.length ? `<div class="status-item warning">${escapeHtml(uiText("runtimeOverrides"))}: ${escapeHtml(schedulerOverrideEntries.map(([key, value]) => `${key}=${value}`).join(", "))}</div>` : ""}
+    ${section === "scheduler" ? renderSchedulerControls() : ""}
     <div class="field-grid">${fields}</div>
     ${section === "download_client" ? renderDownloaderStructuredEditor(sectionData) : ""}
     ${section === "release_preferences" ? renderSearchTagScoreEditor(sectionData) : ""}
@@ -3066,6 +3095,12 @@ function renderSettingsPanel(section) {
     </div>
   `;
   page.addEventListener("click", (event) => {
+    const schedulerButton = event.target?.closest?.("[data-scheduler-action]");
+    const schedulerAction = schedulerButton?.dataset?.schedulerAction;
+    if (schedulerAction) {
+      handleSchedulerAction(page, schedulerAction, schedulerButton);
+      return;
+    }
     const preset = event.target?.closest?.("[data-release-preset]")?.dataset?.releasePreset;
     if (preset && applyReleasePreferencePreset(page, preset)) {
       return;
@@ -3082,6 +3117,69 @@ function renderSettingsPanel(section) {
   page.addEventListener("input", () => resetSettingsPanelPreview(page));
   page.addEventListener("change", () => resetSettingsPanelPreview(page));
   return page;
+}
+
+function renderSchedulerControls() {
+  const ops = state.overview.ops || {};
+  const backoff = ops.schedule_backoff || {};
+  const phase = ops.scheduler_control?.phase || "unavailable";
+  const phaseLabel = phase === "running" ? uiText("schedulerRunning") : phase === "waiting" ? uiText("schedulerWaiting") : uiText("schedulerUnavailable");
+  return `
+    <div class="scheduler-controls">
+      <div class="tracker-actions-group">
+        <button class="primary-button" type="button" data-scheduler-action="trigger" ${phase === "waiting" ? "" : "disabled"}>${escapeHtml(uiText("schedulerTriggerNow"))}</button>
+        <button class="secondary-button" type="button" data-scheduler-action="clear-backoff" ${backoff.active ? "" : "disabled"}>${escapeHtml(uiText("schedulerClearBackoff"))}</button>
+      </div>
+      <div class="status-list" data-scheduler-status>
+        <div class="status-item info">${escapeHtml(uiText("schedulerPhase"))}: ${escapeHtml(phaseLabel)}</div>
+      </div>
+    </div>
+  `;
+}
+
+async function handleSchedulerAction(page, action, actionButton) {
+  const status = page.querySelector("[data-scheduler-status]");
+  const buttons = page.querySelectorAll("[data-scheduler-action]");
+  if (action === "clear-backoff" && actionButton.dataset.confirmed !== "true") {
+    actionButton.dataset.confirmed = "true";
+    actionButton.textContent = uiText("schedulerConfirmClearBackoff");
+    if (status) {
+      status.innerHTML = `<div class="status-item warning">${escapeHtml(uiText("schedulerClearBackoffConfirm"))}</div>`;
+    }
+    return;
+  }
+  buttons.forEach((button) => { button.disabled = true; });
+  if (status) {
+    status.innerHTML = `<div class="status-item info">${escapeHtml(action === "trigger" ? uiText("schedulerTriggering") : uiText("schedulerClearingBackoff"))}</div>`;
+  }
+  try {
+    const endpoint = action === "trigger" ? "/api/scheduler/trigger" : "/api/scheduler/backoff/clear";
+    const response = await apiFetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    });
+    const payload = await response.json();
+    if (!response.ok) {
+      throw new Error(payload.error || payload.status?.[0]?.message || `${uiText("requestFailedPrefix")}: ${response.status}`);
+    }
+    if (status) {
+      status.innerHTML = `<div class="status-item ok">${escapeHtml(action === "trigger" ? uiText("schedulerTriggerQueued") : uiText("schedulerBackoffCleared"))}</div>`;
+    }
+    await loadOverview();
+  } catch (error) {
+    if (status) {
+      status.innerHTML = `<div class="status-item warning">${escapeHtml(error.message)}</div>`;
+    }
+  } finally {
+    if (action === "clear-backoff") {
+      delete actionButton.dataset.confirmed;
+      actionButton.textContent = uiText("schedulerClearBackoff");
+    }
+    const phase = state.overview.ops?.scheduler_control?.phase;
+    page.querySelector('[data-scheduler-action="trigger"]')?.toggleAttribute("disabled", phase !== "waiting");
+    page.querySelector('[data-scheduler-action="clear-backoff"]')?.toggleAttribute("disabled", !state.overview.ops?.schedule_backoff?.active);
+  }
 }
 
 function handleDownloaderStructuredAction(page, action, target) {

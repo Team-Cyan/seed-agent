@@ -840,6 +840,52 @@ def test_scheduler_lease_rejects_second_owner_and_allows_expired_takeover(
     assert store.get_scheduler_lease() is None
 
 
+def test_scheduler_trigger_only_queues_while_waiting_and_is_consumed_once(
+    tmp_path: Path,
+) -> None:
+    store = StateStore(tmp_path / "state.sqlite3")
+
+    store.begin_scheduler_cycle()
+    rejected = store.request_scheduler_trigger(source="web")
+
+    assert rejected["queued"] is False
+    assert store.get_scheduler_trigger() is None
+    assert store.get_scheduler_control()["phase"] == "running"  # type: ignore[index]
+
+    store.mark_scheduler_waiting()
+    queued = store.request_scheduler_trigger(source="web")
+
+    assert queued["queued"] is True
+    assert store.get_scheduler_trigger()["source"] == "web"  # type: ignore[index]
+
+    consumed = store.consume_scheduler_trigger()
+
+    assert consumed is not None
+    assert consumed["source"] == "web"
+    assert store.consume_scheduler_trigger() is None
+    assert store.get_scheduler_control()["phase"] == "running"  # type: ignore[index]
+
+
+def test_state_store_clears_active_tracker_backoffs_without_deleting_history(
+    tmp_path: Path,
+) -> None:
+    store = StateStore(tmp_path / "state.sqlite3")
+    store.set_tracker_backoff(
+        site="mteam",
+        endpoint="torrent/search",
+        until="2026-07-18T00:00:00+08:00",
+        reason="request too frequent",
+    )
+
+    cleared = store.clear_tracker_backoffs(site="mteam")
+    row = store.get_tracker_backoff("mteam", "torrent/search")
+
+    assert cleared == 1
+    assert row is not None
+    assert row["active"] == 0
+    assert row["reason"] == "request too frequent"
+
+
 def test_intent_enqueue_claim_blocks_parallel_owner_and_commits_atomically(
     tmp_path: Path,
 ) -> None:

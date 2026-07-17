@@ -814,6 +814,56 @@ def config_status(
     _print_json(_config_status_payload(config))
 
 
+@app.command(name="schedule-trigger")
+def schedule_trigger(
+    config: Annotated[Path, typer.Option("--config")] = DEFAULT_CONFIG,
+) -> None:
+    loaded = load_config(config)
+    store = StateStore(_state_path(loaded))
+    lease = store.get_scheduler_lease()
+    lease_expires_at = _parse_schedule_backoff_datetime(
+        lease.get("expires_at") if lease is not None else None
+    )
+    if lease is None or lease_expires_at is None or lease_expires_at <= datetime.now(UTC):
+        _print_json(
+            {
+                "command": "schedule-trigger",
+                "config": str(config),
+                "error": "no active scheduler lease",
+                "scheduler_lease": lease,
+            }
+        )
+        raise typer.Exit(code=1)
+    trigger = store.request_scheduler_trigger(source="cli")
+    if not trigger["queued"]:
+        _print_json(
+            {
+                "command": "schedule-trigger",
+                "config": str(config),
+                "error": trigger["reason"],
+                "trigger": trigger,
+                "scheduler_lease": lease,
+            }
+        )
+        raise typer.Exit(code=1)
+    _print_json(
+        {
+            "command": "schedule-trigger",
+            "config": str(config),
+            "status": "queued",
+            "trigger": trigger,
+            "scheduler_lease": lease,
+        }
+    )
+
+
+@app.command(name="scheduler-backoff-clear")
+def scheduler_backoff_clear(
+    config: Annotated[Path, typer.Option("--config")] = DEFAULT_CONFIG,
+) -> None:
+    _print_json(_clear_schedule_backoff(config, source="cli"))
+
+
 @app.command(name="runtime-doctor")
 def runtime_doctor(
     config: Annotated[Path, typer.Option("--config")] = DEFAULT_CONFIG,
@@ -1401,7 +1451,11 @@ def schedule_run(
     signal.signal(signal.SIGTERM, handle_scheduler_sigterm)
 
     cycle = 0
+    manual_trigger: dict[str, Any] | None = None
     while True:
+        cycle_started_monotonic = time.monotonic()
+        if manual_trigger is None:
+            manual_trigger = lease_store.begin_scheduler_cycle()
         cycle += 1
         run_id = _new_schedule_run_id()
         loaded_for_run = load_config(config)
@@ -1447,7 +1501,7 @@ def schedule_run(
             intent_execute=intent_execute,
             backoff_active=bool(backoff.get("active")),
             backoff_until=str(backoff.get("until")) if backoff.get("until") else None,
-            summary={"cycle": cycle},
+            summary={"cycle": cycle, "manual_trigger": manual_trigger},
         )
         _record_schedule_phase(
             store_for_run,
@@ -1751,6 +1805,7 @@ def schedule_run(
         )
         payload["scheduler_cli_overrides"] = scheduler_cli_overrides
         payload["scheduler_lease"] = lease
+        payload["manual_trigger"] = manual_trigger
         if payload.get("schedule_backoff", {}).get("active"):
             payload["intent_search_enabled"] = False
             if intent and "intent" not in payload:
@@ -1817,13 +1872,29 @@ def schedule_run(
             atexit.unregister(release_scheduler_lease)
             signal.signal(signal.SIGTERM, previous_sigterm_handler)
             return
-        _wait_for_next_schedule_cycle(
+        lease_store.mark_scheduler_waiting()
+        manual_trigger = _wait_for_next_schedule_cycle(
             config,
             execute=execute and prune,
-            interval_seconds=interval_minutes * 60,
+            interval_seconds=_remaining_schedule_interval_seconds(
+                interval_minutes=interval_minutes,
+                cycle_started_monotonic=cycle_started_monotonic,
+            ),
             guard_interval_seconds=scheduler.capacity_guard_interval_seconds,
             lease_heartbeat=lease_heartbeat,
+            trigger_store=lease_store,
         )
+
+
+def _remaining_schedule_interval_seconds(
+    *,
+    interval_minutes: int,
+    cycle_started_monotonic: float,
+    now_monotonic: float | None = None,
+) -> int:
+    current = time.monotonic() if now_monotonic is None else now_monotonic
+    elapsed_seconds = max(current - cycle_started_monotonic, 0.0)
+    return max(int(interval_minutes * 60 - elapsed_seconds), 0)
 
 
 def _wait_for_next_schedule_cycle(
@@ -1833,15 +1904,28 @@ def _wait_for_next_schedule_cycle(
     interval_seconds: int,
     guard_interval_seconds: int,
     lease_heartbeat: _SchedulerLeaseHeartbeat,
-) -> None:
+    trigger_store: StateStore | None = None,
+) -> dict[str, Any] | None:
     remaining_seconds = max(int(interval_seconds), 0)
     guard_interval_seconds = max(int(guard_interval_seconds), 10)
+    seconds_until_guard = guard_interval_seconds
     while remaining_seconds > 0:
-        sleep_seconds = min(guard_interval_seconds, remaining_seconds)
+        if trigger_store is not None:
+            trigger = trigger_store.consume_scheduler_trigger()
+            if trigger is not None:
+                return trigger
+        sleep_seconds = min(
+            1 if trigger_store is not None else seconds_until_guard,
+            remaining_seconds,
+        )
         time.sleep(sleep_seconds)
         remaining_seconds -= sleep_seconds
+        seconds_until_guard -= sleep_seconds
         if remaining_seconds <= 0:
-            return
+            return None
+        if seconds_until_guard > 0:
+            continue
+        seconds_until_guard = guard_interval_seconds
         lease_heartbeat.ensure_owned()
         try:
             payload = _capacity_guard_payload(config_path, execute=execute)
@@ -1853,6 +1937,7 @@ def _wait_for_next_schedule_cycle(
                 "error": _runtime_error_summary(exc),
             }
         _print_json(_capacity_guard_payload_summary(payload))
+    return None
 
 
 def _capacity_guard_payload(config_path: Path, *, execute: bool) -> dict[str, Any]:
@@ -2066,6 +2151,37 @@ def _schedule_backoff_status(
         }
     )
     return status
+
+
+def _clear_schedule_backoff(
+    config_path: Path,
+    *,
+    source: str,
+) -> dict[str, Any]:
+    loaded = load_config(config_path)
+    store = StateStore(_state_path(loaded))
+    before = _schedule_backoff_status(config_path)
+    path = _schedule_backoff_path(config_path)
+    file_removed = path.exists()
+    path.unlink(missing_ok=True)
+    cleared = store.clear_tracker_backoffs(site="mteam")
+    store.record_tracker_api_event(
+        site="mteam",
+        endpoint=str(before.get("endpoint") or "*"),
+        event="backoff_cleared",
+        rate_limited=False,
+        message=f"cleared by {source}",
+    )
+    return {
+        "command": "scheduler-backoff-clear",
+        "config": str(config_path),
+        "status": "cleared",
+        "source": source,
+        "file_removed": file_removed,
+        "tracker_backoffs_cleared": cleared,
+        "previous_backoff": before,
+        "schedule_backoff": _schedule_backoff_status(config_path),
+    }
 
 
 def _record_schedule_rate_limit_backoff(
@@ -4255,6 +4371,7 @@ def _schedule_log_summary(payload: dict[str, Any]) -> dict[str, Any]:
         "intent_execute",
         "scheduler_config_source",
         "scheduler_cli_overrides",
+        "manual_trigger",
         "intent_search_enabled",
         "schedule_backoff",
         "skipped_by_backoff",

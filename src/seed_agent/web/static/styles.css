@@ -301,6 +301,22 @@ body.dark .secondary-button {
   color: var(--text);
 }
 
+.scheduler-controls {
+  align-items: center;
+  background: var(--panel-subtle);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  margin-bottom: 16px;
+  padding: 12px;
+}
+
+.scheduler-controls .status-list {
+  margin: 0;
+}
+
 .tracker-list {
   display: grid;
   gap: 14px;
@@ -1273,10 +1289,17 @@ body.dark .secondary-button {
   }
 
   .settings-panel-header,
+  .scheduler-controls,
   .structured-section-head,
   .candidate-card-head {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .scheduler-controls .tracker-actions-group {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
   }
 
   .field {
@@ -1442,6 +1465,7 @@ body.dark .secondary-button {
 
 @media (max-width: 420px) {
   .want-filters,
+  .scheduler-controls .tracker-actions-group,
   .sticky-actions .tracker-actions-group,
   .candidate-actions,
   .candidate-preview-actions {

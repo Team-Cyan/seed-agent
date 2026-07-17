@@ -906,6 +906,107 @@ def test_schedule_run_uses_yaml_scheduler_defaults(
     }
 
 
+def test_schedule_trigger_queues_only_when_live_scheduler_is_waiting(
+    tmp_path: Path,
+) -> None:
+    from seed_agent import cli
+
+    config_path = _config_file(tmp_path)
+    store = StateStore(tmp_path / ".seed-agent" / "state.db")
+    store.acquire_scheduler_lease("test-owner", ttl_seconds=60)
+    store.mark_scheduler_waiting()
+
+    queued = CliRunner().invoke(
+        cli.app,
+        ["schedule-trigger", "--config", str(config_path)],
+    )
+
+    assert queued.exit_code == 0
+    queued_payload = _json_output(queued)
+    assert queued_payload["status"] == "queued"
+    assert store.get_scheduler_trigger() is not None
+
+    store.begin_scheduler_cycle()
+    rejected = CliRunner().invoke(
+        cli.app,
+        ["schedule-trigger", "--config", str(config_path)],
+    )
+
+    assert rejected.exit_code == 1
+    rejected_payload = _json_output(rejected)
+    assert rejected_payload["error"] == "scheduler cycle is already running"
+    assert store.get_scheduler_trigger() is None
+
+
+def test_scheduler_interval_restarts_from_manual_cycle_start() -> None:
+    from seed_agent import cli
+
+    assert (
+        cli._remaining_schedule_interval_seconds(
+            interval_minutes=60,
+            cycle_started_monotonic=100.0,
+            now_monotonic=130.0,
+        )
+        == 3570
+    )
+    assert (
+        cli._remaining_schedule_interval_seconds(
+            interval_minutes=1,
+            cycle_started_monotonic=100.0,
+            now_monotonic=175.0,
+        )
+        == 0
+    )
+
+
+def test_schedule_log_summary_preserves_manual_trigger_provenance() -> None:
+    from seed_agent import cli
+
+    trigger = {
+        "trigger_name": "schedule-run",
+        "requested_at": "2026-07-17T01:29:17+00:00",
+        "source": "web",
+    }
+
+    summary = cli._schedule_log_summary(
+        {
+            "command": "schedule-run",
+            "manual_trigger": trigger,
+            "scores": [],
+            "decisions": [],
+        }
+    )
+
+    assert summary["manual_trigger"] == trigger
+
+
+def test_scheduler_backoff_clear_deactivates_file_and_sqlite_backoff(
+    tmp_path: Path,
+) -> None:
+    from seed_agent import cli
+
+    config_path = _config_file(tmp_path)
+    cli._record_schedule_rate_limit_backoff(
+        config_path,
+        reason="mteam request too frequent",
+    )
+
+    result = CliRunner().invoke(
+        cli.app,
+        ["scheduler-backoff-clear", "--config", str(config_path)],
+    )
+
+    assert result.exit_code == 0
+    payload = _json_output(result)
+    assert payload["status"] == "cleared"
+    assert payload["schedule_backoff"]["active"] is False
+    assert not (tmp_path / ".seed-agent" / "schedule-backoff.json").exists()
+    store = StateStore(tmp_path / ".seed-agent" / "state.db")
+    backoff = store.get_tracker_backoff("mteam", "torrent/search")
+    assert backoff is not None
+    assert backoff["active"] == 0
+
+
 def test_scheduled_intent_search_runs_once_after_daily_hour() -> None:
     from seed_agent import cli
 

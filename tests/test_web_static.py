@@ -489,6 +489,20 @@ def test_want_candidate_enqueue_is_preview_first() -> None:
     assert ".candidate-preview-actions" in styles
 
 
+def test_scheduler_controls_are_single_process_and_inline_confirmed() -> None:
+    script = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
+    styles = (STATIC_ROOT / "styles.css").read_text(encoding="utf-8")
+
+    assert 'data-scheduler-action="trigger"' in script
+    assert 'data-scheduler-action="clear-backoff"' in script
+    assert '"/api/scheduler/trigger"' in script
+    assert '"/api/scheduler/backoff/clear"' in script
+    assert "schedulerConfirmClearBackoff" in script
+    assert "window.confirm" not in script
+    assert '.toggleAttribute("disabled", phase !== "waiting")' in script
+    assert ".scheduler-controls" in styles
+
+
 def test_dashboard_attention_does_not_warn_for_review_required_items() -> None:
     script = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
 

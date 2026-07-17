@@ -341,6 +341,18 @@ paid release for a requested work, subject to its category and capacity gates.
 - `renewed_at`
 - `expires_at`
 
+`scheduler_triggers`
+
+- `trigger_name`
+- `requested_at`
+- `source`
+
+`scheduler_controls`
+
+- `control_name`
+- `phase`
+- `updated_at`
+
 `scheduler_run_events`
 
 - `id`

@@ -269,6 +269,13 @@ def make_handler(config_path: Path) -> type[BaseHTTPRequestHandler]:
             if self.path == "/api/wants/sync":
                 self._send_json(_sync_wants_payload(resolved_config_path, root))
                 return
+            if self.path == "/api/scheduler/trigger":
+                payload, status = _scheduler_trigger_payload(root)
+                self._send_json(payload, status=status)
+                return
+            if self.path == "/api/scheduler/backoff/clear":
+                self._send_json(_clear_scheduler_backoff_payload(root))
+                return
             want_search_id = _want_subresource_intent_id(self.path, "search")
             if want_search_id is not None:
                 payload, status = _search_single_want_payload(
@@ -1427,6 +1434,8 @@ def _ops_payload(root: Path) -> dict[str, Any]:
         "cleanup_events": [],
         "audit_tail": _audit_tail(root),
         "scheduler_lease": None,
+        "scheduler_trigger": None,
+        "scheduler_control": None,
     }
     if not state_path.exists():
         return payload
@@ -1443,9 +1452,72 @@ def _ops_payload(root: Path) -> dict[str, Any]:
                 if row.get("phase") == "prune"
             ][:20],
             "scheduler_lease": store.get_scheduler_lease(),
+            "scheduler_trigger": store.get_scheduler_trigger(),
+            "scheduler_control": store.get_scheduler_control(),
         }
     )
     return payload
+
+
+def _scheduler_trigger_payload(root: Path) -> tuple[dict[str, Any], HTTPStatus]:
+    store = StateStore(_state_db_path(root))
+    lease = store.get_scheduler_lease()
+    expires_at = _parse_iso_datetime(lease.get("expires_at") if lease else None)
+    if lease is None or expires_at is None or expires_at <= datetime.now(UTC):
+        return {
+            "error": "no active scheduler lease",
+            "scheduler_lease": lease,
+            "status": [
+                {
+                    "level": "warning",
+                    "message": "scheduler is not running; trigger was not queued",
+                }
+            ],
+        }, HTTPStatus.CONFLICT
+    trigger = store.request_scheduler_trigger(source="web")
+    if not trigger["queued"]:
+        return {
+            "queued": False,
+            "error": trigger["reason"],
+            "trigger": trigger,
+            "scheduler_lease": lease,
+            "status": [
+                {
+                    "level": "warning",
+                    "message": "scheduler cycle is already running",
+                }
+            ],
+        }, HTTPStatus.CONFLICT
+    return {
+        "queued": True,
+        "trigger": trigger,
+        "scheduler_lease": lease,
+        "status": [{"level": "ok", "message": "scheduler cycle queued"}],
+    }, HTTPStatus.ACCEPTED
+
+
+def _clear_scheduler_backoff_payload(root: Path) -> dict[str, Any]:
+    store = StateStore(_state_db_path(root))
+    before = _schedule_backoff_status(root)
+    path = _schedule_backoff_path(root)
+    file_removed = path.exists()
+    path.unlink(missing_ok=True)
+    cleared = store.clear_tracker_backoffs(site="mteam")
+    store.record_tracker_api_event(
+        site="mteam",
+        endpoint=str(before.get("endpoint") or "*"),
+        event="backoff_cleared",
+        rate_limited=False,
+        message="cleared by web",
+    )
+    return {
+        "cleared": True,
+        "file_removed": file_removed,
+        "tracker_backoffs_cleared": cleared,
+        "previous_backoff": before,
+        "schedule_backoff": _schedule_backoff_status(root),
+        "status": [{"level": "ok", "message": "scheduler backoff cleared"}],
+    }
 
 
 def _audit_tail(root: Path, limit: int = 20) -> list[dict[str, Any]]:

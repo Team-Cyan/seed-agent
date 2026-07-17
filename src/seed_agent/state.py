@@ -117,6 +117,149 @@ class StateStore:
             ).fetchone()
         return dict(row) if row is not None else None
 
+    def request_scheduler_trigger(
+        self,
+        *,
+        source: str,
+        trigger_name: str = "schedule-run",
+        requested_at: datetime | None = None,
+    ) -> dict[str, Any]:
+        current_time = requested_at or _utc_now_datetime()
+        with self._connect(row_factory=sqlite3.Row) as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            control = conn.execute(
+                "SELECT * FROM scheduler_controls WHERE control_name = ?",
+                (trigger_name,),
+            ).fetchone()
+            if control is None or str(control["phase"]) != "waiting":
+                return {
+                    "queued": False,
+                    "trigger_name": trigger_name,
+                    "requested_at": current_time.isoformat(),
+                    "source": source,
+                    "reason": "scheduler cycle is already running",
+                    "scheduler_phase": dict(control) if control is not None else None,
+                }
+            conn.execute(
+                """
+                INSERT INTO scheduler_triggers (trigger_name, requested_at, source)
+                VALUES (?, ?, ?)
+                ON CONFLICT(trigger_name) DO UPDATE SET
+                  requested_at = excluded.requested_at,
+                  source = excluded.source
+                """,
+                (trigger_name, current_time.isoformat(), source),
+            )
+        return {
+            "queued": True,
+            "trigger_name": trigger_name,
+            "requested_at": current_time.isoformat(),
+            "source": source,
+        }
+
+    def get_scheduler_trigger(
+        self,
+        trigger_name: str = "schedule-run",
+    ) -> dict[str, Any] | None:
+        with self._connect(row_factory=sqlite3.Row) as conn:
+            row = conn.execute(
+                "SELECT * FROM scheduler_triggers WHERE trigger_name = ?",
+                (trigger_name,),
+            ).fetchone()
+        return dict(row) if row is not None else None
+
+    def get_scheduler_control(
+        self,
+        control_name: str = "schedule-run",
+    ) -> dict[str, Any] | None:
+        with self._connect(row_factory=sqlite3.Row) as conn:
+            row = conn.execute(
+                "SELECT * FROM scheduler_controls WHERE control_name = ?",
+                (control_name,),
+            ).fetchone()
+        return dict(row) if row is not None else None
+
+    def begin_scheduler_cycle(
+        self,
+        control_name: str = "schedule-run",
+        *,
+        started_at: datetime | None = None,
+    ) -> dict[str, Any] | None:
+        current_time = started_at or _utc_now_datetime()
+        with self._connect(row_factory=sqlite3.Row) as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT * FROM scheduler_triggers WHERE trigger_name = ?",
+                (control_name,),
+            ).fetchone()
+            conn.execute(
+                "DELETE FROM scheduler_triggers WHERE trigger_name = ?",
+                (control_name,),
+            )
+            conn.execute(
+                """
+                INSERT INTO scheduler_controls (control_name, phase, updated_at)
+                VALUES (?, 'running', ?)
+                ON CONFLICT(control_name) DO UPDATE SET
+                  phase = excluded.phase,
+                  updated_at = excluded.updated_at
+                """,
+                (control_name, current_time.isoformat()),
+            )
+        return dict(row) if row is not None else None
+
+    def mark_scheduler_waiting(
+        self,
+        control_name: str = "schedule-run",
+        *,
+        updated_at: datetime | None = None,
+    ) -> dict[str, Any]:
+        current_time = updated_at or _utc_now_datetime()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO scheduler_controls (control_name, phase, updated_at)
+                VALUES (?, 'waiting', ?)
+                ON CONFLICT(control_name) DO UPDATE SET
+                  phase = excluded.phase,
+                  updated_at = excluded.updated_at
+                """,
+                (control_name, current_time.isoformat()),
+            )
+        return {
+            "control_name": control_name,
+            "phase": "waiting",
+            "updated_at": current_time.isoformat(),
+        }
+
+    def consume_scheduler_trigger(
+        self,
+        trigger_name: str = "schedule-run",
+    ) -> dict[str, Any] | None:
+        with self._connect(row_factory=sqlite3.Row) as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT * FROM scheduler_triggers WHERE trigger_name = ?",
+                (trigger_name,),
+            ).fetchone()
+            if row is None:
+                return None
+            conn.execute(
+                "DELETE FROM scheduler_triggers WHERE trigger_name = ?",
+                (trigger_name,),
+            )
+            conn.execute(
+                """
+                INSERT INTO scheduler_controls (control_name, phase, updated_at)
+                VALUES (?, 'running', ?)
+                ON CONFLICT(control_name) DO UPDATE SET
+                  phase = excluded.phase,
+                  updated_at = excluded.updated_at
+                """,
+                (trigger_name, _utc_now_datetime().isoformat()),
+            )
+        return dict(row)
+
     def start_scheduler_run(
         self,
         *,
@@ -377,6 +520,16 @@ class StateStore:
                 """
             ).fetchall()
         return [dict(row) for row in rows]
+
+    def clear_tracker_backoffs(self, *, site: str | None = None) -> int:
+        query = "UPDATE tracker_backoffs SET active = 0 WHERE active = 1"
+        params: tuple[object, ...] = ()
+        if site is not None:
+            query += " AND site = ?"
+            params = (site,)
+        with self._connect() as conn:
+            cursor = conn.execute(query, params)
+        return cursor.rowcount
 
     def record_tracker_api_event(
         self,
@@ -1926,6 +2079,16 @@ class StateStore:
                   acquired_at TEXT NOT NULL,
                   renewed_at TEXT NOT NULL,
                   expires_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS scheduler_triggers (
+                  trigger_name TEXT PRIMARY KEY,
+                  requested_at TEXT NOT NULL,
+                  source TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS scheduler_controls (
+                  control_name TEXT PRIMARY KEY,
+                  phase TEXT NOT NULL,
+                  updated_at TEXT NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS scheduler_run_events (
                   id INTEGER PRIMARY KEY AUTOINCREMENT,
