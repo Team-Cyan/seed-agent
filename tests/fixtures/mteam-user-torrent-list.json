@@ -1,0 +1,30 @@
+{
+  "code": "0",
+  "message": "SUCCESS",
+  "data": {
+    "data": [
+      {
+        "id": 900001,
+        "uploaded": "0",
+        "downloaded": "123456789",
+        "torrent": {
+          "id": 1234567,
+          "name": "Sanitized Stopped Incomplete",
+          "size": "53687091200",
+          "discount": "FREE",
+          "discountEndTime": "2099-01-01T00:00:00",
+          "status": {
+            "seeders": "12",
+            "leechers": "34",
+            "timesCompleted": "56"
+          },
+          "createdDate": "2026-07-17T12:00:00"
+        }
+      }
+    ],
+    "pageNumber": 1,
+    "pageSize": 200,
+    "total": 1,
+    "totalPages": 1
+  }
+}

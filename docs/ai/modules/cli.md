@@ -87,12 +87,15 @@ Expose the operator-facing command surface and safe summaries.
   `schedule-run --prune`. Standalone `run-once --prune` keeps the historical
   post-enqueue cleanup behavior; scheduled cycles run conservative prune before
   PT discovery/enqueue, then run the resource intent loop last,
-- scheduled cycles first run tracker source backfill for qB-only live torrents,
-  bounded by `scheduler.tracker_backfill_max_api_requests` (default `20`), then
-  conservative prune, PT discovery/enqueue, and the resource intent loop.
-  Remaining tasks rotate into later cycles by risk and oldest evidence. The
-  backfill phase stops on the first rate-limit or network failure and also uses
-  the shared request pacer,
+- scheduled cycles first batch-refresh qB tracker evidence from M-Team's user
+  torrent list, then run conservative prune, PT discovery/enqueue, and the
+  resource intent loop. `scheduler.tracker_backfill_max_api_requests` (default
+  `20`) limits only per-torrent detail/search fallback for tasks absent from the
+  batch snapshot. Seeding, leeching, and stopped incomplete lists are included;
+  recent tracker evidence suppresses repeated fallback for six hours, while an
+  incomplete batch miss remains an unknown-free prune risk. The backfill phase
+  stops on the first rate-limit or network failure and also uses the shared
+  request pacer,
 - scheduled PT enqueue can run one capacity-pressure prune when accepted
   candidates would otherwise be rejected by runtime gates. That pass uses
   forced space reclamation, refreshes qB state afterward, and recomputes enqueue

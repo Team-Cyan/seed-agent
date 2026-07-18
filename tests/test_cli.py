@@ -322,7 +322,7 @@ def test_backfill_targets_refresh_tracked_incomplete_but_not_tracked_completed(
 def test_mteam_torrent_id_from_tracker_decodes_credential() -> None:
     from seed_agent import cli
 
-    credential = base64.b64encode(b"sign=abc&t=1783531016&tid=1206069&uid=305694").decode()
+    credential = base64.b64encode(b"sign=abc&t=1783531016&tid=1206069&uid=123456").decode()
     torrent = _managed_torrent(
         metadata={
             "tracker": f"https://tracker.m-team.io/announce?credential={credential}",
@@ -330,6 +330,303 @@ def test_mteam_torrent_id_from_tracker_decodes_credential() -> None:
     )
 
     assert cli._mteam_torrent_id_from_tracker(torrent) == "1206069"
+    assert cli._mteam_user_id_from_tracker(torrent) == 123456
+
+
+def test_mteam_batch_match_prefers_tracker_tid() -> None:
+    from seed_agent import cli
+
+    credential = base64.b64encode(b"sign=abc&t=1783531016&tid=1206069&uid=123456").decode()
+    torrent = _managed_incomplete_torrent(
+        name="qB Name May Differ",
+        metadata={
+            "amount_left_bytes": 10 * 1024**3,
+            "tracker": f"https://tracker.m-team.io/announce?credential={credential}",
+        },
+    )
+    expected = TorrentCandidate(
+        site="mteam",
+        title="M-Team Canonical Name",
+        source_url="https://kp.m-team.cc/detail/1206069",
+        download_url="mteam-api://torrent/1206069",
+        size_bytes=42 * 1024**3,
+        seeders=1,
+        leechers=0,
+        discount="free",
+        metadata={
+            "mteam_torrent_id": "1206069",
+            "backfill_match_source": "user_torrent_list",
+        },
+    )
+
+    matched = cli._mteam_user_torrent_batch_match(torrent, [expected])
+
+    assert matched is expected
+    assert matched.metadata["backfill_match_source"] == "user_torrent_list"
+
+
+@pytest.mark.asyncio
+async def test_backfill_uses_partial_batch_match_without_detail_fallback(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from seed_agent import cli
+
+    raw = _config().model_dump(mode="json")
+    raw["tracker_sites"] = [
+        {
+            "name": "mteam",
+            "type": "mteam",
+            "enabled": True,
+            "rss_url": "https://rss.m-team.cc/api/rss/fetch?dl=1",
+            "api_key_ref": "local/secrets/mteam-api-key.txt",
+            "discovery_mode": "api",
+            "api_discovery": {"mode": "adult"},
+        }
+    ]
+    config = SeedAgentConfig.model_validate(raw)
+    credential = base64.b64encode(b"sign=abc&t=1783531016&tid=1206069&uid=123456").decode()
+    torrent = _managed_incomplete_torrent(
+        metadata={
+            "amount_left_bytes": 10 * 1024**3,
+            "tracker": f"https://tracker.m-team.io/announce?credential={credential}",
+        },
+    )
+    candidate = TorrentCandidate(
+        site="mteam",
+        title=torrent.name,
+        source_url="https://kp.m-team.cc/detail/1206069",
+        download_url="mteam-api://torrent/1206069",
+        size_bytes=torrent.size_bytes,
+        seeders=1,
+        leechers=0,
+        discount="free",
+        left_time_minutes=180,
+        metadata={
+            "mteam_torrent_id": "1206069",
+            "backfill_match_source": "user_torrent_list",
+        },
+    )
+
+    async def fake_batch(
+        config: SeedAgentConfig,
+        torrents: list[ManagedTorrent],
+        *,
+        request_usage: dict[str, int],
+    ) -> tuple[dict[str, list[TorrentCandidate]], dict[str, dict[str, str]]]:
+        del config, torrents
+        request_usage["batch"] = 3
+        return {"mteam": [candidate]}, {
+            "mteam": {
+                "status": "error",
+                "endpoint": "member/getUserTorrentList",
+                "reason": "later torrent type failed",
+            }
+        }
+
+    async def fail_fallback(**kwargs: object) -> dict[str, object]:
+        raise AssertionError("detail/search fallback should not run for a batch match")
+
+    monkeypatch.setattr(cli, "_mteam_user_torrent_batch_candidates", fake_batch)
+    monkeypatch.setattr(cli, "_find_mteam_match_for_torrent", fail_fallback)
+    monkeypatch.setattr(cli, "_read_secret_ref", lambda *args: "secret")
+    request_budget: dict[str, int | None] = {"remaining": 20, "used": 0}
+    request_usage = {"batch": 0}
+    store = StateStore(tmp_path / "state.db")
+
+    results = await cli._backfill_tracker_sources(
+        config,
+        store,
+        [torrent],
+        execute=True,
+        request_budget=request_budget,
+        request_usage=request_usage,
+    )
+
+    assert results[0]["status"] == "matched"
+    assert results[0]["match"]["candidate_id"] == candidate.stable_id
+    assert request_budget == {"remaining": 20, "used": 0}
+    assert request_usage == {"batch": 3}
+    rows = store.list_by_torrent_hash(torrent.hash)
+    assert len(rows) == 1
+    assert rows[0]["site"] == "mteam"
+    assert rows[0]["discount"] == "free"
+    assert rows[0]["free_window_expires_at"] is not None
+
+
+def test_mteam_backfill_fallback_refresh_due_uses_tracker_evidence_age(tmp_path: Path) -> None:
+    from seed_agent import cli
+
+    store = StateStore(tmp_path / "state.db")
+    torrent = _managed_incomplete_torrent()
+    now = datetime.now(UTC)
+
+    assert cli._mteam_backfill_fallback_refresh_due(store, torrent, now=now) is True
+
+    store.upsert_candidate(
+        "mteam:1206069",
+        torrent.name,
+        "mteam",
+        LifecycleState.DOWNLOADING,
+        score=None,
+        torrent_hash=torrent.hash,
+        discount="free",
+    )
+
+    assert cli._mteam_backfill_fallback_refresh_due(store, torrent, now=now) is False
+    assert (
+        cli._mteam_backfill_fallback_refresh_due(
+            store,
+            torrent,
+            now=now + timedelta(hours=7),
+        )
+        is True
+    )
+
+
+@pytest.mark.asyncio
+async def test_backfill_skips_fallback_for_fresh_tracker_evidence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from seed_agent import cli
+
+    raw = _config().model_dump(mode="json")
+    raw["tracker_sites"] = [
+        {
+            "name": "mteam",
+            "type": "mteam",
+            "enabled": True,
+            "rss_url": "https://rss.m-team.cc/api/rss/fetch?dl=1",
+            "api_key_ref": "local/secrets/mteam-api-key.txt",
+            "discovery_mode": "api",
+            "api_discovery": {"mode": "adult"},
+        }
+    ]
+    config = SeedAgentConfig.model_validate(raw)
+    credential = base64.b64encode(b"sign=abc&t=1783531016&tid=1206069&uid=123456").decode()
+    torrent = _managed_incomplete_torrent(
+        metadata={
+            "amount_left_bytes": 10 * 1024**3,
+            "tracker": f"https://tracker.m-team.io/announce?credential={credential}",
+        },
+    )
+    store = StateStore(tmp_path / "state.db")
+    store.upsert_candidate(
+        "mteam:1206069",
+        torrent.name,
+        "mteam",
+        LifecycleState.DOWNLOADING,
+        score=None,
+        torrent_hash=torrent.hash,
+        discount="free",
+    )
+
+    async def fake_batch(
+        config: SeedAgentConfig,
+        torrents: list[ManagedTorrent],
+        *,
+        request_usage: dict[str, int],
+    ) -> tuple[dict[str, list[TorrentCandidate]], dict[str, dict[str, str]]]:
+        del config, torrents
+        request_usage["batch"] = 3
+        return {"mteam": []}, {}
+
+    async def fail_fallback(**kwargs: object) -> dict[str, object]:
+        raise AssertionError("fresh tracker evidence should suppress detail/search fallback")
+
+    monkeypatch.setattr(cli, "_mteam_user_torrent_batch_candidates", fake_batch)
+    monkeypatch.setattr(cli, "_find_mteam_match_for_torrent", fail_fallback)
+    monkeypatch.setattr(cli, "_read_secret_ref", lambda *args: "secret")
+
+    results = await cli._backfill_tracker_sources(
+        config,
+        store,
+        [torrent],
+        execute=False,
+        request_budget={"remaining": 20, "used": 0},
+        request_usage={"batch": 0},
+    )
+
+    assert len(results) == 1
+    assert results[0]["hash"] == torrent.hash
+    assert results[0]["status"] == "batch_miss_cached"
+    assert results[0]["site"] == "mteam"
+    assert results[0]["reason"] == "batch miss; detail/search fallback is cooling down"
+    assert cli._tracker_source_backfill_unresolved_risk_hashes(
+        {"results": results}
+    ) == {torrent.hash}
+
+
+@pytest.mark.asyncio
+async def test_backfill_does_not_fallback_after_batch_application_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from seed_agent import cli
+
+    raw = _config().model_dump(mode="json")
+    raw["tracker_sites"] = [
+        {
+            "name": "mteam",
+            "type": "mteam",
+            "enabled": True,
+            "rss_url": "https://rss.m-team.cc/api/rss/fetch?dl=1",
+            "api_key_ref": "local/secrets/mteam-api-key.txt",
+            "discovery_mode": "api",
+            "api_discovery": {"mode": "adult"},
+        }
+    ]
+    config = SeedAgentConfig.model_validate(raw)
+    credential = base64.b64encode(b"sign=abc&t=1783531016&tid=1206069&uid=123456").decode()
+    torrent = _managed_incomplete_torrent(
+        metadata={
+            "amount_left_bytes": 10 * 1024**3,
+            "tracker": f"https://tracker.m-team.io/announce?credential={credential}",
+        },
+    )
+
+    async def fake_batch(
+        config: SeedAgentConfig,
+        torrents: list[ManagedTorrent],
+        *,
+        request_usage: dict[str, int],
+    ) -> tuple[dict[str, list[TorrentCandidate]], dict[str, dict[str, str]]]:
+        del config, torrents
+        request_usage["batch"] = 1
+        return {}, {
+            "mteam": {
+                "status": "error",
+                "endpoint": "member/getUserTorrentList",
+                "reason": "invalid request",
+            }
+        }
+
+    async def fail_fallback(**kwargs: object) -> dict[str, object]:
+        raise AssertionError("batch errors must stop detail/search fallback")
+
+    monkeypatch.setattr(cli, "_mteam_user_torrent_batch_candidates", fake_batch)
+    monkeypatch.setattr(cli, "_find_mteam_match_for_torrent", fail_fallback)
+    monkeypatch.setattr(cli, "_read_secret_ref", lambda *args: "secret")
+    request_budget: dict[str, int | None] = {"remaining": 20, "used": 0}
+
+    results = await cli._backfill_tracker_sources(
+        config,
+        StateStore(tmp_path / "state.db"),
+        [torrent],
+        execute=False,
+        request_budget=request_budget,
+        request_usage={"batch": 0},
+    )
+
+    assert len(results) == 1
+    assert results[0]["status"] == "error"
+    assert results[0]["endpoint"] == "member/getUserTorrentList"
+    assert results[0]["reason"] == "invalid request"
+    assert request_budget == {"remaining": 20, "used": 0}
+    assert cli._tracker_source_backfill_unresolved_risk_hashes(
+        {"results": results}
+    ) == {torrent.hash}
 
 
 def test_live_reconciliation_links_unlinked_candidate_by_tracker_tid(
@@ -347,7 +644,7 @@ def test_live_reconciliation_links_unlinked_candidate_by_tracker_tid(
         torrent_hash=None,
         discount="free",
     )
-    credential = base64.b64encode(b"sign=abc&t=1783531016&tid=1206069&uid=305694").decode()
+    credential = base64.b64encode(b"sign=abc&t=1783531016&tid=1206069&uid=123456").decode()
     torrent = _managed_incomplete_torrent(
         hash="live-hash",
         name="Renamed qB Content Root",
@@ -406,7 +703,7 @@ async def test_find_mteam_match_uses_tracker_tid_before_keyword_search(
 
     monkeypatch.setattr(cli, "MTeamApiClient", FakeMTeamApiClient)
     monkeypatch.setattr(cli, "fetch_mteam_api_candidates", fail_keyword_search)
-    credential = base64.b64encode(b"sign=abc&t=1783531016&tid=1206069&uid=305694").decode()
+    credential = base64.b64encode(b"sign=abc&t=1783531016&tid=1206069&uid=123456").decode()
     torrent = _managed_incomplete_torrent(
         name="Risky Incomplete Torrent",
         metadata={

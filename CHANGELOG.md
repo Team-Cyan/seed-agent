@@ -4,6 +4,26 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.18.13 - 2026-07-18
+
+### Fixed
+
+- Replaced per-torrent scheduled M-Team source refresh with paginated
+  `member/getUserTorrentList` snapshots for seeding, leeching, and stopped
+  incomplete tasks. Batch rows now refresh promotion evidence before
+  detail/search fallback, and the existing backfill request budget only limits
+  fallback calls.
+- Added a six-hour fallback refresh cooldown for tasks absent from the batch
+  snapshot when recent tracker evidence already exists, avoiding repeated
+  per-torrent detail/search calls without delaying batch promotion updates.
+  Incomplete batch misses remain fail-closed cleanup risks during that cooldown.
+- Split scheduler backfill reporting into batch and fallback request counts and
+  preserve the real batch endpoint when recording rate-limit or availability
+  backoff evidence.
+- Normalized M-Team HTTP and malformed-JSON failures into structured API errors.
+  Any batch error now blocks per-torrent fallback for unmatched tasks while
+  preserving valid matches returned before the failure.
+
 ## 0.18.12 - 2026-07-17
 
 ### Fixed

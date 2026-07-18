@@ -203,7 +203,7 @@ def test_parse_rss_candidates_supports_mteam_sparse_feed() -> None:
             <p><strong>◎年　　代</strong> 2024</p>
           ]]></description>
           <enclosure
-            url="https://rss.m-team.cc/api/rss/dlv2?tid=1171443&amp;uid=305694&amp;sign=redacted"
+            url="https://rss.m-team.cc/api/rss/dlv2?tid=1171443&amp;uid=123456&amp;sign=redacted"
             type="application/x-bittorrent"
           />
         </item>

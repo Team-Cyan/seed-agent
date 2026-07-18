@@ -57,8 +57,13 @@ Current fallback still present in code:
   at one-second spacing, and can be tuned with
   `SEED_AGENT_MTEAM_MIN_REQUEST_INTERVAL_SECONDS`; keep it conservative. Web
   and scheduler processes intentionally maintain separate limiters.
-- Scheduler source backfill also has a per-cycle API budget, defaulting to 20.
-  Pacing controls bursts; the budget limits longer-window cumulative usage.
+- Scheduler source backfill pages `member/getUserTorrentList` for `SEEDING`,
+  `LEECHING`, and `INCOMPLETE` first, then joins rows to qB by tracker torrent
+  ID. The configured backfill API budget only bounds detail/search fallback for
+  rows missing from that batch snapshot; batch pagination does not consume it.
+  A batch miss reuses tracker evidence for six hours before trying fallback
+  again, but a batch match refreshes promotion state immediately. Incomplete
+  batch misses stay in the fail-closed prune risk set during the cooldown.
 - Pagination stops when the API page itself is exhausted, not when local
   filtering leaves a short result list.
 - Treat timezone-naive M-Team API date strings as `Asia/Shanghai`; convert them

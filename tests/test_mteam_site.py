@@ -4,6 +4,7 @@ import base64
 import hashlib
 import hmac
 import json
+from pathlib import Path
 
 import httpx
 import pytest
@@ -195,6 +196,242 @@ async def test_mteam_api_client_discovers_free_candidates_with_sorting() -> None
         "audio_codec": "3",
         "labels_new": ["中字"],
     }
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_mteam_api_client_fetches_user_torrents_in_batched_pages() -> None:
+    route = respx.post(
+        "https://api.m-team.cc/api/member/getUserTorrentList"
+    ).mock(
+        side_effect=[
+            httpx.Response(
+                200,
+                json={
+                    "code": "0",
+                    "data": {
+                        "data": [
+                            {
+                                "discount": "FREE",
+                                "discountEndTime": "2099-01-01T00:00:00+00:00",
+                                "torrent": {
+                                    "id": 101,
+                                    "name": "Seeding One",
+                                    "size": 10 * 1024**3,
+                                    "status": {"seeders": 3, "leechers": 1},
+                                },
+                            }
+                        ],
+                        "totalPages": 2,
+                    },
+                },
+            ),
+            httpx.Response(
+                200,
+                json={
+                    "code": "0",
+                    "data": {
+                        "data": [
+                            {
+                                "torrent": {
+                                    "id": 102,
+                                    "name": "Seeding Two",
+                                    "size": 20 * 1024**3,
+                                    "discount": "FREE",
+                                    "discountEndTime": None,
+                                    "status": {"seeders": 4, "leechers": 2},
+                                }
+                            }
+                        ],
+                        "totalPages": 2,
+                    },
+                },
+            ),
+            httpx.Response(
+                200,
+                json={
+                    "code": "0",
+                    "data": {
+                        "data": [
+                            {
+                                "torrent": {
+                                    "id": 103,
+                                    "name": "Leeching One",
+                                    "size": 30 * 1024**3,
+                                    "discount": "NORMAL",
+                                    "status": {"seeders": 5, "leechers": 6},
+                                }
+                            }
+                        ],
+                        "totalPages": 1,
+                    },
+                },
+            ),
+            httpx.Response(
+                200,
+                json={
+                    "code": "0",
+                    "data": {
+                        "data": [
+                            {
+                                "torrent": {
+                                    "id": 104,
+                                    "name": "Stopped Incomplete",
+                                    "size": 40 * 1024**3,
+                                    "discount": "FREE",
+                                    "discountEndTime": "2099-01-01T00:00:00+00:00",
+                                    "status": {"seeders": 2, "leechers": 7},
+                                }
+                            }
+                        ],
+                        "totalPages": 1,
+                    },
+                },
+            ),
+        ]
+    )
+
+    request_starts = 0
+
+    def record_request() -> None:
+        nonlocal request_starts
+        request_starts += 1
+
+    snapshot = await MTeamApiClient(api_key="secret-api-key").fetch_user_torrent_snapshot(
+        site="mteam",
+        user_id=123456,
+        page_size=1,
+        on_request=record_request,
+    )
+
+    assert snapshot.requests_used == 4
+    assert request_starts == 4
+    assert snapshot.torrent_types == ("SEEDING", "LEECHING", "INCOMPLETE")
+    assert [candidate.title for candidate in snapshot.candidates] == [
+        "Seeding One",
+        "Seeding Two",
+        "Leeching One",
+        "Stopped Incomplete",
+    ]
+    assert snapshot.candidates[0].discount.value == "free"
+    assert snapshot.candidates[0].left_time_minutes is not None
+    assert snapshot.candidates[1].metadata["left_time_source"] == "mteam_api_unlimited"
+    assert snapshot.candidates[2].metadata["mteam_user_torrent_type"] == "LEECHING"
+    assert [
+        json.loads(call.request.content.decode("utf-8"))
+        for call in route.calls
+    ] == [
+        {
+            "userid": 123456,
+            "type": "SEEDING",
+            "pageNumber": 1,
+            "pageSize": 1,
+        },
+        {
+            "userid": 123456,
+            "type": "SEEDING",
+            "pageNumber": 2,
+            "pageSize": 1,
+        },
+        {
+            "userid": 123456,
+            "type": "LEECHING",
+            "pageNumber": 1,
+            "pageSize": 1,
+        },
+        {
+            "userid": 123456,
+            "type": "INCOMPLETE",
+            "pageNumber": 1,
+            "pageSize": 1,
+        },
+    ]
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_mteam_api_client_parses_production_shaped_incomplete_row() -> None:
+    payload = json.loads(
+        (Path(__file__).parent / "fixtures" / "mteam-user-torrent-list.json").read_text()
+    )
+    respx.post("https://api.m-team.cc/api/member/getUserTorrentList").mock(
+        return_value=httpx.Response(200, json=payload)
+    )
+
+    snapshot = await MTeamApiClient(api_key="secret-api-key").fetch_user_torrent_snapshot(
+        site="mteam",
+        user_id=123456,
+        torrent_types=("INCOMPLETE",),
+    )
+
+    assert snapshot.requests_used == 1
+    assert len(snapshot.candidates) == 1
+    candidate = snapshot.candidates[0]
+    assert candidate.title == "Sanitized Stopped Incomplete"
+    assert candidate.size_bytes == 50 * 1024**3
+    assert candidate.discount.value == "free"
+    assert candidate.seeders == 12
+    assert candidate.leechers == 34
+    assert candidate.metadata["mteam_torrent_id"] == "1234567"
+    assert candidate.metadata["mteam_user_torrent_type"] == "INCOMPLETE"
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_mteam_user_torrent_request_callback_runs_before_api_error() -> None:
+    respx.post("https://api.m-team.cc/api/member/getUserTorrentList").mock(
+        return_value=httpx.Response(
+            200,
+            json={"code": "1", "message": "請求過於頻繁", "data": None},
+        )
+    )
+    request_starts = 0
+
+    def record_request() -> None:
+        nonlocal request_starts
+        request_starts += 1
+
+    with pytest.raises(MTeamApiResponseError):
+        await MTeamApiClient(api_key="secret-api-key").fetch_user_torrent_snapshot(
+            site="mteam",
+            user_id=123456,
+            on_request=record_request,
+        )
+
+    assert request_starts == 1
+
+
+@pytest.mark.parametrize(
+    ("status_code", "response_content", "expected_code"),
+    [
+        (401, b'{"message":"Unauthorized"}', "401"),
+        (200, b"not-json", "invalid_response"),
+    ],
+)
+@pytest.mark.asyncio
+@respx.mock
+async def test_mteam_user_torrent_snapshot_normalizes_http_and_json_errors(
+    status_code: int,
+    response_content: bytes,
+    expected_code: str,
+) -> None:
+    respx.post("https://api.m-team.cc/api/member/getUserTorrentList").mock(
+        return_value=httpx.Response(
+            status_code,
+            content=response_content,
+            headers={"content-type": "application/json"},
+        )
+    )
+
+    with pytest.raises(MTeamApiResponseError) as exc_info:
+        await MTeamApiClient(api_key="secret-api-key").fetch_user_torrent_snapshot(
+            site="mteam",
+            user_id=123456,
+        )
+
+    assert exc_info.value.endpoint == "member/getUserTorrentList"
+    assert exc_info.value.code == expected_code
+    assert exc_info.value.status_code == status_code
 
 
 @respx.mock

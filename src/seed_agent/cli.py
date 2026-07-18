@@ -112,6 +112,7 @@ SCHEDULE_BACKOFF_FILE = "schedule-backoff.json"
 MTEAM_RATE_LIMIT_MARKERS = ("請求過於頻繁", "请求过于频繁")
 MTEAM_RATE_LIMIT_BACKOFF_HOURS = 24
 MTEAM_NETWORK_BACKOFF_MINUTES = 30
+MTEAM_BACKFILL_FALLBACK_REFRESH_HOURS = 6
 MTEAM_NETWORK_ERROR_TYPES = {
     "ConnectError",
     "ConnectTimeout",
@@ -1601,16 +1602,20 @@ def schedule_run(
                 )
                 payload["tracker_source_backfill"] = tracker_backfill_payload
                 if _tracker_source_backfill_has_rate_limit(tracker_backfill_payload):
+                    endpoint = _tracker_source_backfill_failure_endpoint(
+                        tracker_backfill_payload,
+                        status="rate_limited",
+                    )
                     payload["schedule_backoff"] = _record_schedule_rate_limit_backoff(
                         config,
-                        endpoint="torrent/search",
+                        endpoint=endpoint,
                         reason="mteam request too frequent",
                         run_id=run_id,
                     )
                     payload["skipped_by_backoff"] = True
                     store_for_run.record_tracker_api_event(
                         site="mteam",
-                        endpoint="torrent/search",
+                        endpoint=endpoint,
                         event="rate_limited",
                         run_id=run_id,
                         rate_limited=True,
@@ -1625,16 +1630,20 @@ def schedule_run(
                         payload={"schedule_backoff": payload["schedule_backoff"]},
                     )
                 elif _tracker_source_backfill_has_network_unavailable(tracker_backfill_payload):
+                    endpoint = _tracker_source_backfill_failure_endpoint(
+                        tracker_backfill_payload,
+                        status="unavailable",
+                    )
                     payload["schedule_backoff"] = _record_schedule_network_backoff(
                         config,
-                        endpoint="torrent/search",
+                        endpoint=endpoint,
                         reason="mteam api unavailable",
                         run_id=run_id,
                     )
                     payload["skipped_by_backoff"] = True
                     store_for_run.record_tracker_api_event(
                         site="mteam",
-                        endpoint="torrent/search",
+                        endpoint=endpoint,
                         event="unavailable",
                         run_id=run_id,
                         rate_limited=False,
@@ -3628,6 +3637,7 @@ def _tracker_source_backfill_payload(
         "remaining": max_api_requests,
         "used": 0,
     }
+    request_usage = {"batch": 0}
     results = _run(
         _backfill_tracker_sources(
             config,
@@ -3635,8 +3645,11 @@ def _tracker_source_backfill_payload(
             candidates,
             execute=execute,
             request_budget=request_budget,
+            request_usage=request_usage,
         )
     )
+    fallback_requests_used = int(request_budget["used"] or 0)
+    batch_requests_used = request_usage["batch"]
     return {
         "command": "tracker-source-backfill",
         "execute": execute,
@@ -3646,9 +3659,12 @@ def _tracker_source_backfill_payload(
         "missing_from_qb_reconciled": missing_reconciled,
         "candidate_reconciliation": candidate_reconciliation,
         "qbonly_candidates": len(candidates),
-        "api_requests_used": request_budget["used"],
+        "api_requests_used": batch_requests_used + fallback_requests_used,
+        "batch_api_requests_used": batch_requests_used,
+        "fallback_api_requests_used": fallback_requests_used,
         "api_requests_remaining": request_budget["remaining"],
         "max_api_requests": max_api_requests,
+        "fallback_max_api_requests": max_api_requests,
         "summary": _tracker_source_backfill_summary(results),
         "results": results,
     }
@@ -3720,6 +3736,95 @@ def _qb_only_unknown_free_risk(torrent: ManagedTorrent) -> int:
     return 0
 
 
+async def _mteam_user_torrent_batch_candidates(
+    config: SeedAgentConfig,
+    torrents: list[ManagedTorrent],
+    *,
+    request_usage: dict[str, int],
+) -> tuple[
+    dict[str, list[TorrentCandidate]],
+    dict[str, dict[str, str]],
+]:
+    site_user_ids: dict[str, tuple[Any, set[int]]] = {}
+    for torrent in torrents:
+        inferred = _infer_tracker_site(torrent)
+        if inferred is None:
+            continue
+        site = _configured_site_for_inferred_tracker(config, inferred)
+        if site is None or site.type != "mteam":
+            continue
+        user_id = _mteam_user_id_from_tracker(torrent)
+        if user_id is None:
+            continue
+        entry = site_user_ids.setdefault(site.name, (site, set()))
+        entry[1].add(user_id)
+
+    candidates_by_site: dict[str, list[TorrentCandidate]] = {}
+    errors_by_site: dict[str, dict[str, str]] = {}
+    for site_name, (site, user_ids) in site_user_ids.items():
+        api_key = _read_secret_ref(site.api_key_ref, config.config_dir)
+        if not api_key:
+            continue
+        client = MTeamApiClient(
+            api_key=api_key,
+            api_key_header=site.auth_header or "x-api-key",
+        )
+        site_candidates: dict[str, TorrentCandidate] = {}
+
+        def record_batch_request() -> None:
+            request_usage["batch"] += 1
+
+        try:
+            for user_id in sorted(user_ids):
+                snapshot = await client.fetch_user_torrent_snapshot(
+                    site=site_name,
+                    user_id=user_id,
+                    on_request=record_batch_request,
+                )
+                for candidate in snapshot.candidates:
+                    site_candidates[candidate.stable_id] = candidate
+        except MTeamApiResponseError as exc:
+            status = (
+                "rate_limited"
+                if exc.rate_limited
+                else "unavailable"
+                if exc.unavailable or exc.retriable
+                else "error"
+            )
+            errors_by_site[site_name] = {
+                "status": status,
+                "endpoint": exc.endpoint,
+                "reason": str(exc),
+            }
+        except (httpx.TimeoutException, httpx.NetworkError) as exc:
+            errors_by_site[site_name] = {
+                "status": "unavailable",
+                "endpoint": "member/getUserTorrentList",
+                "reason": type(exc).__name__,
+            }
+        candidates_by_site[site_name] = list(site_candidates.values())
+    return candidates_by_site, errors_by_site
+
+
+def _mteam_user_torrent_batch_match(
+    torrent: ManagedTorrent,
+    candidates: list[TorrentCandidate],
+) -> TorrentCandidate | None:
+    torrent_id = _mteam_torrent_id_from_tracker(torrent)
+    if torrent_id is not None:
+        return next(
+            (
+                candidate
+                for candidate in candidates
+                if str(candidate.metadata.get("mteam_torrent_id") or "") == torrent_id
+            ),
+            None,
+        )
+    matches = _matching_mteam_candidates(torrent, candidates)
+    unique = _unique_candidates(matches)
+    return unique[0] if len(unique) == 1 else None
+
+
 async def _backfill_tracker_sources(
     config: SeedAgentConfig,
     store: StateStore,
@@ -3727,18 +3832,15 @@ async def _backfill_tracker_sources(
     *,
     execute: bool,
     request_budget: dict[str, int | None],
+    request_usage: dict[str, int],
 ) -> list[dict[str, Any]]:
     results: list[dict[str, Any]] = []
+    batch_candidates, batch_errors = await _mteam_user_torrent_batch_candidates(
+        config,
+        torrents,
+        request_usage=request_usage,
+    )
     for torrent in torrents:
-        if _tracker_request_budget_exhausted(request_budget):
-            results.append(
-                _tracker_source_result(
-                    torrent,
-                    "skipped",
-                    reason="api request budget exhausted",
-                )
-            )
-            continue
         site_name = _infer_tracker_site(torrent)
         if site_name is None:
             results.append(_tracker_source_result(torrent, "skipped", reason="site unknown"))
@@ -3776,14 +3878,57 @@ async def _backfill_tracker_sources(
                 )
             )
             continue
-        match_result = await _find_mteam_match_for_torrent(
-            site_name=site.name,
-            site_mode=site.api_discovery.mode if site.api_discovery is not None else None,
-            api_key=api_key,
-            api_key_header=site.auth_header or "x-api-key",
-            torrent=torrent,
-            request_budget=request_budget,
+        batch_match = _mteam_user_torrent_batch_match(
+            torrent,
+            batch_candidates.get(site_name, []),
         )
+        batch_error = batch_errors.get(site_name)
+        if batch_match is not None:
+            match_result: dict[str, Any] = {
+                "status": "matched",
+                "candidate": batch_match,
+                "match": _candidate_match_summary(batch_match),
+            }
+        elif batch_error is not None:
+            results.append(
+                _tracker_source_result(
+                    torrent,
+                    str(batch_error["status"]),
+                    site=site_name,
+                    reason=batch_error["reason"],
+                    endpoint=batch_error["endpoint"],
+                )
+            )
+            continue
+        elif not _mteam_backfill_fallback_refresh_due(store, torrent):
+            results.append(
+                _tracker_source_result(
+                    torrent,
+                    "batch_miss_cached",
+                    site=site_name,
+                    reason="batch miss; detail/search fallback is cooling down",
+                )
+            )
+            continue
+        elif _tracker_request_budget_exhausted(request_budget):
+            results.append(
+                _tracker_source_result(
+                    torrent,
+                    "skipped",
+                    site=site_name,
+                    reason="fallback api request budget exhausted",
+                )
+            )
+            continue
+        else:
+            match_result = await _find_mteam_match_for_torrent(
+                site_name=site.name,
+                site_mode=site.api_discovery.mode if site.api_discovery is not None else None,
+                api_key=api_key,
+                api_key_header=site.auth_header or "x-api-key",
+                torrent=torrent,
+                request_budget=request_budget,
+            )
         result = _tracker_source_result(
             torrent,
             str(match_result["status"]),
@@ -3814,6 +3959,19 @@ async def _backfill_tracker_sources(
     return results
 
 
+def _mteam_backfill_fallback_refresh_due(
+    store: StateStore,
+    torrent: ManagedTorrent,
+    *,
+    now: datetime | None = None,
+) -> bool:
+    updated_at = _tracker_evidence_updated_at(store, torrent.hash)
+    if updated_at == datetime.min.replace(tzinfo=UTC):
+        return True
+    current = now or datetime.now(UTC)
+    return current - updated_at >= timedelta(hours=MTEAM_BACKFILL_FALLBACK_REFRESH_HOURS)
+
+
 def _tracker_source_result(
     torrent: ManagedTorrent,
     status: str,
@@ -3821,6 +3979,7 @@ def _tracker_source_result(
     site: str | None = None,
     reason: object = None,
     match: object = None,
+    endpoint: object = None,
 ) -> dict[str, Any]:
     result: dict[str, Any] = {
         "hash": torrent.hash,
@@ -3836,6 +3995,8 @@ def _tracker_source_result(
         result["reason"] = str(reason)
     if match is not None:
         result["match"] = match
+    if endpoint is not None:
+        result["endpoint"] = str(endpoint)
     return result
 
 
@@ -3877,13 +4038,27 @@ def _tracker_source_backfill_has_network_unavailable(payload: dict[str, Any]) ->
     return False
 
 
+def _tracker_source_backfill_failure_endpoint(
+    payload: dict[str, Any],
+    *,
+    status: str,
+) -> str:
+    for result in payload.get("results") or []:
+        if not isinstance(result, dict) or result.get("status") != status:
+            continue
+        endpoint = str(result.get("endpoint") or "").strip()
+        if endpoint:
+            return endpoint
+    return "torrent/search"
+
+
 def _tracker_source_backfill_unresolved_risk_hashes(payload: dict[str, Any]) -> set[str]:
     hashes: set[str] = set()
     for result in payload.get("results") or []:
         if not isinstance(result, dict) or not bool(result.get("incomplete")):
             continue
         status = str(result.get("status") or "")
-        if status in {"not_found", "ambiguous", "error"}:
+        if status in {"not_found", "ambiguous", "error", "batch_miss_cached"}:
             torrent_hash = str(result.get("hash") or "")
             if torrent_hash:
                 hashes.add(torrent_hash)
@@ -4149,10 +4324,35 @@ def _mteam_torrent_id_from_tracker(torrent: ManagedTorrent) -> str | None:
     return _mteam_torrent_id_from_query(decoded)
 
 
+def _mteam_user_id_from_tracker(torrent: ManagedTorrent) -> int | None:
+    tracker = str(torrent.metadata.get("tracker") or "").strip()
+    if not tracker:
+        return None
+    parsed = urlparse(tracker)
+    direct = _mteam_user_id_from_query(parsed.query)
+    if direct is not None:
+        return direct
+    params = dict(parse_qsl(parsed.query, keep_blank_values=True))
+    credential = params.get("credential")
+    if not credential:
+        return None
+    decoded = _decode_mteam_tracker_credential(credential)
+    if decoded is None:
+        return None
+    return _mteam_user_id_from_query(decoded)
+
+
 def _mteam_torrent_id_from_query(query: str) -> str | None:
     for key, value in parse_qsl(query, keep_blank_values=True):
         if key.lower() in {"tid", "id", "torrent_id", "torrentid"} and value.isdigit():
             return value
+    return None
+
+
+def _mteam_user_id_from_query(query: str) -> int | None:
+    for key, value in parse_qsl(query, keep_blank_values=True):
+        if key.lower() in {"uid", "userid", "user_id"} and value.isdigit():
+            return int(value)
     return None
 
 
@@ -4454,8 +4654,11 @@ def _tracker_source_backfill_payload_summary(
         "live_torrent_count": payload.get("live_torrent_count"),
         "qbonly_candidates": payload.get("qbonly_candidates"),
         "api_requests_used": payload.get("api_requests_used"),
+        "batch_api_requests_used": payload.get("batch_api_requests_used"),
+        "fallback_api_requests_used": payload.get("fallback_api_requests_used"),
         "api_requests_remaining": payload.get("api_requests_remaining"),
         "max_api_requests": payload.get("max_api_requests"),
+        "fallback_max_api_requests": payload.get("fallback_max_api_requests"),
         "summary": payload.get("summary"),
         "error": payload.get("error"),
     }

@@ -9,6 +9,7 @@ import threading
 import time
 import uuid
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import parse_qsl, urlparse
@@ -41,6 +42,13 @@ MTEAM_MIN_REQUEST_INTERVAL_ENV = "SEED_AGENT_MTEAM_MIN_REQUEST_INTERVAL_SECONDS"
 MTEAM_DEFAULT_MIN_REQUEST_INTERVAL_SECONDS = 1.25
 _MTEAM_REQUEST_LOCK = threading.Lock()
 _MTEAM_LAST_REQUEST_AT = 0.0
+
+
+@dataclass(frozen=True)
+class MTeamUserTorrentSnapshot:
+    candidates: tuple[TorrentCandidate, ...]
+    requests_used: int
+    torrent_types: tuple[str, ...]
 
 
 class MTeamApiResponseError(RuntimeError):
@@ -88,14 +96,33 @@ def is_mteam_rate_limit_message(message: str) -> bool:
 
 def _raise_for_mteam_http_status(response: httpx.Response, *, endpoint: str) -> None:
     status_code = response.status_code
-    if status_code == 429 or 500 <= status_code < 600:
+    if status_code >= 400:
         raise MTeamApiResponseError(
             endpoint=endpoint,
             code=str(status_code),
             message=_mteam_http_error_message(response),
             status_code=status_code,
         )
-    response.raise_for_status()
+
+
+def _mteam_json_object(response: httpx.Response, *, endpoint: str) -> dict[str, Any]:
+    try:
+        payload = response.json()
+    except ValueError as exc:
+        raise MTeamApiResponseError(
+            endpoint=endpoint,
+            code="invalid_response",
+            message="expected JSON object response",
+            status_code=response.status_code,
+        ) from exc
+    if not isinstance(payload, dict):
+        raise MTeamApiResponseError(
+            endpoint=endpoint,
+            code="invalid_response",
+            message="expected JSON object response",
+            status_code=response.status_code,
+        )
+    return payload
 
 
 def _mteam_http_error_message(response: httpx.Response) -> str:
@@ -239,13 +266,7 @@ class MTeamApiClient:
         )
         _raise_for_mteam_http_status(response, endpoint="torrent/search")
 
-        payload = response.json()
-        if not isinstance(payload, dict):
-            raise MTeamApiResponseError(
-                endpoint="torrent/search",
-                code="invalid_response",
-                message="expected object response",
-            )
+        payload = _mteam_json_object(response, endpoint="torrent/search")
         if str(payload.get("code")) != "0":
             raise MTeamApiResponseError(
                 endpoint="torrent/search",
@@ -296,13 +317,7 @@ class MTeamApiClient:
             )
             _raise_for_mteam_http_status(response, endpoint="torrent/detail")
 
-        payload = response.json()
-        if not isinstance(payload, dict):
-            raise MTeamApiResponseError(
-                endpoint="torrent/detail",
-                code="invalid_response",
-                message="expected object response",
-            )
+        payload = _mteam_json_object(response, endpoint="torrent/detail")
         code = str(payload.get("code"))
         if code != "0":
             message = str(payload.get("message") or "")
@@ -338,13 +353,7 @@ class MTeamApiClient:
             )
             _raise_for_mteam_http_status(response, endpoint="torrent/detail")
 
-        payload = response.json()
-        if not isinstance(payload, dict):
-            raise MTeamApiResponseError(
-                endpoint="torrent/detail",
-                code="invalid_response",
-                message="expected object response",
-            )
+        payload = _mteam_json_object(response, endpoint="torrent/detail")
         if str(payload.get("code")) != "0":
             raise MTeamApiResponseError(
                 endpoint="torrent/detail",
@@ -356,6 +365,95 @@ class MTeamApiClient:
             return None
         data["_auth_mode"] = "api_key"
         return data
+
+    async def fetch_user_torrent_snapshot(
+        self,
+        *,
+        site: str,
+        user_id: int,
+        torrent_types: tuple[str, ...] = ("SEEDING", "LEECHING", "INCOMPLETE"),
+        page_size: int = 200,
+        on_request: Callable[[], None] | None = None,
+    ) -> MTeamUserTorrentSnapshot:
+        if not self.api_key:
+            return MTeamUserTorrentSnapshot((), 0, torrent_types)
+
+        normalized_types = tuple(dict.fromkeys(item.strip().upper() for item in torrent_types))
+        page_size = min(max(int(page_size), 1), 200)
+        candidates: dict[str, TorrentCandidate] = {}
+        requests_used = 0
+        headers = {
+            "Accept": "application/json, text/plain, */*",
+            "Content-Type": "application/json",
+            "User-Agent": "Mozilla/5.0",
+            self.api_key_header: self.api_key,
+        }
+
+        async with httpx.AsyncClient(follow_redirects=True, timeout=self.timeout) as client:
+            for torrent_type in normalized_types:
+                page_number = 1
+                while True:
+                    await self._wait_for_request_slot()
+                    if on_request is not None:
+                        on_request()
+                    response = await client.post(
+                        f"{self.API_BASE_URL}/member/getUserTorrentList",
+                        headers=headers,
+                        json={
+                            "userid": user_id,
+                            "type": torrent_type,
+                            "pageNumber": page_number,
+                            "pageSize": page_size,
+                        },
+                    )
+                    requests_used += 1
+                    _raise_for_mteam_http_status(
+                        response,
+                        endpoint="member/getUserTorrentList",
+                    )
+                    payload = _mteam_json_object(
+                        response,
+                        endpoint="member/getUserTorrentList",
+                    )
+                    if str(payload.get("code")) != "0":
+                        raise MTeamApiResponseError(
+                            endpoint="member/getUserTorrentList",
+                            code=str(payload.get("code")),
+                            message=str(payload.get("message") or ""),
+                        )
+
+                    rows = _extract_search_rows(payload)
+                    for row in rows:
+                        candidate = await self._candidate_from_search_row(
+                            site,
+                            _normalize_user_torrent_row(row),
+                        )
+                        if candidate is None:
+                            continue
+                        metadata = {
+                            **candidate.metadata,
+                            "mteam_user_torrent_type": torrent_type,
+                            "backfill_match_source": "user_torrent_list",
+                        }
+                        candidates[candidate.stable_id] = candidate.model_copy(
+                            update={"metadata": metadata}
+                        )
+
+                    total_pages = _user_torrent_total_pages(payload)
+                    if total_pages is not None:
+                        if page_number >= total_pages:
+                            break
+                    elif len(rows) < page_size:
+                        break
+                    if page_number >= 1000:
+                        break
+                    page_number += 1
+
+        return MTeamUserTorrentSnapshot(
+            tuple(candidates.values()),
+            requests_used,
+            normalized_types,
+        )
 
     async def fetch_download_url(self, torrent_id: str) -> str | None:
         if not self.api_key:
@@ -377,13 +475,7 @@ class MTeamApiClient:
             )
             _raise_for_mteam_http_status(response, endpoint="torrent/genDlToken")
 
-        payload = response.json()
-        if not isinstance(payload, dict):
-            raise MTeamApiResponseError(
-                endpoint="torrent/genDlToken",
-                code="invalid_response",
-                message="expected object response",
-            )
+        payload = _mteam_json_object(response, endpoint="torrent/genDlToken")
         if str(payload.get("code")) != "0":
             raise MTeamApiResponseError(
                 endpoint="torrent/genDlToken",
@@ -853,6 +945,42 @@ def _extract_search_rows(payload: dict[str, Any]) -> list[dict[str, Any]]:
     if isinstance(nested, list):
         return [row for row in nested if isinstance(row, dict)]
     return []
+
+
+def _normalize_user_torrent_row(row: dict[str, Any]) -> dict[str, Any]:
+    torrent = row.get("torrent")
+    if not isinstance(torrent, dict):
+        return row
+
+    normalized = dict(row)
+    normalized.pop("torrent", None)
+    normalized.update(torrent)
+    for field in (
+        "discount",
+        "discountEndTime",
+        "discountEndDate",
+        "freeEndTime",
+        "freeEndDate",
+        "promotionEndTime",
+        "promotionEndDate",
+    ):
+        if field in row:
+            normalized[field] = row[field]
+    return normalized
+
+
+def _user_torrent_total_pages(payload: dict[str, Any]) -> int | None:
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        return None
+    total_pages = _coerce_int(data.get("totalPages"))
+    if total_pages is not None:
+        return max(total_pages, 0)
+    total = _coerce_int(data.get("total"))
+    page_size = _coerce_int(data.get("pageSize"))
+    if total is None or page_size is None or page_size <= 0:
+        return None
+    return (total + page_size - 1) // page_size
 
 
 def _row_meets_thresholds(row: dict[str, Any], options: MTeamApiDiscoveryOptions) -> bool:

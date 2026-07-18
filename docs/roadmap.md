@@ -184,9 +184,12 @@ by completion period, and unfinished work is ordered by current priority.
   - Terminal tracker-backfill misses for incomplete torrents are passed to prune
     as high-risk unknown-free evidence; network outages remain deferred instead
     of triggering blind deletion.
-  - Scheduled tracker backfill rotates all outstanding qB tasks by risk and
-    oldest evidence under a configurable per-cycle API budget (default 20).
-    The shared 1.25-second M-Team request pacer remains mandatory, and
+  - Scheduled tracker backfill batch-refreshes M-Team seeding, leeching, and
+    stopped incomplete rows and joins them to qB by tracker torrent ID. The
+    configurable API budget applies only to detail/search fallback for batch
+    misses, while fresh tracker evidence suppresses repeat fallback for six
+    hours without removing incomplete batch misses from the fail-closed cleanup
+    risk set. The shared 1.25-second request pacer remains mandatory, and
     rate-limit or network failures stop the rest of the cycle and activate
     scheduler protection.
   - Scheduled conservative cleanup keeps completed low-upload seeds unless space

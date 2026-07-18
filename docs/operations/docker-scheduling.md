@@ -47,10 +47,16 @@ do not reduce it on unattended deployments without a bounded live probe. The
 default adds headroom after production rejected the 51st continuous request at
 one-second spacing. Web and scheduler processes use independent limiters.
 
-Pacing alone does not protect longer tracker quota windows. Scheduled source
-backfill therefore also uses `scheduler.tracker_backfill_max_api_requests`,
-defaulting to `20` calls per cycle. Outstanding qB tasks remain eligible and
-rotate across later cycles by risk and oldest tracker evidence.
+Scheduled source backfill first pages through M-Team's
+`member/getUserTorrentList` endpoint for the account's seeding, leeching, and
+stopped incomplete torrents. One batch row refreshes promotion evidence without
+a per-torrent detail call. `scheduler.tracker_backfill_max_api_requests`
+defaults to `20` and only limits detail/search fallback for qB tasks absent from
+that batch snapshot; normal batch pagination does not consume the fallback
+budget. A batch miss with tracker evidence refreshed in the previous six hours
+also skips fallback, while batch matches continue to refresh every cycle.
+Incomplete tasks missing from the batch remain unknown-free cleanup risks during
+that cooldown; cached evidence does not make them safe to keep downloading.
 
 Both variables must be configured together. Existing DockerMan installations
 that predate these template fields and provide neither variable retain their

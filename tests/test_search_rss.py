@@ -177,7 +177,7 @@ async def test_rss_search_provider_supports_mteam_sparse_candidates() -> None:
           <link>https://kp.m-team.cc/detail/123456</link>
           <category>Movie/Blu-Ray</category>
           <enclosure
-            url="https://rss.m-team.cc/api/rss/dlv2?tid=123456&amp;uid=305694&amp;sign=redacted"
+            url="https://rss.m-team.cc/api/rss/dlv2?tid=123456&amp;uid=123456&amp;sign=redacted"
             type="application/x-bittorrent"
           />
         </item>
