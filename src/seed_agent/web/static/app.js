@@ -16,6 +16,17 @@ const state = {
       media_type: "all",
     },
   },
+  logs: {
+    entries: [],
+    error: null,
+    loading: true,
+    autoRefresh: true,
+    filters: {
+      source: "all",
+      level: "all",
+      query: "",
+    },
+  },
   configSections: {},
   sectionYamls: {},
   configYaml: "",
@@ -76,6 +87,7 @@ async function apiFetch(input, init = {}, retryUnauthorized = true) {
   if (response.status !== 401 || !retryUnauthorized) {
     return response;
   }
+  webTokenButton?.removeAttribute("hidden");
   if (!(await requestWebToken())) {
     return response;
   }
@@ -92,6 +104,7 @@ const copy = {
     },
     nav: {
       overview: "状态",
+      logs: "运行日志",
       tracker: "站点",
       download_client: "下载与分类",
       pt_filters: "PT 入队规则",
@@ -105,6 +118,8 @@ const copy = {
     },
     overviewTitle: "状态",
     overviewSubtitle: "本地只读状态：心跳、候选/意图数量和配置的容量池。",
+    logsTitle: "运行日志",
+    logsSubtitle: "查看持久化的调度、站点、想看搜索和审计事件。",
     trackerTitle: "站点",
     trackerSubtitle: "配置 PT 站点接入方式、认证文件和试运行检查。",
     addTracker: "添加站点",
@@ -145,6 +160,10 @@ const copy = {
       config_file: {
         title: "配置文件",
         description: "查看当前配置文件和各配置页对应的 YAML 区块。",
+      },
+      logs: {
+        title: "运行日志",
+        description: "查看持久化的调度、站点、想看搜索和审计事件；不需要 Docker socket。",
       },
     },
     ui: {
@@ -215,6 +234,18 @@ const copy = {
       invalidMapSuffix: "请使用 site=priority，例如 demo=10。",
       leechers: "下载",
       loading: "加载中",
+      logsAllLevels: "全部级别",
+      logsAllSources: "全部来源",
+      logsAutoRefresh: "自动刷新",
+      logsEmpty: "当前筛选条件下没有日志。",
+      logsFilter: "筛选日志",
+      logsRefresh: "刷新",
+      logsRefreshed: "最近刷新",
+      logsSearchPlaceholder: "搜索标题、消息、run ID…",
+      logsSourceAudit: "审计",
+      logsSourceScheduler: "调度",
+      logsSourceTracker: "站点",
+      logsSourceWant: "想看",
       loadingCandidates: "正在读取候选",
       localApiLoading: "正在读取本地只读 API。",
       lowerMatch: "低匹配，可强制",
@@ -319,7 +350,11 @@ const copy = {
       schedulerRunning: "正在执行",
       schedulerWaiting: "等待下一轮",
       schedulerUnavailable: "状态不可用",
+      schedulerNextCycle: "下一轮",
+      schedulerDue: "已到计划时间，等待 scheduler 唤醒",
+      schedulerQueuedImmediate: "已排队，将立即执行",
       schedulerTriggerNow: "立即执行一轮",
+      schedulerTriggerRequest: "立即执行请求",
       schedulerTriggering: "正在触发",
       schedulerTriggerQueued: "已触发，后台将立即执行",
       schedulerClearBackoff: "清除限流",
@@ -327,6 +362,11 @@ const copy = {
       schedulerBackoffCleared: "限流状态已清除",
       schedulerConfirmClearBackoff: "确认清除限流",
       schedulerClearBackoffConfirm: "确认清除当前 M-Team backoff？真实限流保护仍会保留。",
+      schedulerBackoffStatus: "限流状态",
+      schedulerBackoffActive: "已限流",
+      schedulerBackoffInactive: "未限流",
+      schedulerBackoffStarted: "限流开始",
+      schedulerBackoffEnds: "预计解除",
       trackerConfigMteam: "M-Team 配置",
       trackerConfigNexusphp: "NexusPHP 配置",
       trackerDryRun: "试运行预览",
@@ -371,6 +411,7 @@ const copy = {
     },
     nav: {
       overview: "Status",
+      logs: "Logs",
       tracker: "Tracker",
       download_client: "Download Client",
       pt_filters: "PT Intake Rules",
@@ -384,6 +425,8 @@ const copy = {
     },
     overviewTitle: "Status",
     overviewSubtitle: "Local read-only status: heartbeat, candidate/intent counts, and configured budget pools.",
+    logsTitle: "Logs",
+    logsSubtitle: "Review durable scheduler, tracker, Want search, and audit events.",
     trackerTitle: "Tracker",
     trackerSubtitle: "New users start empty. Click Add Tracker to create a tracker card.",
     addTracker: "Add Tracker",
@@ -424,6 +467,10 @@ const copy = {
       config_file: {
         title: "Config File",
         description: "Review the active config file and the YAML sections edited by each page.",
+      },
+      logs: {
+        title: "Logs",
+        description: "Review durable scheduler, tracker, Want search, and audit events without Docker socket access.",
       },
     },
     ui: {
@@ -494,6 +541,18 @@ const copy = {
       invalidMapSuffix: "Use site=priority, for example demo=10.",
       leechers: "leechers",
       loading: "Loading",
+      logsAllLevels: "All levels",
+      logsAllSources: "All sources",
+      logsAutoRefresh: "Auto refresh",
+      logsEmpty: "No logs match the current filters.",
+      logsFilter: "Filter logs",
+      logsRefresh: "Refresh",
+      logsRefreshed: "Last refreshed",
+      logsSearchPlaceholder: "Search title, message, or run ID…",
+      logsSourceAudit: "Audit",
+      logsSourceScheduler: "Scheduler",
+      logsSourceTracker: "Tracker",
+      logsSourceWant: "Want",
       loadingCandidates: "Loading candidates",
       localApiLoading: "Reading the local read-only API.",
       lowerMatch: "Lower match, force allowed",
@@ -598,7 +657,11 @@ const copy = {
       schedulerRunning: "Running",
       schedulerWaiting: "Waiting",
       schedulerUnavailable: "Unavailable",
+      schedulerNextCycle: "Next cycle",
+      schedulerDue: "Due; waiting for the scheduler to wake",
+      schedulerQueuedImmediate: "Queued to run immediately",
       schedulerTriggerNow: "Run one cycle now",
+      schedulerTriggerRequest: "Immediate run request",
       schedulerTriggering: "Triggering",
       schedulerTriggerQueued: "Triggered; the scheduler will run immediately",
       schedulerClearBackoff: "Clear backoff",
@@ -606,6 +669,11 @@ const copy = {
       schedulerBackoffCleared: "Backoff cleared",
       schedulerConfirmClearBackoff: "Confirm clear backoff",
       schedulerClearBackoffConfirm: "Clear the current M-Team backoff? Future rate-limit protection remains enabled.",
+      schedulerBackoffStatus: "Rate-limit state",
+      schedulerBackoffActive: "Rate limited",
+      schedulerBackoffInactive: "Not rate limited",
+      schedulerBackoffStarted: "Rate limit started",
+      schedulerBackoffEnds: "Expected release",
       trackerConfigMteam: "M-Team config",
       trackerConfigNexusphp: "NexusPHP config",
       trackerDryRun: "Dry-run preview",
@@ -1037,6 +1105,7 @@ const releasePreferencePresets = {
 
 const navigationSections = [
   "overview",
+  "logs",
   "wants",
   "tracker",
   "download_client",
@@ -1051,6 +1120,7 @@ const navigationSections = [
 
 const sectionGroupBySection = {
   overview: "operations",
+  logs: "operations",
   wants: "operations",
   tracker: "automation",
   download_client: "automation",
@@ -1164,6 +1234,15 @@ function switchSection(section) {
   });
   sectionSwitcher.value = section;
   renderSection();
+  if (section === "logs" && !state.logs.refreshedAt && !logsRefreshPending) {
+    logsRefreshPending = true;
+    loadLogs().finally(() => {
+      logsRefreshPending = false;
+      if (state.currentSection === "logs") {
+        renderSection();
+      }
+    });
+  }
 }
 
 function syncNavigationLabels() {
@@ -1264,6 +1343,24 @@ async function loadWants() {
   }
 }
 
+async function loadLogs() {
+  state.logs.loading = true;
+  try {
+    const response = await apiFetch("/api/logs");
+    if (!response.ok) {
+      throw new Error(`${uiText("requestFailedPrefix")}: ${response.status}`);
+    }
+    const payload = await response.json();
+    state.logs.entries = payload.entries || [];
+    state.logs.error = null;
+    state.logs.refreshedAt = new Date().toISOString();
+  } catch (error) {
+    state.logs.error = error.message;
+  } finally {
+    state.logs.loading = false;
+  }
+}
+
 async function loadInitialData() {
   await Promise.all([loadConfig(), loadOverview(), loadWants()]);
   renderSection();
@@ -1283,6 +1380,13 @@ function renderSection() {
     subtitle.textContent = copy[state.language].overviewSubtitle;
     addTrackerButton.hidden = true;
     trackerList.replaceChildren(renderOverviewPanel());
+    return;
+  }
+  if (state.currentSection === "logs") {
+    title.textContent = copy[state.language].logsTitle;
+    subtitle.textContent = copy[state.language].logsSubtitle;
+    addTrackerButton.hidden = true;
+    trackerList.replaceChildren(renderLogsPanel());
     return;
   }
   if (state.currentSection === "wants") {
@@ -1366,9 +1470,9 @@ function renderOverviewPanel() {
       <div class="section-title">${escapeHtml(uiText("dashboardAttention"))}</div>
       ${renderAttentionList(health, candidateStates, intentStates, budgetPools)}
     </article>
-    <article class="overview-detail-panel">
+    <article class="overview-detail-panel wide">
       <div class="section-title">${escapeHtml(uiText("opsDashboard"))}</div>
-      ${renderOpsSummary(ops)}
+      ${renderSchedulerOperations(ops)}
     </article>
     <article class="overview-detail-panel wide">
       <div class="section-title">${escapeHtml(uiText("runtimeProvenance"))}</div>
@@ -1389,7 +1493,36 @@ function renderOverviewPanel() {
     </article>
   `;
   panel.append(detailGrid);
+  panel.addEventListener("click", (event) => {
+    const schedulerButton = event.target?.closest?.("[data-scheduler-action]");
+    const schedulerAction = schedulerButton?.dataset?.schedulerAction;
+    if (schedulerAction) {
+      handleSchedulerAction(panel, schedulerAction, schedulerButton);
+    }
+  });
   return panel;
+}
+
+function renderSchedulerOperations(ops) {
+  const backoff = ops.schedule_backoff || {};
+  const phase = ops.scheduler_control?.phase || "unavailable";
+  const phaseLabel = phase === "running" ? uiText("schedulerRunning") : phase === "waiting" ? uiText("schedulerWaiting") : uiText("schedulerUnavailable");
+  return `
+    <div class="scheduler-operations">
+      <div class="scheduler-controls">
+        <div class="tracker-actions-group">
+          <button class="primary-button" type="button" data-scheduler-action="trigger" ${phase === "waiting" ? "" : "disabled"}>${escapeHtml(uiText("schedulerTriggerNow"))}</button>
+          <button class="secondary-button" type="button" data-scheduler-action="clear-backoff" ${backoff.active ? "" : "disabled"}>${escapeHtml(uiText("schedulerClearBackoff"))}</button>
+        </div>
+        <div class="status-list scheduler-state-list">
+          <div class="status-item info">${escapeHtml(uiText("schedulerPhase"))}: ${escapeHtml(phaseLabel)}</div>
+          <div class="status-item info">${escapeHtml(uiText("schedulerNextCycle"))}: <span data-scheduler-next-cycle>${escapeHtml(formatSchedulerNextCycle(ops))}</span></div>
+          <div data-scheduler-status></div>
+        </div>
+      </div>
+      ${renderOpsSummary(ops)}
+    </div>
+  `;
 }
 
 function renderOpsSummary(ops) {
@@ -1397,12 +1530,12 @@ function renderOpsSummary(ops) {
   const events = ops.tracker_api_events || [];
   const wantRuns = ops.want_search_runs || [];
   const backoff = ops.schedule_backoff || {};
-  const control = ops.scheduler_control || {};
   const pendingTrigger = ops.scheduler_trigger || null;
   const rows = [
-    [uiText("trackerBackoff"), backoff.active ? `${backoff.endpoint || "mteam"} · ${backoff.remaining_minutes ?? "?"}m` : uiText("inactive")],
-    [uiText("schedulerPhase"), control.phase === "running" ? uiText("schedulerRunning") : control.phase === "waiting" ? uiText("schedulerWaiting") : uiText("schedulerUnavailable")],
-    [uiText("schedulerTriggerNow"), pendingTrigger ? pendingTrigger.requested_at : uiText("inactive")],
+    [uiText("schedulerBackoffStatus"), backoff.active ? `${uiText("schedulerBackoffActive")} · ${backoff.endpoint || "mteam"}` : uiText("schedulerBackoffInactive")],
+    [uiText("schedulerBackoffStarted"), backoff.active && backoff.created_at ? `${formatRelativeTime(backoff.created_at)} · ${formatDateTime(backoff.created_at)}` : uiText("noData")],
+    [uiText("schedulerBackoffEnds"), backoff.active && backoff.until ? `${formatRemainingMinutes(backoff.remaining_minutes)} · ${formatDateTime(backoff.until)}` : uiText("noData")],
+    [uiText("schedulerTriggerRequest"), pendingTrigger ? formatDateTime(pendingTrigger.requested_at) : uiText("inactive")],
     [uiText("recentSchedulerRuns"), runs.length ? `${runs[0].status || "unknown"} · ${runs[0].run_id || ""}` : uiText("noData")],
     [uiText("trackerApiEvents"), events.length],
     [uiText("wantSearchRuns"), wantRuns.length ? `${wantRuns[0].status || "unknown"} · ${wantRuns[0].source || ""}` : uiText("noData")],
@@ -1421,6 +1554,56 @@ function renderOpsSummary(ops) {
         .join("")}
     </div>
   `;
+}
+
+function formatSchedulerNextCycle(ops) {
+  if (ops.scheduler_trigger) {
+    return uiText("schedulerQueuedImmediate");
+  }
+  if (ops.scheduler_control?.phase === "running") {
+    return uiText("schedulerRunning");
+  }
+  const latestRun = (ops.scheduler_runs || [])[0];
+  const startedAt = Date.parse(latestRun?.started_at || "");
+  const intervalMinutes = Number(latestRun?.interval_minutes);
+  if (!Number.isFinite(startedAt) || !Number.isFinite(intervalMinutes) || intervalMinutes <= 0) {
+    return uiText("schedulerUnavailable");
+  }
+  const nextRunAt = startedAt + intervalMinutes * 60_000;
+  const remainingMinutes = Math.ceil((nextRunAt - Date.now()) / 60_000);
+  if (remainingMinutes <= 0) {
+    return uiText("schedulerDue");
+  }
+  return `${formatRemainingMinutes(remainingMinutes)} · ${formatDateTime(new Date(nextRunAt).toISOString())}`;
+}
+
+function formatRemainingMinutes(value) {
+  const minutes = Math.max(Math.ceil(Number(value) || 0), 0);
+  if (minutes < 60) {
+    return state.language === "CN" ? `${minutes} 分钟后` : `in ${minutes} min`;
+  }
+  const hours = Math.ceil(minutes / 60);
+  if (hours < 48) {
+    return state.language === "CN" ? `${hours} 小时后` : `in ${hours} hr`;
+  }
+  const days = Math.ceil(hours / 24);
+  return state.language === "CN" ? `${days} 天后` : `in ${days} days`;
+}
+
+function formatRelativeTime(value) {
+  const elapsedMinutes = Math.max(Math.floor((Date.now() - Date.parse(value)) / 60_000), 0);
+  if (!Number.isFinite(elapsedMinutes) || elapsedMinutes < 1) {
+    return state.language === "CN" ? "刚刚" : "just now";
+  }
+  if (elapsedMinutes < 60) {
+    return state.language === "CN" ? `${elapsedMinutes} 分钟前` : `${elapsedMinutes} min ago`;
+  }
+  const hours = Math.floor(elapsedMinutes / 60);
+  if (hours < 48) {
+    return state.language === "CN" ? `${hours} 小时前` : `${hours} hr ago`;
+  }
+  const days = Math.floor(hours / 24);
+  return state.language === "CN" ? `${days} 天前` : `${days} days ago`;
 }
 
 function renderRuntimeProvenance(health, stateSummary) {
@@ -1547,6 +1730,155 @@ function formatHealthStatus(status) {
     missing_heartbeat: uiText("heartbeatMissingStatus"),
   };
   return labels[status] || status || uiText("unknown");
+}
+
+function renderLogsPanel() {
+  const panel = document.createElement("section");
+  panel.className = "logs-panel";
+  panel.innerHTML = `
+    <div class="logs-toolbar" aria-label="${escapeAttribute(uiText("logsFilter"))}">
+      <label class="field compact-field">
+        <span>${escapeHtml(uiText("provider"))}</span>
+        <select data-log-filter="source">
+          <option value="all">${escapeHtml(uiText("logsAllSources"))}</option>
+          ${["scheduler", "tracker", "want", "audit"].map((source) => `<option value="${source}" ${state.logs.filters.source === source ? "selected" : ""}>${escapeHtml(logSourceLabel(source))}</option>`).join("")}
+        </select>
+      </label>
+      <label class="field compact-field">
+        <span>${escapeHtml(uiText("status"))}</span>
+        <select data-log-filter="level">
+          <option value="all">${escapeHtml(uiText("logsAllLevels"))}</option>
+          ${["info", "warning", "error"].map((level) => `<option value="${level}" ${state.logs.filters.level === level ? "selected" : ""}>${escapeHtml(level)}</option>`).join("")}
+        </select>
+      </label>
+      <label class="field logs-search-field">
+        <span>${escapeHtml(uiText("search"))}</span>
+        <input type="search" data-log-filter="query" value="${escapeAttribute(state.logs.filters.query)}" placeholder="${escapeAttribute(uiText("logsSearchPlaceholder"))}" />
+      </label>
+      <div class="logs-toolbar-actions">
+        <label class="logs-auto-refresh">
+          <input type="checkbox" data-log-auto-refresh ${state.logs.autoRefresh ? "checked" : ""} />
+          <span>${escapeHtml(uiText("logsAutoRefresh"))}</span>
+        </label>
+        <button class="secondary-button" type="button" data-log-refresh>${escapeHtml(uiText("logsRefresh"))}</button>
+      </div>
+    </div>
+    <div class="logs-meta" data-logs-meta></div>
+    <div class="log-timeline" data-log-timeline></div>
+  `;
+  panel.addEventListener("change", (event) => {
+    const filter = event.target?.dataset?.logFilter;
+    if (filter) {
+      state.logs.filters[filter] = event.target.value;
+      updateLogEntries(panel);
+    }
+    if (event.target?.matches?.("[data-log-auto-refresh]")) {
+      state.logs.autoRefresh = event.target.checked;
+    }
+  });
+  panel.addEventListener("input", (event) => {
+    if (event.target?.dataset?.logFilter === "query") {
+      state.logs.filters.query = event.target.value;
+      updateLogEntries(panel);
+    }
+  });
+  panel.addEventListener("click", async (event) => {
+    const refreshButton = event.target?.closest?.("[data-log-refresh]");
+    if (!refreshButton) {
+      return;
+    }
+    if (logsRefreshPending) {
+      return;
+    }
+    refreshButton.disabled = true;
+    logsRefreshPending = true;
+    await loadLogs();
+    logsRefreshPending = false;
+    if (state.currentSection === "logs") {
+      renderSection();
+    }
+  });
+  updateLogEntries(panel);
+  return panel;
+}
+
+function updateLogEntries(panel) {
+  const timeline = panel.querySelector("[data-log-timeline]");
+  const meta = panel.querySelector("[data-logs-meta]");
+  if (state.logs.loading) {
+    timeline.innerHTML = `<div class="status-item info">${escapeHtml(uiText("loading"))}</div>`;
+    return;
+  }
+  if (state.logs.error) {
+    timeline.innerHTML = `<div class="status-item warning">${escapeHtml(state.logs.error)}</div>`;
+    return;
+  }
+  const query = state.logs.filters.query.trim().toLocaleLowerCase();
+  const entries = state.logs.entries.filter((entry) => {
+    if (state.logs.filters.source !== "all" && entry.source !== state.logs.filters.source) {
+      return false;
+    }
+    if (state.logs.filters.level !== "all" && entry.level !== state.logs.filters.level) {
+      return false;
+    }
+    if (!query) {
+      return true;
+    }
+    return [entry.title, entry.message, entry.run_id, entry.intent_id, entry.target_id]
+      .filter(Boolean)
+      .join(" ")
+      .toLocaleLowerCase()
+      .includes(query);
+  });
+  meta.textContent = `${entries.length} / ${state.logs.entries.length} · ${uiText("logsRefreshed")}: ${formatLogDateTime(state.logs.refreshedAt)}`;
+  if (!entries.length) {
+    timeline.innerHTML = `<div class="empty-state">${escapeHtml(uiText("logsEmpty"))}</div>`;
+    return;
+  }
+  timeline.innerHTML = entries.map(renderLogEntry).join("");
+}
+
+function renderLogEntry(entry) {
+  const identifiers = [entry.run_id, entry.intent_id, entry.target_id].filter(Boolean);
+  const status = entry.status_code ? `HTTP ${entry.status_code}` : "";
+  return `
+    <article class="log-entry ${escapeAttribute(entry.level || "info")}">
+      <div class="log-entry-marker" aria-hidden="true"></div>
+      <div class="log-entry-body">
+        <div class="log-entry-head">
+          <div class="log-entry-title">
+            <span class="badge">${escapeHtml(logSourceLabel(entry.source))}</span>
+            <strong>${escapeHtml(entry.title || uiText("noData"))}</strong>
+          </div>
+          <time datetime="${escapeAttribute(entry.timestamp || "")}">${escapeHtml(formatLogDateTime(entry.timestamp))}</time>
+        </div>
+        ${entry.message ? `<div class="log-entry-message">${escapeHtml(entry.message)}</div>` : ""}
+        ${identifiers.length || status ? `<div class="log-entry-context">${escapeHtml([status, ...identifiers].filter(Boolean).join(" · "))}</div>` : ""}
+      </div>
+    </article>
+  `;
+}
+
+function logSourceLabel(source) {
+  const labels = {
+    scheduler: uiText("logsSourceScheduler"),
+    tracker: uiText("logsSourceTracker"),
+    want: uiText("logsSourceWant"),
+    audit: uiText("logsSourceAudit"),
+  };
+  return labels[source] || source || uiText("unknown");
+}
+
+function formatLogDateTime(value) {
+  const date = new Date(value);
+  if (!value || Number.isNaN(date.getTime())) {
+    return value || "";
+  }
+  return date.toLocaleString(state.language === "CN" ? "zh-CN" : "en-GB", {
+    dateStyle: "short",
+    timeStyle: "medium",
+    hour12: false,
+  });
 }
 
 function formatStateCounts(counts) {
@@ -2759,6 +3091,26 @@ function setModalBusy(modal, busy) {
 syncNavigationLabels();
 loadInitialData();
 
+globalThis.setInterval(() => {
+  const nextCycle = document.querySelector("[data-scheduler-next-cycle]");
+  if (nextCycle && state.overview.ops) {
+    nextCycle.textContent = formatSchedulerNextCycle(state.overview.ops);
+  }
+}, 30_000);
+
+let logsRefreshPending = false;
+globalThis.setInterval(async () => {
+  if (state.currentSection !== "logs" || !state.logs.autoRefresh || logsRefreshPending) {
+    return;
+  }
+  logsRefreshPending = true;
+  await loadLogs();
+  logsRefreshPending = false;
+  if (state.currentSection === "logs") {
+    renderSection();
+  }
+}, 30_000);
+
 function setLanguage(language) {
   state.language = language;
   document.documentElement.lang = language === "CN" ? "zh-CN" : "en";
@@ -3075,7 +3427,6 @@ function renderSettingsPanel(section) {
       <span class="badge">${escapeHtml(configSourceLabel)}</span>
     </div>
     ${schedulerOverrideEntries.length ? `<div class="status-item warning">${escapeHtml(uiText("runtimeOverrides"))}: ${escapeHtml(schedulerOverrideEntries.map(([key, value]) => `${key}=${value}`).join(", "))}</div>` : ""}
-    ${section === "scheduler" ? renderSchedulerControls() : ""}
     <div class="field-grid">${fields}</div>
     ${section === "download_client" ? renderDownloaderStructuredEditor(sectionData) : ""}
     ${section === "release_preferences" ? renderSearchTagScoreEditor(sectionData) : ""}
@@ -3097,12 +3448,6 @@ function renderSettingsPanel(section) {
     </div>
   `;
   page.addEventListener("click", (event) => {
-    const schedulerButton = event.target?.closest?.("[data-scheduler-action]");
-    const schedulerAction = schedulerButton?.dataset?.schedulerAction;
-    if (schedulerAction) {
-      handleSchedulerAction(page, schedulerAction, schedulerButton);
-      return;
-    }
     const preset = event.target?.closest?.("[data-release-preset]")?.dataset?.releasePreset;
     if (preset && applyReleasePreferencePreset(page, preset)) {
       return;
@@ -3119,24 +3464,6 @@ function renderSettingsPanel(section) {
   page.addEventListener("input", () => resetSettingsPanelPreview(page));
   page.addEventListener("change", () => resetSettingsPanelPreview(page));
   return page;
-}
-
-function renderSchedulerControls() {
-  const ops = state.overview.ops || {};
-  const backoff = ops.schedule_backoff || {};
-  const phase = ops.scheduler_control?.phase || "unavailable";
-  const phaseLabel = phase === "running" ? uiText("schedulerRunning") : phase === "waiting" ? uiText("schedulerWaiting") : uiText("schedulerUnavailable");
-  return `
-    <div class="scheduler-controls">
-      <div class="tracker-actions-group">
-        <button class="primary-button" type="button" data-scheduler-action="trigger" ${phase === "waiting" ? "" : "disabled"}>${escapeHtml(uiText("schedulerTriggerNow"))}</button>
-        <button class="secondary-button" type="button" data-scheduler-action="clear-backoff" ${backoff.active ? "" : "disabled"}>${escapeHtml(uiText("schedulerClearBackoff"))}</button>
-      </div>
-      <div class="status-list" data-scheduler-status>
-        <div class="status-item info">${escapeHtml(uiText("schedulerPhase"))}: ${escapeHtml(phaseLabel)}</div>
-      </div>
-    </div>
-  `;
 }
 
 async function handleSchedulerAction(page, action, actionButton) {
@@ -3169,6 +3496,7 @@ async function handleSchedulerAction(page, action, actionButton) {
       status.innerHTML = `<div class="status-item ok">${escapeHtml(action === "trigger" ? uiText("schedulerTriggerQueued") : uiText("schedulerBackoffCleared"))}</div>`;
     }
     await loadOverview();
+    renderSection();
   } catch (error) {
     if (status) {
       status.innerHTML = `<div class="status-item warning">${escapeHtml(error.message)}</div>`;

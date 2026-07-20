@@ -25,6 +25,9 @@ Expose the operator-facing command surface and safe summaries.
   modal interactions for the local settings surface,
 - read-only web API endpoints for state summary, configured budget pools, and
   heartbeat health,
+- a read-only Web UI operations log that merges persisted scheduler phase,
+  tracker API, Want List search, and redacted audit events into a filterable
+  timeline without mounting the Docker socket or depending on container stdout,
 - web Want List endpoints for listing canonical Douban/IMDb wants, triggering
   search-only dry runs for current filters or a single item, reviewing saved
   release candidates, and explicitly enqueueing one release through the same

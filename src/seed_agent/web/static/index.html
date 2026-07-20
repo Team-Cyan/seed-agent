@@ -18,6 +18,7 @@
           <div class="nav-group" data-nav-group="operations">
             <div class="nav-group-label" data-nav-group-label="operations">运行</div>
             <button class="nav-item active" type="button" data-section="overview">状态</button>
+            <button class="nav-item" type="button" data-section="logs">运行日志</button>
             <button class="nav-item" type="button" data-section="wants">想看列表</button>
           </div>
           <div class="nav-group" data-nav-group="automation">
@@ -52,6 +53,7 @@
           <div class="header-actions">
             <select class="mobile-section-select" data-section-switcher aria-label="Settings section">
               <option value="overview">状态</option>
+              <option value="logs">运行日志</option>
               <option value="wants">想看列表</option>
               <option value="tracker">站点</option>
               <option value="download_client">下载与分类</option>
@@ -71,7 +73,7 @@
                 <button type="button" data-language-option="EN">EN</button>
               </div>
             </div>
-            <button class="icon-button" type="button" aria-label="Web API token" title="Web API token" data-web-token-button>
+            <button class="icon-button" type="button" aria-label="Web API token" title="Web API token" data-web-token-button hidden>
               K
             </button>
             <button class="icon-button theme-button" type="button" aria-label="Toggle theme" data-theme-button>

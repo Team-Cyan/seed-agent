@@ -11,9 +11,9 @@ operations.
 
 | Surface | Primary use | Risk level | Notes |
 | --- | --- | --- | --- |
-| Status and health | Read scheduler heartbeat, state summary, budget-pool config, and Want List state. | Read-only | Safe for routine checks. It reads mounted runtime files and may show stale or missing state when the container is pointed at the wrong workspace. |
-| Scheduler controls | Trigger one immediate cycle or clear the current M-Team backoff. | Controlled runtime mutation | Trigger requests are accepted only while the existing scheduler is waiting; an active cycle returns `409` instead of starting another process. Clearing backoff uses an inline confirmation and does not disable future rate-limit protection. |
-| Settings pages | Edit tracker, downloader, discovery, cleanup, acquisition, and Want List source settings. | Preview-first config mutation | Non-tracker sections show a before/after diff preview and validate the full config before saving. Secret values stay in local secret files or secret refs. |
+| Status and health | Read scheduler heartbeat, next-cycle timing, rate-limit history, state summary, budget-pool config, and Want List state. | Read-only plus explicit scheduler controls | The overview owns runtime status and the deliberate actions to trigger one cycle or clear the current M-Team backoff. Trigger requests are accepted only while the existing scheduler is waiting; clearing backoff uses an inline confirmation. |
+| Run logs | Filter and search scheduler phase, tracker API, Want List search, and redacted audit events. | Read-only | The timeline uses durable application evidence, survives process restarts, and does not require Docker socket access. Raw Docker/Unraid stdout remains available through the host's container log viewer. |
+| Settings pages | Edit tracker, downloader, scheduler, discovery, cleanup, acquisition, and Want List source settings. | Preview-first config mutation | The Scheduler page is configuration-only. Non-tracker sections show a before/after diff preview and validate the full config before saving. Secret values stay in local secret files or secret refs. |
 | Tracker actions | Validate a tracker draft, run site probe, or dry-run a tracker-local discovery preview. | Preview/read-only network access | These actions may call tracker APIs or RSS endpoints, but they must not enqueue to qBittorrent or clean up torrents. |
 | Want List refresh | Sync configured Douban/IMDb sources into local intent state. | Local state mutation | It may read public/export source data and update `.seed-agent/state.db`, but it does not contact qBittorrent. |
 | Want List search | Refresh configured sources, search/rank candidates for the current filters, and store release candidates. | Preview-first search | It may read runtime config, source state, and tracker/downloader-adjacent metadata needed for ranking. It does not add tasks to qBittorrent. |
@@ -29,10 +29,11 @@ every Web API `GET` and `POST` must include either:
 - `X-Seed-Agent-Token: <token>`
 - `Authorization: Bearer <token>`
 
-The built-in UI asks for the token and keeps it in page memory only. It is not
-written to local storage. External health checks must also send the token. Do
-not put it in committed config files; keep it in local env or the host's secret
-manager.
+The built-in UI keeps the token control hidden for unprotected deployments. If
+the server returns `401 Unauthorized`, the UI reveals the control, asks for the
+token, and keeps it in page memory only. It is not written to local storage.
+External health checks must also send the token. Do not put it in committed
+config files; keep it in local env or the host's secret manager.
 
 ## Config Concurrency And Secrets
 
@@ -55,8 +56,9 @@ Use the Web UI when the work is interactive and narrow:
 
 - reviewing scheduler health, state counts, budget-pool setup, and Want List
   status,
-- triggering one immediate scheduler cycle or clearing a verified-stale
-  M-Team backoff,
+- reviewing and filtering recent durable operational events in Run logs,
+- using the overview to trigger one immediate scheduler cycle or clear a
+  verified-stale M-Team backoff,
 - editing routine config sections and checking the diff before save,
 - adjusting Want List source configuration or media-type routing,
 - refreshing/searching a small filtered Want List set,
@@ -143,9 +145,9 @@ cases:
 
 - Keep qBittorrent mutations deliberate. Web UI search and candidate preview
   actions are not approval to enqueue or clean up.
-- Use the Scheduler page's immediate-run action instead of restarting the
-  container. It signals the current scheduler, rejects overlapping cycles, and
-  resets the next interval from the manual cycle start.
+- Use the overview's immediate-run action instead of restarting the container.
+  It signals the current scheduler, rejects overlapping cycles, and resets the
+  next interval from the manual cycle start.
 - Clear backoff only after a bounded tracker probe confirms the service is
   responding again. The 1.25-second M-Team request pacer and scheduled backfill
   API budget remain active.

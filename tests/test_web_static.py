@@ -24,8 +24,10 @@ def test_web_token_stays_in_memory_and_is_attached_to_api_requests() -> None:
     script = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
 
     assert "data-web-token-button" in html
+    assert "data-web-token-button hidden" in html
     assert "X-Seed-Agent-Token" in script
     assert "apiFetch" in script
+    assert 'webTokenButton?.removeAttribute("hidden")' in script
     assert "localStorage" not in script
     assert "sessionStorage" not in script
 
@@ -51,6 +53,7 @@ def test_index_contains_tracker_first_ui_anchors() -> None:
     assert "data-language-menu" in html
     assert "data-config-path" in html
     assert 'data-section="overview"' in html
+    assert 'data-section="logs"' in html
     assert 'data-section="download_client"' in html
     assert 'data-section="release_preferences"' in html
     assert 'data-section="want_sources"' not in html
@@ -78,6 +81,16 @@ def test_navigation_is_grouped_and_mobile_switchable() -> None:
     assert "switchSection" in script
     assert "syncNavigationLabels" in script
     assert ".mobile-section-select" in styles
+
+
+def test_overview_cards_and_dark_neutral_controls_share_theme_tokens() -> None:
+    styles = (STATIC_ROOT / "styles.css").read_text(encoding="utf-8")
+
+    assert "grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));" in styles
+    assert ".overview-summary-strip {\n  display: contents;" in styles
+    assert "--nav-active-bg: #2b312d;" in styles
+    assert "--neutral-bg: #2b312d;" in styles
+    assert "background: var(--neutral-bg);" in styles
 
 
 def test_tracker_actions_are_not_top_level_toolbar_items() -> None:
@@ -218,6 +231,25 @@ def test_overview_reads_and_renders_ops_dashboard() -> None:
     assert "recentSchedulerRuns" in script
     assert "tracker_api_events" in script
     assert "want_search_runs" in script
+
+
+def test_logs_page_reads_filters_and_refreshes_durable_timeline() -> None:
+    html = (STATIC_ROOT / "index.html").read_text(encoding="utf-8")
+    script = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
+    styles = (STATIC_ROOT / "styles.css").read_text(encoding="utf-8")
+
+    assert 'data-section="logs"' in html
+    assert '<option value="logs">' in html
+    assert 'apiFetch("/api/logs")' in script
+    assert "section === \"logs\" && !state.logs.refreshedAt" in script
+    assert "Promise.all([loadConfig(), loadOverview(), loadWants()])" in script
+    assert "renderLogsPanel" in script
+    assert 'data-log-filter="source"' in script
+    assert 'data-log-filter="level"' in script
+    assert "data-log-auto-refresh" in script
+    assert "logSourceLabel" in script
+    assert ".log-timeline" in styles
+    assert ".log-entry-body" in styles
 
 
 def test_mobile_header_and_want_empty_state_are_compact_and_actionable() -> None:
@@ -502,6 +534,12 @@ def test_scheduler_controls_are_single_process_and_inline_confirmed() -> None:
     assert "window.confirm" not in script
     assert '.toggleAttribute("disabled", phase !== "waiting")' in script
     assert ".scheduler-controls" in styles
+    assert "function renderSchedulerOperations(ops)" in script
+    assert "${renderSchedulerOperations(ops)}" in script
+    assert '${section === "scheduler" ? renderSchedulerControls() : ""}' not in script
+    assert "data-scheduler-next-cycle" in script
+    assert "formatSchedulerNextCycle" in script
+    assert "formatRelativeTime" in script
 
 
 def test_dashboard_attention_does_not_warn_for_review_required_items() -> None:

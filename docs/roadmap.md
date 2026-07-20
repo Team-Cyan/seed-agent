@@ -170,6 +170,13 @@ by completion period, and unfinished work is ordered by current priority.
     contribution/low-upload evidence, config status, and runtime doctor checks.
   - The Web UI overview includes an operations panel backed by `/api/ops` for
     recent scheduler, tracker, backoff, and Want List search state.
+  - The Web UI Run logs page merges persisted scheduler phase, tracker API,
+    Want List search, and redacted audit events into a searchable, filterable,
+    auto-refreshing timeline without Docker socket access.
+  - Scheduler runtime controls and timing now live in that overview operations
+    panel: current phase, next-cycle countdown, rate-limit start/end evidence,
+    immediate-cycle trigger, and backoff clearing. The Scheduler tab remains
+    configuration-only.
   - Prune payloads include structured cleanup evidence for action counts,
     low-upload large torrents, and representative delete samples.
   - Scheduled prune now runs before PT add, PT add can trigger an aggressive
@@ -255,6 +262,10 @@ by completion period, and unfinished work is ordered by current priority.
   - Web UI write/search/enqueue POST requests can be protected with optional
     `SEED_AGENT_WEB_TOKEN`; local trusted deployments remain unchanged when it
     is unset.
+  - Unprotected Web UI deployments keep the optional token control hidden until
+    a server actually returns `401`; desktop status cards use a compact adaptive
+    grid, and dark-mode neutral controls use the same theme palette as their
+    surrounding panels.
   - Compose, Unraid DockerMan, and operator docs now expose the optional Web
     write token and the disk reserve setting.
   - A provider-kernel roadmap spec captures later autobrr/Prowlarr/cross-seed

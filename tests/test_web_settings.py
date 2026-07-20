@@ -13,7 +13,9 @@ import pytest
 import yaml
 
 from seed_agent.actions.intent import ingest_events
+from seed_agent.audit import AuditLogger
 from seed_agent.models import (
+    Decision,
     Discount,
     IntentKind,
     IntentSource,
@@ -354,6 +356,58 @@ def test_http_ops_payload_exposes_scheduler_and_tracker_state(tmp_path: Path) ->
     assert payload["scheduler_runs"][0]["run_id"] == "sched-web"
     assert payload["tracker_api_events"][0]["site"] == "mteam"
     assert payload["want_search_runs"][0]["intent_id"] == "intent-web"
+
+
+def test_http_logs_merges_durable_events_and_redacts_secrets(tmp_path: Path) -> None:
+    config_path = _write_minimal_config(tmp_path)
+    store = StateStore(tmp_path / ".seed-agent" / "state.db")
+    now = datetime.now(UTC)
+    store.record_scheduler_event(
+        run_id="sched-log",
+        phase="discover",
+        event="started",
+        message="discovery started",
+        created_at=now - timedelta(seconds=3),
+    )
+    store.record_tracker_api_event(
+        site="mteam",
+        endpoint="torrent/search",
+        event="rate_limited",
+        rate_limited=True,
+        message="passkey=secret-pass",
+        created_at=now - timedelta(seconds=2),
+    )
+    store.record_want_search_run(
+        intent_id="intent-log",
+        source="web",
+        status="searched",
+        search_enabled=True,
+        results_count=3,
+        searched_at=now - timedelta(seconds=1),
+    )
+    AuditLogger(tmp_path / ".seed-agent" / "audit.jsonl").write(
+        Decision(
+            action="qb.enqueue",
+            target_id="torrent-log",
+            execute=False,
+            reason="preview",
+            created_at=now,
+        )
+    )
+
+    with _running_server(config_path) as base_url:
+        payload = _request_json(base_url, "GET", "/api/logs")
+
+    assert [entry["source"] for entry in payload["entries"]] == [
+        "audit",
+        "want",
+        "tracker",
+        "scheduler",
+    ]
+    assert payload["entries"][2]["level"] == "warning"
+    assert "secret-pass" not in json.dumps(payload)
+    assert "<redacted>" in json.dumps(payload)
+    assert payload["sources"] == ["scheduler", "tracker", "want", "audit"]
 
 
 def test_http_scheduler_trigger_rejects_running_cycle_and_queues_waiting_cycle(

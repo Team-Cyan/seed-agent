@@ -4,6 +4,29 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.19.0 - 2026-07-20
+
+### Added
+
+- Added a read-only Web UI Run logs page that merges persisted scheduler phase,
+  tracker API, Want List search, and redacted audit events into one searchable,
+  filterable timeline with manual and automatic refresh.
+
+### Changed
+
+- Moved immediate-cycle, next-cycle, and tracker-backoff runtime controls and
+  timing evidence from the Scheduler configuration page to the overview.
+- Rebalanced the desktop overview cards so heartbeat and state summaries do not
+  dominate wide layouts, and completed dark-mode token coverage for neutral
+  controls, active navigation, badges, help controls, and status messages.
+
+### Fixed
+
+- Hide the optional Web API token control on unprotected deployments and reveal
+  it only after a `401 Unauthorized` response requires operator input.
+- Keep Run logs lazy-loaded until the operator opens the page, avoiding extra
+  audit and SQLite reads during ordinary overview startup.
+
 ## 0.18.13 - 2026-07-18
 
 ### Fixed

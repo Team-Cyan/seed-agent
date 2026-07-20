@@ -129,6 +129,9 @@ def make_handler(config_path: Path) -> type[BaseHTTPRequestHandler]:
             if self.path == "/api/ops":
                 self._send_json(_ops_payload(root))
                 return
+            if urlparse(self.path).path == "/api/logs":
+                self._send_json(_logs_payload(root))
+                return
             if self.path == "/":
                 self._send_static("index.html")
                 return
@@ -1457,6 +1460,99 @@ def _ops_payload(root: Path) -> dict[str, Any]:
         }
     )
     return payload
+
+
+def _logs_payload(root: Path, limit: int = 200) -> dict[str, Any]:
+    """Return one redacted, durable operations timeline for the Web UI.
+
+    Container stdout remains owned by Docker/Unraid. This endpoint intentionally
+    uses the application's persisted scheduler, tracker, Want List, and audit
+    evidence instead of requiring access to the Docker socket.
+    """
+    bounded_limit = min(max(limit, 1), 500)
+    entries: list[dict[str, Any]] = []
+    state_path = _state_db_path(root)
+    if state_path.exists():
+        store = StateStore(state_path)
+        entries.extend(
+            _scheduler_log_entry(row)
+            for row in store.list_scheduler_run_events(limit=bounded_limit)
+        )
+        entries.extend(
+            _tracker_log_entry(row)
+            for row in store.list_tracker_api_events(limit=bounded_limit)
+        )
+        entries.extend(
+            _want_search_log_entry(row)
+            for row in store.list_want_search_runs(limit=bounded_limit)
+        )
+    entries.extend(_audit_log_entry(row) for row in _audit_tail(root, limit=bounded_limit))
+    entries.sort(key=lambda row: str(row.get("timestamp") or ""), reverse=True)
+    return {
+        **_runtime_provenance(root),
+        "entries": redact_payload(entries[:bounded_limit]),
+        "limit": bounded_limit,
+        "sources": ["scheduler", "tracker", "want", "audit"],
+    }
+
+
+def _scheduler_log_entry(row: dict[str, Any]) -> dict[str, Any]:
+    event = str(row.get("event") or "event")
+    level = "error" if "fail" in event or "error" in event else "info"
+    return {
+        "timestamp": row.get("created_at"),
+        "source": "scheduler",
+        "level": level,
+        "title": f"{row.get('phase') or 'scheduler'} · {event}",
+        "message": row.get("message") or "",
+        "run_id": row.get("run_id"),
+    }
+
+
+def _tracker_log_entry(row: dict[str, Any]) -> dict[str, Any]:
+    event = str(row.get("event") or "event")
+    status_code = row.get("status_code")
+    is_warning = bool(row.get("rate_limited")) or (
+        isinstance(status_code, int) and status_code >= 400
+    )
+    return {
+        "timestamp": row.get("created_at"),
+        "source": "tracker",
+        "level": "warning" if is_warning else "info",
+        "title": f"{row.get('site') or 'tracker'} · {event}",
+        "message": row.get("message") or row.get("endpoint") or "",
+        "run_id": row.get("run_id"),
+        "status_code": status_code,
+    }
+
+
+def _want_search_log_entry(row: dict[str, Any]) -> dict[str, Any]:
+    status = str(row.get("status") or "unknown")
+    level = "error" if status in {"failed", "error"} else "info"
+    return {
+        "timestamp": row.get("searched_at"),
+        "source": "want",
+        "level": level,
+        "title": f"{row.get('source') or 'want'} · {status}",
+        "message": row.get("message") or f"{row.get('results_count') or 0} results",
+        "run_id": row.get("run_id"),
+        "intent_id": row.get("intent_id"),
+    }
+
+
+def _audit_log_entry(row: dict[str, Any]) -> dict[str, Any]:
+    action = str(row.get("action") or "audit")
+    executed = bool(row.get("execute"))
+    level = "warning" if "fail" in action or "delete" in action else "info"
+    return {
+        "timestamp": row.get("created_at"),
+        "source": "audit",
+        "level": level,
+        "title": action,
+        "message": row.get("reason") or "",
+        "target_id": row.get("target_id"),
+        "executed": executed,
+    }
 
 
 def _scheduler_trigger_payload(root: Path) -> tuple[dict[str, Any], HTTPStatus]:
