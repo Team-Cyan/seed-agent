@@ -4,6 +4,25 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.19.1 - 2026-07-23
+
+### Changed
+
+- Rebalanced default Want List quality preferences so 1080p, Blu-ray, UHD
+  Blu-ray, TrueHD, and DTS-HD MA no longer overpower preferred WEB-DL, 2160p,
+  Dolby Vision, DDP, and Atmos candidates.
+- Removed the implicit default 1080p resolution requirement; explicitly
+  requested resolutions still receive the existing match bonus and missing
+  resolution risk.
+
+### Fixed
+
+- Preserve release ranking scores above 100 so strong candidates remain
+  distinguishable, while keeping confidence bounded for existing confirmation
+  and auto-enqueue thresholds.
+- Compare uncapped score differences when detecting ambiguous top candidates
+  instead of treating every score above 100 as tied at maximum confidence.
+
 ## 0.19.0 - 2026-07-20
 
 ### Added

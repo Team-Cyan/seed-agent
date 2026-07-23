@@ -407,7 +407,7 @@ class IntentConfig(BaseModel):
     confirmation_threshold: float = 0.82
     auto_enqueue_threshold: float = 0.94
     ambiguity_gap: float = 0.08
-    default_resolution: str | None = "1080p"
+    default_resolution: str | None = None
     series_search_mode: Literal["season", "episode"] = "season"
     preferred_languages: list[str] = Field(default_factory=lambda: ["zh", "en"])
     inbox_ref: str = "local/inbox/intents.jsonl"

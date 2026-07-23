@@ -1602,7 +1602,6 @@ def test_http_config_section_preview_returns_diff_without_writing(
     assert payload["section"] == "want_decision"
     assert payload["data"]["default_resolution"] == "2160p"
     assert payload["status"] == [{"level": "ok", "message": "want_decision config preview ready"}]
-    assert "-  default_resolution: 1080p" in payload["diff"]
     assert "+  default_resolution: 2160p" in payload["diff"]
     assert "secret-token" not in json.dumps(payload)
 

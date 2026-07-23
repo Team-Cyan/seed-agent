@@ -146,7 +146,7 @@ want_decision:
   confirmation_threshold: 0.82
   auto_enqueue_threshold: 0.94
   ambiguity_gap: 0.08
-  default_resolution: 1080p
+  default_resolution: null
   # For TV/anime episode intents, "season" searches and ranks full-season packs;
   # use "episode" when the operator prefers one episode at a time.
   series_search_mode: season
@@ -163,10 +163,19 @@ release_preferences:
   # Intent search quality preferences. Values are integer score adjustments
   # for canonical tag groups; aliases in the same group count once.
   quality_tag_scores:
-    remux: 20
-    dolby_vision: 15
-    hdr10_plus: 10
-    webdl: -10
+    webdl: 8
+    remux: 0
+    bluray: -15
+    uhd_bluray: -10
+    dolby_vision: 12
+    hdr10: 5
+    hdr10_plus: -5
+    2160p: 8
+    1080p: -12
+    ddp: 8
+    atmos: 5
+    truehd: -12
+    dts_hd_ma: -12
 scheduler:
   interval_minutes: 60
   # qB-only hard-cap and broken-download check between full tracker cycles.

@@ -31,9 +31,10 @@ def rank_releases(
     )
     if not ordered:
         return []
-    top_score = ordered[0].confidence
+    top_score = ordered[0].score
+    ambiguity_gap = round(intent_config.ambiguity_gap * 100)
     for index, ranked in enumerate(ordered):
-        close_to_top = index > 0 and top_score - ranked.confidence <= intent_config.ambiguity_gap
+        close_to_top = index > 0 and top_score - ranked.score <= ambiguity_gap
         confirmation_required = ranked.confirmation_required or close_to_top
         if close_to_top and "close to top candidate" not in ranked.risks:
             ranked = ranked.model_copy(
@@ -45,7 +46,7 @@ def rank_releases(
             ordered[index] = ranked
     if (
         len(ordered) > 1
-        and ordered[0].confidence - ordered[1].confidence <= intent_config.ambiguity_gap
+        and ordered[0].score - ordered[1].score <= ambiguity_gap
     ):
         ordered[0] = ordered[0].model_copy(
             update={
@@ -126,8 +127,8 @@ def _rank_one(
         risks.append("H&R risk")
         score -= 20
 
-    score = max(0, min(score, 100))
-    confidence = round(score / 100, 4)
+    score = max(0, score)
+    confidence = round(min(score, 100) / 100, 4)
     accepted = confidence >= intent_config.confirmation_threshold and not risks
     confirmation_required = confidence < intent_config.auto_enqueue_threshold or bool(risks)
 

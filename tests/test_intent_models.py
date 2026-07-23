@@ -90,6 +90,18 @@ def test_ranked_release_validates_score_and_confidence_ranges() -> None:
     assert ranked.release.discount == Discount.FREE
     assert ranked.accepted is True
 
+    uncapped = RankedRelease(
+        intent_id="cli:uncapped",
+        release=release,
+        score=127,
+        confidence=1.0,
+        accepted=True,
+        confirmation_required=False,
+        reasons=[],
+        risks=[],
+    )
+    assert uncapped.score == 127
+
     with pytest.raises(ValidationError):
         RankedRelease(
             intent_id="cli:bad",

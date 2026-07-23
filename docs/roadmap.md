@@ -238,6 +238,7 @@ by completion period, and unfinished work is ordered by current priority.
   - Downloader status now exposes qB free disk headroom, and enqueue-like flows
     pause accepted candidates when existing incomplete downloads already exceed
     downloader-reported available disk.
+
   - `headroom-report` now projects accepted candidates against both logical
     budget pools and downloader free disk headroom.
   - qB-only live torrents can now be backfilled to tracker source evidence with
@@ -270,6 +271,15 @@ by completion period, and unfinished work is ordered by current priority.
     write token and the disk reserve setting.
   - A provider-kernel roadmap spec captures later autobrr/Prowlarr/cross-seed
     lessons without expanding current scope into a broad plugin framework.
+
+- Completed 2026-07 - Want List score calibration
+  - Release scores are no longer capped at 100, preserving useful ordering for
+    candidates whose base match and quality preferences exceed that value.
+  - Ambiguity uses the uncapped score gap while confidence remains bounded for
+    the existing confirmation and auto-enqueue thresholds.
+  - Default release preferences no longer grant an implicit 1080p match bonus;
+    smaller WEB-DL, Dolby Vision, DDP, and Atmos bonuses are balanced by stronger
+    Blu-ray, UHD Blu-ray, 1080p, TrueHD, and DTS-HD MA penalties.
 
 - Completed 2026-07 - Runtime hardening refinement
   - Deterministic fake downloader/provider integration runs a complete local

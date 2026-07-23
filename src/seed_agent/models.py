@@ -209,7 +209,7 @@ class RankedRelease(BaseModel):
 
     intent_id: str = Field(min_length=1)
     release: ReleaseCandidate
-    score: int = Field(ge=0, le=100)
+    score: int = Field(ge=0)
     confidence: float = Field(ge=0, le=1)
     accepted: bool
     confirmation_required: bool

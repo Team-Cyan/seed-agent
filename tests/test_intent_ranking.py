@@ -195,6 +195,54 @@ def test_rank_releases_applies_quality_tag_scores_once_per_group() -> None:
     assert ranked[0].reasons.count("quality tag score -10: WEB-DL") == 1
 
 
+def test_rank_releases_preserves_score_above_100() -> None:
+    ranked = rank_releases(
+        _intent(),
+        [_release(title="Inception 2010 1080p WEB-DL Dolby Vision Atmos DDP")],
+        _intent_config(),
+        _search_config(
+            quality_tag_scores={
+                "webdl": 8,
+                "dolby_vision": 12,
+                "atmos": 5,
+                "ddp": 8,
+            }
+        ),
+    )
+
+    assert ranked[0].score == 133
+    assert ranked[0].confidence == 1.0
+
+
+def test_rank_releases_uses_raw_score_for_ambiguity_gap() -> None:
+    ranked = rank_releases(
+        _intent(),
+        [
+            _release(
+                release_id="demo:https://tracker.example/details.php?id=high",
+                title="Inception 2010 1080p WEB-DL Dolby Vision Atmos DDP",
+            ),
+            _release(
+                release_id="demo:https://tracker.example/details.php?id=lower",
+                title="Inception 2010 1080p WEB-DL DDP",
+            ),
+        ],
+        _intent_config(),
+        _search_config(
+            quality_tag_scores={
+                "webdl": 8,
+                "dolby_vision": 12,
+                "atmos": 5,
+                "ddp": 8,
+            }
+        ),
+    )
+
+    assert [item.score for item in ranked] == [133, 116]
+    assert "ambiguous top candidates" not in ranked[0].risks
+    assert "close to top candidate" not in ranked[1].risks
+
+
 def test_rank_releases_reads_quality_tags_from_mteam_metadata() -> None:
     ranked = rank_releases(
         _intent(resolution=None),

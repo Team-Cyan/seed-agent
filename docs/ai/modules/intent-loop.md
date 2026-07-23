@@ -48,6 +48,9 @@ Convert human requests into search/rank/reject/enqueue workflows.
   slot, amount-left, and disk-reserve gates before enqueue. Reserve each
   accepted candidate in the same batch so later candidates cannot reuse its
   projected headroom,
+- keep the operator-facing release score uncapped so strong candidates remain
+  distinguishable above 100. Confidence and configured acceptance thresholds
+  stay bounded to `0..1`, while ambiguity compares the uncapped score gap,
 - use the durable enqueue claim keyed by intent and release so concurrent Web,
   CLI, or scheduler workers cannot add the same release twice,
 - do not entangle source ingestion with downloader logic.
