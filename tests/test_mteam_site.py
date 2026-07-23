@@ -63,10 +63,10 @@ def test_mteam_request_interval_defaults_to_rate_safe_value(monkeypatch) -> None
     from seed_agent.sites import mteam
 
     monkeypatch.delenv(mteam.MTEAM_MIN_REQUEST_INTERVAL_ENV, raising=False)
-    assert mteam._mteam_min_request_interval_seconds() == 1.25
+    assert mteam._mteam_min_request_interval_seconds() == 5.0
 
     monkeypatch.setenv(mteam.MTEAM_MIN_REQUEST_INTERVAL_ENV, "invalid")
-    assert mteam._mteam_min_request_interval_seconds() == 1.25
+    assert mteam._mteam_min_request_interval_seconds() == 5.0
 
 
 def _candidate(**overrides: object) -> TorrentCandidate:

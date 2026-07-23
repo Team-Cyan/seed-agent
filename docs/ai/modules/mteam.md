@@ -53,10 +53,11 @@ Current fallback still present in code:
 - Do not reintroduce browser-login assumptions into the main flow.
 - Treat M-Team API key as the long-term preferred authenticated path.
 - All M-Team API clients within one process share a request-start interval. The
-  default is 1.25 seconds after production rejected the 51st continuous request
-  at one-second spacing, and can be tuned with
-  `SEED_AGENT_MTEAM_MIN_REQUEST_INTERVAL_SECONDS`; keep it conservative. Web
-  and scheduler processes intentionally maintain separate limiters.
+  default is 5 seconds after production rate-limited a short
+  `member/getUserTorrentList` pagination burst at 1.25-second spacing, and can
+  be tuned with `SEED_AGENT_MTEAM_MIN_REQUEST_INTERVAL_SECONDS`; keep it
+  conservative. Web and scheduler processes intentionally maintain separate
+  limiters.
 - Scheduler source backfill pages `member/getUserTorrentList` for `SEEDING`,
   `LEECHING`, and `INCOMPLETE` first, then joins rows to qB by tracker torrent
   ID. The configured backfill API budget only bounds detail/search fallback for

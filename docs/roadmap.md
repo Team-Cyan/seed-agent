@@ -196,7 +196,7 @@ by completion period, and unfinished work is ordered by current priority.
     configurable API budget applies only to detail/search fallback for batch
     misses, while fresh tracker evidence suppresses repeat fallback for six
     hours without removing incomplete batch misses from the fail-closed cleanup
-    risk set. The shared 1.25-second request pacer remains mandatory, and
+    risk set. The shared 5-second request pacer remains mandatory, and
     rate-limit or network failures stop the rest of the cycle and activate
     scheduler protection.
   - Scheduled conservative cleanup keeps completed low-upload seeds unless space
@@ -313,10 +313,10 @@ by completion period, and unfinished work is ordered by current priority.
   - M-Team timezone-naive promotion timestamps are interpreted as
     `Asia/Shanghai`, and qB rows retain candidate evidence through tracker-ID
     reconciliation even when their content-root names differ.
-  - Search, detail, and token API calls share a per-process 1.25-second minimum
-    request interval after production rejected the 51st continuous request at
-    one-second spacing; Web and scheduler processes remain independently
-    limited.
+  - Search, detail, and token API calls share a per-process 5-second minimum
+    request interval after production rate-limited a short
+    `member/getUserTorrentList` pagination burst at 1.25-second spacing; Web and
+    scheduler processes remain independently limited.
   - DockerMan and Compose no longer duplicate scheduler policy as environment
     overrides; YAML/Web UI is the deployment source of truth for those fields.
 
@@ -337,9 +337,10 @@ by completion period, and unfinished work is ordered by current priority.
     candidates do not consume capacity needed by a later candidate that fits.
   - M-Team clients propagate structured throttle/service errors, stop pagination
     from raw page exhaustion, clear stale promotion expiry evidence, and keep a
-    shared 1.25-second per-process request pacer. Scheduled source backfill also
-    has a 20-request default budget because pacing alone does not bound
-    longer-window cumulative quotas.
+    shared 5-second per-process request pacer. Scheduled source backfill's
+    detail/search fallback also has a 20-request default budget because pacing
+    alone does not bound longer-window cumulative quotas; batch snapshot
+    pagination is paced but does not consume that fallback budget.
   - Web config writes use revisions and preserve explicit nulls and hidden
     fields. API responses redact credentials, secret refs stay within runtime
     `local/secrets`, tracker drafts cannot reuse unrelated credentials, and an

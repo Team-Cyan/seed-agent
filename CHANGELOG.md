@@ -4,6 +4,15 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.19.2 - 2026-07-23
+
+### Fixed
+
+- Raised the default process-wide M-Team request interval from 1.25 seconds to
+  5 seconds after production rate-limited a short
+  `member/getUserTorrentList` pagination burst. The existing environment
+  override remains available for bounded operator tuning.
+
 ## 0.19.1 - 2026-07-23
 
 ### Changed
