@@ -4,7 +4,9 @@ import asyncio
 import base64
 import hashlib
 import hmac
+import html
 import os
+import re
 import threading
 import time
 import uuid
@@ -523,6 +525,21 @@ class MTeamApiClient:
             metadata["mteam_tags"] = tag_summary["labels"]
         if tag_summary["raw"]:
             metadata["mteam_raw_tags"] = tag_summary["raw"]
+        subtitle = _mteam_search_text(
+            row,
+            ("smallDescr", "smallDescription", "subtitle", "subTitle"),
+            max_length=500,
+        )
+        if subtitle and subtitle.casefold() != title.casefold():
+            metadata["mteam_subtitle"] = subtitle
+        media_info = _mteam_search_text(
+            row,
+            ("mediaInfo", "mediainfo", "media_info", "nfo"),
+            max_length=20_000,
+            multiline=True,
+        )
+        if media_info:
+            metadata["mteam_media_info"] = media_info
         if left_time_minutes is None and discount in {Discount.FREE, Discount.TWO_X_FREE}:
             metadata["left_time_source"] = _left_time_source_from_api_row(row)
 
@@ -856,6 +873,35 @@ def _dedupe_labels(labels: list[str]) -> list[str]:
         seen.add(key)
         deduped.append(normalized)
     return deduped
+
+
+def _mteam_search_text(
+    row: dict[str, Any],
+    fields: tuple[str, ...],
+    *,
+    max_length: int,
+    multiline: bool = False,
+) -> str | None:
+    value = next(
+        (
+            row.get(field)
+            for field in fields
+            if isinstance(row.get(field), str) and str(row.get(field)).strip()
+        ),
+        None,
+    )
+    if not isinstance(value, str):
+        return None
+    text = html.unescape(value)
+    if multiline:
+        text = re.sub(r"(?i)<br\s*/?>", "\n", text)
+    text = re.sub(r"<[^>]+>", " ", text)
+    if multiline:
+        lines = [" ".join(line.split()) for line in text.splitlines()]
+        text = "\n".join(line for line in lines if line)
+    else:
+        text = " ".join(text.split())
+    return text[:max_length].strip() or None
 
 
 def _api_row_containers(row: dict[str, Any]) -> list[dict[str, Any]]:

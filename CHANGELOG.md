@@ -4,6 +4,20 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.20.0 - 2026-07-23
+
+### Added
+
+- Want List candidate review now exposes the tracker subtitle and MediaInfo/NFO
+  evidence when those fields are already present in the M-Team search response,
+  without issuing a torrent-detail request.
+
+### Changed
+
+- Reworked candidate cards with clearer title, metadata, score, warning, and
+  action hierarchy. Duplicate quality aliases and raw tracker enum tags are
+  collapsed, while routine score reasons move into an expandable section.
+
 ## 0.19.4 - 2026-07-23
 
 ### Fixed

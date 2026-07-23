@@ -397,6 +397,10 @@ const copy = {
       doubanUser: "Douban 用户",
       chooseTypeFirst: "先选择类型。选完类型后，只显示这个类型需要继续配置的选项。",
       matchingPreference: "符合偏好",
+      candidateNeedsReview: "需要确认",
+      candidateScoreUnit: "分",
+      scoreEvidence: "评分依据",
+      mediaInfo: "媒体信息",
       processing: "正在处理",
       thisPageYamlSaved: "本页 YAML 已保存",
       thisPageYamlPreviewReady: "本页 YAML 预览已准备",
@@ -704,6 +708,10 @@ const copy = {
       doubanUser: "Douban user",
       chooseTypeFirst: "Choose a type first. After that, only fields for the selected tracker type are shown.",
       matchingPreference: "Matches preferences",
+      candidateNeedsReview: "Needs review",
+      candidateScoreUnit: "pts",
+      scoreEvidence: "Score details",
+      mediaInfo: "Media info",
       processing: "Processing",
       thisPageYamlSaved: "This page YAML saved",
       thisPageYamlPreviewReady: "This page YAML preview is ready",
@@ -2287,28 +2295,178 @@ function renderWantCandidateList(items) {
   `;
 }
 
+const candidateTagPriority = [
+  "2160p",
+  "1080p",
+  "webdl",
+  "webrip",
+  "uhd_bluray",
+  "bluray",
+  "remux",
+  "dolby_vision",
+  "hdr10_plus",
+  "hdr10",
+  "hdr",
+  "sdr",
+  "hevc",
+  "avc",
+  "av1",
+  "atmos",
+  "ddp",
+  "truehd",
+  "dts_hd_ma",
+  "dts_x",
+  "aac",
+  "flac",
+  "ass",
+];
+
+function normalizeCandidateTag(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/([a-z])(\d)|(\d)([a-z])/g, "$1$3 $2$4")
+    .replace(/[^a-z0-9+\u4e00-\u9fff]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+function candidateTagGroupKey(value) {
+  const normalizedValue = normalizeCandidateTag(value);
+  for (const group of qualityTagGroups) {
+    if (normalizeCandidateTag(group.label) === normalizedValue) {
+      return group.key;
+    }
+  }
+  const normalized = ` ${normalizedValue} `;
+  for (const group of qualityTagGroups) {
+    for (const label of group.aliases || []) {
+      const alias = normalizeCandidateTag(label);
+      if (alias && normalized.includes(` ${alias} `)) {
+        return group.key;
+      }
+    }
+  }
+  return null;
+}
+
+function candidateDisplayTags(item) {
+  const grouped = new Map();
+  const extra = [];
+  const extraSeen = new Set();
+  for (const rawTag of [...(item.official_tags || []), ...(item.inferred_tags || [])]) {
+    const tag = String(rawTag || "").trim();
+    if (!tag || /^[a-z][a-z0-9_]*:\d+$/i.test(tag)) {
+      continue;
+    }
+    const groupKey = candidateTagGroupKey(tag);
+    if (groupKey) {
+      grouped.set(groupKey, qualityTagGroups.find((group) => group.key === groupKey)?.label || tag);
+      continue;
+    }
+    const key = tag.toLowerCase();
+    if (!extraSeen.has(key)) {
+      extraSeen.add(key);
+      extra.push(tag);
+    }
+  }
+  if (
+    grouped.has("dolby_vision")
+    || grouped.has("hdr10_plus")
+    || grouped.has("hdr10")
+  ) {
+    grouped.delete("hdr");
+  }
+  if (grouped.has("uhd_bluray")) {
+    grouped.delete("bluray");
+  }
+  return [
+    ...candidateTagPriority
+      .filter((key) => grouped.has(key))
+      .map((key) => grouped.get(key)),
+    ...extra,
+  ];
+}
+
+const candidateNoteTranslations = {
+  "close to top candidate": "与最高分接近",
+  "ambiguous top candidates": "最高分候选接近",
+  "title tokens matched": "标题匹配",
+  "weak title match": "标题匹配较弱",
+  "year matched": "年份匹配",
+  "year missing": "缺少年份",
+  "resolution matched": "分辨率匹配",
+  "resolution missing": "分辨率与偏好不符",
+  "season matched": "季度匹配",
+  "season missing": "缺少季度",
+  "episode matched": "集数匹配",
+  "episode missing": "缺少集数",
+  "healthy seeders": "做种健康",
+  "active leechers": "下载活跃",
+  "free discount preferred": "免费资源优先",
+  "H&R risk": "存在 H&R 风险",
+};
+
+function formatCandidateNote(note) {
+  const text = String(note || "");
+  if (state.language !== "CN") {
+    return text;
+  }
+  if (candidateNoteTranslations[text]) {
+    return candidateNoteTranslations[text];
+  }
+  const qualityScore = text.match(/^quality tag score ([+-]\d+): (.+)$/);
+  if (qualityScore) {
+    return `${qualityScore[2]} ${qualityScore[1]}`;
+  }
+  const sitePriority = text.match(/^site priority \+(\d+)$/);
+  if (sitePriority) {
+    return `站点优先级 +${sitePriority[1]}`;
+  }
+  return text;
+}
+
 function renderWantCandidateCard(item) {
-  const tags = [...(item.official_tags || []), ...(item.inferred_tags || [])];
-  const uniqueTags = Array.from(new Set(tags));
+  const tags = candidateDisplayTags(item);
   const actionLabel = item.matches_requirements ? uiText("enqueueQb") : uiText("forceEnqueueQb");
+  const subtitle = item.subtitle && item.subtitle.trim() !== String(item.title || "").trim()
+    ? `<div class="candidate-subtitle">${escapeHtml(item.subtitle)}</div>`
+    : "";
+  const mediaInfo = item.media_info
+    ? `
+      <details class="candidate-media-info">
+        <summary>${escapeHtml(uiText("mediaInfo"))}</summary>
+        <pre>${escapeHtml(item.media_info)}</pre>
+      </details>
+    `
+    : "";
   return `
     <article class="candidate-card ${item.matches_requirements ? "" : "dimmed"} ${item.selected ? "selected" : ""}" data-release-id="${escapeAttribute(item.release_id)}">
       <div class="candidate-card-head">
-        <div>
+        <div class="candidate-title-block">
           <strong>${escapeHtml(item.title)}</strong>
-          <div class="muted-line">${escapeHtml(item.site)} · ${escapeHtml(formatCandidateSize(item))} · ${escapeHtml(item.seeders)} ${escapeHtml(uiText("seeders"))} / ${escapeHtml(item.leechers)} ${escapeHtml(uiText("leechers"))}</div>
+          ${subtitle}
+          <div class="candidate-meta">
+            <span>${escapeHtml(item.site)}</span>
+            <span>${escapeHtml(formatCandidateSize(item))}</span>
+            <span>${escapeHtml(item.seeders)} ${escapeHtml(uiText("seeders"))}</span>
+            <span>${escapeHtml(item.leechers)} ${escapeHtml(uiText("leechers"))}</span>
+          </div>
         </div>
         <div class="candidate-score">
           <span>${escapeHtml(item.score)}</span>
-          <small>${escapeHtml(item.status_label)}</small>
+          <small>${escapeHtml(uiText("candidateScoreUnit"))} · ${escapeHtml(item.matches_requirements ? uiText("matchingPreference") : uiText("candidateNeedsReview"))}</small>
         </div>
       </div>
       <div class="candidate-tags">
-        ${uniqueTags.map((tag) => `<span class="badge">${escapeHtml(tag)}</span>`).join("") || `<span class="badge">${escapeHtml(uiText("noTags"))}</span>`}
+        ${tags.map((tag) => `<span class="badge">${escapeHtml(tag)}</span>`).join("") || `<span class="badge">${escapeHtml(uiText("noTags"))}</span>`}
       </div>
       ${renderCandidateNotes(item)}
-      <div class="tracker-actions-group candidate-actions">
-        <button class="${item.matches_requirements ? "primary-button" : "secondary-button"}" type="button" data-want-candidate-action="enqueue" data-release-id="${escapeAttribute(item.release_id)}">${escapeHtml(uiText("previewEnqueueQb"))} · ${escapeHtml(actionLabel)}</button>
+      ${mediaInfo}
+      <div class="candidate-card-footer">
+        <div class="candidate-confidence">${escapeHtml(item.matches_requirements ? uiText("matchingPreference") : uiText("candidateNeedsReview"))}</div>
+        <div class="tracker-actions-group candidate-actions">
+          <button class="${item.matches_requirements ? "primary-button" : "secondary-button"}" type="button" data-want-candidate-action="enqueue" data-release-id="${escapeAttribute(item.release_id)}">${escapeHtml(uiText("previewEnqueueQb"))} · ${escapeHtml(actionLabel)}</button>
+        </div>
       </div>
       <div class="candidate-preview-slot" data-want-candidate-preview></div>
     </article>
@@ -2323,8 +2481,15 @@ function renderCandidateNotes(item) {
   }
   return `
     <div class="candidate-notes">
-      ${risks.map((risk) => `<span class="status-item warning">${escapeHtml(risk)}</span>`).join("")}
-      ${reasons.slice(0, 4).map((reason) => `<span class="status-item info">${escapeHtml(reason)}</span>`).join("")}
+      ${risks.length ? `<div class="candidate-risks">${risks.map((risk) => `<span class="candidate-risk">${escapeHtml(formatCandidateNote(risk))}</span>`).join("")}</div>` : ""}
+      ${reasons.length ? `
+        <details class="candidate-score-details">
+          <summary>${escapeHtml(uiText("scoreEvidence"))} · ${escapeHtml(reasons.length)}</summary>
+          <div class="candidate-reasons">
+            ${reasons.map((reason) => `<span>${escapeHtml(formatCandidateNote(reason))}</span>`).join("")}
+          </div>
+        </details>
+      ` : ""}
     </div>
   `;
 }

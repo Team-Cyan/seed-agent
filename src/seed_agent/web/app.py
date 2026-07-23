@@ -24,7 +24,7 @@ from seed_agent.actions.pt import (
     score_candidates,
 )
 from seed_agent.actions.qb import MutationBatchError
-from seed_agent.audit import redact_payload
+from seed_agent.audit import redact_payload, redact_sensitive_text
 from seed_agent.config import (
     IntentConfig as SeedIntentConfig,
 )
@@ -1199,6 +1199,8 @@ def _want_candidate_item(
         if isinstance(metadata.get("mteam_raw_tags"), dict)
         else {},
         "inferred_tags": _inferred_release_tags(release.title),
+        "subtitle": _candidate_evidence_text(metadata.get("mteam_subtitle"), 500),
+        "media_info": _candidate_evidence_text(metadata.get("mteam_media_info"), 20_000),
         "mteam_torrent_id": metadata.get("mteam_torrent_id"),
     }
 
@@ -1232,6 +1234,13 @@ def _clean_label_list(value: Any) -> list[str]:
         seen.add(key)
         labels.append(text)
     return labels
+
+
+def _candidate_evidence_text(value: Any, max_length: int) -> str | None:
+    if not isinstance(value, str):
+        return None
+    text = redact_sensitive_text(value).strip()
+    return text[:max_length] or None
 
 
 def _inferred_release_tags(title: str) -> list[str]:

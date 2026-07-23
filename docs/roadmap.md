@@ -131,6 +131,10 @@ by completion period, and unfinished work is ordered by current priority.
     with score, size, seeder/leecher counts, M-Team tags, inferred quality tags,
     and reasons; lower-match releases stay visible but dimmed for operator
     override.
+  - Candidate review now uses a compact evidence hierarchy: equivalent quality
+    aliases are deduplicated, raw tracker enum codes are hidden, warnings stay
+    visible, routine score reasons are expandable, and existing M-Team search
+    subtitle/MediaInfo fields are shown without extra detail requests.
   - Candidate review supports a single deliberate qB enqueue action per
     candidate, with lower-match releases still available for forced enqueue.
     Search remains non-mutating, and M-Team download tokens are still resolved

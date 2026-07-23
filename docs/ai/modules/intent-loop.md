@@ -51,6 +51,10 @@ Convert human requests into search/rank/reject/enqueue workflows.
 - keep the operator-facing release score uncapped so strong candidates remain
   distinguishable above 100. Confidence and configured acceptance thresholds
   stay bounded to `0..1`, while ambiguity compares the uncapped score gap,
+- keep candidate review focused on decision evidence: deduplicate equivalent
+  quality aliases, hide raw tracker enum codes, keep risks visible, and collapse
+  routine scoring reasons. Show tracker subtitle and MediaInfo/NFO only when the
+  search provider already returned them,
 - use the durable enqueue claim keyed by intent and release so concurrent Web,
   CLI, or scheduler workers cannot add the same release twice,
 - do not entangle source ingestion with downloader logic.

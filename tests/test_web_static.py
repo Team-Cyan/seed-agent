@@ -498,6 +498,14 @@ def test_want_list_exposes_candidate_review_drawer() -> None:
     assert "setModalBusy" in script
     assert ".candidate-card.dimmed" in styles
     assert ".candidate-score" in styles
+    assert "candidateDisplayTags" in script
+    assert "candidate-subtitle" in script
+    assert "candidate-score-details" in script
+    assert "candidate-media-info" in script
+    assert "评分依据" in script
+    assert "/^[a-z][a-z0-9_]*:\\d+$/i.test(tag)" in script
+    assert ".candidate-card-footer" in styles
+    assert ".candidate-media-info pre" in styles
     assert "opacity: 0.72" not in styles
 
 

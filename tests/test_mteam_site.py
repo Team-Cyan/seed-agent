@@ -116,6 +116,8 @@ async def test_mteam_api_client_discovers_free_candidates_with_sorting() -> None
                             "videoCodec": 16,
                             "audioCodec": 3,
                             "labelsNew": ["中字"],
+                            "smallDescr": "银翼杀手 最终剪辑版",
+                            "mediaInfo": "Duration: 01:57:00<br>Video: HEVC",
                             "status": {
                                 "discount": "FREE",
                                 "seeders": 15,
@@ -137,6 +139,9 @@ async def test_mteam_api_client_discovers_free_candidates_with_sorting() -> None
                 "data": "https://dl.m-team.cc/download.php?id=1171443&passkey=secret",
             },
         )
+    )
+    detail_route = respx.post("https://api.m-team.cc/api/torrent/detail").mock(
+        return_value=httpx.Response(500)
     )
 
     client = MTeamApiClient(api_key="secret-api-key")
@@ -168,6 +173,7 @@ async def test_mteam_api_client_discovers_free_candidates_with_sorting() -> None
         "discount": "FREE",
     }
     assert not token_route.called
+    assert not detail_route.called
 
     assert len(candidates) == 1
     candidate = candidates[0]
@@ -196,6 +202,8 @@ async def test_mteam_api_client_discovers_free_candidates_with_sorting() -> None
         "audio_codec": "3",
         "labels_new": ["中字"],
     }
+    assert candidate.metadata["mteam_subtitle"] == "银翼杀手 最终剪辑版"
+    assert candidate.metadata["mteam_media_info"] == "Duration: 01:57:00\nVideo: HEVC"
 
 
 @pytest.mark.asyncio

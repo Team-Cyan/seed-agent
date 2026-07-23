@@ -1167,6 +1167,8 @@ def test_http_want_candidates_show_matching_and_lower_match_releases(
                             "video_codec": "16",
                             "audio_codec": "11",
                         },
+                        "mteam_subtitle": "请以你的名字呼唤我 导演剪辑版",
+                        "mteam_media_info": "Duration: 02:12:00\nVideo: HEVC",
                     },
                 ),
                 ReleaseCandidate(
@@ -1244,6 +1246,13 @@ want_decision:
         "DTS-HD MA",
     ]
     assert candidates_payload["items"][0]["size_gb"] == 66.0
+    assert (
+        candidates_payload["items"][0]["subtitle"]
+        == "请以你的名字呼唤我 导演剪辑版"
+    )
+    assert candidates_payload["items"][0]["media_info"] == (
+        "Duration: 02:12:00\nVideo: HEVC"
+    )
     assert candidates_payload["items"][1]["matches_requirements"] is False
     assert candidates_payload["items"][1]["status_label"] == "不符合偏好"
     assert "quality tag score -30: WEB-DL" in candidates_payload["items"][1]["reasons"]

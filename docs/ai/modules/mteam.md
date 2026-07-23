@@ -34,6 +34,9 @@ Implemented today:
   lack external-ID metadata
 - search result metadata captures M-Team API tag fields such as medium,
   standard, video codec, audio codec, and labels for Web UI candidate review
+- search result metadata also preserves subtitle and MediaInfo/NFO text when
+  those fields are already included in the search row; candidate review must
+  not add a detail request just to obtain this optional evidence
 - intent search supports generic Remux/quality preferences through
   `release_preferences.quality_tag_scores` and TV/anime pack behavior through
   `want_decision.series_search_mode`
@@ -72,6 +75,9 @@ Current fallback still present in code:
 - Keep API discovery cheap: search/detail calls may run during discovery and
   scoring, but `genDlToken` should only run for accepted candidates when
   enqueue is executing.
+- Want List candidate evidence should consume subtitle and MediaInfo/NFO only
+  when the existing search response contains them. Do not add per-candidate
+  detail calls for this UI surface.
 - Treat `discount=FREE` plus an explicit `discountEndTime=null` from the M-Team
   API as a known unlimited free window rather than an unknown expiry.
 - When refreshed tracker evidence no longer contains a promotion expiry, clear
