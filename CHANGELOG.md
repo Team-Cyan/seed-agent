@@ -4,6 +4,14 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.19.4 - 2026-07-23
+
+### Fixed
+
+- Removed the remaining 100-point validation limit from enqueue score
+  breakdowns so uncapped Want List rankings can proceed through preview and
+  enqueue flows. Operational score distributions now report `100+` separately.
+
 ## 0.19.3 - 2026-07-23
 
 ### Fixed

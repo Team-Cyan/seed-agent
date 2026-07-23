@@ -219,7 +219,7 @@ class RankedRelease(BaseModel):
 
 class ScoreBreakdown(BaseModel):
     candidate_id: str
-    score: int = Field(ge=0, le=100)
+    score: int = Field(ge=0)
     accepted: bool
     reasons: list[str]
     candidate: TorrentCandidate

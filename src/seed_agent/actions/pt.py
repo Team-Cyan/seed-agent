@@ -626,7 +626,9 @@ def _score_value_bucket(score: int) -> str:
         return "1-69"
     if score < 85:
         return "70-84"
-    return "85-100"
+    if score < 100:
+        return "85-99"
+    return "100+"
 
 
 def _average(values: Sequence[float]) -> float:

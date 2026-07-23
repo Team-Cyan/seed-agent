@@ -90,6 +90,7 @@ def _ranked(
     *,
     confirmation_required: bool = False,
     release_id: str = "demo-free:release-1",
+    score: int | None = None,
 ) -> RankedRelease:
     return RankedRelease(
         intent_id=intent_id,
@@ -104,7 +105,7 @@ def _ranked(
             leechers=8,
             discount=Discount.FREE,
         ),
-        score=95 if not confirmation_required else 80,
+        score=score if score is not None else (95 if not confirmation_required else 80),
         confidence=0.95 if not confirmation_required else 0.8,
         accepted=not confirmation_required,
         confirmation_required=confirmation_required,
@@ -192,6 +193,30 @@ def test_intent_enqueue_dry_run_does_not_touch_downloader_or_state(
     assert row is not None
     assert row["state"] == IntentState.NORMALIZED.value
     assert "passkey=secret" not in result.output
+
+
+def test_intent_enqueue_dry_run_preserves_score_above_100(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from seed_agent import cli
+
+    monkeypatch.chdir(tmp_path)
+    downloader = _DummyDownloader()
+    monkeypatch.setattr(cli, "build_downloader", lambda config: downloader)
+    config_path = _write_config(tmp_path)
+    store = StateStore(tmp_path / ".seed-agent" / "state.db")
+    intent, _ = add_intent("Inception 2010 1080p", store)
+    store.save_ranked_releases([_ranked(intent.intent_id, score=120)])
+
+    result = CliRunner().invoke(
+        cli.app,
+        ["intent-enqueue", intent.intent_id, "--config", str(config_path)],
+    )
+
+    assert result.exit_code == 0
+    assert _json_output(result)["decisions"][0]["action"] == "qb.enqueue"
+    assert downloader.calls == []
 
 
 def test_intent_enqueue_dry_run_reports_runtime_activity_when_qb_visible(
