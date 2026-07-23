@@ -4,6 +4,15 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.19.3 - 2026-07-23
+
+### Fixed
+
+- Replaced the fixed midnight-aligned M-Team rate-limit cooldown with
+  endpoint-specific progressive backoff of one, four, twelve, and at most
+  twenty-four hours. A successful user-torrent batch snapshot or explicit
+  operator clear resets the escalation sequence.
+
 ## 0.19.2 - 2026-07-23
 
 ### Fixed

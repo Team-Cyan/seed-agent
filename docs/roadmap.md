@@ -157,9 +157,11 @@ by completion period, and unfinished work is ordered by current priority.
     default or `every_cycle`) while keeping scheduled enqueue dry-run unless
     intent execution is explicitly enabled.
   - M-Team tracker rate-limit responses now trigger a persistent scheduler
-    backoff; the container keeps heartbeat liveness but skips PT discovery,
-    cleanup, and Want List tracker searches until the local midnight after at
-    least 24 hours.
+    backoff; the container keeps heartbeat liveness and local prune active while
+    skipping PT discovery and Want List tracker searches. Backoff starts at one
+    hour and escalates across consecutive endpoint failures to four, twelve,
+    and at most twenty-four hours; a successful batch snapshot resets the
+    sequence.
   - Scheduler runs, scheduler phase events, tracker backoffs, tracker API
     events, and Want List search history now persist in SQLite with run IDs for
     post-run debugging.

@@ -1302,6 +1302,33 @@ def test_scheduler_backoff_clear_deactivates_file_and_sqlite_backoff(
     backoff = store.get_tracker_backoff("mteam", "torrent/search")
     assert backoff is not None
     assert backoff["active"] == 0
+    assert store.list_tracker_api_events(site="mteam")[0]["endpoint"] == "*"
+
+
+def test_scheduler_backoff_clear_resets_every_endpoint_streak(tmp_path: Path) -> None:
+    from seed_agent import cli
+
+    config_path = _config_file(tmp_path)
+    store = StateStore(tmp_path / ".seed-agent" / "state.db")
+    for endpoint in ("torrent/search", "member/getUserTorrentList"):
+        store.record_tracker_api_event(
+            site="mteam",
+            endpoint=endpoint,
+            event="rate_limited",
+            rate_limited=True,
+            message="mteam request too frequent",
+        )
+
+    cli._clear_schedule_backoff(config_path, source="test")
+
+    assert cli._mteam_rate_limit_streak(store, endpoint="torrent/search") == 0
+    assert (
+        cli._mteam_rate_limit_streak(
+            store,
+            endpoint="member/getUserTorrentList",
+        )
+        == 0
+    )
 
 
 def test_scheduled_intent_search_runs_once_after_daily_hour() -> None:
@@ -1341,7 +1368,7 @@ def test_scheduler_status_warns_when_tracker_backfill_is_unresolved() -> None:
     )
 
 
-def test_schedule_rate_limit_backoff_uses_next_midnight_after_24h(
+def test_schedule_rate_limit_backoff_escalates_without_midnight_alignment(
     tmp_path: Path,
 ) -> None:
     from seed_agent import cli
@@ -1349,20 +1376,105 @@ def test_schedule_rate_limit_backoff_uses_next_midnight_after_24h(
     config_path = _config_file(tmp_path)
     local_tz = datetime.now().astimezone().tzinfo
     now = datetime(2026, 7, 3, 21, 30, tzinfo=local_tz)
+    expected_hours = [1, 4, 12, 24, 24]
 
-    status = cli._record_schedule_rate_limit_backoff(
+    for expected in expected_hours:
+        status = cli._record_schedule_rate_limit_backoff(
+            config_path,
+            endpoint="member/getUserTorrentList",
+            reason="mteam request too frequent",
+            now=now,
+        )
+        until = datetime.fromisoformat(status["until"])
+
+        assert status["active"] is True
+        assert until == now + timedelta(hours=expected)
+        now = until + timedelta(minutes=1)
+
+    raw = json.loads((tmp_path / ".seed-agent" / "schedule-backoff.json").read_text())
+    assert raw["backoff_hours"] == 24
+    assert raw["rate_limit_streak"] == 5
+    assert (tmp_path / ".seed-agent" / "schedule-backoff.json").exists()
+
+
+def test_successful_mteam_batch_resets_rate_limit_backoff_escalation(
+    tmp_path: Path,
+) -> None:
+    from seed_agent import cli
+
+    config_path = _config_file(tmp_path)
+    endpoint = "member/getUserTorrentList"
+    now = datetime(2026, 7, 3, 10, 0, tzinfo=UTC)
+    first = cli._record_schedule_rate_limit_backoff(
         config_path,
+        endpoint=endpoint,
         reason="mteam request too frequent",
         now=now,
     )
+    second_now = datetime.fromisoformat(first["until"]) + timedelta(minutes=1)
+    second = cli._record_schedule_rate_limit_backoff(
+        config_path,
+        endpoint=endpoint,
+        reason="mteam request too frequent",
+        now=second_now,
+    )
+    assert datetime.fromisoformat(second["until"]) == second_now + timedelta(hours=4)
 
-    until = datetime.fromisoformat(status["until"])
-    assert status["active"] is True
-    assert until.hour == 0
-    assert until.minute == 0
-    assert until >= now + timedelta(hours=24)
-    assert until - now < timedelta(hours=48)
-    assert (tmp_path / ".seed-agent" / "schedule-backoff.json").exists()
+    store = StateStore(tmp_path / ".seed-agent" / "state.db")
+    success_at = datetime.fromisoformat(second["until"]) + timedelta(minutes=1)
+    cli._record_mteam_api_success(
+        store,
+        endpoint=endpoint,
+        run_id="sched-success",
+        message="batch snapshot completed",
+        created_at=success_at,
+    )
+    retry_at = success_at + timedelta(hours=1)
+    after_success = cli._record_schedule_rate_limit_backoff(
+        config_path,
+        endpoint=endpoint,
+        reason="mteam request too frequent",
+        now=retry_at,
+    )
+
+    assert datetime.fromisoformat(after_success["until"]) == retry_at + timedelta(hours=1)
+
+
+def test_successful_mteam_batch_does_not_log_without_a_rate_limit_streak(
+    tmp_path: Path,
+) -> None:
+    from seed_agent import cli
+
+    store = StateStore(tmp_path / "state.db")
+
+    recorded = cli._record_mteam_api_success(
+        store,
+        endpoint="member/getUserTorrentList",
+        run_id="sched-success",
+        message="batch snapshot completed",
+    )
+
+    assert recorded is False
+    assert store.list_tracker_api_events(site="mteam") == []
+
+
+@pytest.mark.parametrize(
+    ("payload", "expected"),
+    [
+        ({"batch_api_requests_used": 4, "summary": {"matched": 2}}, True),
+        ({"batch_api_requests_used": 0, "summary": {}}, False),
+        ({"batch_api_requests_used": 1, "summary": {"rate_limited": 1}}, False),
+        ({"batch_api_requests_used": 1, "summary": {"unavailable": 1}}, False),
+        ({"batch_api_requests_used": 1, "summary": {"error": 1}}, False),
+    ],
+)
+def test_mteam_batch_snapshot_success_requires_real_request_without_failure(
+    payload: dict[str, object],
+    expected: bool,
+) -> None:
+    from seed_agent import cli
+
+    assert cli._mteam_batch_snapshot_succeeded(payload) is expected
 
 
 def test_schedule_run_records_backoff_and_skips_intent_after_mteam_rate_limit(
@@ -2066,6 +2178,13 @@ scheduler:
         encoding="utf-8",
     )
     seen: list[tuple[str, object]] = []
+    StateStore(tmp_path / ".seed-agent" / "state.db").record_tracker_api_event(
+        site="mteam",
+        endpoint="member/getUserTorrentList",
+        event="rate_limited",
+        rate_limited=True,
+        message="mteam request too frequent",
+    )
 
     def fake_prune_payload(
         config_path_value: Path,
@@ -2150,7 +2269,9 @@ scheduler:
             "category": category,
             "live_torrent_count": 0,
             "qbonly_candidates": 0,
-            "api_requests_used": 0,
+            "api_requests_used": 4,
+            "batch_api_requests_used": 4,
+            "fallback_api_requests_used": 0,
             "api_requests_remaining": max_api_requests,
             "max_api_requests": max_api_requests,
             "summary": {},
@@ -2190,6 +2311,10 @@ scheduler:
     assert payload["intent_search_enabled"] is False
     assert payload["prune"]["command"] == "prune"
     assert payload["tracker_source_backfill"]["command"] == "tracker-source-backfill"
+    api_events = StateStore(
+        tmp_path / ".seed-agent" / "state.db"
+    ).list_tracker_api_events(site="mteam", endpoint="member/getUserTorrentList")
+    assert api_events[0]["event"] == "success"
 
 
 def test_schedule_run_passes_terminal_unknown_incomplete_hashes_to_prune(

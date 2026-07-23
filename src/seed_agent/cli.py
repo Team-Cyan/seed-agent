@@ -110,7 +110,7 @@ app = typer.Typer(help="Docker-first PT automation for NAS and homelab operation
 DEFAULT_CONFIG = Path("config/example.yaml")
 SCHEDULE_BACKOFF_FILE = "schedule-backoff.json"
 MTEAM_RATE_LIMIT_MARKERS = ("請求過於頻繁", "请求过于频繁")
-MTEAM_RATE_LIMIT_BACKOFF_HOURS = 24
+MTEAM_RATE_LIMIT_BACKOFF_HOURS = (1, 4, 12, 24)
 MTEAM_NETWORK_BACKOFF_MINUTES = 30
 MTEAM_BACKFILL_FALLBACK_REFRESH_HOURS = 6
 MTEAM_NETWORK_ERROR_TYPES = {
@@ -1613,14 +1613,6 @@ def schedule_run(
                         run_id=run_id,
                     )
                     payload["skipped_by_backoff"] = True
-                    store_for_run.record_tracker_api_event(
-                        site="mteam",
-                        endpoint=endpoint,
-                        event="rate_limited",
-                        run_id=run_id,
-                        rate_limited=True,
-                        message="mteam request too frequent",
-                    )
                     _record_schedule_phase(
                         store_for_run,
                         run_id=run_id,
@@ -1656,6 +1648,13 @@ def schedule_run(
                         event="warning",
                         message="mteam api unavailable",
                         payload={"schedule_backoff": payload["schedule_backoff"]},
+                    )
+                elif _mteam_batch_snapshot_succeeded(tracker_backfill_payload):
+                    _record_mteam_api_success(
+                        store_for_run,
+                        endpoint="member/getUserTorrentList",
+                        run_id=run_id,
+                        message="batch snapshot completed",
                     )
 
             prune_payload: dict[str, Any] | None = None
@@ -1751,14 +1750,6 @@ def schedule_run(
                         run_id=run_id,
                     )
                     payload["skipped_by_backoff"] = True
-                    store_for_run.record_tracker_api_event(
-                        site="mteam",
-                        endpoint=endpoint,
-                        event="rate_limited",
-                        run_id=run_id,
-                        rate_limited=True,
-                        message="mteam request too frequent",
-                    )
                     _record_schedule_phase(
                         store_for_run,
                         run_id=run_id,
@@ -2179,7 +2170,7 @@ def _clear_schedule_backoff(
     cleared = store.clear_tracker_backoffs(site="mteam")
     store.record_tracker_api_event(
         site="mteam",
-        endpoint=str(before.get("endpoint") or "*"),
+        endpoint="*",
         event="backoff_cleared",
         rate_limited=False,
         message=f"cleared by {source}",
@@ -2207,9 +2198,21 @@ def _record_schedule_rate_limit_backoff(
     current = now or datetime.now().astimezone()
     if current.tzinfo is None:
         current = current.replace(tzinfo=UTC)
-    until = _next_local_midnight_at_or_after(
-        current + timedelta(hours=MTEAM_RATE_LIMIT_BACKOFF_HOURS)
+    store = StateStore(_state_path(load_config(config_path)))
+    store.record_tracker_api_event(
+        site="mteam",
+        endpoint=endpoint,
+        event="rate_limited",
+        run_id=run_id,
+        rate_limited=True,
+        message=reason,
+        created_at=current.astimezone(UTC),
     )
+    streak = _mteam_rate_limit_streak(store, endpoint=endpoint)
+    backoff_hours = MTEAM_RATE_LIMIT_BACKOFF_HOURS[
+        min(streak - 1, len(MTEAM_RATE_LIMIT_BACKOFF_HOURS) - 1)
+    ]
+    until = current + timedelta(hours=backoff_hours)
     path = _schedule_backoff_path(config_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
@@ -2219,6 +2222,8 @@ def _record_schedule_rate_limit_backoff(
                 "created_at": current.isoformat(),
                 "until": until.isoformat(),
                 "reason": reason,
+                "backoff_hours": backoff_hours,
+                "rate_limit_streak": streak,
             },
             ensure_ascii=False,
             sort_keys=True,
@@ -2226,7 +2231,6 @@ def _record_schedule_rate_limit_backoff(
         + "\n",
         encoding="utf-8",
     )
-    store = StateStore(_state_path(load_config(config_path)))
     store.set_tracker_backoff(
         site="mteam",
         endpoint=endpoint,
@@ -2237,6 +2241,58 @@ def _record_schedule_rate_limit_backoff(
         created_at=current,
     )
     return _schedule_backoff_status(config_path, now=current)
+
+
+def _mteam_rate_limit_streak(store: StateStore, *, endpoint: str) -> int:
+    streak = 0
+    for row in store.list_tracker_api_events(site="mteam", limit=100):
+        event = str(row.get("event") or "")
+        if event == "backoff_cleared":
+            break
+        if str(row.get("endpoint") or "") != endpoint:
+            continue
+        if event == "success":
+            break
+        if event != "rate_limited":
+            continue
+        streak += 1
+    return streak
+
+
+def _record_mteam_api_success(
+    store: StateStore,
+    *,
+    endpoint: str,
+    run_id: str | None,
+    message: str,
+    created_at: datetime | None = None,
+) -> bool:
+    if _mteam_rate_limit_streak(store, endpoint=endpoint) <= 0:
+        return False
+    store.record_tracker_api_event(
+        site="mteam",
+        endpoint=endpoint,
+        event="success",
+        run_id=run_id,
+        rate_limited=False,
+        message=message,
+        created_at=created_at,
+    )
+    return True
+
+
+def _mteam_batch_snapshot_succeeded(payload: object) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    if int(payload.get("batch_api_requests_used") or 0) <= 0:
+        return False
+    if payload.get("error"):
+        return False
+    summary = payload.get("summary")
+    if not isinstance(summary, dict):
+        return True
+    failure_statuses = ("error", "rate_limited", "unavailable")
+    return not any(int(summary.get(status) or 0) > 0 for status in failure_statuses)
 
 
 def _record_schedule_network_backoff(
@@ -2301,15 +2357,6 @@ def _tracker_backoff_status(
         "remaining_minutes": primary.get("remaining_minutes"),
         "tracker_backoffs": active_rows,
     }
-
-
-def _next_local_midnight_at_or_after(value: datetime) -> datetime:
-    local = value if value.tzinfo is not None else value.replace(tzinfo=UTC)
-    local = local.astimezone()
-    candidate = local.replace(hour=0, minute=0, second=0, microsecond=0)
-    if candidate < local:
-        candidate += timedelta(days=1)
-    return candidate
 
 
 def _parse_schedule_backoff_datetime(value: Any) -> datetime | None:

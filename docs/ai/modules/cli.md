@@ -84,7 +84,9 @@ Expose the operator-facing command surface and safe summaries.
   keeps writing heartbeat output, skips tracker/API discovery and Want List
   search, but still runs local prune from persisted evidence. Web UI Want List search
   actions read the same backoff file and skip tracker searches during that
-  window,
+  window. Rate-limit backoff starts at one hour, escalates across consecutive
+  endpoint failures to four, twelve, and at most twenty-four hours, and resets
+  after a successful batch snapshot or explicit backoff clear,
 - free-window safety previewing for freeleech-sensitive workflows,
 - optional cleanup through `run-once --prune` and scheduled cleanup through
   `schedule-run --prune`. Standalone `run-once --prune` keeps the historical
