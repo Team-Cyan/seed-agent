@@ -68,9 +68,12 @@ Expose the operator-facing command surface and safe summaries.
   Want List source refresh and torrent search independently follow
   `scheduler.intent_search_mode` (`daily` once at or after
   `intent_search_hour` by default, with missed runs caught up on the next
-  cycle, or `every_cycle`). Tracker backoff skips M-Team search but does not
-  suppress a due Douban/IMDb source refresh. Intents already enqueued or
-  rejected are not searched again. Operators can still trigger filtered or
+  cycle, or `every_cycle`). Refresh and search use separate durable success
+  markers rather than a bounded recent-run window, so failed refreshes retry
+  while a successful search does not repeat. Tracker backoff skips M-Team
+  search but does not suppress a due Douban/IMDb source refresh, and source-only
+  refresh does not initialize qB or search providers. Intents already enqueued
+  or rejected are not searched again. Operators can still trigger filtered or
   single-item Want List searches manually from the Web UI. Scheduled resource
   enqueue remains a dry-run unless `--intent-execute` is explicitly set, and
   the loop can be disabled with `--no-intent`,
@@ -130,6 +133,8 @@ Expose the operator-facing command surface and safe summaries.
 ## Expectations
 
 - do not expose secrets in output,
+- require JSON for Web writes, reject cross-site browser writes, and bound
+  request bodies even when the optional trusted-LAN token is unset,
 - keep summaries useful but redacted,
 - preserve stable command names unless intentionally versioned,
 - keep `run-once` and `schedule-run` payload shapes aligned enough for external
@@ -160,7 +165,8 @@ Expose the operator-facing command surface and safe summaries.
   heartbeat updates but skip PT discovery and Want List search until the shared
   scheduler backoff expires. The backoff must not become a tight retry loop,
 - keep configured Want List source refresh failures fail-soft so Douban/IMDb
-  availability issues do not restart long-running scheduler containers,
+  availability issues do not restart long-running scheduler containers. Do not
+  advance replay cursors or the daily refresh success marker on those failures,
 - expose cleanup preview details before execute-mode mutation,
 - pass the scheduler interval into per-cycle pruning so persisted free-window
   expiries can be evaluated against the next scheduled check,

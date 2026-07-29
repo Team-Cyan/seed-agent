@@ -36,7 +36,7 @@ from seed_agent.config import (
     resolve_runtime_secret_path,
 )
 from seed_agent.metrics import render_prometheus_metrics
-from seed_agent.models import IntentSource, RankedRelease, ReleaseCandidate
+from seed_agent.models import Decision, IntentSource, IntentState, RankedRelease, ReleaseCandidate
 from seed_agent.quality_tags import matching_quality_tag_groups
 from seed_agent.search.base import SearchProvider
 from seed_agent.state import StateStore
@@ -68,6 +68,11 @@ CANONICAL_ICON_SOURCE = (
     Path(__file__).resolve().parents[3] / "docs" / "assets" / CANONICAL_ICON_NAME
 )
 SCHEDULE_BACKOFF_FILE = "schedule-backoff.json"
+MAX_JSON_BODY_BYTES = 1024 * 1024
+
+
+class RequestBodyTooLarge(ValueError):
+    pass
 
 
 def make_handler(config_path: Path) -> type[BaseHTTPRequestHandler]:
@@ -148,10 +153,17 @@ def make_handler(config_path: Path) -> type[BaseHTTPRequestHandler]:
             self._send_json({"error": "not found"}, status=HTTPStatus.NOT_FOUND)
 
         def do_POST(self) -> None:
+            if not self._validate_write_request():
+                return
             if not self._authorize_api_request():
                 return
             try:
                 self._do_post()
+            except RequestBodyTooLarge as exc:
+                self._send_json(
+                    {"error": str(exc)},
+                    status=HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
+                )
             except ConfigRevisionConflict as exc:
                 self._send_json(
                     {
@@ -313,8 +325,35 @@ def make_handler(config_path: Path) -> type[BaseHTTPRequestHandler]:
             self._send_json({"error": "unauthorized"}, status=HTTPStatus.UNAUTHORIZED)
             return False
 
+        def _validate_write_request(self) -> bool:
+            fetch_site = self.headers.get("Sec-Fetch-Site", "").strip().lower()
+            origin = self.headers.get("Origin", "").strip()
+            host = self.headers.get("Host", "").strip()
+            if fetch_site == "cross-site" or (origin and not _origin_matches_host(origin, host)):
+                self._send_json(
+                    {"error": "cross-site write request rejected"},
+                    status=HTTPStatus.FORBIDDEN,
+                )
+                return False
+            content_type = self.headers.get("Content-Type", "").partition(";")[0].strip().lower()
+            if content_type != "application/json":
+                self._send_json(
+                    {"error": "application/json content type is required"},
+                    status=HTTPStatus.UNSUPPORTED_MEDIA_TYPE,
+                )
+                return False
+            return True
+
         def _read_json(self) -> dict[str, Any]:
-            length = int(self.headers.get("Content-Length", "0"))
+            raw_length = self.headers.get("Content-Length", "0").strip()
+            try:
+                length = int(raw_length)
+            except ValueError as exc:
+                raise ValueError("invalid Content-Length") from exc
+            if length < 0:
+                raise ValueError("Content-Length must not be negative")
+            if length > MAX_JSON_BODY_BYTES:
+                raise RequestBodyTooLarge(f"request body exceeds {MAX_JSON_BODY_BYTES} bytes")
             if length == 0:
                 return {}
             raw = self.rfile.read(length).decode("utf-8")
@@ -336,12 +375,16 @@ def make_handler(config_path: Path) -> type[BaseHTTPRequestHandler]:
             payload: bytes,
             content_type: str,
             status: HTTPStatus = HTTPStatus.OK,
+            *,
+            cache_control: str | None = None,
         ) -> None:
             self.send_response(status)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(payload)))
             if content_type == "application/json":
                 self.send_header("Cache-Control", "no-store")
+            elif cache_control is not None:
+                self.send_header("Cache-Control", cache_control)
             self.end_headers()
             self.wfile.write(payload)
 
@@ -354,7 +397,11 @@ def make_handler(config_path: Path) -> type[BaseHTTPRequestHandler]:
                 self._send_json({"error": "not found"}, status=HTTPStatus.NOT_FOUND)
                 return
             content_type = _content_type_for(path)
-            self._send_bytes(path.read_bytes(), content_type=content_type)
+            self._send_bytes(
+                path.read_bytes(),
+                content_type=content_type,
+                cache_control="no-cache",
+            )
 
     return SeedAgentWebHandler
 
@@ -378,6 +425,15 @@ def _write_request_authorized(headers: dict[str, str]) -> bool:
     if not provided and authorization.lower().startswith("bearer "):
         provided = authorization.removeprefix("Bearer ").removeprefix("bearer ").strip()
     return bool(provided) and secrets.compare_digest(provided, expected)
+
+
+def _origin_matches_host(origin: str, host: str) -> bool:
+    if not host:
+        return False
+    parsed = urlparse(origin)
+    if parsed.scheme.lower() not in {"http", "https"} or not parsed.netloc:
+        return False
+    return parsed.netloc.casefold() == host.casefold()
 
 
 def _load_config_snapshot(config_path: Path) -> tuple[SeedAgentConfig, str]:
@@ -808,9 +864,97 @@ def _enqueue_want_payload(
             "error": "execute is not accepted; this endpoint always enqueues"
         }, HTTPStatus.BAD_REQUEST
     execute = True
-    store = StateStore(_state_db_path(root))
+    state_path = _state_db_path(root)
+    if not state_path.exists():
+        return {
+            "error": "state db not found",
+            "outcome": "missing",
+            "status": [{"level": "warning", "message": "想看状态库不存在"}],
+        }, HTTPStatus.NOT_FOUND
+    store = StateStore(state_path)
+    intent_row = store.get_intent(intent_id)
+    if intent_row is None:
+        return {
+            "error": "want not found",
+            "outcome": "missing",
+            "status": [{"level": "warning", "message": "想看资源不存在"}],
+        }, HTTPStatus.NOT_FOUND
+    try:
+        ranked_releases = [
+            _ranked_release_from_row(item) for item in store.list_release_candidates(intent_id)
+        ]
+    except ValueError as exc:
+        message = redact_sensitive_text(str(exc))
+        return {
+            "error": message,
+            "outcome": "invalid",
+            "status": [{"level": "warning", "message": message}],
+        }, HTTPStatus.BAD_REQUEST
+    ranked = next(
+        (item for item in ranked_releases if item.release.release_id == release_id),
+        None,
+    )
+    if ranked is None:
+        message = f"unknown release for intent: {release_id}"
+        return {
+            "error": message,
+            "outcome": "invalid",
+            "status": [{"level": "warning", "message": message}],
+        }, HTTPStatus.BAD_REQUEST
+    intent_state = str(intent_row.get("state") or "")
+    if intent_state == IntentState.REJECTED.value:
+        message = f"intent is rejected: {intent_id}"
+        return {
+            "error": message,
+            "outcome": "rejected",
+            "status": [{"level": "warning", "message": "该想看资源已被拒绝"}],
+        }, HTTPStatus.CONFLICT
     config = load_config(config_path)
-    decisions = []
+    decisions: list[Decision] = []
+    if intent_state == IntentState.ENQUEUED.value:
+        selected_release_id = str(intent_row.get("selected_release_id") or "")
+        if selected_release_id and selected_release_id != release_id:
+            message = f"intent already enqueued with release: {selected_release_id}"
+            return {
+                "error": message,
+                "outcome": "already_enqueued",
+                "status": [
+                    {
+                        "level": "warning",
+                        "message": "该想看资源已用其他候选加入 qB",
+                    }
+                ],
+            }, HTTPStatus.CONFLICT
+        decisions.append(
+            Decision(
+                action="qb.enqueue.skip",
+                target_id=release_id,
+                execute=True,
+                reason="already enqueued",
+                old_state={"intent_state": intent_state},
+                new_state={
+                    "intent_id": intent_id,
+                    "release_id": release_id,
+                    "mutated": False,
+                },
+            )
+        )
+        _write_audit_decisions(config, decisions)
+        return {
+            "execute": execute,
+            "outcome": "already_enqueued",
+            "intent": _want_item(
+                intent_row,
+                {"release_count": len(ranked_releases)},
+                store.list_intent_source_evidence(intent_id),
+            ),
+            "selected": _ranked_release_summary(ranked),
+            "enqueued": 0,
+            "decisions": [_decision_summary_payload(item) for item in decisions],
+            "runtime_activity": _runtime_activity_summary([]),
+            "missing_from_qb_reconciled": 0,
+            "status": [{"level": "info", "message": "该资源已在 qB 队列中"}],
+        }, HTTPStatus.OK
     try:
         default_policy = _default_category_policy(config)
         (
@@ -856,7 +1000,12 @@ def _enqueue_want_payload(
         decisions.extend(enqueue_decisions)
         _write_audit_decisions(config, decisions)
     except ValueError as exc:
-        return {"error": redact_sensitive_text(str(exc))}, HTTPStatus.BAD_REQUEST
+        message = redact_sensitive_text(str(exc))
+        return {
+            "error": message,
+            "outcome": "invalid",
+            "status": [{"level": "warning", "message": message}],
+        }, HTTPStatus.BAD_REQUEST
     except MutationBatchError as exc:
         decisions.extend(exc.decisions)
         _write_audit_decisions(config, decisions)
@@ -865,6 +1014,7 @@ def _enqueue_want_payload(
         return {
             "error": redact_sensitive_text(str(exc)),
             "execute": execute,
+            "outcome": "failed",
             "enqueued": _executed_enqueue_count(decisions),
             "decisions": [_decision_summary_payload(item) for item in decisions],
             "status": [
@@ -880,8 +1030,13 @@ def _enqueue_want_payload(
         fallback_paused=paused,
         fallback_reasons=pause_reasons,
     )
+    outcome, status_level, status_message = _want_enqueue_status(
+        decisions,
+        effective_blocked=effective_blocked,
+    )
     payload: dict[str, Any] = {
         "execute": execute,
+        "outcome": outcome,
         "intent": _want_item(
             store.get_intent(intent.intent_id) or {},
             {"release_count": len(store.list_release_candidates(intent.intent_id))},
@@ -894,12 +1049,8 @@ def _enqueue_want_payload(
         "missing_from_qb_reconciled": missing_reconciled,
         "status": [
             {
-                "level": "warning" if effective_blocked else "ok",
-                "message": (
-                    "入队被运行时安全门禁拒绝"
-                    if effective_blocked
-                    else "已加入 qB"
-                ),
+                "level": status_level,
+                "message": status_message,
             }
         ],
     }
@@ -916,6 +1067,23 @@ def _enqueue_want_payload(
     if effective_block_reasons:
         payload["enqueue_blocked_reasons"] = effective_block_reasons
     return payload, HTTPStatus.OK
+
+
+def _want_enqueue_status(
+    decisions: list[Decision],
+    *,
+    effective_blocked: bool,
+) -> tuple[str, str, str]:
+    if any(item.action == "qb.enqueue" and item.execute for item in decisions):
+        return "enqueued", "ok", "已加入 qB"
+    skip_reasons = {item.reason for item in decisions if item.action == "qb.enqueue.skip"}
+    if "already enqueued" in skip_reasons:
+        return "already_enqueued", "info", "该资源已在 qB 队列中"
+    if "enqueue already in progress" in skip_reasons:
+        return "in_progress", "info", "该资源正在加入 qB，请稍后刷新"
+    if effective_blocked or any(item.action == "qb.enqueue.rejected" for item in decisions):
+        return "rejected", "warning", "入队被运行时安全门禁拒绝"
+    return "not_enqueued", "warning", "未执行 qB 入队"
 
 
 def _executed_enqueue_count(decisions: list[Any]) -> int:

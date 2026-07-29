@@ -79,11 +79,21 @@ async function requestWebToken() {
 }
 
 async function apiFetch(input, init = {}, retryUnauthorized = true) {
+  const requestInit = { ...init };
+  const method = String(requestInit.method || "GET").toUpperCase();
   const headers = new Headers(init.headers || {});
+  if (method === "POST") {
+    if (!headers.has("Content-Type")) {
+      headers.set("Content-Type", "application/json");
+    }
+    if (requestInit.body === undefined || requestInit.body === null) {
+      requestInit.body = "{}";
+    }
+  }
   if (state.webToken) {
     headers.set("X-Seed-Agent-Token", state.webToken);
   }
-  const response = await globalThis.fetch(input, { ...init, headers });
+  const response = await globalThis.fetch(input, { ...requestInit, headers });
   if (response.status !== 401 || !retryUnauthorized) {
     return response;
   }
@@ -2252,7 +2262,7 @@ function formatBestCandidateScore(item) {
   return `${uiText("bestCandidateScore")} ${item.best_candidate_score}`;
 }
 
-async function openWantCandidates(panel, intentId, message = "") {
+async function openWantCandidates(panel, intentId, statusItem = null) {
   const modal = panel.querySelector("[data-want-candidate-modal]");
   const title = modal.querySelector("[data-want-candidate-title]");
   const list = modal.querySelector("[data-want-candidate-list]");
@@ -2260,7 +2270,7 @@ async function openWantCandidates(panel, intentId, message = "") {
   modal.dataset.intentId = intentId;
   modal.classList.remove("hidden");
   title.textContent = uiText("candidateTorrents");
-  status.innerHTML = message ? `<div class="status-item ok">${escapeHtml(message)}</div>` : "";
+  status.innerHTML = renderWantCandidateStatus(statusItem);
   list.innerHTML = `<div class="empty-state">${escapeHtml(uiText("loadingCandidates"))}</div>`;
   try {
     const response = await apiFetch(`/api/wants/${encodeURIComponent(intentId)}/candidates`);
@@ -2273,6 +2283,17 @@ async function openWantCandidates(panel, intentId, message = "") {
   } catch (error) {
     list.innerHTML = `<div class="status-item warning">${escapeHtml(error.message)}</div>`;
   }
+}
+
+function renderWantCandidateStatus(statusItem) {
+  const message = String(statusItem?.message || "").trim();
+  if (!message) {
+    return "";
+  }
+  const level = ["ok", "info", "warning"].includes(statusItem?.level)
+    ? statusItem.level
+    : "info";
+  return `<div class="status-item ${escapeAttribute(level)}">${escapeHtml(message)}</div>`;
 }
 
 function renderWantCandidateList(items) {
@@ -2518,8 +2539,11 @@ async function enqueueWantCandidate(panel, intentId, releaseId) {
     status.innerHTML = `<div class="status-item info">${escapeHtml(uiText("processing"))}</div>`;
     const payload = await submitWantCandidateEnqueue(intentId, releaseId);
     await loadWants();
-    const message = payload.status?.[0]?.message || uiText("operationComplete");
-    await openWantCandidates(panel, intentId, message);
+    const resultStatus = payload.status?.[0] || {
+      level: payload.outcome === "enqueued" ? "ok" : "info",
+      message: uiText("operationComplete"),
+    };
+    await openWantCandidates(panel, intentId, resultStatus);
   } catch (error) {
     status.innerHTML = `<div class="status-item warning">${escapeHtml(error.message)}</div>`;
   } finally {

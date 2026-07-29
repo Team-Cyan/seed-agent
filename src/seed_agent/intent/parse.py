@@ -15,7 +15,8 @@ QUALITY_RE = re.compile(r"\b(BluRay|WEB[-_. ]?DL|WEBRip|HDRip|Remux|DVDRip)\b", 
 LANGUAGE_RE = re.compile(r"\b(zh|chi|chs|cht|cn|en|eng|jpn|jp)\b", re.IGNORECASE)
 KIND_PREFIX_RE = re.compile(r"^\s*(?P<kind>movie|film|show|series|episode)\s+", re.IGNORECASE)
 SENSITIVE_ASSIGNMENT_RE = re.compile(
-    r"\b[\w.-]*(passkey|password|passphrase|token|secret|cookie|auth)[\w.-]*\s*=\s*\S+",
+    r"\b[\w.-]*(passkey|password|passphrase|token|secret|cookie|auth)"
+    r"[\w.-]*\s*(?:=|:)\s*\S+",
     re.IGNORECASE,
 )
 SPACE_RE = re.compile(r"\s+")
@@ -32,11 +33,11 @@ def parse_resource_intent(
     if not text:
         raise ValueError("raw_text must not be empty")
 
-    event_identity = source_event_id or text
     safe_text = redact_sensitive_text(text)
+    event_identity = source_event_id or text
     requested = requested_at or datetime.now(UTC)
-    kind_prefix = _kind_prefix(text)
-    working = KIND_PREFIX_RE.sub("", text, count=1)
+    kind_prefix = _kind_prefix(safe_text)
+    working = KIND_PREFIX_RE.sub("", safe_text, count=1)
 
     year = _first_int(YEAR_RE, working)
     resolution = _first_match(RESOLUTION_RE, working)

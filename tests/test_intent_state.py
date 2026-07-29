@@ -317,6 +317,40 @@ def test_state_store_merges_intent_alias_conflicts_to_canonical_intent(
     assert store.list_release_candidates(duplicate.intent_id) == []
 
 
+def test_state_store_merge_uses_selected_release_from_terminal_state_winner(
+    tmp_path: Path,
+) -> None:
+    store = StateStore(tmp_path / "state.sqlite3")
+    canonical = _intent(
+        intent_id="canonical",
+        state=IntentState.CONFIRMATION_REQUIRED,
+    )
+    duplicate = _intent(
+        intent_id="duplicate",
+        state=IntentState.ENQUEUED,
+    )
+    store.upsert_intent(canonical, selected_release_id="release-old")
+    store.upsert_intent(duplicate, selected_release_id="release-actual")
+    store.record_want_search_run(
+        intent_id=duplicate.intent_id,
+        source="intent-run-once",
+        status="searched",
+        search_enabled=True,
+        results_count=1,
+    )
+
+    assert store.merge_intents(canonical.intent_id, duplicate.intent_id) is True
+
+    merged = store.get_intent(canonical.intent_id)
+    assert merged is not None
+    assert merged["state"] == IntentState.ENQUEUED.value
+    assert merged["selected_release_id"] == "release-actual"
+    assert store.list_want_search_runs(intent_id=duplicate.intent_id) == []
+    assert [
+        row["intent_id"] for row in store.list_want_search_runs(intent_id=canonical.intent_id)
+    ] == [canonical.intent_id]
+
+
 def test_state_store_clears_stale_paused_runtime_when_torrent_is_active(tmp_path: Path) -> None:
     from seed_agent.models import ManagedTorrent
 

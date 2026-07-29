@@ -4,9 +4,9 @@ from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from typing import Any
-from xml.etree import ElementTree
 
 import httpx
+from defusedxml import ElementTree
 
 from seed_agent.models import Discount, ReleaseCandidate, ResourceIntent, safe_url_identity
 

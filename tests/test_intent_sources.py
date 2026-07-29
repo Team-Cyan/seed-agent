@@ -2,7 +2,11 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
+import httpx
+import pytest
+
 from seed_agent.models import IntentSource
+from seed_agent.sources import telegram as telegram_source
 from seed_agent.sources.douban import (
     build_douban_wish_url,
     fetch_douban_wanted_user,
@@ -136,6 +140,23 @@ def test_telegram_poll_batch_advances_past_filtered_and_invalid_updates() -> Non
 
     assert batch.events == []
     assert batch.next_offset == 105
+
+
+def test_telegram_http_error_does_not_expose_bot_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bot_token = "123456:ABC-telegram-secret"
+
+    def fake_get(url: str, **_kwargs: object) -> httpx.Response:
+        return httpx.Response(401, request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(telegram_source.httpx, "get", fake_get)
+
+    with pytest.raises(RuntimeError, match="Telegram API returned HTTP 401") as error:
+        telegram_source.poll_telegram_update_batch(bot_token=bot_token)
+
+    assert bot_token not in str(error.value)
+    assert error.value.__context__ is None
 
 
 def test_wechat_bridge_parser_extracts_message() -> None:

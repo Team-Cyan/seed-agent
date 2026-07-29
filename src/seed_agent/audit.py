@@ -38,6 +38,22 @@ SENSITIVE_QUERY_KEYS = {
 }
 SENSITIVE_TOKEN_KEYS = {"pass", "token", "secret", "auth", "cookie", "authorization"}
 URL_RE = re.compile(r"(?P<url>\bhttps?://[^\s<>'\"]+)")
+TELEGRAM_BOT_URL_TOKEN_RE = re.compile(
+    r"(?P<prefix>\bhttps?://api\.telegram\.org/bot)[^/\s?#'\"<>]+",
+    re.IGNORECASE,
+)
+AUTHORIZATION_SCHEME_ASSIGNMENT_RE = re.compile(
+    r"(?<![A-Za-z0-9_.-])"
+    r"(?P<key>proxy-authorization|authorization)"
+    r"\s*(?P<sep>=|:)\s*(?:Bearer|Basic)\s+[^\s,;]+",
+    re.IGNORECASE,
+)
+AUTHORIZATION_DIGEST_ASSIGNMENT_RE = re.compile(
+    r"(?<![A-Za-z0-9_.-])"
+    r"(?P<key>proxy-authorization|authorization)"
+    r"\s*(?P<sep>=|:)\s*Digest[^\r\n]*",
+    re.IGNORECASE,
+)
 SENSITIVE_ASSIGNMENT_RE = re.compile(
     rf"(?<![A-Za-z0-9_.-])(?P<key>{'|'.join(sorted(SENSITIVE_QUERY_KEYS))})"
     r"\s*(?P<sep>=|:)\s*(?P<value>[^\s&;,)\]}]+)",
@@ -46,13 +62,15 @@ SENSITIVE_ASSIGNMENT_RE = re.compile(
 
 
 def redact_sensitive_text(value: str) -> str:
-    redacted = URL_RE.sub(_redact_url_match, value)
+    redacted = _redact_telegram_bot_url_tokens(value)
+    redacted = URL_RE.sub(_redact_url_match, redacted)
     return _redact_sensitive_assignments(redacted)
 
 
 def redact_payload(value: Any) -> Any:
     if isinstance(value, str):
-        stripped = URL_RE.sub(_strip_url_match, value)
+        stripped = _redact_telegram_bot_url_tokens(value)
+        stripped = URL_RE.sub(_strip_url_match, stripped)
         return _redact_sensitive_assignments(stripped)
     if isinstance(value, dict):
         return {
@@ -104,8 +122,23 @@ def _redact_sensitive_assignments(value: str) -> str:
     current = value
     while current != previous:
         previous = current
+        current = AUTHORIZATION_DIGEST_ASSIGNMENT_RE.sub(
+            _redact_sensitive_assignment_match,
+            current,
+        )
+        current = AUTHORIZATION_SCHEME_ASSIGNMENT_RE.sub(
+            _redact_sensitive_assignment_match,
+            current,
+        )
         current = SENSITIVE_ASSIGNMENT_RE.sub(_redact_sensitive_assignment_match, current)
     return current
+
+
+def _redact_telegram_bot_url_tokens(value: str) -> str:
+    return TELEGRAM_BOT_URL_TOKEN_RE.sub(
+        lambda match: f"{match.group('prefix')}{REDACTED}",
+        value,
+    )
 
 
 def _redact_sensitive_assignment_match(match: re.Match[str]) -> str:

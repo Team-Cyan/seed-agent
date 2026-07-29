@@ -4,6 +4,35 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.20.2 - 2026-07-30
+
+### Changed
+
+- Want List candidate actions now report actual enqueue, already-queued,
+  in-progress, and runtime-gate outcomes instead of treating every completed
+  request as a successful qB add.
+- Web write routes now require JSON, reject cross-site browser writes, bound
+  request bodies, and serve static assets with revalidation so candidate
+  subtitle/UI updates are not hidden by stale browser assets.
+
+### Fixed
+
+- Made daily Want List source refresh and torrent search track separate durable
+  success markers across the complete scheduler history, catch up missed
+  non-midnight runs, retry failed source refreshes, and keep source-only sync
+  independent from qB and tracker providers.
+- Prevented configured-source failures from advancing Telegram cursors, and
+  contained M-Team intent-search throttling or outages without terminating the
+  scheduler or leaving its run unfinished.
+- Kept direct enqueue idempotent under repeated and concurrent clicks, avoided
+  qB access for invalid or already-enqueued requests, and evaluated runtime
+  gates before resolving the selected M-Team download token.
+- Protected SQLite state and sidecar files with owner-only permissions, fixed
+  cross-timezone backoff comparisons, preserved the correct selected release
+  when merging terminal intents, and moved merged Want List search history.
+- Redacted multi-word authorization credentials and Telegram bot tokens from
+  persisted intent, scheduler, heartbeat, and audit evidence.
+
 ## 0.20.1 - 2026-07-29
 
 ### Changed

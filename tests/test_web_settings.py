@@ -5,7 +5,7 @@ import json
 from datetime import UTC, datetime, timedelta
 from http.client import HTTPConnection
 from pathlib import Path
-from socketserver import TCPServer
+from socketserver import ThreadingTCPServer
 from threading import Event, Thread, current_thread
 from typing import Any
 
@@ -28,7 +28,7 @@ from seed_agent.models import (
 from seed_agent.sources.base import SourceIntentEvent
 from seed_agent.state import StateStore
 from seed_agent.web import settings as web_settings
-from seed_agent.web.app import make_handler
+from seed_agent.web.app import MAX_JSON_BODY_BYTES, make_handler
 from seed_agent.web.settings import (
     ConfigSectionDraft,
     TrackerDraft,
@@ -273,6 +273,103 @@ def test_http_post_can_require_web_token(
 
     assert blocked["error"] == "unauthorized"
     assert "status" in allowed
+
+
+def test_http_posts_reject_cross_site_and_non_json_requests(tmp_path: Path) -> None:
+    config_path = _write_minimal_config(tmp_path)
+
+    with _running_server(config_path) as base_url:
+        non_json = _request_json(
+            base_url,
+            "POST",
+            "/api/trackers/validate",
+            {"type": "mteam", "name": "mt"},
+            expected_status=415,
+            headers={"Content-Type": "text/plain"},
+        )
+        cross_site = _request_json(
+            base_url,
+            "POST",
+            "/api/trackers/validate",
+            {"type": "mteam", "name": "mt"},
+            expected_status=403,
+            headers={
+                "Origin": "https://evil.example",
+                "Sec-Fetch-Site": "cross-site",
+            },
+        )
+        mismatched_origin = _request_json(
+            base_url,
+            "POST",
+            "/api/trackers/validate",
+            {"type": "mteam", "name": "mt"},
+            expected_status=403,
+            headers={"Origin": "https://evil.example"},
+        )
+        same_origin = _request_json(
+            base_url,
+            "POST",
+            "/api/trackers/validate",
+            {"type": "mteam", "name": "mt"},
+            headers={
+                "Origin": f"http://{base_url}",
+                "Sec-Fetch-Site": "same-origin",
+            },
+        )
+
+    assert non_json == {"error": "application/json content type is required"}
+    assert cross_site == {"error": "cross-site write request rejected"}
+    assert mismatched_origin == {"error": "cross-site write request rejected"}
+    assert "status" in same_origin
+
+
+def test_http_post_rejects_oversized_json_before_reading_body(tmp_path: Path) -> None:
+    config_path = _write_minimal_config(tmp_path)
+
+    with _running_server(config_path) as base_url:
+        connection = HTTPConnection(base_url)
+        connection.request(
+            "POST",
+            "/api/trackers/validate",
+            body=b"{}",
+            headers={
+                "Content-Type": "application/json",
+                "Content-Length": str(MAX_JSON_BODY_BYTES + 1),
+            },
+        )
+        response = connection.getresponse()
+        payload = json.loads(response.read().decode("utf-8"))
+        connection.close()
+
+    assert response.status == 413
+    assert payload == {"error": f"request body exceeds {MAX_JSON_BODY_BYTES} bytes"}
+
+
+@pytest.mark.parametrize("content_length", ["invalid", "-1"])
+def test_http_post_rejects_invalid_content_length(
+    tmp_path: Path,
+    content_length: str,
+) -> None:
+    config_path = _write_minimal_config(tmp_path)
+
+    with _running_server(config_path) as base_url:
+        connection = HTTPConnection(base_url)
+        connection.request(
+            "POST",
+            "/api/trackers/validate",
+            body=b"",
+            headers={
+                "Content-Type": "application/json",
+                "Content-Length": content_length,
+            },
+        )
+        response = connection.getresponse()
+        payload = json.loads(response.read().decode("utf-8"))
+        connection.close()
+
+    assert response.status == 400
+    assert payload["status"][0]["level"] == "warning"
+    assert "Content-Length" in payload["status"][0]["message"]
 
 
 def test_sensitive_gets_require_web_token_and_remain_redacted(
@@ -1426,6 +1523,8 @@ def test_http_want_enqueue_can_select_lower_match_release(
         )
 
     assert payload["execute"] is True
+    assert payload["outcome"] == "enqueued"
+    assert payload["status"] == [{"level": "ok", "message": "已加入 qB"}]
     assert payload["selected"]["release_id"] == "mt:https://kp.m-team.cc/detail/99"
     assert payload["enqueued"] == 1
     assert any(item["action"] == "qb.enqueue" for item in payload["decisions"])
@@ -1520,6 +1619,325 @@ def test_http_want_enqueue_rejects_legacy_execute_flag(
     assert row["state"] == IntentState.CONFIRMATION_REQUIRED.value
 
 
+def test_http_want_enqueue_preflight_avoids_qb_for_missing_and_invalid_selection(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from seed_agent import cli
+
+    config_path = _write_minimal_config(tmp_path)
+    store = StateStore(tmp_path / ".seed-agent" / "state.db")
+    intent = ResourceIntent(
+        intent_id="douban_wanted:preflight",
+        source=IntentSource.DOUBAN_WANTED,
+        raw_text="Preflight 2026",
+        kind=IntentKind.MOVIE,
+        title="Preflight",
+        year=2026,
+        requested_at=datetime(2026, 1, 1, tzinfo=UTC),
+        state=IntentState.CONFIRMATION_REQUIRED,
+    )
+    store.upsert_intent(intent)
+    store.save_ranked_releases(
+        [
+            RankedRelease(
+                intent_id=intent.intent_id,
+                release=ReleaseCandidate(
+                    release_id="mt:https://kp.m-team.cc/detail/200",
+                    site="mt",
+                    title="Preflight 2026 2160p WEB-DL",
+                    source_url="https://kp.m-team.cc/detail/200",
+                    download_url="https://tracker.example/download?id=200",
+                    size_bytes=12 * 1024**3,
+                    seeders=10,
+                    leechers=1,
+                    discount=Discount.FREE,
+                ),
+                score=90,
+                confidence=0.9,
+                accepted=True,
+                confirmation_required=False,
+                reasons=["title tokens matched"],
+                risks=[],
+            )
+        ]
+    )
+
+    def unexpected_downloader(_config):
+        raise AssertionError("qB must not be contacted during enqueue preflight")
+
+    monkeypatch.setattr(cli, "build_downloader", unexpected_downloader)
+
+    with _running_server(config_path) as base_url:
+        missing = _request_json(
+            base_url,
+            "POST",
+            "/api/wants/missing/enqueue",
+            {"release_id": "mt:https://kp.m-team.cc/detail/200"},
+            expected_status=404,
+        )
+        invalid = _request_json(
+            base_url,
+            "POST",
+            f"/api/wants/{intent.intent_id}/enqueue",
+            {"release_id": "mt:https://kp.m-team.cc/detail/missing"},
+            expected_status=400,
+        )
+
+    assert missing["outcome"] == "missing"
+    assert invalid["outcome"] == "invalid"
+
+
+def test_http_want_enqueue_already_enqueued_is_idempotent_without_qb(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from seed_agent import cli
+
+    config_path = _write_minimal_config(tmp_path)
+    store = StateStore(tmp_path / ".seed-agent" / "state.db")
+    release_id = "mt:https://kp.m-team.cc/detail/201"
+    intent = ResourceIntent(
+        intent_id="douban_wanted:already-enqueued",
+        source=IntentSource.DOUBAN_WANTED,
+        raw_text="Already Enqueued 2026",
+        kind=IntentKind.MOVIE,
+        title="Already Enqueued",
+        year=2026,
+        requested_at=datetime(2026, 1, 1, tzinfo=UTC),
+        state=IntentState.ENQUEUED,
+    )
+    store.upsert_intent(intent, selected_release_id=release_id)
+    store.save_ranked_releases(
+        [
+            RankedRelease(
+                intent_id=intent.intent_id,
+                release=ReleaseCandidate(
+                    release_id=release_id,
+                    site="mt",
+                    title="Already Enqueued 2026 2160p WEB-DL",
+                    source_url="https://kp.m-team.cc/detail/201",
+                    download_url="https://tracker.example/download?id=201",
+                    size_bytes=12 * 1024**3,
+                    seeders=10,
+                    leechers=1,
+                    discount=Discount.FREE,
+                ),
+                score=90,
+                confidence=0.9,
+                accepted=True,
+                confirmation_required=False,
+                reasons=["title tokens matched"],
+                risks=[],
+            )
+        ]
+    )
+
+    def unexpected_downloader(_config):
+        raise AssertionError("idempotent enqueue retry must not contact qB")
+
+    monkeypatch.setattr(cli, "build_downloader", unexpected_downloader)
+
+    with _running_server(config_path) as base_url:
+        payload = _request_json(
+            base_url,
+            "POST",
+            f"/api/wants/{intent.intent_id}/enqueue",
+            {"release_id": release_id},
+        )
+
+    assert payload["outcome"] == "already_enqueued"
+    assert payload["enqueued"] == 0
+    assert payload["status"] == [{"level": "info", "message": "该资源已在 qB 队列中"}]
+    assert payload["decisions"][0]["reason"] == "already enqueued"
+
+
+def test_http_want_enqueue_runtime_gate_reports_warning_without_qb_add(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from seed_agent import cli
+
+    config_path = _write_minimal_config(tmp_path)
+    config_path.write_text(
+        config_path.read_text(encoding="utf-8").replace(
+            "  allow_hr: false",
+            "  allow_hr: false\n  max_active_downloads: 0",
+        ),
+        encoding="utf-8",
+    )
+    store = StateStore(tmp_path / ".seed-agent" / "state.db")
+    release_id = "mt:https://kp.m-team.cc/detail/202"
+    intent = ResourceIntent(
+        intent_id="douban_wanted:runtime-gate",
+        source=IntentSource.DOUBAN_WANTED,
+        raw_text="Runtime Gate 2026",
+        kind=IntentKind.MOVIE,
+        title="Runtime Gate",
+        year=2026,
+        requested_at=datetime(2026, 1, 1, tzinfo=UTC),
+        state=IntentState.CONFIRMATION_REQUIRED,
+    )
+    store.upsert_intent(intent)
+    store.save_ranked_releases(
+        [
+            RankedRelease(
+                intent_id=intent.intent_id,
+                release=ReleaseCandidate(
+                    release_id=release_id,
+                    site="mt",
+                    title="Runtime Gate 2026 2160p WEB-DL",
+                    source_url="https://kp.m-team.cc/detail/202",
+                    download_url="https://tracker.example/download?id=202",
+                    size_bytes=12 * 1024**3,
+                    seeders=10,
+                    leechers=1,
+                    discount=Discount.FREE,
+                ),
+                score=90,
+                confidence=0.9,
+                accepted=True,
+                confirmation_required=False,
+                reasons=["title tokens matched"],
+                risks=[],
+            )
+        ]
+    )
+
+    class GateDownloader:
+        add_calls = 0
+
+        async def add_url(
+            self, url: str, category: str, tags: list[str], *, paused: bool = False
+        ) -> str | None:
+            self.add_calls += 1
+            return "0123456789abcdef0123456789abcdef01234567"
+
+        async def list_torrents(self, category=None, tags=None):
+            return []
+
+    downloader = GateDownloader()
+    monkeypatch.setattr(cli, "build_downloader", lambda _config: downloader)
+
+    with _running_server(config_path) as base_url:
+        payload = _request_json(
+            base_url,
+            "POST",
+            f"/api/wants/{intent.intent_id}/enqueue",
+            {"release_id": release_id},
+        )
+
+    assert payload["outcome"] == "rejected"
+    assert payload["enqueued"] == 0
+    assert payload["status"] == [{"level": "warning", "message": "入队被运行时安全门禁拒绝"}]
+    assert downloader.add_calls == 0
+
+
+def test_http_want_enqueue_parallel_request_reports_in_progress(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from seed_agent import cli
+
+    config_path = _write_minimal_config(tmp_path)
+    store = StateStore(tmp_path / ".seed-agent" / "state.db")
+    release_id = "mt:https://kp.m-team.cc/detail/203"
+    intent = ResourceIntent(
+        intent_id="douban_wanted:parallel-enqueue",
+        source=IntentSource.DOUBAN_WANTED,
+        raw_text="Parallel Enqueue 2026",
+        kind=IntentKind.MOVIE,
+        title="Parallel Enqueue",
+        year=2026,
+        requested_at=datetime(2026, 1, 1, tzinfo=UTC),
+        state=IntentState.CONFIRMATION_REQUIRED,
+    )
+    store.upsert_intent(intent)
+    store.save_ranked_releases(
+        [
+            RankedRelease(
+                intent_id=intent.intent_id,
+                release=ReleaseCandidate(
+                    release_id=release_id,
+                    site="mt",
+                    title="Parallel Enqueue 2026 2160p WEB-DL",
+                    source_url="https://kp.m-team.cc/detail/203",
+                    download_url="https://tracker.example/download?id=203",
+                    size_bytes=12 * 1024**3,
+                    seeders=10,
+                    leechers=1,
+                    discount=Discount.FREE,
+                ),
+                score=90,
+                confidence=0.9,
+                accepted=True,
+                confirmation_required=False,
+                reasons=["title tokens matched"],
+                risks=[],
+            )
+        ]
+    )
+    add_started = Event()
+    release_add = Event()
+
+    class BlockingDownloader:
+        calls = 0
+
+        async def add_url(
+            self, url: str, category: str, tags: list[str], *, paused: bool = False
+        ) -> str | None:
+            self.calls += 1
+            add_started.set()
+            if not release_add.wait(timeout=5):
+                raise TimeoutError("timed out waiting to finish qB add")
+            return "0123456789abcdef0123456789abcdef01234567"
+
+        async def list_torrents(self, category=None, tags=None):
+            return []
+
+    downloader = BlockingDownloader()
+    monkeypatch.setattr(cli, "build_downloader", lambda _config: downloader)
+    first_payload: dict[str, Any] = {}
+    first_error: list[Exception] = []
+
+    with _running_server(config_path) as base_url:
+
+        def first_enqueue() -> None:
+            try:
+                first_payload.update(
+                    _request_json(
+                        base_url,
+                        "POST",
+                        f"/api/wants/{intent.intent_id}/enqueue",
+                        {"release_id": release_id},
+                    )
+                )
+            except Exception as exc:  # pragma: no cover - asserted below
+                first_error.append(exc)
+
+        first = Thread(target=first_enqueue, name="first-want-enqueue")
+        first.start()
+        assert add_started.wait(timeout=5)
+        second_payload = _request_json(
+            base_url,
+            "POST",
+            f"/api/wants/{intent.intent_id}/enqueue",
+            {"release_id": release_id},
+        )
+        release_add.set()
+        first.join(timeout=5)
+
+    assert not first.is_alive()
+    assert first_error == []
+    assert first_payload["outcome"] == "enqueued"
+    assert second_payload["outcome"] == "in_progress"
+    assert second_payload["enqueued"] == 0
+    assert second_payload["status"] == [
+        {"level": "info", "message": "该资源正在加入 qB，请稍后刷新"}
+    ]
+    assert downloader.calls == 1
+
+
 def test_http_want_enqueue_failure_returns_actionable_status(
     tmp_path: Path,
     monkeypatch,
@@ -1586,6 +2004,7 @@ def test_http_want_enqueue_failure_returns_actionable_status(
 
     assert payload["error"] == "qBittorrent enqueue batch failed"
     assert payload["execute"] is True
+    assert payload["outcome"] == "failed"
     assert payload["enqueued"] == 0
     assert [item["action"] for item in payload["decisions"]] == [
         "qb.enqueue.failed",
@@ -2033,6 +2452,7 @@ def test_http_root_serves_static_ui(tmp_path: Path) -> None:
         connection.close()
 
     assert response.status == 200
+    assert response.getheader("Cache-Control") == "no-cache"
     assert "Seed Agent Settings" in body
     assert "/static/app.js" in body
 
@@ -2560,8 +2980,9 @@ seed_cleanup:
     return config_path
 
 
-class _TestServer(TCPServer):
+class _TestServer(ThreadingTCPServer):
     allow_reuse_address = True
+    daemon_threads = True
 
 
 class _running_server:
@@ -2589,7 +3010,8 @@ def _request_json(
     headers: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     connection = HTTPConnection(base_url)
-    raw_body = None if body is None else json.dumps(body).encode("utf-8")
+    effective_body = {} if method.upper() == "POST" and body is None else body
+    raw_body = None if effective_body is None else json.dumps(effective_body).encode("utf-8")
     request_headers = dict(headers or {})
     if raw_body is not None:
         request_headers.setdefault("Content-Type", "application/json")

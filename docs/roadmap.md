@@ -225,6 +225,20 @@ by completion period, and unfinished work is ordered by current priority.
     shared run ID and Web Want List search history persistence without touching
     a downloader.
 
+- Completed 2026-07 - Scheduler, direct-enqueue, and state security refinement
+  - Daily Want List refresh/search now use independent durable success markers,
+    catch up across midnight, retry source failures, and keep source-only sync
+    independent from qB and tracker providers.
+  - Telegram cursors remain replay-safe across mixed-source failures, while
+    M-Team intent throttling and outages produce bounded scheduler warnings or
+    backoff instead of terminating the daemon.
+  - Candidate clicks enqueue immediately with truthful idempotent status;
+    invalid, repeated, and concurrent requests cannot cause duplicate qB adds,
+    and runtime gates run before deferred download-token resolution.
+  - Web writes require bounded JSON and same-origin browser context, static
+    assets revalidate, SQLite files are owner-only, and credential redaction
+    covers authorization schemes and Telegram bot URL tokens.
+
 - Completed 2026-07 - Review roadmap execution
   - `site_history_score` now has a real state-derived feedback loop. The state
     store aggregates candidate/runtime/tracker evidence by site with low-sample

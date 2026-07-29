@@ -981,6 +981,8 @@ def test_schedule_run_executes_single_cycle_and_emits_schedule_metadata(
             "config": str(config_path_value),
             "execute": execute,
             "search_enabled": search_ingested,
+            "source_refresh_succeeded": True,
+            "search_succeeded": search_ingested,
             "ingested": 2,
             "searched": 2 if search_ingested else 0,
             "ranked": 2 if search_ingested else 0,
@@ -1036,6 +1038,8 @@ def test_schedule_run_executes_single_cycle_and_emits_schedule_metadata(
         "run_id": None,
         "execute": False,
         "search_enabled": False,
+        "source_refresh_succeeded": True,
+        "search_succeeded": False,
         "ingested": 2,
         "searched": 0,
         "ranked": 0,
@@ -1056,7 +1060,9 @@ def test_schedule_run_executes_single_cycle_and_emits_schedule_metadata(
             "interval_minutes": 15,
             "intent": None,
             "intent_refresh_enabled": None,
+            "intent_refresh_succeeded": None,
             "intent_search_enabled": None,
+            "intent_search_succeeded": None,
             "phase": "running",
             "run_id": startup_heartbeats[0]["run_id"],
             "schedule_backoff": None,
@@ -1075,7 +1081,9 @@ def test_schedule_run_executes_single_cycle_and_emits_schedule_metadata(
     assert heartbeat["run_id"].startswith("sched-")
     assert heartbeat["intent"]["searched"] == 0
     assert heartbeat["intent_refresh_enabled"] is True
+    assert heartbeat["intent_refresh_succeeded"] is True
     assert heartbeat["intent_search_enabled"] is False
+    assert heartbeat["intent_search_succeeded"] is False
 
 
 def test_schedule_run_can_skip_intent_cycle(
@@ -1354,7 +1362,7 @@ def test_scheduled_intent_search_runs_once_after_daily_hour() -> None:
         )
         is False
     )
-    assert cli._scheduled_intent_search_due(datetime(2026, 7, 3, 22, 0), hour=23) is False
+    assert cli._scheduled_intent_search_due(datetime(2026, 7, 3, 22, 0), hour=23) is True
     assert (
         cli._scheduled_intent_search_due(
             datetime(2026, 7, 3, 23, 30),
@@ -1364,6 +1372,22 @@ def test_scheduled_intent_search_runs_once_after_daily_hour() -> None:
         is True
     )
     assert cli._scheduled_intent_search_due(datetime(2026, 7, 3, 1, 0), mode="every_cycle") is True
+    assert (
+        cli._scheduled_intent_search_due(
+            datetime(2026, 7, 4, 1, 0, tzinfo=UTC),
+            hour=23,
+            last_search_at=datetime(2026, 7, 2, 23, 30, tzinfo=UTC),
+        )
+        is True
+    )
+    assert (
+        cli._scheduled_intent_search_due(
+            datetime(2026, 7, 4, 1, 0, tzinfo=UTC),
+            hour=23,
+            last_search_at=datetime(2026, 7, 3, 23, 30, tzinfo=UTC),
+        )
+        is False
+    )
 
 
 @pytest.mark.parametrize(
@@ -1379,8 +1403,19 @@ def test_latest_scheduled_intent_refresh_accepts_refresh_and_legacy_search_runs(
     from seed_agent import cli
 
     class FakeStore:
+        def latest_completed_scheduler_run(
+            self,
+            *,
+            summary_flag: str,
+        ) -> dict[str, object] | None:
+            assert summary_flag == "intent_refresh_succeeded"
+            return None
+
+        def scheduler_run_status_counts(self) -> dict[str, int]:
+            return {"success": 1}
+
         def list_scheduler_runs(self, *, limit: int) -> list[dict[str, object]]:
-            assert limit == 100
+            assert limit == 1
             return [
                 {
                     "finished_at": "2026-07-03T00:15:00+00:00",
@@ -1396,6 +1431,45 @@ def test_latest_scheduled_intent_refresh_accepts_refresh_and_legacy_search_runs(
         15,
         tzinfo=UTC,
     )
+
+
+def test_failed_scheduled_intent_refresh_is_not_a_daily_success(tmp_path: Path) -> None:
+    from seed_agent import cli
+
+    store = StateStore(tmp_path / "state.db")
+    store.start_scheduler_run(
+        run_id="sched-failed-refresh",
+        command="schedule-run",
+        config="config.yaml",
+        execute=False,
+        interval_minutes=60,
+        prune_enabled=False,
+        intent_enabled=True,
+        intent_execute=False,
+        backoff_active=False,
+        backoff_until=None,
+    )
+    store.finish_scheduler_run(
+        run_id="sched-failed-refresh",
+        status="warning",
+        summary={
+            "intent_refresh_enabled": True,
+            "intent_refresh_succeeded": False,
+            "intent_search_enabled": False,
+            "intent_search_succeeded": False,
+            "intent": {
+                "source_warnings": [
+                    {
+                        "source": "configured_sources",
+                        "error_type": "RuntimeError",
+                        "message": "douban unavailable",
+                    }
+                ]
+            },
+        },
+    )
+
+    assert cli._latest_scheduled_intent_refresh_at(store) is None
 
 
 def test_scheduler_status_warns_when_tracker_backfill_is_unresolved() -> None:
@@ -1600,6 +1674,240 @@ def test_schedule_run_refreshes_sources_but_skips_search_after_mteam_rate_limit(
     assert len(events) == 1
     assert events[0]["event"] == "rate_limited"
     assert bool(events[0]["rate_limited"]) is True
+
+
+def test_schedule_run_contains_intent_mteam_rate_limit_and_finishes_run(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from seed_agent import cli
+    from seed_agent.sites.mteam import MTeamApiResponseError
+
+    config_path = _config_file(tmp_path)
+
+    def fake_run_once_payload(
+        config_path_value: Path,
+        *,
+        execute: bool,
+        min_free_window_minutes: int | None,
+        require_known_free_window: bool,
+        prune: bool,
+        prune_free_window_min_remaining_minutes: int | None = None,
+        capacity_prune: bool = False,
+    ) -> dict[str, object]:
+        del (
+            min_free_window_minutes,
+            require_known_free_window,
+            prune,
+            prune_free_window_min_remaining_minutes,
+            capacity_prune,
+        )
+        return {
+            "command": "run-once",
+            "config": str(config_path_value),
+            "execute": execute,
+            "discovered": 0,
+            "scored": 0,
+            "accepted": 0,
+            "enqueued": 0,
+            "scores": [],
+            "decisions": [],
+        }
+
+    def fail_intent_run_once_payload(*args: object, **kwargs: object) -> dict[str, object]:
+        raise MTeamApiResponseError(
+            endpoint="torrent/search",
+            code="1",
+            message="请求过于频繁",
+        )
+
+    monkeypatch.setattr(cli, "_run_once_payload", fake_run_once_payload)
+    monkeypatch.setattr(
+        cli,
+        "_intent_run_once_payload",
+        fail_intent_run_once_payload,
+    )
+
+    result = CliRunner().invoke(
+        cli.app,
+        ["schedule-run", "--config", str(config_path), "--max-cycles", "1"],
+    )
+
+    assert result.exit_code == 0
+    payload = _json_output(result)
+    assert payload["schedule_backoff"]["active"] is True
+    assert payload["skipped_by_backoff"] is True
+    assert payload["intent_refresh_succeeded"] is False
+    assert payload["intent_search_succeeded"] is False
+    assert payload["intent"]["search_warning"]["rate_limited"] is True
+    store = StateStore(tmp_path / ".seed-agent" / "state.db")
+    run = store.list_scheduler_runs(limit=1)[0]
+    assert run["finished_at"] is not None
+    assert run["status"] == "skipped_backoff"
+    events = store.list_scheduler_run_events(run_id=str(run["run_id"]), limit=20)
+    assert any(
+        row["phase"] == "intent_search" and row["event"] == "warning"
+        for row in events
+    )
+
+
+def test_schedule_run_contains_generic_intent_search_failure_as_warning(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from seed_agent import cli
+
+    config_path = _config_file(tmp_path)
+
+    monkeypatch.setattr(
+        cli,
+        "_run_once_payload",
+        lambda *args, **kwargs: {
+            "command": "run-once",
+            "config": str(config_path),
+            "execute": False,
+            "discovered": 0,
+            "scored": 0,
+            "accepted": 0,
+            "enqueued": 0,
+            "scores": [],
+            "decisions": [],
+        },
+    )
+    monkeypatch.setattr(
+        cli,
+        "_intent_run_once_payload",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            RuntimeError("torznab unavailable token=supersecret")
+        ),
+    )
+
+    result = CliRunner().invoke(
+        cli.app,
+        ["schedule-run", "--config", str(config_path), "--max-cycles", "1"],
+    )
+
+    assert result.exit_code == 0
+    payload = _json_output(result)
+    assert "schedule_backoff" not in payload
+    assert payload["intent"]["search_warning"]["message"] == (
+        "torznab unavailable token=<redacted>"
+    )
+    assert payload["intent_refresh_succeeded"] is False
+    assert payload["intent_search_succeeded"] is False
+    store = StateStore(tmp_path / ".seed-agent" / "state.db")
+    run = store.list_scheduler_runs(limit=1)[0]
+    assert run["finished_at"] is not None
+    assert run["status"] == "warning"
+    assert "supersecret" not in str(run["summary_json"])
+
+
+def test_schedule_run_turns_intent_network_failure_into_backoff(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import httpx
+
+    from seed_agent import cli
+
+    config_path = _config_file(tmp_path)
+    monkeypatch.setattr(
+        cli,
+        "_run_once_payload",
+        lambda *args, **kwargs: {
+            "command": "run-once",
+            "config": str(config_path),
+            "execute": False,
+            "discovered": 0,
+            "scored": 0,
+            "accepted": 0,
+            "enqueued": 0,
+            "scores": [],
+            "decisions": [],
+        },
+    )
+    monkeypatch.setattr(
+        cli,
+        "_intent_run_once_payload",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            httpx.ReadTimeout(
+                "mteam intent search timeout",
+                request=httpx.Request("POST", "https://api.m-team.cc/api/torrent/search"),
+            )
+        ),
+    )
+
+    result = CliRunner().invoke(
+        cli.app,
+        ["schedule-run", "--config", str(config_path), "--max-cycles", "1"],
+    )
+
+    assert result.exit_code == 0
+    payload = _json_output(result)
+    assert payload["schedule_backoff"]["active"] is True
+    assert payload["schedule_backoff"]["reason"] == "mteam api unavailable"
+    assert payload["intent"]["search_warning"]["retriable"] is True
+    store = StateStore(tmp_path / ".seed-agent" / "state.db")
+    events = store.list_tracker_api_events(
+        site="mteam",
+        endpoint="torrent/search",
+    )
+    assert any(row["event"] == "unavailable" for row in events)
+
+
+def test_schedule_run_does_not_apply_mteam_backoff_to_torznab_network_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import httpx
+
+    from seed_agent import cli
+
+    config_path = _config_file(tmp_path)
+    monkeypatch.setattr(
+        cli,
+        "_run_once_payload",
+        lambda *args, **kwargs: {
+            "command": "run-once",
+            "config": str(config_path),
+            "execute": False,
+            "discovered": 0,
+            "scored": 0,
+            "accepted": 0,
+            "enqueued": 0,
+            "scores": [],
+            "decisions": [],
+        },
+    )
+    monkeypatch.setattr(
+        cli,
+        "_intent_run_once_payload",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            httpx.ConnectError(
+                "torznab search unavailable",
+                request=httpx.Request("GET", "http://127.0.0.1:9117/api"),
+            )
+        ),
+    )
+
+    result = CliRunner().invoke(
+        cli.app,
+        ["schedule-run", "--config", str(config_path), "--max-cycles", "1"],
+    )
+
+    assert result.exit_code == 0
+    payload = _json_output(result)
+    assert "schedule_backoff" not in payload
+    assert payload["intent"]["search_warning"] == {
+        "error_type": "ConnectError",
+        "message": "torznab search unavailable",
+        "search_enabled": True,
+    }
+    store = StateStore(tmp_path / ".seed-agent" / "state.db")
+    assert store.list_tracker_api_events(site="mteam", endpoint="torrent/search") == []
+    run = store.list_scheduler_runs(limit=1)[0]
+    assert run["status"] == "warning"
+    assert run["finished_at"] is not None
 
 
 def test_schedule_run_records_network_backoff_after_mteam_timeout(
@@ -2294,6 +2602,96 @@ def test_intent_run_once_reports_source_warnings(
             "message": "douban 403",
         }
     ]
+    assert payload["source_refresh_succeeded"] is False
+    assert payload["search_succeeded"] is True
+
+
+def test_intent_source_only_refresh_does_not_load_downloader_or_search_providers(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from seed_agent import cli
+    from seed_agent.models import IntentSource
+    from seed_agent.sources.base import SourceIntentEvent
+
+    config_path = _config_file(tmp_path)
+    event = SourceIntentEvent(
+        source=IntentSource.DOUBAN_WANTED,
+        raw_text="Inception 2010",
+        source_event_id="douban:1292720",
+        requested_at=datetime(2026, 7, 3, tzinfo=UTC),
+        metadata={"external_ids": {"douban": "1292720"}},
+    )
+    monkeypatch.setattr(
+        cli,
+        "_enqueue_runtime_context",
+        lambda *args, **kwargs: pytest.fail(
+            "source-only refresh must not load qB runtime context"
+        ),
+    )
+    monkeypatch.setattr(
+        cli,
+        "_build_search_providers",
+        lambda *args, **kwargs: pytest.fail(
+            "source-only refresh must not build search providers"
+        ),
+    )
+    monkeypatch.setattr(
+        cli,
+        "_read_configured_source_events",
+        lambda *args, **kwargs: [event],
+    )
+
+    payload = cli._intent_run_once_payload(
+        config_path,
+        execute=True,
+        search_ingested=False,
+        run_id="sched-source-only",
+    )
+
+    assert payload["source_refresh_succeeded"] is True
+    assert payload["search_succeeded"] is False
+    assert payload["ingested"] == 1
+    assert payload["searched"] == 0
+    store = StateStore(tmp_path / ".seed-agent" / "state.db")
+    assert store.find_intent_id_by_alias("douban:1292720") is not None
+
+
+def test_intent_source_failure_does_not_commit_pending_cursor(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from seed_agent import cli
+
+    config_path = _config_file(tmp_path)
+    cursor_key = "telegram:local/secrets/telegram.yaml"
+
+    def fail_after_poll(
+        loaded,
+        *,
+        store: StateStore,
+        cursor_updates: dict[str, str],
+    ) -> list[object]:
+        del loaded, store
+        cursor_updates[cursor_key] = "42"
+        raise RuntimeError("douban unavailable after telegram poll")
+
+    monkeypatch.setattr(cli, "_read_configured_source_events", fail_after_poll)
+
+    payload = cli._intent_run_once_payload(
+        config_path,
+        execute=False,
+        search_ingested=False,
+        run_id="sched-source-failed",
+    )
+
+    store = StateStore(tmp_path / ".seed-agent" / "state.db")
+    assert payload["source_refresh_succeeded"] is False
+    assert payload["source_warnings"][0]["message"] == (
+        "douban unavailable after telegram poll"
+    )
+    assert store.get_source_cursor(cursor_key) is None
+    assert cli._schedule_run_status({"intent": payload}) == "warning"
 
 
 def test_schedule_run_can_prune_each_cycle(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

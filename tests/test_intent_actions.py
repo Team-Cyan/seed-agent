@@ -6,6 +6,7 @@ import pytest
 
 from seed_agent.actions.intent import (
     add_intent,
+    enqueue_intent,
     ingest_events,
     ingest_inbox,
     run_intent_once,
@@ -17,6 +18,7 @@ from seed_agent.models import (
     IntentKind,
     IntentSource,
     IntentState,
+    RankedRelease,
     ReleaseCandidate,
     ResourceIntent,
 )
@@ -85,6 +87,69 @@ def test_add_intent_is_idempotent_for_same_source_event(tmp_path: Path) -> None:
     assert second_decision.new_state["existed"] is True
     rows = store.list_intents_by_state(IntentState.NORMALIZED)
     assert [row["intent_id"] for row in rows] == [first.intent_id]
+
+
+@pytest.mark.asyncio
+async def test_enqueue_intent_runtime_gate_skips_download_url_resolution(
+    tmp_path: Path,
+) -> None:
+    store = StateStore(tmp_path / "state.db")
+    intent, _ = add_intent("Backrooms 2026 2160p", store)
+    release_id = "mteam:https://kp.m-team.cc/detail/1208776"
+    store.save_ranked_releases(
+        [
+            RankedRelease(
+                intent_id=intent.intent_id,
+                release=ReleaseCandidate(
+                    release_id=release_id,
+                    site="mteam",
+                    title="Backrooms 2026 2160p WEB-DL",
+                    source_url="https://kp.m-team.cc/detail/1208776",
+                    download_url="mteam-api://torrent/1208776",
+                    size_bytes=20 * 1024**3,
+                    seeders=100,
+                    leechers=1,
+                    discount=Discount.FREE,
+                    metadata={
+                        "mteam_torrent_id": "1208776",
+                        "download_url_source": "mteam_api_deferred",
+                    },
+                ),
+                score=115,
+                confidence=0.95,
+                accepted=True,
+                confirmation_required=False,
+                reasons=["title tokens matched"],
+                risks=[],
+            )
+        ]
+    )
+    resolver_calls = 0
+
+    async def release_resolver(release: ReleaseCandidate) -> ReleaseCandidate:
+        nonlocal resolver_calls
+        resolver_calls += 1
+        return release.model_copy(
+            update={"download_url": "https://tracker.example/download?id=1208776"}
+        )
+
+    def enqueue_context_resolver(*_args):
+        return True, None, ["active downloads 1 >= max 1"]
+
+    _updated, _selected, decisions = await enqueue_intent(
+        intent.intent_id,
+        store,
+        _UnusedDownloader(),
+        _policy(),
+        True,
+        release_resolver=release_resolver,
+        enqueue_context_resolver=enqueue_context_resolver,
+        release_id=release_id,
+    )
+
+    assert resolver_calls == 0
+    assert [item.action for item in decisions] == ["qb.enqueue.rejected"]
+    assert decisions[0].new_state["pause_reasons"] == ["active downloads 1 >= max 1"]
 
 
 def test_add_intent_persists_source_metadata(tmp_path: Path) -> None:
@@ -582,9 +647,7 @@ async def test_search_intent_replaces_previous_search_snapshot(tmp_path: Path) -
     provider.release_id = "new"
     await search_intent(intent.intent_id, store, [provider])
 
-    assert [row["release_id"] for row in store.list_release_candidates(intent.intent_id)] == [
-        "new"
-    ]
+    assert [row["release_id"] for row in store.list_release_candidates(intent.intent_id)] == ["new"]
 
 
 def test_ingest_inbox_missing_file_returns_empty_list(tmp_path: Path) -> None:

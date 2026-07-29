@@ -40,6 +40,9 @@ Convert human requests into search/rank/reject/enqueue workflows.
   later search behavior,
 - preserve source evidence separately from canonical intent rows so repeated
   wants from different configured lists do not duplicate searches or downloads,
+- commit replay-sensitive source cursors only after the complete source batch
+  and intent cycle succeed; a later source failure must leave earlier Telegram
+  updates replayable,
 - merge source aliases only from trusted source events; candidate release
   metadata is search evidence and must never establish canonical identity,
 - treat `enqueued` and `rejected` as terminal for repeated source sync, and
@@ -67,7 +70,11 @@ Convert human requests into search/rank/reject/enqueue workflows.
   `S020E030`,
 - redact credential-like assignments before persisting intent raw text while
   retaining stable source-event identity,
-- do not entangle source ingestion with downloader logic.
+- keep source-only ingestion independent from downloader and search-provider
+  availability,
+- evaluate enqueue runtime gates before resolving a deferred tracker download
+  token, and preserve distinct already-enqueued/in-progress outcomes for
+  idempotent callers.
 
 ## Verification
 
