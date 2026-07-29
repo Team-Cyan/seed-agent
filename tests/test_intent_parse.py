@@ -73,7 +73,8 @@ def test_parse_removes_sensitive_assignments_from_title() -> None:
     )
 
     assert intent.title == "Secret"
-    assert "passkey=abc123" in intent.raw_text
+    assert "abc123" not in intent.raw_text
+    assert "passkey=<redacted>" in intent.raw_text
 
 
 def test_parse_uses_source_event_id_for_stable_identity() -> None:

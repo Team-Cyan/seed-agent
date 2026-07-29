@@ -198,7 +198,6 @@ const copy = {
       configPathMissing: "配置文件: 尚未加载",
       configSaved: "配置已保存",
       configYamlNotLoaded: "配置尚未加载。",
-      confirmEnqueueQb: "确认加入 qB",
       confirmSaveForm: "确认保存表单",
       cookieFile: "Cookie 文件",
       cookieFileHelp: "可选。只保存本地 cookie secret 文件路径，不保存明文。",
@@ -209,7 +208,6 @@ const copy = {
       downloaders: "下载",
       enabled: "启用",
       enqueueQb: "加入 qB",
-      enqueuePreviewReady: "入队预览已准备。确认后才会向 qB 发送添加任务。",
       expandTracker: "展开站点",
       exportFile: "导出文件",
       failed: "失败",
@@ -278,7 +276,6 @@ const copy = {
       opsDashboard: "调度",
       pages: "页数",
       preview: "预览",
-      previewEnqueueQb: "预览入队",
       previewFormChanges: "预览表单改动",
       previewThisPageYaml: "预览本页 YAML",
       provider: "来源",
@@ -509,7 +506,6 @@ const copy = {
       configPathMissing: "Config file: not loaded",
       configSaved: "Config saved",
       configYamlNotLoaded: "Config is not loaded.",
-      confirmEnqueueQb: "Confirm add to qB",
       confirmSaveForm: "Confirm save form",
       cookieFile: "Cookie file",
       cookieFileHelp: "Optional. Stores only the local cookie secret file path, not the cookie value.",
@@ -520,7 +516,6 @@ const copy = {
       downloaders: "Downloads",
       enabled: "Enabled",
       enqueueQb: "Add to qB",
-      enqueuePreviewReady: "Queue preview is ready. Confirming will send the add request to qB.",
       expandTracker: "Expand tracker",
       exportFile: "Export file",
       failed: "Failed",
@@ -589,7 +584,6 @@ const copy = {
       opsDashboard: "Scheduler",
       pages: "Pages",
       preview: "Preview",
-      previewEnqueueQb: "Preview queue",
       previewFormChanges: "Preview form changes",
       previewThisPageYaml: "Preview this page YAML",
       provider: "Source",
@@ -2465,10 +2459,9 @@ function renderWantCandidateCard(item) {
       <div class="candidate-card-footer">
         <div class="candidate-confidence">${escapeHtml(item.matches_requirements ? uiText("matchingPreference") : uiText("candidateNeedsReview"))}</div>
         <div class="tracker-actions-group candidate-actions">
-          <button class="${item.matches_requirements ? "primary-button" : "secondary-button"}" type="button" data-want-candidate-action="enqueue" data-release-id="${escapeAttribute(item.release_id)}">${escapeHtml(uiText("previewEnqueueQb"))} · ${escapeHtml(actionLabel)}</button>
+          <button class="${item.matches_requirements ? "primary-button" : "secondary-button"}" type="button" data-want-candidate-action="enqueue" data-release-id="${escapeAttribute(item.release_id)}">${escapeHtml(actionLabel)}</button>
         </div>
       </div>
-      <div class="candidate-preview-slot" data-want-candidate-preview></div>
     </article>
   `;
 }
@@ -2513,58 +2506,30 @@ async function handleWantCandidateAction(panel, action, button) {
     return;
   }
   if (action === "enqueue") {
-    await previewWantCandidateEnqueue(panel, intentId, releaseId, button);
-    return;
-  }
-  if (action !== "enqueue-confirm") {
-    return;
-  }
-  await confirmWantCandidateEnqueue(panel, intentId, releaseId, button);
-}
-
-async function previewWantCandidateEnqueue(panel, intentId, releaseId, button) {
-  const modal = panel.querySelector("[data-want-candidate-modal]");
-  const status = modal.querySelector("[data-want-candidate-status]");
-  const previewSlot = button?.closest?.("[data-release-id]")?.querySelector("[data-want-candidate-preview]");
-  try {
-    setModalBusy(modal, true);
-    status.innerHTML = `<div class="status-item info">${escapeHtml(uiText("processing"))}</div>`;
-    const payload = await submitWantCandidateEnqueue(intentId, releaseId, false);
-    if (previewSlot) {
-      previewSlot.innerHTML = renderWantCandidatePreview(payload, releaseId);
-    }
-    status.innerHTML = `<div class="status-item ok">${escapeHtml(payload.status?.[0]?.message || uiText("enqueuePreviewReady"))}</div>`;
-  } catch (error) {
-    status.innerHTML = `<div class="status-item warning">${escapeHtml(error.message)}</div>`;
-  } finally {
-    setModalBusy(modal, false);
+    await enqueueWantCandidate(panel, intentId, releaseId);
   }
 }
 
-async function confirmWantCandidateEnqueue(panel, intentId, releaseId, button) {
+async function enqueueWantCandidate(panel, intentId, releaseId) {
   const modal = panel.querySelector("[data-want-candidate-modal]");
   const status = modal.querySelector("[data-want-candidate-status]");
   try {
     setModalBusy(modal, true);
     status.innerHTML = `<div class="status-item info">${escapeHtml(uiText("processing"))}</div>`;
-    const payload = await submitWantCandidateEnqueue(intentId, releaseId, true);
+    const payload = await submitWantCandidateEnqueue(intentId, releaseId);
     await loadWants();
     const message = payload.status?.[0]?.message || uiText("operationComplete");
     await openWantCandidates(panel, intentId, message);
   } catch (error) {
     status.innerHTML = `<div class="status-item warning">${escapeHtml(error.message)}</div>`;
-    const previewSlot = button?.closest?.("[data-release-id]")?.querySelector("[data-want-candidate-preview]");
-    if (previewSlot) {
-      previewSlot.insertAdjacentHTML("beforeend", `<div class="status-item warning">${escapeHtml(error.message)}</div>`);
-    }
   } finally {
     setModalBusy(modal, false);
   }
 }
 
-async function submitWantCandidateEnqueue(intentId, releaseId, execute) {
+async function submitWantCandidateEnqueue(intentId, releaseId) {
   const endpoint = `/api/wants/${encodeURIComponent(intentId)}/enqueue`;
-  const body = { release_id: releaseId, execute: execute ? true : false };
+  const body = { release_id: releaseId };
   const response = await apiFetch(endpoint, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -2575,28 +2540,6 @@ async function submitWantCandidateEnqueue(intentId, releaseId, execute) {
     throw new Error(formatWantCandidateError(payload, response.status));
   }
   return payload;
-}
-
-function renderWantCandidatePreview(payload, releaseId) {
-  const selected = payload.selected || {};
-  const decisions = payload.decisions || [];
-  const decisionReason = decisions.find((item) => item?.reason)?.reason;
-  const runtimeTotal = payload.runtime_activity?.managed_count ?? 0;
-  const statusMessage = payload.status?.[0]?.message || uiText("enqueuePreviewReady");
-  return `
-    <div class="candidate-preview">
-      <div class="status-item ok">${escapeHtml(statusMessage)}</div>
-      <div class="candidate-preview-summary">
-        <span>${escapeHtml(uiText("score"))}: ${escapeHtml(selected.score ?? "?")}</span>
-        <span>${escapeHtml(uiText("runtimeManagedCount"))}: ${escapeHtml(runtimeTotal)}</span>
-        <span>${escapeHtml(uiText("status"))}: ${escapeHtml(payload.execute ? uiText("statusEnqueued") : uiText("preview"))}</span>
-      </div>
-      ${decisionReason ? `<div class="muted-line">${escapeHtml(decisionReason)}</div>` : ""}
-      <div class="candidate-preview-actions">
-        <button class="primary-button" type="button" data-want-candidate-action="enqueue-confirm" data-release-id="${escapeAttribute(releaseId)}">${escapeHtml(uiText("confirmEnqueueQb"))}</button>
-      </div>
-    </div>
-  `;
 }
 
 function formatWantCandidateError(payload, statusCode) {

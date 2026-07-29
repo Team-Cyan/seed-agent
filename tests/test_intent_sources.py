@@ -12,7 +12,11 @@ from seed_agent.sources.douban import (
 from seed_agent.sources.file_inbox import read_file_inbox
 from seed_agent.sources.imdb import parse_imdb_watchlist_csv, parse_imdb_watchlist_html
 from seed_agent.sources.letterboxd import parse_letterboxd_watchlist_csv
-from seed_agent.sources.telegram import parse_telegram_update, poll_telegram_updates
+from seed_agent.sources.telegram import (
+    parse_telegram_update,
+    poll_telegram_update_batch,
+    poll_telegram_updates,
+)
 from seed_agent.sources.wechat_bridge import parse_wechat_bridge_event
 
 
@@ -114,6 +118,24 @@ def test_telegram_polling_reads_updates_and_filters_allowed_chats() -> None:
     assert events[0].source_event_id == "telegram:12345:42"
     assert events[0].metadata["chat_id"] == "12345"
     assert "secret-token" not in str(events[0].metadata)
+
+
+def test_telegram_poll_batch_advances_past_filtered_and_invalid_updates() -> None:
+    batch = poll_telegram_update_batch(
+        bot_token="secret-token",
+        offset=100,
+        allowed_chat_ids={"12345"},
+        fetcher=lambda _token, _params: {
+            "ok": True,
+            "result": [
+                {"update_id": 101, "message": {"chat": {"id": 99999}, "text": "filtered"}},
+                {"update_id": 104, "message": {"chat": {"id": 12345}, "photo": []}},
+            ],
+        },
+    )
+
+    assert batch.events == []
+    assert batch.next_offset == 105
 
 
 def test_wechat_bridge_parser_extracts_message() -> None:

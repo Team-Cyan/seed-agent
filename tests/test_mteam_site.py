@@ -1152,6 +1152,22 @@ def test_merge_detail_drops_stale_finite_window_when_expiry_is_missing() -> None
     assert merged.metadata["left_time_source"] == "mteam_api_missing"
 
 
+def test_merge_detail_preserves_explicit_zero_peer_counts() -> None:
+    candidate = _candidate(seeders=10, leechers=30)
+
+    merged = _merge_detail(
+        candidate,
+        {
+            "_auth_mode": "api_key",
+            "size": candidate.size_bytes,
+            "status": {"seeders": 0, "leechers": 0},
+        },
+    )
+
+    assert merged.seeders == 0
+    assert merged.leechers == 0
+
+
 @pytest.mark.asyncio
 async def test_enrich_candidates_merges_mteam_detail() -> None:
     async def fake_fetch_detail(torrent_id: str) -> dict[str, object] | None:

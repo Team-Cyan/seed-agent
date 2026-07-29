@@ -738,6 +738,24 @@ def test_scoring_weights_must_sum_to_100() -> None:
         SeedAgentConfig(**data)
 
 
+def test_scoring_weights_cannot_use_negative_compensation() -> None:
+    data = _valid_config_data("local/secrets/qb.yaml")
+    data["pt_scoring"] = {
+        "min_score_to_enqueue": 70,
+        "weights": {
+            "discount": 110,
+            "leechers": -10,
+            "seeders": 0,
+            "left_time": 0,
+            "size": 0,
+            "site_history": 0,
+        },
+    }
+
+    with pytest.raises(ValidationError, match="between 0 and 100"):
+        SeedAgentConfig(**data)
+
+
 def test_cleanup_legacy_pause_delay_is_accepted_but_excluded() -> None:
     data = _valid_config_data("local/secrets/qb.yaml")
     data["seed_cleanup"] = {**data["seed_cleanup"], "pause_before_delete_hours": 24}

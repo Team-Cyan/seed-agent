@@ -219,47 +219,6 @@ def _dedupe_strings(values: list[str]) -> list[str]:
     return deduped
 
 
-def _record_release_external_aliases(
-    store: StateStore,
-    intent: ResourceIntent,
-    releases: list[ReleaseCandidate],
-) -> ResourceIntent:
-    merged_ids = _dict_metadata(intent.metadata.get("external_ids"))
-    for release in releases:
-        release_ids = _dict_metadata(release.metadata.get("external_ids"))
-        if release_ids:
-            merged_ids.update(release_ids)
-    if not merged_ids:
-        return intent
-    aliases = [f"{provider}:{value}" for provider, value in merged_ids.items() if value]
-    existing_ids = {
-        existing_id
-        for alias in aliases
-        if (existing_id := store.find_intent_id_by_alias(alias)) is not None
-    }
-    existing_ids.add(intent.intent_id)
-    canonical_id = _canonical_intent_id(store, existing_ids) or intent.intent_id
-    for duplicate_id in sorted(existing_ids):
-        if duplicate_id != canonical_id:
-            store.merge_intents(canonical_id, duplicate_id)
-    for alias in aliases:
-        store.upsert_intent_alias(alias, canonical_id)
-    row = store.get_intent(canonical_id)
-    if row is None:
-        return intent
-    canonical = ResourceIntent.model_validate(json.loads(str(row["normalized_json"])))
-    if merged_ids != canonical.metadata.get("external_ids"):
-        updated = canonical.model_copy(
-            update={"metadata": _merge_metadata(canonical.metadata, {"external_ids": merged_ids})}
-        )
-        store.upsert_intent(
-            updated,
-            selected_release_id=row["selected_release_id"],
-        )
-        return updated
-    return canonical
-
-
 def ingest_events(
     events: Iterable[SourceIntentEvent],
     store: StateStore,
@@ -288,12 +247,11 @@ async def search_intent(
     releases: list[ReleaseCandidate] = []
     for provider in providers:
         releases.extend(await provider.search(intent))
-    canonical_intent = _record_release_external_aliases(store, intent, releases)
-    ranked = [_unranked_candidate(canonical_intent.intent_id, release) for release in releases]
-    store.save_ranked_releases(ranked)
-    store.update_intent_state(canonical_intent.intent_id, IntentState.SEARCHED)
-    updated_intent = canonical_intent.model_copy(update={"state": IntentState.SEARCHED})
-    return updated_intent, ranked, _search_decision(canonical_intent, ranked)
+    ranked = [_unranked_candidate(intent.intent_id, release) for release in releases]
+    store.save_ranked_releases(ranked, replace_intent_id=intent.intent_id)
+    store.update_intent_state(intent.intent_id, IntentState.SEARCHED)
+    updated_intent = intent.model_copy(update={"state": IntentState.SEARCHED})
+    return updated_intent, ranked, _search_decision(intent, ranked)
 
 
 def rank_intent(
@@ -447,7 +405,15 @@ async def run_intent_once(
     ingested_pairs.extend(ingest_events(source_events, store))
     ingested = [item[0] for item in ingested_pairs]
     decisions = [item[1] for item in ingested_pairs]
-    pending_search = _dedupe_intents_by_id(ingested) if search_ingested else []
+    pending_search = (
+        [
+            intent
+            for intent in _dedupe_intents_by_id(ingested)
+            if intent.state not in {IntentState.ENQUEUED, IntentState.REJECTED}
+        ]
+        if search_ingested
+        else []
+    )
     searched: list[ResourceIntent] = []
     ranked_releases: list[RankedRelease] = []
     enqueue_selected: list[RankedRelease] = []

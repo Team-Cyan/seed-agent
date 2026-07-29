@@ -4,6 +4,7 @@ import hashlib
 import re
 from datetime import UTC, datetime
 
+from seed_agent.audit import redact_sensitive_text
 from seed_agent.models import IntentKind, IntentSource, IntentState, ResourceIntent
 
 YEAR_RE = re.compile(r"\b(19\d{2}|20\d{2}|21\d{2})\b")
@@ -31,6 +32,8 @@ def parse_resource_intent(
     if not text:
         raise ValueError("raw_text must not be empty")
 
+    event_identity = source_event_id or text
+    safe_text = redact_sensitive_text(text)
     requested = requested_at or datetime.now(UTC)
     kind_prefix = _kind_prefix(text)
     working = KIND_PREFIX_RE.sub("", text, count=1)
@@ -51,12 +54,10 @@ def parse_resource_intent(
 
     title = _title_from_text(working)
     kind = _kind(kind_prefix, year=year, season=season, episode=episode)
-    event_identity = source_event_id or text
-
     return ResourceIntent(
         intent_id=_intent_id(source, event_identity),
         source=source,
-        raw_text=text,
+        raw_text=safe_text,
         kind=kind,
         title=title,
         year=year,

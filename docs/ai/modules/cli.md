@@ -30,8 +30,8 @@ Expose the operator-facing command surface and safe summaries.
   timeline without mounting the Docker socket or depending on container stdout,
 - web Want List endpoints for listing canonical Douban/IMDb wants, triggering
   search-only dry runs for current filters or a single item, reviewing saved
-  release candidates, and explicitly enqueueing one release through the same
-  intent enqueue path,
+  release candidates, and enqueueing one reviewed release through the same
+  intent enqueue path with a single explicit candidate-button click,
 - the Web UI Want List toolbar separates source refresh from torrent search:
   refresh syncs configured Douban/IMDb sources into local intent state, while
   search runs the non-mutating torrent search for the current filters. Each
@@ -65,13 +65,15 @@ Expose the operator-facing command surface and safe summaries.
   from the YAML `scheduler` section. Explicit CLI flags and container variables
   override those defaults and are reported in scheduler summaries; the Web
   scheduler page also lists environment-derived overrides. Configured
-  Want List sources are refreshed every enabled cycle; scheduled torrent search
-  follows `scheduler.intent_search_mode` (`daily` once at or after
+  Want List source refresh and torrent search independently follow
+  `scheduler.intent_search_mode` (`daily` once at or after
   `intent_search_hour` by default, with missed runs caught up on the next
-  cycle, or `every_cycle`). Operators can still trigger filtered or
+  cycle, or `every_cycle`). Tracker backoff skips M-Team search but does not
+  suppress a due Douban/IMDb source refresh. Intents already enqueued or
+  rejected are not searched again. Operators can still trigger filtered or
   single-item Want List searches manually from the Web UI. Scheduled resource
-  enqueue remains a dry-run unless `--intent-execute` is explicitly set, and the
-  loop can be disabled with `--no-intent`,
+  enqueue remains a dry-run unless `--intent-execute` is explicitly set, and
+  the loop can be disabled with `--no-intent`,
 - `schedule-trigger` asks the already-running scheduler process to start one
   cycle immediately. The durable scheduler control state rejects the request
   while a cycle is already running, so the command cannot create a concurrent
@@ -121,7 +123,9 @@ Expose the operator-facing command surface and safe summaries.
 - heartbeat reporting and healthcheck probes for long-running deployments.
 - optional Prometheus `/metrics` output derived only from local SQLite and
   heartbeat evidence, with fixed low-cardinality labels and no tracker or
-  downloader calls during scrape.
+  downloader calls during scrape. Cumulative counters aggregate the complete
+  database history, expired backoffs are inactive, and the route honors the
+  optional Web API token.
 
 ## Expectations
 
@@ -165,12 +169,12 @@ Expose the operator-facing command surface and safe summaries.
   capacity pressure only, when better accepted candidates are waiting,
 - keep long-running deployment liveness inspectable through structured
   heartbeat output instead of opaque shell wrappers.
-- keep web UI actions safe by default: tracker-local validation, site probe,
-  search, dry-run previews, and read-only state endpoints must not execute
-  enqueue or cleanup mutations. qB enqueue from the Want List must remain an
-  explicit candidate-level action with a confirmation step. Candidate review UI
-  should keep lower-match releases visibly distinct without making their force
-  actions look disabled.
+- keep non-mutating web UI actions safe by default: tracker-local validation,
+  site probe, search, dry-run previews, and read-only state endpoints must not
+  execute enqueue or cleanup mutations. A Want List candidate button is the
+  explicit qB enqueue action and executes immediately; it must stay scoped to
+  the selected release. Candidate review UI should keep lower-match releases
+  visibly distinct without making their force actions look disabled.
 - keep `config-import` dry-run by default and validate the merged config before
   atomically writing. Imported rule bundles should not contain secret values,
   only secret refs.

@@ -8,8 +8,11 @@ import httpx
 import pytest
 import respx
 
+from seed_agent.actions.qb import prune_cold_torrents
+from seed_agent.config import CategoryPolicyConfig, CleanupConfig
 from seed_agent.downloaders.transmission import TransmissionClient, TransmissionError
 from seed_agent.models import ManagedTorrent
+from seed_agent.policies.category_policy import PoolUsage
 
 
 @pytest.mark.asyncio
@@ -243,6 +246,75 @@ async def test_transmission_pause_and_delete_post_rpc_methods() -> None:
             "arguments": {"ids": ["abcd1234"], "delete-local-data": True},
         },
     ]
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_transmission_execute_prune_revalidates_requested_category() -> None:
+    removed = False
+    calls: list[str] = []
+    torrent_row = {
+        "hashString": "abcd1234",
+        "name": "Cold Incomplete",
+        "labels": ["seed", "seed-agent"],
+        "status": 4,
+        "totalSize": 10 * 1024**3,
+        "uploadedEver": 0,
+        "downloadedEver": 5 * 1024**3,
+        "leftUntilDone": 5 * 1024**3,
+        "addedDate": 1700000000,
+        "activityDate": 1700000000,
+        "downloadDir": "/mnt/downloads",
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal removed
+        payload = json.loads(request.content.decode())
+        calls.append(payload["method"])
+        if payload["method"] == "torrent-remove":
+            removed = True
+            return httpx.Response(200, json={"result": "success", "arguments": {}})
+        return httpx.Response(
+            200,
+            json={
+                "result": "success",
+                "arguments": {"torrents": [] if removed else [torrent_row]},
+            },
+        )
+
+    respx.post("https://tr.example/transmission/rpc").mock(side_effect=handler)
+    client = TransmissionClient("https://tr.example")
+    torrent = (await client.list_torrents(category="seed"))[0]
+
+    decisions = await prune_cold_torrents(
+        [torrent],
+        client,
+        CleanupConfig(
+            cold_after_days=1,
+            min_upload_delta_gb=1,
+            protect_hr=True,
+            protect_manual=True,
+            protect_media_library=True,
+            delete_after_no_upload_hours=1,
+        ),
+        CategoryPolicyConfig(
+            name="seed",
+            mode="mutable",
+            budget_pool="downloads",
+            delete_enabled=True,
+            over_budget_behavior="add_paused",
+            tags=["seed-agent", "seed"],
+        ),
+        execute=True,
+        pool_usage=PoolUsage(
+            pool_name="downloads",
+            size_bytes=11 * 1024**4,
+            max_size_bytes=10 * 1024**4,
+        ),
+    )
+
+    assert decisions[0].action == "qb.cleanup.delete"
+    assert "torrent-remove" in calls
 
 
 @pytest.mark.asyncio

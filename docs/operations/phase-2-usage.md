@@ -31,7 +31,8 @@ rows. Clicking a row opens candidate review: matching releases appear first with
 score, size, M-Team tags, inferred quality tags, and ranking reasons; lower-match
 releases remain visible and dimmed so an operator can force a download when
 waiting for Remux/Blu-ray/4K is not worth it. qB enqueue still requires an
-explicit button click and browser confirmation; search itself never enqueues.
+explicit candidate button click, which executes immediately without another
+preview or browser confirmation; search itself never enqueues.
 
 For a movie Remux-first Douban/IMDb-to-M-Team intent flow:
 

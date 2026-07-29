@@ -990,7 +990,12 @@ def test_schedule_run_executes_single_cycle_and_emits_schedule_metadata(
 
     monkeypatch.setattr(cli, "_run_once_payload", fake_run_once_payload)
     monkeypatch.setattr(cli, "_intent_run_once_payload", fake_intent_run_once_payload)
-    monkeypatch.setattr(cli, "_scheduled_intent_search_due", lambda *args, **kwargs: False)
+    intent_due = iter((True, False))
+    monkeypatch.setattr(
+        cli,
+        "_scheduled_intent_search_due",
+        lambda *args, **kwargs: next(intent_due),
+    )
     monkeypatch.setattr(cli.time, "sleep", lambda seconds: None)
 
     result = CliRunner().invoke(
@@ -1050,6 +1055,7 @@ def test_schedule_run_executes_single_cycle_and_emits_schedule_metadata(
             "execute": True,
             "interval_minutes": 15,
             "intent": None,
+            "intent_refresh_enabled": None,
             "intent_search_enabled": None,
             "phase": "running",
             "run_id": startup_heartbeats[0]["run_id"],
@@ -1068,6 +1074,7 @@ def test_schedule_run_executes_single_cycle_and_emits_schedule_metadata(
     assert isinstance(heartbeat["run_id"], str)
     assert heartbeat["run_id"].startswith("sched-")
     assert heartbeat["intent"]["searched"] == 0
+    assert heartbeat["intent_refresh_enabled"] is True
     assert heartbeat["intent_search_enabled"] is False
 
 
@@ -1359,6 +1366,38 @@ def test_scheduled_intent_search_runs_once_after_daily_hour() -> None:
     assert cli._scheduled_intent_search_due(datetime(2026, 7, 3, 1, 0), mode="every_cycle") is True
 
 
+@pytest.mark.parametrize(
+    "summary",
+    [
+        {"intent_refresh_enabled": True, "intent_search_enabled": False},
+        {"intent_search_enabled": True},
+    ],
+)
+def test_latest_scheduled_intent_refresh_accepts_refresh_and_legacy_search_runs(
+    summary: dict[str, bool],
+) -> None:
+    from seed_agent import cli
+
+    class FakeStore:
+        def list_scheduler_runs(self, *, limit: int) -> list[dict[str, object]]:
+            assert limit == 100
+            return [
+                {
+                    "finished_at": "2026-07-03T00:15:00+00:00",
+                    "summary_json": json.dumps(summary),
+                }
+            ]
+
+    assert cli._latest_scheduled_intent_refresh_at(FakeStore()) == datetime(
+        2026,
+        7,
+        3,
+        0,
+        15,
+        tzinfo=UTC,
+    )
+
+
 def test_scheduler_status_warns_when_tracker_backfill_is_unresolved() -> None:
     from seed_agent import cli
 
@@ -1477,14 +1516,14 @@ def test_mteam_batch_snapshot_success_requires_real_request_without_failure(
     assert cli._mteam_batch_snapshot_succeeded(payload) is expected
 
 
-def test_schedule_run_records_backoff_and_skips_intent_after_mteam_rate_limit(
+def test_schedule_run_refreshes_sources_but_skips_search_after_mteam_rate_limit(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from seed_agent import cli
 
     config_path = _config_file(tmp_path)
-    intent_called = False
+    intent_search_modes: list[bool] = []
 
     def fake_run_once_payload(
         config_path_value: Path,
@@ -1521,9 +1560,17 @@ def test_schedule_run_records_backoff_and_skips_intent_after_mteam_rate_limit(
         search_ingested: bool = True,
         run_id: str | None = None,
     ) -> dict[str, object]:
-        nonlocal intent_called
-        intent_called = True
-        return {"command": "intent-run-once", "execute": execute}
+        intent_search_modes.append(search_ingested)
+        return {
+            "command": "intent-run-once",
+            "execute": execute,
+            "search_enabled": search_ingested,
+            "ingested": 2,
+            "searched": 0,
+            "ranked": 0,
+            "enqueue_candidates": 0,
+            "decisions": [],
+        }
 
     monkeypatch.setattr(cli, "_run_once_payload", fake_run_once_payload)
     monkeypatch.setattr(cli, "_intent_run_once_payload", fake_intent_run_once_payload)
@@ -1537,10 +1584,12 @@ def test_schedule_run_records_backoff_and_skips_intent_after_mteam_rate_limit(
     payload = _json_output(result)
     assert payload["skipped_by_backoff"] is True
     assert payload["schedule_backoff"]["active"] is True
+    assert payload["intent_refresh_enabled"] is True
     assert payload["intent_search_enabled"] is False
-    assert payload["intent"]["skipped_by_backoff"] is True
+    assert payload["intent"]["search_skipped_by_backoff"] is True
+    assert payload["intent"]["ingested"] == 2
     assert payload["intent"]["searched"] == 0
-    assert intent_called is False
+    assert intent_search_modes == [False]
     assert (tmp_path / ".seed-agent" / "schedule-backoff.json").exists()
     store = StateStore(tmp_path / ".seed-agent" / "state.db")
     backoff = store.get_tracker_backoff("mteam", "torrent/search")
@@ -1593,11 +1642,28 @@ def test_schedule_run_records_network_backoff_after_mteam_timeout(
         }
 
     monkeypatch.setattr(cli, "_run_once_payload", fake_run_once_payload)
-    monkeypatch.setattr(
-        cli,
-        "_intent_run_once_payload",
-        lambda *args, **kwargs: pytest.fail("intent should be skipped after network backoff"),
-    )
+    intent_search_modes: list[bool] = []
+
+    def fake_intent_run_once_payload(
+        config_path_value: Path,
+        *,
+        execute: bool,
+        search_ingested: bool = True,
+        run_id: str | None = None,
+    ) -> dict[str, object]:
+        intent_search_modes.append(search_ingested)
+        return {
+            "command": "intent-run-once",
+            "execute": execute,
+            "search_enabled": search_ingested,
+            "ingested": 1,
+            "searched": 0,
+            "ranked": 0,
+            "enqueue_candidates": 0,
+            "decisions": [],
+        }
+
+    monkeypatch.setattr(cli, "_intent_run_once_payload", fake_intent_run_once_payload)
 
     result = CliRunner().invoke(
         cli.app,
@@ -1610,7 +1676,8 @@ def test_schedule_run_records_network_backoff_after_mteam_timeout(
     assert payload["schedule_backoff"]["active"] is True
     assert payload["schedule_backoff"]["endpoint"] == "torrent/search"
     assert payload["schedule_backoff"]["reason"] == "mteam api unavailable"
-    assert payload["intent"]["skipped_by_backoff"] is True
+    assert payload["intent"]["search_skipped_by_backoff"] is True
+    assert intent_search_modes == [False]
     assert not (tmp_path / ".seed-agent" / "schedule-backoff.json").exists()
 
     store = StateStore(tmp_path / ".seed-agent" / "state.db")
@@ -1689,10 +1756,31 @@ def test_schedule_run_prunes_after_tracker_backfill_network_backoff(
         "_run_once_payload",
         lambda *args, **kwargs: pytest.fail("run-once should be skipped"),
     )
+    intent_search_modes: list[bool] = []
+
+    def fake_intent_run_once_payload(
+        config_path_value: Path,
+        *,
+        execute: bool,
+        search_ingested: bool = True,
+        run_id: str | None = None,
+    ) -> dict[str, object]:
+        intent_search_modes.append(search_ingested)
+        return {
+            "command": "intent-run-once",
+            "execute": execute,
+            "search_enabled": search_ingested,
+            "ingested": 1,
+            "searched": 0,
+            "ranked": 0,
+            "enqueue_candidates": 0,
+            "decisions": [],
+        }
+
     monkeypatch.setattr(
         cli,
         "_intent_run_once_payload",
-        lambda *args, **kwargs: pytest.fail("intent should be skipped"),
+        fake_intent_run_once_payload,
     )
 
     result = CliRunner().invoke(
@@ -1714,6 +1802,9 @@ def test_schedule_run_prunes_after_tracker_backfill_network_backoff(
     assert payload["skipped_by_backoff"] is True
     assert payload["schedule_backoff"]["reason"] == "mteam api unavailable"
     assert payload["tracker_source_backfill"]["summary"]["unavailable"] == 1
+    assert payload["intent_refresh_enabled"] is True
+    assert payload["intent_search_enabled"] is False
+    assert intent_search_modes == [False]
 
 
 def test_schedule_run_skips_work_while_backoff_is_active(
@@ -1758,12 +1849,30 @@ def test_schedule_run_skips_work_while_backoff_is_active(
             "preview": [],
         }
 
-    def fail_intent_run_once_payload(*args: object, **kwargs: object) -> dict[str, object]:
-        pytest.fail("intent should be skipped during schedule backoff")
+    intent_search_modes: list[bool] = []
+
+    def fake_intent_run_once_payload(
+        config_path_value: Path,
+        *,
+        execute: bool,
+        search_ingested: bool = True,
+        run_id: str | None = None,
+    ) -> dict[str, object]:
+        intent_search_modes.append(search_ingested)
+        return {
+            "command": "intent-run-once",
+            "execute": execute,
+            "search_enabled": search_ingested,
+            "ingested": 1,
+            "searched": 0,
+            "ranked": 0,
+            "enqueue_candidates": 0,
+            "decisions": [],
+        }
 
     monkeypatch.setattr(cli, "_run_once_payload", fail_run_once_payload)
     monkeypatch.setattr(cli, "_prune_payload", fake_prune_payload)
-    monkeypatch.setattr(cli, "_intent_run_once_payload", fail_intent_run_once_payload)
+    monkeypatch.setattr(cli, "_intent_run_once_payload", fake_intent_run_once_payload)
 
     result = CliRunner().invoke(
         cli.app,
@@ -1785,8 +1894,10 @@ def test_schedule_run_skips_work_while_backoff_is_active(
     assert payload["enqueued"] == 0
     assert prune_calls == [120]
     assert payload["prune"]["command"] == "prune"
-    assert payload["intent"]["skipped_by_backoff"] is True
+    assert payload["intent"]["search_skipped_by_backoff"] is True
+    assert payload["intent_refresh_enabled"] is True
     assert payload["intent_search_enabled"] is False
+    assert intent_search_modes == [False]
 
 
 def test_schedule_run_skips_work_from_sqlite_tracker_backoff(
@@ -1809,11 +1920,29 @@ def test_schedule_run_skips_work_from_sqlite_tracker_backoff(
     def fail_run_once_payload(*args: object, **kwargs: object) -> dict[str, object]:
         pytest.fail("run-once should be skipped during sqlite tracker backoff")
 
-    def fail_intent_run_once_payload(*args: object, **kwargs: object) -> dict[str, object]:
-        pytest.fail("intent should be skipped during sqlite tracker backoff")
+    intent_search_modes: list[bool] = []
+
+    def fake_intent_run_once_payload(
+        config_path_value: Path,
+        *,
+        execute: bool,
+        search_ingested: bool = True,
+        run_id: str | None = None,
+    ) -> dict[str, object]:
+        intent_search_modes.append(search_ingested)
+        return {
+            "command": "intent-run-once",
+            "execute": execute,
+            "search_enabled": search_ingested,
+            "ingested": 1,
+            "searched": 0,
+            "ranked": 0,
+            "enqueue_candidates": 0,
+            "decisions": [],
+        }
 
     monkeypatch.setattr(cli, "_run_once_payload", fail_run_once_payload)
-    monkeypatch.setattr(cli, "_intent_run_once_payload", fail_intent_run_once_payload)
+    monkeypatch.setattr(cli, "_intent_run_once_payload", fake_intent_run_once_payload)
 
     result = CliRunner().invoke(
         cli.app,
@@ -1825,6 +1954,9 @@ def test_schedule_run_skips_work_from_sqlite_tracker_backoff(
     assert payload["skipped_by_backoff"] is True
     assert payload["schedule_backoff"]["active"] is True
     assert payload["schedule_backoff"]["endpoint"] == "torrent/genDlToken"
+    assert payload["intent_refresh_enabled"] is True
+    assert payload["intent_search_enabled"] is False
+    assert intent_search_modes == [False]
     assert not (tmp_path / ".seed-agent" / "schedule-backoff.json").exists()
 
 
@@ -2047,7 +2179,7 @@ def test_schedule_run_can_execute_intent_cycle_when_explicit(
 
     monkeypatch.setattr(cli, "_run_once_payload", fake_run_once_payload)
     monkeypatch.setattr(cli, "_intent_run_once_payload", fake_intent_run_once_payload)
-    monkeypatch.setattr(cli, "_scheduled_intent_search_due", lambda *args, **kwargs: False)
+    monkeypatch.setattr(cli, "_scheduled_intent_search_due", lambda *args, **kwargs: True)
 
     result = CliRunner().invoke(
         cli.app,
@@ -2065,7 +2197,7 @@ def test_schedule_run_can_execute_intent_cycle_when_explicit(
     payload = _json_output(result)
     assert payload["intent_execute"] is True
     assert payload["intent"]["execute"] is True
-    assert payload["intent"]["search_enabled"] is False
+    assert payload["intent"]["search_enabled"] is True
     assert seen_execute == [True]
 
 
@@ -2137,7 +2269,7 @@ def test_intent_run_once_reports_source_warnings(
         assert kwargs["source_events"] == []
         return FakeIntentResult()
 
-    def fail_read_configured_source_events(loaded):
+    def fail_read_configured_source_events(loaded, **kwargs):
         raise RuntimeError("douban 403")
 
     class FakeDownloader:
@@ -2286,7 +2418,12 @@ scheduler:
     monkeypatch.setattr(cli, "_prune_payload", fake_prune_payload)
     monkeypatch.setattr(cli, "_run_once_payload", fake_run_once_payload)
     monkeypatch.setattr(cli, "_intent_run_once_payload", fake_intent_run_once_payload)
-    monkeypatch.setattr(cli, "_scheduled_intent_search_due", lambda *args, **kwargs: False)
+    intent_due = iter((True, False))
+    monkeypatch.setattr(
+        cli,
+        "_scheduled_intent_search_due",
+        lambda *args, **kwargs: next(intent_due),
+    )
 
     result = CliRunner().invoke(
         cli.app,
@@ -2667,7 +2804,12 @@ def test_schedule_run_persists_phase_order_with_shared_run_id(
     monkeypatch.setattr(cli, "_prune_payload", fake_prune_payload)
     monkeypatch.setattr(cli, "_run_once_payload", fake_run_once_payload)
     monkeypatch.setattr(cli, "_intent_run_once_payload", fake_intent_run_once_payload)
-    monkeypatch.setattr(cli, "_scheduled_intent_search_due", lambda *args, **kwargs: False)
+    intent_due = iter((True, False))
+    monkeypatch.setattr(
+        cli,
+        "_scheduled_intent_search_due",
+        lambda *args, **kwargs: next(intent_due),
+    )
 
     result = CliRunner().invoke(
         cli.app,
@@ -4691,17 +4833,28 @@ want_sources:
 
     def fake_poll(**kwargs):
         calls.append(kwargs)
-        return [
-            SourceIntentEvent(
-                source=IntentSource.TELEGRAM,
-                raw_text="Inception 2010",
-                source_event_id="telegram:12345:42",
-            )
-        ]
+        from seed_agent.sources.telegram import TelegramPollBatch
 
-    monkeypatch.setattr(cli, "poll_telegram_updates", fake_poll)
+        return TelegramPollBatch(
+            events=[
+                SourceIntentEvent(
+                    source=IntentSource.TELEGRAM,
+                    raw_text="Inception 2010",
+                    source_event_id="telegram:12345:42",
+                )
+            ],
+            next_offset=102,
+        )
 
-    events = cli._read_configured_source_events(cli.load_config(config_path))
+    monkeypatch.setattr(cli, "poll_telegram_update_batch", fake_poll)
+
+    store = StateStore(tmp_path / ".seed-agent" / "state.db")
+    cursor_updates: dict[str, str] = {}
+    events = cli._read_configured_source_events(
+        cli.load_config(config_path),
+        store=store,
+        cursor_updates=cursor_updates,
+    )
 
     assert [event.source for event in events] == [IntentSource.TELEGRAM]
     assert calls == [
@@ -4712,6 +4865,38 @@ want_sources:
             "allowed_chat_ids": {"12345", "999"},
         }
     ]
+    assert store.get_source_cursor("telegram:local/secrets/telegram.yaml") is None
+    assert cursor_updates == {"telegram:local/secrets/telegram.yaml": "102"}
+
+    monkeypatch.setattr(cli, "_build_search_providers", lambda _config: [])
+    payload = cli._intent_run_once_payload(config_path, execute=False)
+
+    assert payload["ingested"] == 1
+    assert StateStore(tmp_path / ".seed-agent" / "state.db").get_source_cursor(
+        "telegram:local/secrets/telegram.yaml"
+    ) == "102"
+
+
+def test_read_configured_telegram_requires_chat_allowlist(tmp_path: Path) -> None:
+    from seed_agent import cli
+
+    config_path = _config_file(tmp_path)
+    secret = tmp_path / "local" / "secrets" / "telegram.yaml"
+    secret.parent.mkdir(parents=True)
+    secret.write_text("bot_token: secret-token\n", encoding="utf-8")
+    config_path.write_text(
+        config_path.read_text(encoding="utf-8")
+        + """
+want_sources:
+  telegram:
+    enabled: true
+    secret_ref: local/secrets/telegram.yaml
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="allowed_chat_ids"):
+        cli._read_configured_source_events(cli.load_config(config_path))
 
 
 def test_config_export_and_import_dry_run_report_changed_sections(tmp_path: Path) -> None:

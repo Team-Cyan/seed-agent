@@ -264,6 +264,10 @@ class ScoringConfig(BaseModel):
             if unknown:
                 details.append(f"unknown keys: {', '.join(unknown)}")
             raise ValueError(f"weights must use exact keys; {'; '.join(details)}")
+        invalid = {key: value for key, value in self.weights.items() if not 0 <= value <= 100}
+        if invalid:
+            details = ", ".join(f"{key}={value}" for key, value in sorted(invalid.items()))
+            raise ValueError(f"weights must each be between 0 and 100; got {details}")
         total = sum(self.weights.values())
         if total != 100:
             raise ValueError(f"weights must sum to 100, got {total}")

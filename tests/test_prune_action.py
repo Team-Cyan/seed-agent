@@ -375,6 +375,45 @@ async def test_prune_stops_capacity_deletion_after_reclaim_target_is_met() -> No
 
 
 @pytest.mark.asyncio
+async def test_disk_reclaim_target_uses_downloaded_bytes_for_incomplete_torrents() -> None:
+    from seed_agent.actions.qb import prune_cold_torrents
+
+    downloader = DummyDownloader()
+    gib = 1024**3
+    decisions = await prune_cold_torrents(
+        [
+            _incomplete_torrent(
+                hash="first",
+                size_bytes=100 * gib,
+                downloaded_bytes=1 * gib,
+                metadata={"amount_left_bytes": 99 * gib, "recent_upload_gb": 0},
+            ),
+            _incomplete_torrent(
+                hash="second",
+                size_bytes=100 * gib,
+                downloaded_bytes=1 * gib,
+                metadata={"amount_left_bytes": 99 * gib, "recent_upload_gb": 0},
+            ),
+        ],
+        downloader,
+        _cleanup(),
+        _policy(),
+        execute=True,
+        force_space_reclamation=True,
+        reclaim_target_bytes=2 * gib,
+    )
+
+    assert downloader.calls == [
+        ("delete", "first", True),
+        ("delete", "second", True),
+    ]
+    assert [decision.action for decision in decisions] == [
+        "qb.cleanup.delete",
+        "qb.cleanup.delete",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_prune_stops_capacity_deletion_at_per_run_limit() -> None:
     from seed_agent.actions.qb import prune_cold_torrents
 

@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import fcntl
 import json
 import sqlite3
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -23,6 +26,15 @@ STATE_PRIORITY = {
     LifecycleState.COLD.value: 5,
     LifecycleState.PAUSED.value: 6,
     LifecycleState.DELETED.value: 7,
+}
+INTENT_STATE_PRIORITY = {
+    IntentState.RECEIVED.value: 0,
+    IntentState.NORMALIZED.value: 1,
+    IntentState.SEARCHED.value: 2,
+    IntentState.CONFIRMATION_REQUIRED.value: 3,
+    IntentState.REJECTED.value: 4,
+    IntentState.FAILED.value: 4,
+    IntentState.ENQUEUED.value: 5,
 }
 GIB = 1024**3
 _UNSET = object()
@@ -435,6 +447,13 @@ class StateStore:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def scheduler_run_status_counts(self) -> dict[str, int]:
+        with self._connect(row_factory=sqlite3.Row) as conn:
+            rows = conn.execute(
+                "SELECT status, COUNT(*) AS count FROM scheduler_runs GROUP BY status"
+            ).fetchall()
+        return {str(row["status"]): int(row["count"]) for row in rows}
+
     def list_scheduler_run_events(
         self,
         *,
@@ -521,6 +540,20 @@ class StateStore:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def has_active_tracker_backoff(self, *, now: datetime | None = None) -> bool:
+        current_time = (now or _utc_now_datetime()).isoformat()
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT 1
+                FROM tracker_backoffs
+                WHERE active = 1 AND until > ?
+                LIMIT 1
+                """,
+                (current_time,),
+            ).fetchone()
+        return row is not None
+
     def clear_tracker_backoffs(self, *, site: str | None = None) -> int:
         query = "UPDATE tracker_backoffs SET active = 0 WHERE active = 1"
         params: tuple[object, ...] = ()
@@ -606,6 +639,34 @@ class StateStore:
         with self._connect(row_factory=sqlite3.Row) as conn:
             rows = conn.execute(query, params).fetchall()
         return [dict(row) for row in rows]
+
+    def tracker_api_event_counts(self) -> dict[str, int]:
+        with self._connect(row_factory=sqlite3.Row) as conn:
+            rows = conn.execute(
+                "SELECT event, COUNT(*) AS count FROM tracker_api_events GROUP BY event"
+            ).fetchall()
+        return {str(row["event"]): int(row["count"]) for row in rows}
+
+    def get_source_cursor(self, source: str) -> str | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT cursor FROM source_cursors WHERE source = ?",
+                (source,),
+            ).fetchone()
+        return str(row[0]) if row is not None else None
+
+    def set_source_cursor(self, source: str, cursor: str) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO source_cursors (source, cursor, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(source) DO UPDATE SET
+                  cursor = excluded.cursor,
+                  updated_at = excluded.updated_at
+                """,
+                (source, cursor, _utc_now_datetime().isoformat()),
+            )
 
     def record_want_search_run(
         self,
@@ -812,31 +873,36 @@ class StateStore:
         left_time_minutes: int | None | object = _UNSET,
         score_reasons: list[str] | None | object = _UNSET,
     ) -> None:
-        current = self.get_candidate(stable_id)
         now = _utc_now()
-        first_seen_at = current["first_seen_at"] if current is not None else now
-        free_window_value = _preserved_value(
-            current,
-            "free_window_expires_at",
-            free_window_expires_at,
-        )
-        size_value = _preserved_value(current, "size_bytes", size_bytes)
-        seeders_value = _preserved_value(current, "seeders", seeders)
-        leechers_value = _preserved_value(current, "leechers", leechers)
-        discount_value = _preserved_value(current, "discount", discount)
-        left_time_value = _preserved_value(current, "left_time_minutes", left_time_minutes)
-        score_reasons_value = _preserved_value(current, "score_reasons", score_reasons)
-        score_reasons_json = (
-            _json_dumps(score_reasons_value) if score_reasons_value is not None else None
-        )
-        state_value, score_value, torrent_hash_value = _monotonic_values(
-            current,
-            state,
-            score,
-            torrent_hash,
-        )
-
         with self._connect(row_factory=sqlite3.Row) as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            current = _candidate_row(
+                conn.execute(
+                    "SELECT * FROM candidates WHERE stable_id = ?",
+                    (stable_id,),
+                ).fetchone()
+            )
+            first_seen_at = current["first_seen_at"] if current is not None else now
+            free_window_value = _preserved_value(
+                current,
+                "free_window_expires_at",
+                free_window_expires_at,
+            )
+            size_value = _preserved_value(current, "size_bytes", size_bytes)
+            seeders_value = _preserved_value(current, "seeders", seeders)
+            leechers_value = _preserved_value(current, "leechers", leechers)
+            discount_value = _preserved_value(current, "discount", discount)
+            left_time_value = _preserved_value(current, "left_time_minutes", left_time_minutes)
+            score_reasons_value = _preserved_value(current, "score_reasons", score_reasons)
+            score_reasons_json = (
+                _json_dumps(score_reasons_value) if score_reasons_value is not None else None
+            )
+            state_value, score_value, torrent_hash_value = _monotonic_values(
+                current,
+                state,
+                score,
+                torrent_hash,
+            )
             conn.execute(
                 """
                 INSERT INTO candidates (
@@ -1435,14 +1501,19 @@ class StateStore:
         intent: ResourceIntent,
         selected_release_id: str | None = None,
     ) -> None:
-        current = self.get_intent(intent.intent_id)
         now = _utc_now()
-        created_at = current["created_at"] if current is not None else now
-        selected_value = selected_release_id
-        if selected_value is None and current is not None:
-            selected_value = current["selected_release_id"]
-
-        with self._connect() as conn:
+        with self._connect(row_factory=sqlite3.Row) as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            current_row = conn.execute(
+                "SELECT * FROM intents WHERE intent_id = ?",
+                (intent.intent_id,),
+            ).fetchone()
+            current = dict(current_row) if current_row is not None else None
+            created_at = current["created_at"] if current is not None else now
+            selected_value = selected_release_id
+            if selected_value is None and current is not None:
+                selected_value = current["selected_release_id"]
+            effective_intent = _monotonic_intent(current, intent)
             conn.execute(
                 """
                 INSERT INTO intents (
@@ -1469,13 +1540,13 @@ class StateStore:
                     updated_at = excluded.updated_at
                 """,
                 (
-                    intent.intent_id,
-                    intent.source.value,
-                    intent.raw_text,
-                    intent.title,
-                    intent.kind.value,
-                    intent.state.value,
-                    _json_dumps(intent.model_dump(mode="json")),
+                    effective_intent.intent_id,
+                    effective_intent.source.value,
+                    effective_intent.raw_text,
+                    effective_intent.title,
+                    effective_intent.kind.value,
+                    effective_intent.state.value,
+                    _json_dumps(effective_intent.model_dump(mode="json")),
                     selected_value,
                     created_at,
                     now,
@@ -1798,22 +1869,53 @@ class StateStore:
     def merge_intents(self, canonical_intent_id: str, duplicate_intent_id: str) -> bool:
         if canonical_intent_id == duplicate_intent_id:
             return True
-        canonical = self.get_intent(canonical_intent_id)
-        duplicate = self.get_intent(duplicate_intent_id)
-        if canonical is None or duplicate is None:
-            return False
-        canonical_payload = json.loads(str(canonical["normalized_json"]))
-        duplicate_payload = json.loads(str(duplicate["normalized_json"]))
-        canonical_metadata = dict(canonical_payload.get("metadata") or {})
-        duplicate_metadata = dict(duplicate_payload.get("metadata") or {})
-        canonical_payload["metadata"] = _merge_intent_metadata(
-            canonical_metadata,
-            duplicate_metadata,
-        )
-        merged_intent = ResourceIntent.model_validate(canonical_payload)
-        selected_release_id = canonical["selected_release_id"] or duplicate["selected_release_id"]
         now = _utc_now()
         with self._connect(row_factory=sqlite3.Row) as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            canonical_row = conn.execute(
+                "SELECT * FROM intents WHERE intent_id = ?",
+                (canonical_intent_id,),
+            ).fetchone()
+            duplicate_row = conn.execute(
+                "SELECT * FROM intents WHERE intent_id = ?",
+                (duplicate_intent_id,),
+            ).fetchone()
+            if canonical_row is None or duplicate_row is None:
+                return False
+            canonical = dict(canonical_row)
+            duplicate = dict(duplicate_row)
+            conn.execute(
+                "DELETE FROM intent_enqueue_claims WHERE expires_at <= ?",
+                (now,),
+            )
+            active_claim = conn.execute(
+                """
+                SELECT intent_id
+                FROM intent_enqueue_claims
+                WHERE intent_id IN (?, ?)
+                LIMIT 1
+                """,
+                (canonical_intent_id, duplicate_intent_id),
+            ).fetchone()
+            if active_claim is not None:
+                return False
+            canonical_payload = json.loads(str(canonical["normalized_json"]))
+            duplicate_payload = json.loads(str(duplicate["normalized_json"]))
+            canonical_payload["metadata"] = _merge_intent_metadata(
+                dict(canonical_payload.get("metadata") or {}),
+                dict(duplicate_payload.get("metadata") or {}),
+            )
+            canonical_state = str(canonical_payload.get("state") or canonical["state"])
+            duplicate_state = str(duplicate_payload.get("state") or duplicate["state"])
+            if INTENT_STATE_PRIORITY.get(duplicate_state, -1) > INTENT_STATE_PRIORITY.get(
+                canonical_state,
+                -1,
+            ):
+                canonical_payload["state"] = duplicate_state
+            merged_intent = ResourceIntent.model_validate(canonical_payload)
+            selected_release_id = (
+                canonical["selected_release_id"] or duplicate["selected_release_id"]
+            )
             duplicate_rows = conn.execute(
                 """
                 SELECT release_id, site, title, score, confidence, accepted,
@@ -1884,13 +1986,49 @@ class StateStore:
                 "DELETE FROM release_candidates WHERE intent_id = ?",
                 (duplicate_intent_id,),
             )
+            conn.execute(
+                """
+                UPDATE intents
+                SET source = ?,
+                    raw_text = ?,
+                    title = ?,
+                    kind = ?,
+                    state = ?,
+                    normalized_json = ?,
+                    selected_release_id = ?,
+                    updated_at = ?
+                WHERE intent_id = ?
+                """,
+                (
+                    merged_intent.source.value,
+                    merged_intent.raw_text,
+                    merged_intent.title,
+                    merged_intent.kind.value,
+                    merged_intent.state.value,
+                    _json_dumps(merged_intent.model_dump(mode="json")),
+                    selected_release_id,
+                    now,
+                    canonical_intent_id,
+                ),
+            )
             conn.execute("DELETE FROM intents WHERE intent_id = ?", (duplicate_intent_id,))
-        self.upsert_intent(merged_intent, selected_release_id=selected_release_id)
         return True
 
-    def save_ranked_releases(self, releases: list[RankedRelease]) -> None:
+    def save_ranked_releases(
+        self,
+        releases: list[RankedRelease],
+        *,
+        replace_intent_id: str | None = None,
+    ) -> None:
         now = _utc_now()
         with self._connect() as conn:
+            if replace_intent_id is not None:
+                if any(ranked.intent_id != replace_intent_id for ranked in releases):
+                    raise ValueError("replacement releases must belong to one intent")
+                conn.execute(
+                    "DELETE FROM release_candidates WHERE intent_id = ?",
+                    (replace_intent_id,),
+                )
             for ranked in releases:
                 conn.execute(
                     """
@@ -2128,6 +2266,11 @@ class StateStore:
                 );
                 CREATE INDEX IF NOT EXISTS idx_tracker_api_events_site_endpoint
                   ON tracker_api_events(site, endpoint);
+                CREATE TABLE IF NOT EXISTS source_cursors (
+                  source TEXT PRIMARY KEY,
+                  cursor TEXT NOT NULL,
+                  updated_at TEXT NOT NULL
+                );
                 CREATE TABLE IF NOT EXISTS want_search_runs (
                   id INTEGER PRIMARY KEY AUTOINCREMENT,
                   intent_id TEXT NOT NULL,
@@ -2153,13 +2296,26 @@ class StateStore:
             self._migrate_confirmed_intents(conn)
             self._migrate_torrent_runtime(conn)
 
-    def _connect(self, *, row_factory: Any | None = None) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.path, timeout=SQLITE_TIMEOUT_SECONDS)
-        conn.execute(f"PRAGMA busy_timeout={SQLITE_BUSY_TIMEOUT_MS}")
-        conn.execute("PRAGMA journal_mode=WAL")
-        if row_factory is not None:
-            conn.row_factory = row_factory
-        return conn
+    @contextmanager
+    def _connect(self, *, row_factory: Any | None = None) -> Iterator[sqlite3.Connection]:
+        lock_path = _sqlite_access_lock_path(self.path)
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        with lock_path.open("a+b") as access_lock:
+            fcntl.flock(access_lock.fileno(), fcntl.LOCK_SH)
+            conn = sqlite3.connect(self.path, timeout=SQLITE_TIMEOUT_SECONDS)
+            try:
+                conn.execute(f"PRAGMA busy_timeout={SQLITE_BUSY_TIMEOUT_MS}")
+                conn.execute("PRAGMA journal_mode=WAL")
+                if row_factory is not None:
+                    conn.row_factory = row_factory
+                yield conn
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                conn.close()
+                fcntl.flock(access_lock.fileno(), fcntl.LOCK_UN)
 
     def _migrate_release_candidates(self, conn: sqlite3.Connection) -> None:
         row = conn.execute(
@@ -2538,3 +2694,30 @@ def _monotonic_values(
         incoming_score if incoming_score is not None else current["score"],
         incoming_torrent_hash if incoming_torrent_hash is not None else current["torrent_hash"],
     )
+
+
+def _monotonic_intent(
+    current: dict[str, Any] | None,
+    incoming: ResourceIntent,
+) -> ResourceIntent:
+    if current is None:
+        return incoming
+    current_payload = json.loads(str(current["normalized_json"]))
+    current_intent = ResourceIntent.model_validate(current_payload)
+    current_rank = INTENT_STATE_PRIORITY.get(current_intent.state.value, -1)
+    incoming_rank = INTENT_STATE_PRIORITY.get(incoming.state.value, -1)
+    if current_rank <= incoming_rank:
+        return incoming
+    return incoming.model_copy(
+        update={
+            "state": current_intent.state,
+            "metadata": _merge_intent_metadata(
+                current_intent.metadata,
+                incoming.metadata,
+            ),
+        }
+    )
+
+
+def _sqlite_access_lock_path(path: Path) -> Path:
+    return Path(f"{path}.access.lock")

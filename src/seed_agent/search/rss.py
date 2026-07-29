@@ -41,7 +41,7 @@ class RssSearchProvider:
             self.site,
             self.cookie,
             self.api_key,
-            self.site_type,
+            site_type=self.site_type,
         )
         releases: list[ReleaseCandidate] = []
         for candidate in candidates:
@@ -63,12 +63,18 @@ def _matches_intent(candidate: TorrentCandidate, intent: ResourceIntent) -> bool
     if intent.year is not None and str(intent.year) not in candidate_tokens:
         return False
     if intent.season is not None:
-        season_token = f"s{intent.season:02d}"
-        if not any(token.startswith(season_token) for token in candidate_tokens):
+        if re.search(
+            rf"(?<![a-z])s0*{intent.season}(?!\d)",
+            candidate.title,
+            re.IGNORECASE,
+        ) is None:
             return False
     if intent.episode is not None:
-        episode_token = f"e{intent.episode:02d}"
-        if not any(episode_token in token for token in candidate_tokens):
+        if re.search(
+            rf"(?<![a-z])e0*{intent.episode}(?!\d)",
+            candidate.title,
+            re.IGNORECASE,
+        ) is None:
             return False
     if intent.resolution is not None and intent.resolution.lower() not in candidate_tokens:
         return False

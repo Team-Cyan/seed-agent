@@ -137,8 +137,9 @@ by completion period, and unfinished work is ordered by current priority.
     subtitle/MediaInfo fields are shown without extra detail requests.
   - Candidate review supports a single deliberate qB enqueue action per
     candidate, with lower-match releases still available for forced enqueue.
-    Search remains non-mutating, and M-Team download tokens are still resolved
-    only for execute-mode enqueue.
+    The candidate button executes immediately without a second preview or
+    browser-confirmation step. Search remains non-mutating, and M-Team download
+    tokens are still resolved only for the selected enqueue action.
   - Settings pages include mobile section switching and sticky draft/preview/save
     actions inspired by the reference repo UI patterns, without adopting a
     dashboard-first product shape.
@@ -156,10 +157,12 @@ by completion period, and unfinished work is ordered by current priority.
     Web UI vs CLI decision path, runtime provenance checks, and the
     preview-first Want List refresh/search boundary.
   - Want List refresh/search actions show immediate in-progress feedback in the
-    Web UI. `schedule-run` refreshes configured Want List sources every enabled
-    cycle and searches according to the YAML scheduler policy (`daily` by
-    default or `every_cycle`) while keeping scheduled enqueue dry-run unless
-    intent execution is explicitly enabled.
+    Web UI. `schedule-run` refreshes configured Want List sources and searches
+    according to the YAML scheduler policy (`daily` by default or
+    `every_cycle`). Source refresh has its own durable cadence and still runs
+    when M-Team backoff suppresses tracker search; already-enqueued intents are
+    not searched again. Scheduled enqueue stays dry-run unless intent execution
+    is explicitly enabled.
   - M-Team tracker rate-limit responses now trigger a persistent scheduler
     backoff; the container keeps heartbeat liveness and local prune active while
     skipping PT discovery and Want List tracker searches. Backoff starts at one
@@ -400,6 +403,20 @@ by completion period, and unfinished work is ordered by current priority.
   - Keep the detailed acceptance matrix in
     `docs/plans/2026-07-11-runtime-hardening-refinement.md`.
 
+- Completed 2026-07 - Whole-repository correctness hardening
+  - Want List identity now comes only from trusted source evidence; tracker
+    candidate IDs cannot merge unrelated intents, terminal wants stay terminal,
+    and refreshed searches replace stale release snapshots.
+  - Candidate/intent lifecycle writes and intent merges are concurrency-safe,
+    enqueue claims block destructive merges, and SQLite restore excludes active
+    StateStore connections.
+  - Telegram polling is allowlisted and replay-safe, persisted text/error/audit
+    surfaces redact credentials, and tracker secret writes roll back if config
+    persistence fails.
+  - M-Team/RSS parsing, exact episode matching, Transmission ownership checks,
+    incomplete-download disk reclaim accounting, and cumulative metrics now
+    preserve their intended operational semantics.
+
 - Next P0 - Add scheduler and Web preview integration coverage
   - Add fake downloader/provider fixtures that can run a scheduler cycle without
     touching qBittorrent or a tracker.
@@ -409,8 +426,8 @@ by completion period, and unfinished work is ordered by current priority.
     coverage remains.
   - Cover Web Want List refresh/search preview behavior so search remains
     non-mutating and qB enqueue stays candidate-level and explicit. Search
-    history persistence and enqueue preview are covered; broader refresh/search
-    fixture consolidation remains.
+    history persistence and immediate candidate enqueue are covered; broader
+    refresh/search fixture consolidation remains.
   - Verify scheduler/Web changes in a local Apple `container` deployment before
     touching live Unraid.
   - Keep the detailed task split in
@@ -422,9 +439,10 @@ by completion period, and unfinished work is ordered by current priority.
     M-Team results, including cases where only WEB-DL or lower-match candidates
     exist.
   - Verify the Web UI candidate review and explicit qB enqueue flow on live
-    Unraid with a safe dry-run first.
+    Unraid with one intentionally selected candidate.
   - Verify season-pack vs episode behavior on real TV/anime examples.
-  - Keep qB enqueue dry-run unless explicitly executing.
+  - Keep scheduled and CLI qB enqueue dry-run unless explicitly executing; the
+    Web candidate button itself is the explicit execute action.
 
 - Next P1 - Web UI polish
   - Extend before/after diff preview to tracker edits.

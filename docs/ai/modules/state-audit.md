@@ -27,6 +27,7 @@ Persist local lifecycle knowledge and durable decision evidence.
   a competing scheduler process,
 - persist atomic Want List enqueue claims so concurrent Web, CLI, and scheduler
   execution cannot add the same intent/release pair more than once,
+- persist source cursors for replay-safe adapters such as Telegram,
 - persist `9999-12-31T23:59:59+00:00` for API candidates whose FREE window is
   explicitly unlimited,
 - prune stale unqueued candidate rows after the configured retention window,
@@ -48,6 +49,10 @@ Persist local lifecycle knowledge and durable decision evidence.
 - keep enqueued/downloading/seeding/paused/deleted candidate rows during stale
   candidate pruning so cleanup evidence remains durable,
 - redact secrets in audit output,
+- create and maintain audit JSONL files with owner-only `0600` permissions,
+- keep candidate and intent lifecycle writes monotonic inside one SQLite
+  transaction, and keep intent merge data movement atomic with enqueue-claim
+  checks,
 - keep state changes explainable and reviewable.
 - renew the mutable scheduler lease in the background during long tracker,
   prune, discovery, and intent phases, and verify ownership at phase boundaries,
@@ -56,7 +61,9 @@ Persist local lifecycle knowledge and durable decision evidence.
   from that manual cycle's start,
 - verify SQLite backups and restores against the complete current StateStore
   schema. Legacy databases may be accepted only when normal migrations can
-  bring a temporary copy to that schema before replacement,
+  bring a temporary copy to that schema before replacement. Restore must also
+  hold the exclusive StateStore access lock so an older connection cannot
+  commit into a replaced database,
 - for manual live cleanup outside the normal prune decision path, write a
   separate operator audit record in the mounted runtime state area before
   mutation. Include cutoff, category, hash, name, size, state, and whether files

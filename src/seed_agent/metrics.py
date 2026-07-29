@@ -14,9 +14,9 @@ def render_prometheus_metrics(state_path: Path, heartbeat_path: Path) -> str:
         store = StateStore(state_path)
         runs = store.list_scheduler_runs(limit=1000)
         status_counts: dict[str, int] = {}
-        for row in runs:
-            status = _bounded_status(row.get("status"))
-            status_counts[status] = status_counts.get(status, 0) + 1
+        for raw_status, count in store.scheduler_run_status_counts().items():
+            status = _bounded_status(raw_status)
+            status_counts[status] = status_counts.get(status, 0) + count
         for status in sorted(status_counts):
             _sample(
                 samples,
@@ -24,16 +24,15 @@ def render_prometheus_metrics(state_path: Path, heartbeat_path: Path) -> str:
                 status_counts[status],
                 {"status": status},
             )
-        backoffs = store.list_tracker_backoffs()
         _sample(
             samples,
             "seed_agent_tracker_backoff_active",
-            int(any(bool(row.get("active")) for row in backoffs)),
+            int(store.has_active_tracker_backoff()),
         )
         api_counts: dict[str, int] = {}
-        for row in store.list_tracker_api_events(limit=10_000):
-            event = _bounded_api_event(row.get("event"))
-            api_counts[event] = api_counts.get(event, 0) + 1
+        for raw_event, count in store.tracker_api_event_counts().items():
+            event = _bounded_api_event(raw_event)
+            api_counts[event] = api_counts.get(event, 0) + count
         for event in sorted(api_counts):
             _sample(
                 samples,

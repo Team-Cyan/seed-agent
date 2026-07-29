@@ -76,13 +76,17 @@ def make_handler(config_path: Path) -> type[BaseHTTPRequestHandler]:
 
     class SeedAgentWebHandler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
-            if self.path.startswith("/api/") and not self._authorize_api_request():
-                return
             try:
                 metrics_config = load_config(resolved_config_path).metrics
             except OSError, ValueError:
                 metrics_config = None
-            if metrics_config is not None and self.path == metrics_config.path:
+            request_path = urlparse(self.path).path
+            protected = request_path.startswith("/api/") or (
+                metrics_config is not None and request_path == metrics_config.path
+            )
+            if protected and not self._authorize_api_request():
+                return
+            if metrics_config is not None and request_path == metrics_config.path:
                 if not metrics_config.enabled:
                     self._send_json({"error": "not found"}, status=HTTPStatus.NOT_FOUND)
                     return
@@ -790,7 +794,6 @@ def _enqueue_want_payload(
         _enqueue_runtime_context,
         _intent_category_policy,
         _intent_enqueue_pause_state,
-        _NullDownloader,
         _pool_usage_item_summary,
         _ranked_release_summary,
         _runtime_activity_summary,
@@ -800,45 +803,40 @@ def _enqueue_want_payload(
     release_id = str(body.get("release_id") or "").strip()
     if not release_id:
         return {"error": "release_id is required"}, HTTPStatus.BAD_REQUEST
-    execute = _truthy_execute(body.get("execute"))
+    if "execute" in body:
+        return {
+            "error": "execute is not accepted; this endpoint always enqueues"
+        }, HTTPStatus.BAD_REQUEST
+    execute = True
     store = StateStore(_state_db_path(root))
     config = load_config(config_path)
     decisions = []
     try:
         default_policy = _default_category_policy(config)
-        if execute:
-            (
-                downloader,
-                live_torrents,
-                downloader_status,
-                paused,
-                pool_usage,
-                missing_reconciled,
-            ) = _enqueue_runtime_context(
-                config,
-                store=store,
-                execute=execute,
-            )
-            pause_reasons = _enqueue_pause_reasons(
-                config,
-                live_torrents,
-                pool_usage,
-                downloader_status,
-            )
-        else:
-            downloader = _NullDownloader()
-            live_torrents = []
-            downloader_status = None
-            paused = False
-            pool_usage = None
-            missing_reconciled = 0
-            pause_reasons = []
+        (
+            downloader,
+            live_torrents,
+            downloader_status,
+            paused,
+            pool_usage,
+            missing_reconciled,
+        ) = _enqueue_runtime_context(
+            config,
+            store=store,
+            execute=True,
+        )
+        pause_reasons = _enqueue_pause_reasons(
+            config,
+            live_torrents,
+            pool_usage,
+            downloader_status,
+        )
         enqueue_context_resolver = _build_intent_enqueue_context_resolver(
             config,
             live_torrents,
             downloader_status,
         )
-        release_resolver = _build_release_download_resolver(config) if execute else None
+        release_resolver = _build_release_download_resolver(config)
         intent, ranked, enqueue_decisions = run(
             enqueue_intent(
                 intent_id,
@@ -856,17 +854,16 @@ def _enqueue_want_payload(
             )
         )
         decisions.extend(enqueue_decisions)
-        if execute:
-            _write_audit_decisions(config, decisions)
+        _write_audit_decisions(config, decisions)
     except ValueError as exc:
-        return {"error": str(exc)}, HTTPStatus.BAD_REQUEST
+        return {"error": redact_sensitive_text(str(exc))}, HTTPStatus.BAD_REQUEST
     except MutationBatchError as exc:
         decisions.extend(exc.decisions)
         _write_audit_decisions(config, decisions)
         failed_reasons = [item.reason for item in decisions if item.action.endswith(".failed")]
-        message = failed_reasons[-1] if failed_reasons else str(exc)
+        message = redact_sensitive_text(failed_reasons[-1] if failed_reasons else str(exc))
         return {
-            "error": str(exc),
+            "error": redact_sensitive_text(str(exc)),
             "execute": execute,
             "enqueued": _executed_enqueue_count(decisions),
             "decisions": [_decision_summary_payload(item) for item in decisions],
@@ -902,8 +899,6 @@ def _enqueue_want_payload(
                     "入队被运行时安全门禁拒绝"
                     if effective_blocked
                     else "已加入 qB"
-                    if execute
-                    else "入队试运行完成"
                 ),
             }
         ],
@@ -921,14 +916,6 @@ def _enqueue_want_payload(
     if effective_block_reasons:
         payload["enqueue_blocked_reasons"] = effective_block_reasons
     return payload, HTTPStatus.OK
-
-
-def _truthy_execute(value: Any) -> bool:
-    if value is True:
-        return True
-    if isinstance(value, str):
-        return value.strip().lower() in {"true", "1", "yes", "on"}
-    return False
 
 
 def _executed_enqueue_count(decisions: list[Any]) -> int:
@@ -1126,8 +1113,12 @@ def _want_item(
     )
     return {
         "intent_id": row.get("intent_id") or normalized.get("intent_id"),
-        "title": row.get("title") or normalized.get("title") or row.get("raw_text") or "",
-        "raw_text": row.get("raw_text") or normalized.get("raw_text") or "",
+        "title": redact_sensitive_text(
+            str(row.get("title") or normalized.get("title") or row.get("raw_text") or "")
+        ),
+        "raw_text": redact_sensitive_text(
+            str(row.get("raw_text") or normalized.get("raw_text") or "")
+        ),
         "kind": row.get("kind") or normalized.get("kind") or "unknown",
         "media_type": _want_media_type(normalized, metadata),
         "source": source,
@@ -1794,7 +1785,7 @@ def _content_type_for(path: Path) -> str:
 
 
 def _friendly_error(exc: Exception) -> str:
-    message = str(exc)
+    message = redact_sensitive_text(str(exc))
     if "api_key_ref is required when discovery_mode=api" in message:
         return "api_key_ref is required when discovery_mode=api"
     if "type is required" in message:

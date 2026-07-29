@@ -509,24 +509,22 @@ def test_want_list_exposes_candidate_review_drawer() -> None:
     assert "opacity: 0.72" not in styles
 
 
-def test_want_candidate_enqueue_is_preview_first() -> None:
+def test_want_candidate_enqueue_is_single_click_execute() -> None:
     script = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
     styles = (STATIC_ROOT / "styles.css").read_text(encoding="utf-8")
 
-    assert "previewWantCandidateEnqueue" in script
-    assert "confirmWantCandidateEnqueue" in script
-    assert "renderWantCandidatePreview" in script
-    assert 'data-want-candidate-action="enqueue-confirm"' in script
-    assert "previewEnqueueQb" in script
-    assert "confirmEnqueueQb" in script
-    assert "enqueuePreviewReady" in script
-    assert "runtimeManagedCount" in script
-    assert 'uiText("confirmEnqueue")' not in script
+    assert "enqueueWantCandidate" in script
+    assert 'data-want-candidate-action="enqueue"' in script
+    assert "const body = { release_id: releaseId };" in script
+    assert "previewWantCandidateEnqueue" not in script
+    assert "confirmWantCandidateEnqueue" not in script
+    assert "renderWantCandidatePreview" not in script
+    assert 'data-want-candidate-action="enqueue-confirm"' not in script
+    assert "previewEnqueueQb" not in script
+    assert "confirmEnqueueQb" not in script
+    assert "enqueuePreviewReady" not in script
     assert "window.confirm" not in script
-    assert "submitWantCandidateEnqueue(intentId, releaseId, false)" in script
-    assert "submitWantCandidateEnqueue(intentId, releaseId, true)" in script
-    assert ".candidate-preview" in styles
-    assert ".candidate-preview-actions" in styles
+    assert ".candidate-preview" not in styles
 
 
 def test_scheduler_controls_are_single_process_and_inline_confirmed() -> None:

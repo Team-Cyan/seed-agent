@@ -101,7 +101,7 @@ from seed_agent.sources.base import SourceIntentEvent
 from seed_agent.sources.douban import fetch_douban_wanted_user, read_douban_wanted
 from seed_agent.sources.imdb import fetch_imdb_watchlist, read_imdb_watchlist_csv
 from seed_agent.sources.letterboxd import read_letterboxd_watchlist_csv
-from seed_agent.sources.telegram import poll_telegram_updates
+from seed_agent.sources.telegram import poll_telegram_update_batch
 from seed_agent.state import STATE_PRIORITY, StateStore
 
 ReleaseDownloadResolver = Callable[[ReleaseCandidate], Awaitable[ReleaseCandidate | None]]
@@ -1809,45 +1809,62 @@ def schedule_run(
         payload["scheduler_cli_overrides"] = scheduler_cli_overrides
         payload["scheduler_lease"] = lease
         payload["manual_trigger"] = manual_trigger
-        if payload.get("schedule_backoff", {}).get("active"):
-            payload["intent_search_enabled"] = False
-            if intent and "intent" not in payload:
-                payload["intent"] = _intent_backoff_skip_payload(
-                    execute=intent_execute,
-                    backoff=payload["schedule_backoff"],
-                    run_id=run_id,
-                )
-        elif intent and "error" not in payload:
-            lease_heartbeat.ensure_owned()
+        if intent and "error" not in payload:
+            intent_refresh = _scheduled_intent_search_due(
+                mode=scheduler.intent_search_mode,
+                hour=scheduler.intent_search_hour,
+                last_search_at=_latest_scheduled_intent_refresh_at(store_for_run),
+            )
             intent_search = _scheduled_intent_search_due(
                 mode=scheduler.intent_search_mode,
                 hour=scheduler.intent_search_hour,
                 last_search_at=_latest_scheduled_intent_search_at(store_for_run),
             )
-            _record_schedule_phase(
-                store_for_run,
-                run_id=run_id,
-                phase="intent_search" if intent_search else "intent_source_sync",
-                event="start",
-                payload={"search_enabled": intent_search},
-            )
-            intent_payload = _intent_run_once_payload(
-                config,
-                execute=intent_execute,
-                search_ingested=intent_search,
-                run_id=run_id,
-            )
-            _record_schedule_phase(
-                store_for_run,
-                run_id=run_id,
-                phase="intent_search" if intent_search else "intent_source_sync",
-                event="end",
-                payload=_intent_payload_summary(intent_payload),
-            )
-            payload["intent"] = intent_payload
+            active_backoff = payload.get("schedule_backoff", {}).get("active") is True
+            if active_backoff:
+                intent_search = False
+            run_intent_cycle = intent_refresh or intent_search
+            payload["intent_refresh_enabled"] = run_intent_cycle
             payload["intent_search_enabled"] = intent_search
-            if "error" in intent_payload:
-                payload["error"] = f"intent: {intent_payload['error']}"
+            if run_intent_cycle:
+                lease_heartbeat.ensure_owned()
+                phase = "intent_search" if intent_search else "intent_source_sync"
+                _record_schedule_phase(
+                    store_for_run,
+                    run_id=run_id,
+                    phase=phase,
+                    event="start",
+                    payload={
+                        "refresh_enabled": True,
+                        "search_enabled": intent_search,
+                        "schedule_backoff_active": active_backoff,
+                    },
+                )
+                intent_payload = _intent_run_once_payload(
+                    config,
+                    execute=intent_execute,
+                    search_ingested=intent_search,
+                    run_id=run_id,
+                )
+                if active_backoff:
+                    intent_payload["schedule_backoff"] = payload["schedule_backoff"]
+                    intent_payload["search_skipped_by_backoff"] = True
+                _record_schedule_phase(
+                    store_for_run,
+                    run_id=run_id,
+                    phase=phase,
+                    event="end",
+                    payload=_intent_payload_summary(intent_payload),
+                )
+                payload["intent"] = intent_payload
+                if "error" in intent_payload:
+                    payload["error"] = f"intent: {intent_payload['error']}"
+            elif active_backoff and "intent" not in payload:
+                payload["intent"] = _intent_backoff_skip_payload(
+                    execute=intent_execute,
+                    backoff=payload["schedule_backoff"],
+                    run_id=run_id,
+                )
         if heartbeat_file is not None:
             _write_heartbeat(
                 heartbeat_file,
@@ -2067,6 +2084,31 @@ def _latest_scheduled_intent_search_at(store: StateStore) -> datetime | None:
         except KeyError, ValueError:
             continue
         return searched_at
+    return None
+
+
+def _latest_scheduled_intent_refresh_at(store: StateStore) -> datetime | None:
+    for row in store.list_scheduler_runs(limit=100):
+        if not row.get("finished_at"):
+            continue
+        try:
+            summary = json.loads(str(row.get("summary_json") or "{}"))
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(summary, dict):
+            continue
+        if (
+            summary.get("intent_refresh_enabled") is not True
+            and summary.get("intent_search_enabled") is not True
+        ):
+            continue
+        try:
+            refreshed_at = datetime.fromisoformat(
+                str(row["finished_at"]).replace("Z", "+00:00")
+            )
+        except KeyError, ValueError:
+            continue
+        return refreshed_at
     return None
 
 
@@ -2941,8 +2983,13 @@ def _intent_run_once_payload(
         downloader_status,
     )
     source_warnings: list[dict[str, str]] = []
+    pending_source_cursors: dict[str, str] = {}
     try:
-        source_events = _read_configured_source_events(loaded)
+        source_events = _read_configured_source_events(
+            loaded,
+            store=store,
+            cursor_updates=pending_source_cursors,
+        )
     except Exception as exc:
         source_events = []
         source_warnings.append(
@@ -2974,6 +3021,8 @@ def _intent_run_once_payload(
                 search_ingested=search_ingested,
             )
         )
+        for source, cursor in pending_source_cursors.items():
+            store.set_source_cursor(source, cursor)
         decisions = result.decisions
     except MutationBatchError as exc:
         result = None
@@ -3243,6 +3292,7 @@ def _write_heartbeat(
         "accepted": payload.get("accepted"),
         "enqueued": payload.get("enqueued"),
         "intent": _intent_payload_summary(payload.get("intent")),
+        "intent_refresh_enabled": payload.get("intent_refresh_enabled"),
         "intent_search_enabled": payload.get("intent_search_enabled"),
         "schedule_backoff": payload.get("schedule_backoff"),
         "skipped_by_backoff": payload.get("skipped_by_backoff"),
@@ -4623,6 +4673,7 @@ def _schedule_log_summary(payload: dict[str, Any]) -> dict[str, Any]:
         "scheduler_config_source",
         "scheduler_cli_overrides",
         "manual_trigger",
+        "intent_refresh_enabled",
         "intent_search_enabled",
         "schedule_backoff",
         "skipped_by_backoff",
@@ -4729,6 +4780,10 @@ def _intent_payload_summary(payload: object) -> dict[str, Any] | None:
         summary["source_warnings"] = payload.get("source_warnings")
     if payload.get("skipped_by_backoff"):
         summary["skipped_by_backoff"] = payload.get("skipped_by_backoff")
+    if payload.get("search_skipped_by_backoff"):
+        summary["search_skipped_by_backoff"] = payload.get(
+            "search_skipped_by_backoff"
+        )
     if payload.get("schedule_backoff"):
         summary["schedule_backoff"] = payload.get("schedule_backoff")
     return summary
@@ -5822,10 +5877,21 @@ def _build_search_providers(config: SeedAgentConfig) -> list[SearchProvider]:
     return providers
 
 
-def _read_configured_source_events(config: SeedAgentConfig) -> list[SourceIntentEvent]:
+def _read_configured_source_events(
+    config: SeedAgentConfig,
+    *,
+    store: StateStore | None = None,
+    cursor_updates: dict[str, str] | None = None,
+) -> list[SourceIntentEvent]:
     events: list[SourceIntentEvent] = []
     if config.want_sources.telegram.enabled:
-        events.extend(_read_configured_telegram_events(config))
+        events.extend(
+            _read_configured_telegram_events(
+                config,
+                store=store,
+                cursor_updates=cursor_updates,
+            )
+        )
     for source in config.want_sources.want_lists:
         if not source.enabled:
             continue
@@ -5893,7 +5959,12 @@ def _read_configured_source_events(config: SeedAgentConfig) -> list[SourceIntent
     return events
 
 
-def _read_configured_telegram_events(config: SeedAgentConfig) -> list[SourceIntentEvent]:
+def _read_configured_telegram_events(
+    config: SeedAgentConfig,
+    *,
+    store: StateStore | None = None,
+    cursor_updates: dict[str, str] | None = None,
+) -> list[SourceIntentEvent]:
     secret_ref = config.want_sources.telegram.secret_ref
     if not secret_ref:
         return []
@@ -5904,12 +5975,22 @@ def _read_configured_telegram_events(config: SeedAgentConfig) -> list[SourceInte
     bot_token = secret.get("bot_token") or secret.get("token")
     if not bot_token:
         return []
-    return poll_telegram_updates(
+    allowed_chat_ids = _csv_set(secret.get("allowed_chat_ids"))
+    if not allowed_chat_ids:
+        raise ValueError("Telegram source requires a non-empty allowed_chat_ids allowlist")
+    cursor_key = f"telegram:{secret_ref}"
+    stored_offset = _optional_int(store.get_source_cursor(cursor_key)) if store else None
+    batch = poll_telegram_update_batch(
         bot_token=bot_token,
-        offset=_optional_int(secret.get("offset")),
+        offset=stored_offset
+        if stored_offset is not None
+        else _optional_int(secret.get("offset")),
         timeout_seconds=_optional_int(secret.get("timeout_seconds")) or 0,
-        allowed_chat_ids=_csv_set(secret.get("allowed_chat_ids")),
+        allowed_chat_ids=allowed_chat_ids,
     )
+    if cursor_updates is not None and batch.next_offset is not None:
+        cursor_updates[cursor_key] = str(batch.next_offset)
+    return batch.events
 
 
 def _optional_int(value: object) -> int | None:
