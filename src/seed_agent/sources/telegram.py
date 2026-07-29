@@ -122,11 +122,21 @@ def _unix_datetime(value: object) -> datetime | None:
 
 
 def _fetch_updates(bot_token: str, params: dict[str, object]) -> dict[str, Any]:
-    response = httpx.get(
-        f"https://api.telegram.org/bot{bot_token}/getUpdates",
-        params=params,
-        timeout=30.0,
-    )
-    response.raise_for_status()
+    error_message: str | None = None
+    try:
+        response = httpx.get(
+            f"https://api.telegram.org/bot{bot_token}/getUpdates",
+            params=params,
+            timeout=30.0,
+        )
+    except httpx.RequestError as exc:
+        error_message = f"Telegram API request failed: {type(exc).__name__}"
+        response = None
+    if response is not None and response.is_error:
+        error_message = f"Telegram API returned HTTP {response.status_code}"
+    if error_message is not None:
+        raise RuntimeError(error_message)
+    if response is None:
+        raise RuntimeError("Telegram API request failed without a response")
     payload = response.json()
     return payload if isinstance(payload, dict) else {}

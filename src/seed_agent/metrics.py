@@ -12,7 +12,7 @@ def render_prometheus_metrics(state_path: Path, heartbeat_path: Path) -> str:
     samples: list[str] = []
     if state_path.exists():
         store = StateStore(state_path)
-        runs = store.list_scheduler_runs(limit=1000)
+        runs = store.list_scheduler_runs(limit=1)
         status_counts: dict[str, int] = {}
         for raw_status, count in store.scheduler_run_status_counts().items():
             status = _bounded_status(raw_status)

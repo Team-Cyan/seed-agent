@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import pytest
+from defusedxml.common import EntitiesForbidden
 
 from seed_agent.models import IntentKind, IntentSource, IntentState, ResourceIntent
 from seed_agent.search.torznab import TorznabSearchProvider, parse_torznab_releases
@@ -66,6 +67,16 @@ def test_parse_torznab_releases_reads_attrs_and_redacts_release_identity() -> No
     assert releases[0].release_id == "torznab-demo:https://indexer.example/details/1"
     assert "apikey" not in releases[0].release_id
     assert releases[0].metadata["torznab_attrs"]["peers"] == "52"
+
+
+def test_parse_torznab_releases_rejects_entity_definitions() -> None:
+    xml = """<?xml version="1.0"?>
+    <!DOCTYPE rss [<!ENTITY payload "expanded">]>
+    <rss><channel><item><title>&payload;</title></item></channel></rss>
+    """
+
+    with pytest.raises(EntitiesForbidden):
+        parse_torznab_releases(xml, site="torznab-demo")
 
 
 @pytest.mark.asyncio

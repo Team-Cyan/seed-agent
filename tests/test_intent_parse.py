@@ -77,6 +77,36 @@ def test_parse_removes_sensitive_assignments_from_title() -> None:
     assert "passkey=<redacted>" in intent.raw_text
 
 
+def test_parse_never_derives_title_or_normalized_payload_from_authorization_secret() -> None:
+    secret = "super-secret-bearer-token"
+
+    intent = parse_resource_intent(
+        f"movie Secret Authorization: Bearer {secret} 2020 1080p",
+        requested_at=REQUESTED_AT,
+    )
+
+    assert intent.title == "Secret"
+    assert intent.year == 2020
+    assert intent.resolution == "1080p"
+    assert secret not in intent.raw_text
+    assert secret not in intent.model_dump_json()
+
+
+def test_parse_keeps_distinct_event_identity_when_only_credentials_differ() -> None:
+    first = parse_resource_intent(
+        "movie Secret Authorization: Bearer first-token 2020 1080p",
+        requested_at=REQUESTED_AT,
+    )
+    second = parse_resource_intent(
+        "movie Secret Authorization: Bearer second-token 2020 1080p",
+        requested_at=REQUESTED_AT,
+    )
+
+    assert first.intent_id != second.intent_id
+    assert "first-token" not in first.model_dump_json()
+    assert "second-token" not in second.model_dump_json()
+
+
 def test_parse_uses_source_event_id_for_stable_identity() -> None:
     first = parse_resource_intent(
         "Inception 2010 1080p",

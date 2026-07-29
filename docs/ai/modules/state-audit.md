@@ -42,6 +42,9 @@ Persist local lifecycle knowledge and durable decision evidence.
 ## Expectations
 
 - do not treat local state as disposable,
+- keep the primary SQLite database, its access lock, and existing WAL/SHM/
+  journal sidecars owner-only (`0600`) because release evidence may contain
+  credential-bearing download URLs,
 - preserve free-window state across scheduler cycles so later review and cleanup
   logic can reason from durable enqueue-time evidence,
 - expose persisted free-window expiry through managed torrent metadata during
@@ -52,7 +55,8 @@ Persist local lifecycle knowledge and durable decision evidence.
 - create and maintain audit JSONL files with owner-only `0600` permissions,
 - keep candidate and intent lifecycle writes monotonic inside one SQLite
   transaction, and keep intent merge data movement atomic with enqueue-claim
-  checks,
+  checks. When a duplicate terminal state wins, its selected release must win
+  with it and its Want List search history must move to the canonical intent,
 - keep state changes explainable and reviewable.
 - renew the mutable scheduler lease in the background during long tracker,
   prune, discovery, and intent phases, and verify ownership at phase boundaries,

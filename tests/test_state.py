@@ -1,10 +1,51 @@
+import json
+import os
+import sqlite3
+import stat
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from threading import Event, Thread
 
+import pytest
+
 from seed_agent.actions.intent import add_intent
 from seed_agent.models import LifecycleState, ManagedTorrent
 from seed_agent.state import StateStore
+
+
+def test_state_store_forces_private_database_lock_and_wal_permissions(tmp_path: Path) -> None:
+    existing_path = tmp_path / "existing" / "state.db"
+    existing_path.parent.mkdir()
+    lock_path = Path(f"{existing_path}.access.lock")
+    lock_path.touch(mode=0o644)
+    with sqlite3.connect(existing_path) as seed_conn:
+        seed_conn.execute("PRAGMA journal_mode=WAL")
+        seed_conn.execute("CREATE TABLE permission_probe (value INTEGER)")
+        seed_conn.execute("INSERT INTO permission_probe VALUES (1)")
+        seed_conn.commit()
+        wal_path = Path(f"{existing_path}-wal")
+        shm_path = Path(f"{existing_path}-shm")
+        journal_path = Path(f"{existing_path}-journal")
+        journal_path.touch(mode=0o644)
+        assert wal_path.is_file()
+        assert shm_path.is_file()
+        for path in (existing_path, lock_path, wal_path, shm_path, journal_path):
+            os.chmod(path, 0o644)
+
+        store = StateStore(existing_path)
+
+        for path in (existing_path, lock_path, wal_path, shm_path, journal_path):
+            assert stat.S_IMODE(path.stat().st_mode) == 0o600
+
+        with store._connect():  # noqa: SLF001 - verify modes before every connection
+            pass
+        assert stat.S_IMODE(wal_path.stat().st_mode) == 0o600
+        assert stat.S_IMODE(shm_path.stat().st_mode) == 0o600
+
+    fresh_path = tmp_path / "fresh" / "state.db"
+    StateStore(fresh_path)
+    assert stat.S_IMODE(fresh_path.stat().st_mode) == 0o600
+    assert stat.S_IMODE(Path(f"{fresh_path}.access.lock").stat().st_mode) == 0o600
 
 
 def test_state_store_upserts_candidate_and_updates_existing_row(tmp_path: Path) -> None:
@@ -821,6 +862,80 @@ def test_state_store_records_scheduler_run_and_events(tmp_path: Path) -> None:
     assert events[0]["event"] == "warning"
 
 
+def test_latest_completed_scheduler_run_finds_flag_beyond_first_hundred(
+    tmp_path: Path,
+) -> None:
+    store = StateStore(tmp_path / "state.sqlite3")
+    started = datetime(2026, 7, 1, tzinfo=UTC)
+    columns = (
+        "run_id, started_at, finished_at, status, command, execute, "
+        "prune_enabled, intent_enabled, intent_execute, backoff_active, "
+        "warning_count, summary_json"
+    )
+    rows: list[tuple[object, ...]] = [
+        (
+            "matching-old-run",
+            started.isoformat(),
+            (started + timedelta(minutes=1)).isoformat(),
+            "success",
+            "schedule-run",
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            json.dumps({"intent_refresh_enabled": True}),
+        )
+    ]
+    for index in range(125):
+        newer = started + timedelta(minutes=index + 2)
+        rows.append(
+            (
+                f"newer-run-{index:03d}",
+                newer.isoformat(),
+                (newer + timedelta(seconds=30)).isoformat(),
+                "success",
+                "schedule-run",
+                0,
+                0,
+                1,
+                0,
+                0,
+                0,
+                json.dumps({"intent_refresh_enabled": False}),
+            )
+        )
+    rows.append(
+        (
+            "unfinished-matching-run",
+            (started + timedelta(days=1)).isoformat(),
+            None,
+            "running",
+            "schedule-run",
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            json.dumps({"intent_refresh_enabled": True}),
+        )
+    )
+    with store._connect() as conn:  # noqa: SLF001 - seed a large scheduler history
+        conn.executemany(
+            f"INSERT INTO scheduler_runs ({columns}) VALUES ({', '.join('?' for _ in range(12))})",
+            rows,
+        )
+
+    match = store.latest_completed_scheduler_run(summary_flag="intent_refresh_enabled")
+
+    assert match is not None
+    assert match["run_id"] == "matching-old-run"
+    with pytest.raises(ValueError, match="summary_flag"):
+        store.latest_completed_scheduler_run(summary_flag="unsafe.flag")
+
+
 def test_state_store_records_tracker_backoff_and_api_events(tmp_path: Path) -> None:
     store = StateStore(tmp_path / "state.sqlite3")
 
@@ -850,6 +965,41 @@ def test_state_store_records_tracker_backoff_and_api_events(tmp_path: Path) -> N
     assert backoff["run_id"] == "sched-test"
     assert events[0]["site"] == "mteam"
     assert events[0]["rate_limited"] == 1
+
+
+def test_state_store_backoff_activity_compares_actual_instants_across_offsets(
+    tmp_path: Path,
+) -> None:
+    store = StateStore(tmp_path / "state.sqlite3")
+    store.set_tracker_backoff(
+        site="mteam",
+        endpoint="torrent/search",
+        until="2026-07-29T16:00:00+08:00",
+        reason="request too frequent",
+    )
+
+    assert store.has_active_tracker_backoff(
+        now=datetime(2026, 7, 29, 7, 59, tzinfo=UTC),
+    )
+    assert not store.has_active_tracker_backoff(
+        now=datetime(2026, 7, 29, 9, 0, tzinfo=UTC),
+    )
+
+
+def test_state_store_creates_metrics_covering_indexes(tmp_path: Path) -> None:
+    store = StateStore(tmp_path / "state.sqlite3")
+
+    with store._connect() as conn:  # noqa: SLF001 - inspect migrated schema
+        scheduler_indexes = {
+            str(row[1]) for row in conn.execute("PRAGMA index_list(scheduler_runs)")
+        }
+        tracker_indexes = {
+            str(row[1]) for row in conn.execute("PRAGMA index_list(tracker_api_events)")
+        }
+
+    assert "idx_scheduler_runs_status" in scheduler_indexes
+    assert "idx_scheduler_runs_finished_at" in scheduler_indexes
+    assert "idx_tracker_api_events_event" in tracker_indexes
 
 
 def test_state_store_records_want_search_runs(tmp_path: Path) -> None:

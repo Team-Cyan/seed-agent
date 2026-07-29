@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import fcntl
 import json
+import os
+import re
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -47,6 +49,7 @@ class StateStore:
     def __init__(self, path: Path) -> None:
         self.path = path
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        _ensure_private_file(self.path)
         self._initialize()
 
     def acquire_scheduler_lease(
@@ -447,6 +450,30 @@ class StateStore:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def latest_completed_scheduler_run(
+        self,
+        *,
+        summary_flag: str,
+    ) -> dict[str, Any] | None:
+        if re.fullmatch(r"[A-Za-z0-9_]+", summary_flag) is None:
+            raise ValueError("summary_flag must contain only letters, digits, or underscores")
+        json_path = f"$.{summary_flag}"
+        with self._connect(row_factory=sqlite3.Row) as conn:
+            row = conn.execute(
+                """
+                SELECT *
+                FROM scheduler_runs
+                WHERE finished_at IS NOT NULL
+                  AND json_valid(summary_json) = 1
+                  AND json_type(summary_json, ?) = 'true'
+                  AND json_extract(summary_json, ?) = 1
+                ORDER BY finished_at DESC, started_at DESC
+                LIMIT 1
+                """,
+                (json_path, json_path),
+            ).fetchone()
+        return dict(row) if row is not None else None
+
     def scheduler_run_status_counts(self) -> dict[str, int]:
         with self._connect(row_factory=sqlite3.Row) as conn:
             rows = conn.execute(
@@ -541,18 +568,20 @@ class StateStore:
         return [dict(row) for row in rows]
 
     def has_active_tracker_backoff(self, *, now: datetime | None = None) -> bool:
-        current_time = (now or _utc_now_datetime()).isoformat()
-        with self._connect() as conn:
-            row = conn.execute(
+        current_time = _as_utc(now or _utc_now_datetime())
+        with self._connect(row_factory=sqlite3.Row) as conn:
+            rows = conn.execute(
                 """
-                SELECT 1
+                SELECT until
                 FROM tracker_backoffs
-                WHERE active = 1 AND until > ?
-                LIMIT 1
-                """,
-                (current_time,),
-            ).fetchone()
-        return row is not None
+                WHERE active = 1
+                """
+            ).fetchall()
+        return any(
+            until is not None and _as_utc(until) > current_time
+            for row in rows
+            if (until := _parse_datetime(row["until"])) is not None
+        )
 
     def clear_tracker_backoffs(self, *, site: str | None = None) -> int:
         query = "UPDATE tracker_backoffs SET active = 0 WHERE active = 1"
@@ -785,20 +814,23 @@ class StateStore:
             ).fetchall()
             backoff_rows = conn.execute(
                 """
-                SELECT site, COUNT(*) AS count
+                SELECT site, until
                 FROM tracker_backoffs
-                WHERE active = 1 AND until > ?
-                GROUP BY site
-                """,
-                (_utc_now(),),
+                WHERE active = 1
+                """
             ).fetchall()
 
         rate_limited_counts = {
             str(row["site"]): int(row["count"]) for row in rate_limited_rows
         }
-        active_backoff_counts = {
-            str(row["site"]): int(row["count"]) for row in backoff_rows
-        }
+        active_backoff_counts: dict[str, int] = {}
+        current_time = _utc_now_datetime()
+        for row in backoff_rows:
+            until = _parse_datetime(row["until"])
+            if until is None or _as_utc(until) <= current_time:
+                continue
+            site = str(row["site"])
+            active_backoff_counts[site] = active_backoff_counts.get(site, 0) + 1
         grouped: dict[str, dict[str, Any]] = {}
         seen_hashes: set[tuple[str, str]] = set()
         for row in rows:
@@ -1885,7 +1917,10 @@ class StateStore:
             canonical = dict(canonical_row)
             duplicate = dict(duplicate_row)
             conn.execute(
-                "DELETE FROM intent_enqueue_claims WHERE expires_at <= ?",
+                """
+                DELETE FROM intent_enqueue_claims
+                WHERE julianday(expires_at) <= julianday(?)
+                """,
                 (now,),
             )
             active_claim = conn.execute(
@@ -1907,15 +1942,23 @@ class StateStore:
             )
             canonical_state = str(canonical_payload.get("state") or canonical["state"])
             duplicate_state = str(duplicate_payload.get("state") or duplicate["state"])
-            if INTENT_STATE_PRIORITY.get(duplicate_state, -1) > INTENT_STATE_PRIORITY.get(
-                canonical_state,
-                -1,
-            ):
+            canonical_rank = INTENT_STATE_PRIORITY.get(canonical_state, -1)
+            duplicate_rank = INTENT_STATE_PRIORITY.get(duplicate_state, -1)
+            state_winner = canonical
+            if duplicate_rank > canonical_rank:
                 canonical_payload["state"] = duplicate_state
+                state_winner = duplicate
             merged_intent = ResourceIntent.model_validate(canonical_payload)
-            selected_release_id = (
-                canonical["selected_release_id"] or duplicate["selected_release_id"]
-            )
+            if merged_intent.state in {
+                IntentState.ENQUEUED,
+                IntentState.REJECTED,
+                IntentState.FAILED,
+            }:
+                selected_release_id = state_winner["selected_release_id"]
+            else:
+                selected_release_id = (
+                    canonical["selected_release_id"] or duplicate["selected_release_id"]
+                )
             duplicate_rows = conn.execute(
                 """
                 SELECT release_id, site, title, score, confidence, accepted,
@@ -1981,6 +2024,14 @@ class StateStore:
                 WHERE intent_id = ?
                 """,
                 (canonical_intent_id, now, duplicate_intent_id),
+            )
+            conn.execute(
+                """
+                UPDATE want_search_runs
+                SET intent_id = ?
+                WHERE intent_id = ?
+                """,
+                (canonical_intent_id, duplicate_intent_id),
             )
             conn.execute(
                 "DELETE FROM release_candidates WHERE intent_id = ?",
@@ -2211,6 +2262,11 @@ class StateStore:
                   error TEXT,
                   summary_json TEXT NOT NULL
                 );
+                CREATE INDEX IF NOT EXISTS idx_scheduler_runs_status
+                  ON scheduler_runs(status);
+                CREATE INDEX IF NOT EXISTS idx_scheduler_runs_finished_at
+                  ON scheduler_runs(finished_at DESC, started_at DESC)
+                  WHERE finished_at IS NOT NULL;
                 CREATE TABLE IF NOT EXISTS scheduler_leases (
                   lease_name TEXT PRIMARY KEY,
                   owner_id TEXT NOT NULL,
@@ -2266,6 +2322,8 @@ class StateStore:
                 );
                 CREATE INDEX IF NOT EXISTS idx_tracker_api_events_site_endpoint
                   ON tracker_api_events(site, endpoint);
+                CREATE INDEX IF NOT EXISTS idx_tracker_api_events_event
+                  ON tracker_api_events(event);
                 CREATE TABLE IF NOT EXISTS source_cursors (
                   source TEXT PRIMARY KEY,
                   cursor TEXT NOT NULL,
@@ -2298,14 +2356,18 @@ class StateStore:
 
     @contextmanager
     def _connect(self, *, row_factory: Any | None = None) -> Iterator[sqlite3.Connection]:
+        _ensure_private_file(self.path)
+        _ensure_sqlite_sidecars_private(self.path)
         lock_path = _sqlite_access_lock_path(self.path)
         lock_path.parent.mkdir(parents=True, exist_ok=True)
-        with lock_path.open("a+b") as access_lock:
+        lock_fd = _open_private_file(lock_path)
+        with os.fdopen(lock_fd, "a+b") as access_lock:
             fcntl.flock(access_lock.fileno(), fcntl.LOCK_SH)
             conn = sqlite3.connect(self.path, timeout=SQLITE_TIMEOUT_SECONDS)
             try:
                 conn.execute(f"PRAGMA busy_timeout={SQLITE_BUSY_TIMEOUT_MS}")
                 conn.execute("PRAGMA journal_mode=WAL")
+                _ensure_sqlite_sidecars_private(self.path)
                 if row_factory is not None:
                     conn.row_factory = row_factory
                 yield conn
@@ -2626,6 +2688,14 @@ def _parse_datetime(value: Any) -> datetime | None:
         return None
 
 
+def _as_utc(value: datetime) -> datetime:
+    from datetime import UTC
+
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
 def _is_paused_state(state: str) -> bool:
     normalized = state.strip().lower()
     return normalized.startswith("paused") or normalized.startswith("stopped")
@@ -2721,3 +2791,40 @@ def _monotonic_intent(
 
 def _sqlite_access_lock_path(path: Path) -> Path:
     return Path(f"{path}.access.lock")
+
+
+def _open_private_file(path: Path) -> int:
+    flags = os.O_CREAT | os.O_RDWR
+    flags |= getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(path, flags, 0o600)
+    try:
+        os.fchmod(fd, 0o600)
+    except Exception:
+        os.close(fd)
+        raise
+    return fd
+
+
+def _ensure_private_file(path: Path) -> None:
+    fd = _open_private_file(path)
+    os.close(fd)
+
+
+def _ensure_sqlite_sidecars_private(path: Path) -> None:
+    for suffix in ("-wal", "-shm", "-journal"):
+        _ensure_existing_private_file(Path(f"{path}{suffix}"))
+
+
+def _ensure_existing_private_file(path: Path) -> None:
+    flags = os.O_RDWR
+    flags |= getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(path, flags)
+    except FileNotFoundError:
+        return
+    try:
+        os.fchmod(fd, 0o600)
+    finally:
+        os.close(fd)

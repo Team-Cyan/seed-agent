@@ -46,7 +46,7 @@ from seed_agent.actions.pt import (
     strategy_report as build_strategy_report,
 )
 from seed_agent.actions.qb import MutationBatchError, enqueue_candidates, prune_cold_torrents
-from seed_agent.audit import AuditLogger, redact_payload
+from seed_agent.audit import AuditLogger, redact_payload, redact_sensitive_text
 from seed_agent.config import (
     CategoryPolicyConfig,
     SeedAgentConfig,
@@ -1840,15 +1840,45 @@ def schedule_run(
                         "schedule_backoff_active": active_backoff,
                     },
                 )
-                intent_payload = _intent_run_once_payload(
-                    config,
-                    execute=intent_execute,
-                    search_ingested=intent_search,
-                    run_id=run_id,
-                )
+                try:
+                    intent_payload = _intent_run_once_payload(
+                        config,
+                        execute=intent_execute,
+                        search_ingested=intent_search,
+                        run_id=run_id,
+                    )
+                except Exception as exc:
+                    intent_payload, failure_backoff = _scheduled_intent_failure_payload(
+                        config,
+                        exc=exc,
+                        execute=intent_execute,
+                        search_enabled=intent_search,
+                        run_id=run_id,
+                        store=store_for_run,
+                    )
+                    if failure_backoff is not None:
+                        payload["schedule_backoff"] = failure_backoff
+                        payload["skipped_by_backoff"] = True
+                    _record_schedule_phase(
+                        store_for_run,
+                        run_id=run_id,
+                        phase=phase,
+                        event="warning",
+                        message=str(intent_payload["search_warning"]["message"]),
+                        payload={
+                            "search_warning": intent_payload["search_warning"],
+                            "schedule_backoff": failure_backoff,
+                        },
+                    )
                 if active_backoff:
                     intent_payload["schedule_backoff"] = payload["schedule_backoff"]
                     intent_payload["search_skipped_by_backoff"] = True
+                payload["intent_refresh_succeeded"] = (
+                    intent_payload.get("source_refresh_succeeded") is True
+                )
+                payload["intent_search_succeeded"] = (
+                    intent_search and intent_payload.get("search_succeeded") is True
+                )
                 _record_schedule_phase(
                     store_for_run,
                     run_id=run_id,
@@ -2058,9 +2088,12 @@ def _scheduled_intent_search_due(
     current = now or datetime.now().astimezone()
     if current.tzinfo is None:
         current = current.astimezone()
-    scheduled_at = current.replace(hour=hour, minute=0, second=0, microsecond=0)
-    if current < scheduled_at:
-        return False
+    scheduled_today = current.replace(hour=hour, minute=0, second=0, microsecond=0)
+    scheduled_at = (
+        scheduled_today
+        if current >= scheduled_today
+        else scheduled_today - timedelta(days=1)
+    )
     if last_search_at is None:
         return True
     previous = last_search_at
@@ -2070,46 +2103,72 @@ def _scheduled_intent_search_due(
 
 
 def _latest_scheduled_intent_search_at(store: StateStore) -> datetime | None:
-    for row in store.list_scheduler_runs(limit=100):
-        if not row.get("finished_at"):
-            continue
-        try:
-            summary = json.loads(str(row.get("summary_json") or "{}"))
-        except json.JSONDecodeError:
-            continue
-        if not isinstance(summary, dict) or summary.get("intent_search_enabled") is not True:
-            continue
-        try:
-            searched_at = datetime.fromisoformat(str(row["finished_at"]).replace("Z", "+00:00"))
-        except KeyError, ValueError:
-            continue
-        return searched_at
-    return None
+    succeeded = store.latest_completed_scheduler_run(
+        summary_flag="intent_search_succeeded"
+    )
+    succeeded_at = _scheduler_run_finished_at(succeeded)
+    if succeeded_at is not None:
+        return succeeded_at
+    return _latest_legacy_scheduled_intent_at(
+        store,
+        enabled_flags=("intent_search_enabled",),
+        explicit_success_flag="intent_search_succeeded",
+    )
 
 
 def _latest_scheduled_intent_refresh_at(store: StateStore) -> datetime | None:
-    for row in store.list_scheduler_runs(limit=100):
+    succeeded = store.latest_completed_scheduler_run(
+        summary_flag="intent_refresh_succeeded"
+    )
+    succeeded_at = _scheduler_run_finished_at(succeeded)
+    if succeeded_at is not None:
+        return succeeded_at
+    return _latest_legacy_scheduled_intent_at(
+        store,
+        enabled_flags=("intent_refresh_enabled", "intent_search_enabled"),
+        explicit_success_flag="intent_refresh_succeeded",
+    )
+
+
+def _latest_legacy_scheduled_intent_at(
+    store: StateStore,
+    *,
+    enabled_flags: tuple[str, ...],
+    explicit_success_flag: str,
+) -> datetime | None:
+    total_runs = sum(store.scheduler_run_status_counts().values())
+    if total_runs <= 0:
+        return None
+    for row in store.list_scheduler_runs(limit=total_runs):
         if not row.get("finished_at"):
             continue
         try:
             summary = json.loads(str(row.get("summary_json") or "{}"))
         except json.JSONDecodeError:
             continue
-        if not isinstance(summary, dict):
+        if not isinstance(summary, dict) or explicit_success_flag in summary:
             continue
-        if (
-            summary.get("intent_refresh_enabled") is not True
-            and summary.get("intent_search_enabled") is not True
+        if summary.get("error") or not any(summary.get(flag) is True for flag in enabled_flags):
+            continue
+        intent_summary = summary.get("intent")
+        if isinstance(intent_summary, dict) and (
+            intent_summary.get("source_warnings")
+            or intent_summary.get("search_warning")
         ):
             continue
-        try:
-            refreshed_at = datetime.fromisoformat(
-                str(row["finished_at"]).replace("Z", "+00:00")
-            )
-        except KeyError, ValueError:
-            continue
-        return refreshed_at
+        finished_at = _scheduler_run_finished_at(row)
+        if finished_at is not None:
+            return finished_at
     return None
+
+
+def _scheduler_run_finished_at(row: dict[str, Any] | None) -> datetime | None:
+    if not row or not row.get("finished_at"):
+        return None
+    try:
+        return datetime.fromisoformat(str(row["finished_at"]).replace("Z", "+00:00"))
+    except KeyError, ValueError:
+        return None
 
 
 def _new_schedule_run_id(now: datetime | None = None) -> str:
@@ -2153,6 +2212,11 @@ def _schedule_run_status(summary: dict[str, Any]) -> str:
     if _payload_has_mteam_rate_limit(summary):
         return "rate_limited"
     if _tracker_source_backfill_has_unresolved(summary.get("tracker_source_backfill")):
+        return "warning"
+    intent = summary.get("intent")
+    if isinstance(intent, dict) and (
+        intent.get("source_warnings") or intent.get("search_warning")
+    ):
         return "warning"
     return "success"
 
@@ -2517,6 +2581,113 @@ def _intent_backoff_skip_payload(
         "schedule_backoff": backoff,
         "skipped_by_backoff": True,
     }
+
+
+def _scheduled_intent_failure_payload(
+    config_path: Path,
+    *,
+    exc: Exception,
+    execute: bool,
+    search_enabled: bool,
+    run_id: str,
+    store: StateStore,
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    warning: dict[str, Any] = {
+        "error_type": type(exc).__name__,
+        "message": _runtime_error_summary(exc),
+        "search_enabled": search_enabled,
+    }
+    backoff: dict[str, Any] | None = None
+    if isinstance(exc, MTeamApiResponseError):
+        warning.update(
+            {
+                "site": "mteam",
+                "endpoint": exc.endpoint,
+                "api_code": exc.code,
+                "status_code": exc.status_code,
+                "rate_limited": exc.rate_limited,
+                "retriable": exc.retriable,
+            }
+        )
+        if exc.rate_limited:
+            backoff = _record_schedule_rate_limit_backoff(
+                config_path,
+                endpoint=exc.endpoint,
+                reason="mteam request too frequent",
+                run_id=run_id,
+            )
+        elif exc.retriable:
+            backoff = _record_schedule_network_backoff(
+                config_path,
+                endpoint=exc.endpoint,
+                reason="mteam api unavailable",
+                run_id=run_id,
+            )
+            store.record_tracker_api_event(
+                site="mteam",
+                endpoint=exc.endpoint,
+                event="unavailable",
+                run_id=run_id,
+                status_code=exc.status_code,
+                api_code=exc.code,
+                rate_limited=False,
+                message=warning["message"],
+            )
+    elif isinstance(exc, (httpx.TimeoutException, httpx.NetworkError)) and (
+        _httpx_exception_request_is_mteam(exc)
+    ):
+        endpoint = "torrent/search"
+        warning.update(
+            {
+                "site": "mteam",
+                "endpoint": endpoint,
+                "rate_limited": False,
+                "retriable": True,
+            }
+        )
+        backoff = _record_schedule_network_backoff(
+            config_path,
+            endpoint=endpoint,
+            reason="mteam api unavailable",
+            run_id=run_id,
+        )
+        store.record_tracker_api_event(
+            site="mteam",
+            endpoint=endpoint,
+            event="unavailable",
+            run_id=run_id,
+            rate_limited=False,
+            message=warning["message"],
+        )
+    payload: dict[str, Any] = {
+        "command": "intent-run-once",
+        "run_id": run_id,
+        "execute": execute,
+        "search_enabled": search_enabled,
+        "source_refresh_succeeded": False,
+        "search_succeeded": False,
+        "ingested": 0,
+        "searched": 0,
+        "ranked": 0,
+        "enqueue_candidates": 0,
+        "decisions": [],
+        "search_warning": warning,
+    }
+    if backoff is not None:
+        payload["schedule_backoff"] = backoff
+        payload["search_skipped_by_backoff"] = True
+    return payload, backoff
+
+
+def _httpx_exception_request_is_mteam(exc: httpx.HTTPError) -> bool:
+    try:
+        host = exc.request.url.host
+    except RuntimeError:
+        return False
+    if not host:
+        return False
+    normalized_host = host.rstrip(".").lower()
+    return normalized_host == "m-team.cc" or normalized_host.endswith(".m-team.cc")
 
 
 def _prune_payload(
@@ -2955,21 +3126,29 @@ def _intent_run_once_payload(
 ) -> dict[str, Any]:
     loaded = load_config(config_path)
     store = StateStore(_state_path(loaded))
-    providers = _build_search_providers(loaded)
+    providers = _build_search_providers(loaded) if search_ingested else []
     inbox_path = _resolve_path(loaded.want_decision.inbox_ref, loaded.config_dir)
     default_policy = _default_category_policy(loaded)
 
     def policy_resolver(intent: ResourceIntent) -> CategoryPolicyConfig:
         return _intent_category_policy(loaded, intent)
 
-    (
-        downloader,
-        live_torrents,
-        downloader_status,
-        paused,
-        pool_usage,
-        missing_reconciled,
-    ) = _enqueue_runtime_context(loaded, store=store, execute=execute)
+    if search_ingested:
+        (
+            downloader,
+            live_torrents,
+            downloader_status,
+            paused,
+            pool_usage,
+            missing_reconciled,
+        ) = _enqueue_runtime_context(loaded, store=store, execute=execute)
+    else:
+        downloader = _NullDownloader()
+        live_torrents = []
+        downloader_status = None
+        paused = False
+        pool_usage = None
+        missing_reconciled = 0
     batch_error = None
     pause_reasons = _enqueue_pause_reasons(
         loaded,
@@ -2977,13 +3156,18 @@ def _intent_run_once_payload(
         pool_usage,
         downloader_status,
     )
-    enqueue_context_resolver = _build_intent_enqueue_context_resolver(
-        loaded,
-        live_torrents,
-        downloader_status,
+    enqueue_context_resolver = (
+        _build_intent_enqueue_context_resolver(
+            loaded,
+            live_torrents,
+            downloader_status,
+        )
+        if search_ingested
+        else None
     )
     source_warnings: list[dict[str, str]] = []
     pending_source_cursors: dict[str, str] = {}
+    source_refresh_succeeded = True
     try:
         source_events = _read_configured_source_events(
             loaded,
@@ -2992,6 +3176,8 @@ def _intent_run_once_payload(
         )
     except Exception as exc:
         source_events = []
+        pending_source_cursors.clear()
+        source_refresh_succeeded = False
         source_warnings.append(
             {
                 "source": "configured_sources",
@@ -3000,7 +3186,9 @@ def _intent_run_once_payload(
             }
         )
     try:
-        release_resolver = _build_release_download_resolver(loaded)
+        release_resolver = (
+            _build_release_download_resolver(loaded) if search_ingested else None
+        )
         result = _run(
             run_intent_once(
                 inbox_path=inbox_path,
@@ -3028,6 +3216,7 @@ def _intent_run_once_payload(
         result = None
         decisions = exc.decisions
         batch_error = exc
+        source_refresh_succeeded = False
     effective_paused, effective_pause_reasons = _intent_enqueue_pause_state(
         decisions,
         fallback_paused=paused,
@@ -3040,6 +3229,8 @@ def _intent_run_once_payload(
         "run_id": run_id,
         "execute": execute,
         "search_enabled": search_ingested,
+        "source_refresh_succeeded": source_refresh_succeeded,
+        "search_succeeded": search_ingested and batch_error is None,
         "ingested": len(result.ingested) if result is not None else 0,
         "searched": len(result.searched) if result is not None else 0,
         "ranked": len(result.ranked) if result is not None else 0,
@@ -3293,7 +3484,9 @@ def _write_heartbeat(
         "enqueued": payload.get("enqueued"),
         "intent": _intent_payload_summary(payload.get("intent")),
         "intent_refresh_enabled": payload.get("intent_refresh_enabled"),
+        "intent_refresh_succeeded": payload.get("intent_refresh_succeeded"),
         "intent_search_enabled": payload.get("intent_search_enabled"),
+        "intent_search_succeeded": payload.get("intent_search_succeeded"),
         "schedule_backoff": payload.get("schedule_backoff"),
         "skipped_by_backoff": payload.get("skipped_by_backoff"),
         "error": payload.get("error"),
@@ -4035,7 +4228,8 @@ async def _backfill_tracker_sources(
         )
         if execute and match_result["status"] == "matched":
             candidate = match_result["candidate"]
-            assert isinstance(candidate, TorrentCandidate)
+            if not isinstance(candidate, TorrentCandidate):
+                raise RuntimeError("tracker match did not include a torrent candidate")
             store.upsert_candidate(
                 candidate.stable_id,
                 candidate.title,
@@ -4639,7 +4833,7 @@ def _runtime_error_summary(exc: Exception) -> str:
     text = str(exc).replace("\n", " ").strip()
     if not text:
         return type(exc).__name__
-    return text[:500]
+    return redact_sensitive_text(text)[:500]
 
 
 def _print_json(payload: dict[str, Any]) -> None:
@@ -4674,7 +4868,9 @@ def _schedule_log_summary(payload: dict[str, Any]) -> dict[str, Any]:
         "scheduler_cli_overrides",
         "manual_trigger",
         "intent_refresh_enabled",
+        "intent_refresh_succeeded",
         "intent_search_enabled",
+        "intent_search_succeeded",
         "schedule_backoff",
         "skipped_by_backoff",
         "heartbeat_file",
@@ -4770,6 +4966,8 @@ def _intent_payload_summary(payload: object) -> dict[str, Any] | None:
         "run_id": payload.get("run_id"),
         "execute": payload.get("execute"),
         "search_enabled": payload.get("search_enabled"),
+        "source_refresh_succeeded": payload.get("source_refresh_succeeded"),
+        "search_succeeded": payload.get("search_succeeded"),
         "ingested": payload.get("ingested"),
         "searched": payload.get("searched"),
         "ranked": payload.get("ranked"),
@@ -4778,6 +4976,8 @@ def _intent_payload_summary(payload: object) -> dict[str, Any] | None:
     }
     if payload.get("source_warnings"):
         summary["source_warnings"] = payload.get("source_warnings")
+    if payload.get("search_warning"):
+        summary["search_warning"] = payload.get("search_warning")
     if payload.get("skipped_by_backoff"):
         summary["skipped_by_backoff"] = payload.get("skipped_by_backoff")
     if payload.get("search_skipped_by_backoff"):

@@ -337,8 +337,16 @@ async def enqueue_intent(
             raise ValueError(f"unable to claim intent enqueue: {status}")
 
     try:
+        score_breakdown = _score_breakdown_from_ranked(ranked)
+        if enqueue_context_resolver is not None:
+            paused, pool_usage, pause_reasons = enqueue_context_resolver(
+                intent,
+                selected_policy,
+                score_breakdown,
+            )
         if execute and (
-            release_resolver is not None or _requires_download_resolution(ranked.release)
+            not paused
+            and (release_resolver is not None or _requires_download_resolution(ranked.release))
         ):
             if release_resolver is None:
                 raise ValueError("selected release download URL could not be resolved")
@@ -347,13 +355,7 @@ async def enqueue_intent(
                 raise ValueError("selected release download URL could not be resolved")
             ranked = ranked.model_copy(update={"release": resolved_release})
             store.save_ranked_releases([ranked])
-        score_breakdown = _score_breakdown_from_ranked(ranked)
-        if enqueue_context_resolver is not None:
-            paused, pool_usage, pause_reasons = enqueue_context_resolver(
-                intent,
-                selected_policy,
-                score_breakdown,
-            )
+            score_breakdown = _score_breakdown_from_ranked(ranked)
         decisions = await enqueue_candidates(
             [score_breakdown],
             downloader,
@@ -369,7 +371,8 @@ async def enqueue_intent(
         raise
     updated = intent
     if execute and any(decision.action == "qb.enqueue" for decision in decisions):
-        assert claim_owner_id is not None
+        if claim_owner_id is None:
+            raise RuntimeError("intent enqueue claim was not acquired before state commit")
         if not store.complete_intent_enqueue_claim(
             intent.intent_id,
             ranked.release.release_id,

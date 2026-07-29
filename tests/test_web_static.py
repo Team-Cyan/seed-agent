@@ -27,6 +27,9 @@ def test_web_token_stays_in_memory_and_is_attached_to_api_requests() -> None:
     assert "data-web-token-button hidden" in html
     assert "X-Seed-Agent-Token" in script
     assert "apiFetch" in script
+    assert 'if (method === "POST")' in script
+    assert 'headers.set("Content-Type", "application/json")' in script
+    assert 'requestInit.body = "{}"' in script
     assert 'webTokenButton?.removeAttribute("hidden")' in script
     assert "localStorage" not in script
     assert "sessionStorage" not in script
@@ -516,6 +519,11 @@ def test_want_candidate_enqueue_is_single_click_execute() -> None:
     assert "enqueueWantCandidate" in script
     assert 'data-want-candidate-action="enqueue"' in script
     assert "const body = { release_id: releaseId };" in script
+    assert "renderWantCandidateStatus" in script
+    assert "status.innerHTML = renderWantCandidateStatus(statusItem);" in script
+    assert '["ok", "info", "warning"].includes(statusItem?.level)' in script
+    assert "const resultStatus = payload.status?.[0]" in script
+    assert 'status.innerHTML = message ? `<div class="status-item ok">' not in script
     assert "previewWantCandidateEnqueue" not in script
     assert "confirmWantCandidateEnqueue" not in script
     assert "renderWantCandidatePreview" not in script

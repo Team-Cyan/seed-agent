@@ -110,6 +110,32 @@ def test_redact_payload_masks_authorization_headers() -> None:
     }
 
 
+def test_redactors_mask_multiword_authorization_values_and_telegram_bot_urls() -> None:
+    telegram_token = "123456:ABC-telegram-secret"
+    bearer_token = "bearer-secret"
+    basic_token = "YmFzaWMtc2VjcmV0"
+    value = (
+        f"Authorization: Bearer {bearer_token}; "
+        f"Proxy-Authorization=Basic {basic_token}\n"
+        f"https://api.telegram.org/bot{telegram_token}/getUpdates"
+    )
+
+    for redacted in (redact_sensitive_text(value), redact_payload(value)):
+        assert telegram_token not in redacted
+        assert bearer_token not in redacted
+        assert basic_token not in redacted
+        assert "https://api.telegram.org/bot<redacted>/getUpdates" in redacted
+        assert redacted.count("<redacted>") >= 3
+
+
+def test_authorization_redaction_preserves_following_media_metadata() -> None:
+    value = "movie Secret Authorization: Bearer bearer-secret 2020 1080p"
+
+    redacted = redact_sensitive_text(value)
+
+    assert redacted == "movie Secret Authorization:<redacted> 2020 1080p"
+
+
 def test_audit_logger_writes_redacted_jsonl(tmp_path: Path) -> None:
     path = tmp_path / "logs" / "audit.jsonl"
     decision = Decision(
