@@ -12,6 +12,8 @@ All notable project changes are tracked here.
   durable update cursor only after the intent cycle succeeds.
 - Upgraded the async test runtime to `pytest-asyncio` 1.4 for native Python
   3.14 support instead of retaining the pre-1.0 event-loop policy integration.
+- Want List candidate buttons now execute the reviewed qB add immediately,
+  removing the redundant preview-and-confirm step from the Web UI.
 - Prometheus counters now aggregate the complete SQLite history, expired
   tracker backoffs no longer report active, and the metrics route follows the
   same optional Web token policy as API routes.

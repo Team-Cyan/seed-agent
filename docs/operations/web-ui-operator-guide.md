@@ -17,7 +17,7 @@ operations.
 | Tracker actions | Validate a tracker draft, run site probe, or dry-run a tracker-local discovery preview. | Preview/read-only network access | These actions may call tracker APIs or RSS endpoints, but they must not enqueue to qBittorrent or clean up torrents. |
 | Want List refresh | Sync configured Douban/IMDb sources into local intent state. | Local state mutation | It may read public/export source data and update `.seed-agent/state.db`, but it does not contact qBittorrent. |
 | Want List search | Refresh configured sources, search/rank candidates for the current filters, and store release candidates. | Preview-first search | It may read runtime config, source state, and tracker/downloader-adjacent metadata needed for ranking. It does not add tasks to qBittorrent. |
-| Want List candidate enqueue | Add exactly one selected release candidate through the shared intent enqueue path. | Explicit qB mutation | This is the only current Web UI qB enqueue surface. Use it only after reviewing the candidate modal preview and in-modal confirmation. |
+| Want List candidate enqueue | Add exactly one selected release candidate through the shared intent enqueue path. | Explicit qB mutation | This is the only current Web UI qB enqueue surface. After reviewing the candidate card, clicking `加入 qB` or `强制加入 qB` immediately executes the add. |
 
 ## Optional API Token
 
@@ -78,7 +78,7 @@ Use the CLI when the work is batch-oriented, unattended, or high risk:
 When in doubt, start with the Web UI for read-only status and config previews,
 then use the CLI for execution or deeper evidence.
 
-## Preview-First Want List Workflow
+## Want List Workflow
 
 The Want List page has separate refresh, search, review, and enqueue steps:
 
@@ -87,9 +87,9 @@ The Want List page has separate refresh, search, review, and enqueue steps:
    wants, ranks releases, and stores release candidates for review.
 3. Opening a Want List row reads stored candidates and shows matching releases
    first, with lower-match releases still visible for operator override.
-4. Candidate enqueue first builds an in-modal preview for one release. The
-   preview does not contact qBittorrent runtime, update intent state, or write
-   audit rows. The in-modal confirmation performs the qB action.
+4. Clicking a candidate's enqueue button immediately performs the qB action.
+   Matching candidates use `加入 qB`; lower-match candidates use
+   `强制加入 qB`.
 
 Refresh and search are preview-first, not qB mutation actions. They may still do
 real work:
@@ -102,9 +102,8 @@ real work:
   enqueue planning constraints.
 
 The boundary is qBittorrent mutation: refresh and search do not add torrents to
-qBittorrent. Candidate preview is narrower and remains side-effect-free for qB,
-intent state, and audit. qB enqueue only happens through the candidate-level
-confirmation action or a CLI command with explicit execute mode.
+qBittorrent. Candidate-level enqueue is an explicit execute action; CLI
+commands still require explicit execute mode.
 
 ## Runtime Provenance
 
@@ -143,8 +142,8 @@ cases:
 
 ## Operational Rules
 
-- Keep qBittorrent mutations deliberate. Web UI search and candidate preview
-  actions are not approval to enqueue or clean up.
+- Keep qBittorrent mutations deliberate. Web UI search does not approve enqueue
+  or cleanup, while a candidate enqueue button is an immediate qB mutation.
 - Use the overview's immediate-run action instead of restarting the container.
   It signals the current scheduler, rejects overlapping cycles, and resets the
   next interval from the manual cycle start.

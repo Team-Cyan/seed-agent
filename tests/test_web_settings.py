@@ -1418,29 +1418,11 @@ def test_http_want_enqueue_can_select_lower_match_release(
     monkeypatch.setattr(cli, "build_downloader", lambda loaded: downloader)
 
     with _running_server(config_path) as base_url:
-        preview_payload = _request_json(
-            base_url,
-            "POST",
-            f"/api/wants/{intent.intent_id}/enqueue",
-            {"release_id": "mt:https://kp.m-team.cc/detail/99", "execute": "false"},
-        )
-        assert preview_payload["execute"] is False
-        assert preview_payload["selected"]["release_id"] == "mt:https://kp.m-team.cc/detail/99"
-        assert preview_payload["enqueued"] == 0
-        assert [item["action"] for item in preview_payload["decisions"]] == ["qb.enqueue"]
-        assert preview_payload["decisions"][0]["execute"] is False
-        assert preview_payload["runtime_activity"]["managed_count"] == 0
-        assert preview_payload["status"][0]["level"] == "ok"
-        assert downloader.calls == []
-        preview_row = store.get_intent(intent.intent_id)
-        assert preview_row["selected_release_id"] is None
-        assert preview_row["state"] == IntentState.CONFIRMATION_REQUIRED.value
-
         payload = _request_json(
             base_url,
             "POST",
             f"/api/wants/{intent.intent_id}/enqueue",
-            {"release_id": "mt:https://kp.m-team.cc/detail/99", "execute": True},
+            {"release_id": "mt:https://kp.m-team.cc/detail/99"},
         )
 
     assert payload["execute"] is True
@@ -1459,7 +1441,7 @@ def test_http_want_enqueue_can_select_lower_match_release(
     assert row["state"] == IntentState.ENQUEUED.value
 
 
-def test_http_want_enqueue_preview_does_not_mutate_downloader(
+def test_http_want_enqueue_rejects_legacy_execute_flag(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -1525,15 +1507,11 @@ def test_http_want_enqueue_preview_does_not_mutate_downloader(
             base_url,
             "POST",
             f"/api/wants/{intent.intent_id}/enqueue",
-            {"release_id": "mt:https://kp.m-team.cc/detail/100"},
+            {"release_id": "mt:https://kp.m-team.cc/detail/100", "execute": False},
+            expected_status=400,
         )
 
-    assert payload["execute"] is False
-    assert payload["selected"]["release_id"] == "mt:https://kp.m-team.cc/detail/100"
-    assert payload["enqueued"] == 0
-    assert [item["action"] for item in payload["decisions"]] == ["qb.enqueue"]
-    assert payload["decisions"][0]["execute"] is False
-    assert payload["runtime_activity"]["managed_count"] == 0
+    assert payload == {"error": "execute is not accepted; this endpoint always enqueues"}
     assert downloader.calls == []
     assert downloader.list_calls == 0
     assert not (tmp_path / "audit.jsonl").exists()
@@ -1602,7 +1580,7 @@ def test_http_want_enqueue_failure_returns_actionable_status(
             base_url,
             "POST",
             f"/api/wants/{intent.intent_id}/enqueue",
-            {"release_id": "mt:https://kp.m-team.cc/detail/99", "execute": True},
+            {"release_id": "mt:https://kp.m-team.cc/detail/99"},
             expected_status=400,
         )
 

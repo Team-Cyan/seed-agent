@@ -30,8 +30,8 @@ Expose the operator-facing command surface and safe summaries.
   timeline without mounting the Docker socket or depending on container stdout,
 - web Want List endpoints for listing canonical Douban/IMDb wants, triggering
   search-only dry runs for current filters or a single item, reviewing saved
-  release candidates, and explicitly enqueueing one release through the same
-  intent enqueue path,
+  release candidates, and enqueueing one reviewed release through the same
+  intent enqueue path with a single explicit candidate-button click,
 - the Web UI Want List toolbar separates source refresh from torrent search:
   refresh syncs configured Douban/IMDb sources into local intent state, while
   search runs the non-mutating torrent search for the current filters. Each
@@ -167,12 +167,12 @@ Expose the operator-facing command surface and safe summaries.
   capacity pressure only, when better accepted candidates are waiting,
 - keep long-running deployment liveness inspectable through structured
   heartbeat output instead of opaque shell wrappers.
-- keep web UI actions safe by default: tracker-local validation, site probe,
-  search, dry-run previews, and read-only state endpoints must not execute
-  enqueue or cleanup mutations. qB enqueue from the Want List must remain an
-  explicit candidate-level action with a confirmation step. Candidate review UI
-  should keep lower-match releases visibly distinct without making their force
-  actions look disabled.
+- keep non-mutating web UI actions safe by default: tracker-local validation,
+  site probe, search, dry-run previews, and read-only state endpoints must not
+  execute enqueue or cleanup mutations. A Want List candidate button is the
+  explicit qB enqueue action and executes immediately; it must stay scoped to
+  the selected release. Candidate review UI should keep lower-match releases
+  visibly distinct without making their force actions look disabled.
 - keep `config-import` dry-run by default and validate the merged config before
   atomically writing. Imported rule bundles should not contain secret values,
   only secret refs.

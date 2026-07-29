@@ -137,8 +137,9 @@ by completion period, and unfinished work is ordered by current priority.
     subtitle/MediaInfo fields are shown without extra detail requests.
   - Candidate review supports a single deliberate qB enqueue action per
     candidate, with lower-match releases still available for forced enqueue.
-    Search remains non-mutating, and M-Team download tokens are still resolved
-    only for execute-mode enqueue.
+    The candidate button executes immediately without a second preview or
+    browser-confirmation step. Search remains non-mutating, and M-Team download
+    tokens are still resolved only for the selected enqueue action.
   - Settings pages include mobile section switching and sticky draft/preview/save
     actions inspired by the reference repo UI patterns, without adopting a
     dashboard-first product shape.
@@ -423,8 +424,8 @@ by completion period, and unfinished work is ordered by current priority.
     coverage remains.
   - Cover Web Want List refresh/search preview behavior so search remains
     non-mutating and qB enqueue stays candidate-level and explicit. Search
-    history persistence and enqueue preview are covered; broader refresh/search
-    fixture consolidation remains.
+    history persistence and immediate candidate enqueue are covered; broader
+    refresh/search fixture consolidation remains.
   - Verify scheduler/Web changes in a local Apple `container` deployment before
     touching live Unraid.
   - Keep the detailed task split in
@@ -436,9 +437,10 @@ by completion period, and unfinished work is ordered by current priority.
     M-Team results, including cases where only WEB-DL or lower-match candidates
     exist.
   - Verify the Web UI candidate review and explicit qB enqueue flow on live
-    Unraid with a safe dry-run first.
+    Unraid with one intentionally selected candidate.
   - Verify season-pack vs episode behavior on real TV/anime examples.
-  - Keep qB enqueue dry-run unless explicitly executing.
+  - Keep scheduled and CLI qB enqueue dry-run unless explicitly executing; the
+    Web candidate button itself is the explicit execute action.
 
 - Next P1 - Web UI polish
   - Extend before/after diff preview to tracker edits.

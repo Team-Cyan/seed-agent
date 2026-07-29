@@ -1484,35 +1484,6 @@ body.dark .secondary-button {
   min-height: 40px;
 }
 
-.candidate-preview {
-  background: var(--panel-subtle);
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  display: grid;
-  gap: 8px;
-  padding: 10px;
-}
-
-.candidate-preview-summary {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.candidate-preview-summary span {
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  color: var(--muted);
-  font-size: 12px;
-  padding: 4px 8px;
-}
-
-.candidate-preview-actions {
-  display: flex;
-  justify-content: flex-end;
-}
-
 @media (max-width: 900px) {
   .app-shell {
     grid-template-columns: 1fr;
@@ -1626,8 +1597,7 @@ body.dark .secondary-button {
   }
 
   .sticky-actions .tracker-actions-group,
-  .candidate-actions,
-  .candidate-preview-actions {
+  .candidate-actions {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -1832,8 +1802,7 @@ body.dark .secondary-button {
   .want-filters,
   .scheduler-controls .tracker-actions-group,
   .sticky-actions .tracker-actions-group,
-  .candidate-actions,
-  .candidate-preview-actions {
+  .candidate-actions {
     grid-template-columns: 1fr;
   }
 

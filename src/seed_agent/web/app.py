@@ -794,7 +794,6 @@ def _enqueue_want_payload(
         _enqueue_runtime_context,
         _intent_category_policy,
         _intent_enqueue_pause_state,
-        _NullDownloader,
         _pool_usage_item_summary,
         _ranked_release_summary,
         _runtime_activity_summary,
@@ -804,45 +803,40 @@ def _enqueue_want_payload(
     release_id = str(body.get("release_id") or "").strip()
     if not release_id:
         return {"error": "release_id is required"}, HTTPStatus.BAD_REQUEST
-    execute = _truthy_execute(body.get("execute"))
+    if "execute" in body:
+        return {
+            "error": "execute is not accepted; this endpoint always enqueues"
+        }, HTTPStatus.BAD_REQUEST
+    execute = True
     store = StateStore(_state_db_path(root))
     config = load_config(config_path)
     decisions = []
     try:
         default_policy = _default_category_policy(config)
-        if execute:
-            (
-                downloader,
-                live_torrents,
-                downloader_status,
-                paused,
-                pool_usage,
-                missing_reconciled,
-            ) = _enqueue_runtime_context(
-                config,
-                store=store,
-                execute=execute,
-            )
-            pause_reasons = _enqueue_pause_reasons(
-                config,
-                live_torrents,
-                pool_usage,
-                downloader_status,
-            )
-        else:
-            downloader = _NullDownloader()
-            live_torrents = []
-            downloader_status = None
-            paused = False
-            pool_usage = None
-            missing_reconciled = 0
-            pause_reasons = []
+        (
+            downloader,
+            live_torrents,
+            downloader_status,
+            paused,
+            pool_usage,
+            missing_reconciled,
+        ) = _enqueue_runtime_context(
+            config,
+            store=store,
+            execute=True,
+        )
+        pause_reasons = _enqueue_pause_reasons(
+            config,
+            live_torrents,
+            pool_usage,
+            downloader_status,
+        )
         enqueue_context_resolver = _build_intent_enqueue_context_resolver(
             config,
             live_torrents,
             downloader_status,
         )
-        release_resolver = _build_release_download_resolver(config) if execute else None
+        release_resolver = _build_release_download_resolver(config)
         intent, ranked, enqueue_decisions = run(
             enqueue_intent(
                 intent_id,
@@ -860,8 +854,7 @@ def _enqueue_want_payload(
             )
         )
         decisions.extend(enqueue_decisions)
-        if execute:
-            _write_audit_decisions(config, decisions)
+        _write_audit_decisions(config, decisions)
     except ValueError as exc:
         return {"error": redact_sensitive_text(str(exc))}, HTTPStatus.BAD_REQUEST
     except MutationBatchError as exc:
@@ -906,8 +899,6 @@ def _enqueue_want_payload(
                     "入队被运行时安全门禁拒绝"
                     if effective_blocked
                     else "已加入 qB"
-                    if execute
-                    else "入队试运行完成"
                 ),
             }
         ],
@@ -925,14 +916,6 @@ def _enqueue_want_payload(
     if effective_block_reasons:
         payload["enqueue_blocked_reasons"] = effective_block_reasons
     return payload, HTTPStatus.OK
-
-
-def _truthy_execute(value: Any) -> bool:
-    if value is True:
-        return True
-    if isinstance(value, str):
-        return value.strip().lower() in {"true", "1", "yes", "on"}
-    return False
 
 
 def _executed_enqueue_count(decisions: list[Any]) -> int:
