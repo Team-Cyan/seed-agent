@@ -144,6 +144,39 @@ seed_cleanup:
     ) == "secret-token"
 
 
+def test_save_tracker_draft_restores_secret_when_config_write_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = _write_minimal_config(tmp_path)
+    secret_path = tmp_path / "local" / "secrets" / "mt.api-key"
+    secret_path.parent.mkdir(parents=True)
+    secret_path.write_text("old-token", encoding="utf-8")
+    before_config = config_path.read_text(encoding="utf-8")
+
+    def fail_config_write(*_args: object, **_kwargs: object) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(web_settings, "write_config_mapping", fail_config_write)
+
+    with pytest.raises(OSError, match="disk full"):
+        save_tracker_draft(
+            config_path,
+            TrackerDraft(
+                type="mteam",
+                name="mt",
+                enabled=True,
+                rss_url="https://rss.example/feed",
+                discovery_mode="api",
+                api_key_ref="local/secrets/mt.api-key",
+                api_key_value="new-token",
+            ),
+        )
+
+    assert config_path.read_text(encoding="utf-8") == before_config
+    assert secret_path.read_text(encoding="utf-8") == "old-token"
+
+
 def test_http_config_redacts_secret_values(tmp_path: Path) -> None:
     config_path = _write_minimal_config(tmp_path)
     (tmp_path / "local" / "secrets").mkdir(parents=True)
@@ -1062,7 +1095,7 @@ def test_http_wants_search_syncs_sources_before_search(
     assert wants_payload["items"][0]["source_label"] == "IMDb-周末清单"
 
 
-def test_http_wants_search_ranks_canonical_after_release_id_merge(
+def test_http_wants_search_does_not_merge_from_candidate_external_ids(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -1131,10 +1164,11 @@ def test_http_wants_search_ranks_canonical_after_release_id_merge(
         )
 
     assert payload["searched"] == 1
-    assert store.get_intent(newer.intent_id) is None
-    assert store.get_intent(older.intent_id)["state"] == IntentState.CONFIRMATION_REQUIRED.value
-    assert [row["intent_id"] for row in store.list_release_candidates(older.intent_id)] == [
-        older.intent_id
+    assert store.get_intent(newer.intent_id)["state"] == IntentState.CONFIRMATION_REQUIRED.value
+    assert store.get_intent(older.intent_id)["state"] == IntentState.RECEIVED.value
+    assert store.list_release_candidates(older.intent_id) == []
+    assert [row["intent_id"] for row in store.list_release_candidates(newer.intent_id)] == [
+        newer.intent_id
     ]
 
 
@@ -1929,7 +1963,10 @@ def test_http_state_summary_reports_local_state_counts(tmp_path: Path) -> None:
     assert payload["release_candidates"] == {"total": 0}
 
 
-def test_http_metrics_endpoint_is_optional_and_prometheus_compatible(tmp_path: Path) -> None:
+def test_http_metrics_endpoint_is_optional_and_prometheus_compatible(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     config_path = _write_minimal_config(tmp_path)
     StateStore(tmp_path / ".seed-agent" / "state.db")
 
@@ -1940,10 +1977,17 @@ def test_http_metrics_endpoint_is_optional_and_prometheus_compatible(tmp_path: P
         config_path.read_text(encoding="utf-8") + "\nmetrics:\n  enabled: true\n  path: /metrics\n",
         encoding="utf-8",
     )
+    monkeypatch.setenv("SEED_AGENT_WEB_TOKEN", "local-token")
     with _running_server(config_path) as base_url:
-        metrics, content_type = _request_text(base_url, "/metrics")
+        blocked = _request_json(base_url, "GET", "/metrics", expected_status=401)
+        metrics, content_type = _request_text(
+            base_url,
+            "/metrics",
+            headers={"X-Seed-Agent-Token": "local-token"},
+        )
 
     assert disabled == {"error": "not found"}
+    assert blocked == {"error": "unauthorized"}
     assert content_type.startswith("text/plain")
     assert "seed_agent_tracker_backoff_active" in metrics
     assert "seed_agent_heartbeat_present 0.000000" in metrics
@@ -2579,9 +2623,14 @@ def _request_json(
     return data
 
 
-def _request_text(base_url: str, path: str) -> tuple[str, str]:
+def _request_text(
+    base_url: str,
+    path: str,
+    *,
+    headers: dict[str, str] | None = None,
+) -> tuple[str, str]:
     connection = HTTPConnection(base_url)
-    connection.request("GET", path)
+    connection.request("GET", path, headers=headers or {})
     response = connection.getresponse()
     data = response.read().decode("utf-8")
     content_type = response.getheader("Content-Type") or ""

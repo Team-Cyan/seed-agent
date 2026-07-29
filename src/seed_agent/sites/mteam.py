@@ -691,9 +691,12 @@ def _merge_detail(candidate: TorrentCandidate, detail: dict[str, Any]) -> Torren
             metadata.pop("rss_missing_fields", None)
     metadata.pop("rss_sparse_candidate", None)
 
-    size_bytes = _coerce_int(detail.get("size")) or candidate.size_bytes
-    seeders = _coerce_int(status_data.get("seeders")) or candidate.seeders
-    leechers = _coerce_int(status_data.get("leechers")) or candidate.leechers
+    detail_size = _coerce_int(detail.get("size"))
+    detail_seeders = _coerce_int(status_data.get("seeders"))
+    detail_leechers = _coerce_int(status_data.get("leechers"))
+    size_bytes = candidate.size_bytes if detail_size is None else detail_size
+    seeders = candidate.seeders if detail_seeders is None else detail_seeders
+    leechers = candidate.leechers if detail_leechers is None else detail_leechers
     discount = _normalize_discount_label(_row_discount(detail))
     left_time_minutes = _left_time_minutes_from_api_row(detail)
     metadata.pop("left_time_source", None)

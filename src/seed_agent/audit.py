@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import fcntl
 import json
+import os
 import re
 from pathlib import Path
 from typing import Any
@@ -22,6 +23,8 @@ SENSITIVE_QUERY_KEYS = {
     "rsskey",
     "authkey",
     "auth",
+    "authorization",
+    "proxy-authorization",
     "pass_key",
     "torrent_pass",
     "torrentpass",
@@ -33,7 +36,7 @@ SENSITIVE_QUERY_KEYS = {
     "x-api-key",
     "hash",
 }
-SENSITIVE_TOKEN_KEYS = {"pass", "token", "secret", "auth", "cookie"}
+SENSITIVE_TOKEN_KEYS = {"pass", "token", "secret", "auth", "cookie", "authorization"}
 URL_RE = re.compile(r"(?P<url>\bhttps?://[^\s<>'\"]+)")
 SENSITIVE_ASSIGNMENT_RE = re.compile(
     rf"(?<![A-Za-z0-9_.-])(?P<key>{'|'.join(sorted(SENSITIVE_QUERY_KEYS))})"
@@ -70,7 +73,9 @@ class AuditLogger:
     def write(self, decision: Decision) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         payload = redact_payload(decision.model_dump(mode="json"))
-        with self.path.open("a", encoding="utf-8") as handle:
+        fd = os.open(self.path, os.O_APPEND | os.O_CREAT | os.O_WRONLY, 0o600)
+        os.chmod(self.path, 0o600)
+        with os.fdopen(fd, "a", encoding="utf-8") as handle:
             fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
             try:
                 json.dump(payload, handle, ensure_ascii=False, sort_keys=True)

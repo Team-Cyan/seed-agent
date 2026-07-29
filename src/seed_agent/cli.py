@@ -101,7 +101,7 @@ from seed_agent.sources.base import SourceIntentEvent
 from seed_agent.sources.douban import fetch_douban_wanted_user, read_douban_wanted
 from seed_agent.sources.imdb import fetch_imdb_watchlist, read_imdb_watchlist_csv
 from seed_agent.sources.letterboxd import read_letterboxd_watchlist_csv
-from seed_agent.sources.telegram import poll_telegram_updates
+from seed_agent.sources.telegram import poll_telegram_update_batch
 from seed_agent.state import STATE_PRIORITY, StateStore
 
 ReleaseDownloadResolver = Callable[[ReleaseCandidate], Awaitable[ReleaseCandidate | None]]
@@ -2941,8 +2941,13 @@ def _intent_run_once_payload(
         downloader_status,
     )
     source_warnings: list[dict[str, str]] = []
+    pending_source_cursors: dict[str, str] = {}
     try:
-        source_events = _read_configured_source_events(loaded)
+        source_events = _read_configured_source_events(
+            loaded,
+            store=store,
+            cursor_updates=pending_source_cursors,
+        )
     except Exception as exc:
         source_events = []
         source_warnings.append(
@@ -2974,6 +2979,8 @@ def _intent_run_once_payload(
                 search_ingested=search_ingested,
             )
         )
+        for source, cursor in pending_source_cursors.items():
+            store.set_source_cursor(source, cursor)
         decisions = result.decisions
     except MutationBatchError as exc:
         result = None
@@ -5822,10 +5829,21 @@ def _build_search_providers(config: SeedAgentConfig) -> list[SearchProvider]:
     return providers
 
 
-def _read_configured_source_events(config: SeedAgentConfig) -> list[SourceIntentEvent]:
+def _read_configured_source_events(
+    config: SeedAgentConfig,
+    *,
+    store: StateStore | None = None,
+    cursor_updates: dict[str, str] | None = None,
+) -> list[SourceIntentEvent]:
     events: list[SourceIntentEvent] = []
     if config.want_sources.telegram.enabled:
-        events.extend(_read_configured_telegram_events(config))
+        events.extend(
+            _read_configured_telegram_events(
+                config,
+                store=store,
+                cursor_updates=cursor_updates,
+            )
+        )
     for source in config.want_sources.want_lists:
         if not source.enabled:
             continue
@@ -5893,7 +5911,12 @@ def _read_configured_source_events(config: SeedAgentConfig) -> list[SourceIntent
     return events
 
 
-def _read_configured_telegram_events(config: SeedAgentConfig) -> list[SourceIntentEvent]:
+def _read_configured_telegram_events(
+    config: SeedAgentConfig,
+    *,
+    store: StateStore | None = None,
+    cursor_updates: dict[str, str] | None = None,
+) -> list[SourceIntentEvent]:
     secret_ref = config.want_sources.telegram.secret_ref
     if not secret_ref:
         return []
@@ -5904,12 +5927,22 @@ def _read_configured_telegram_events(config: SeedAgentConfig) -> list[SourceInte
     bot_token = secret.get("bot_token") or secret.get("token")
     if not bot_token:
         return []
-    return poll_telegram_updates(
+    allowed_chat_ids = _csv_set(secret.get("allowed_chat_ids"))
+    if not allowed_chat_ids:
+        raise ValueError("Telegram source requires a non-empty allowed_chat_ids allowlist")
+    cursor_key = f"telegram:{secret_ref}"
+    stored_offset = _optional_int(store.get_source_cursor(cursor_key)) if store else None
+    batch = poll_telegram_update_batch(
         bot_token=bot_token,
-        offset=_optional_int(secret.get("offset")),
+        offset=stored_offset
+        if stored_offset is not None
+        else _optional_int(secret.get("offset")),
         timeout_seconds=_optional_int(secret.get("timeout_seconds")) or 0,
-        allowed_chat_ids=_csv_set(secret.get("allowed_chat_ids")),
+        allowed_chat_ids=allowed_chat_ids,
     )
+    if cursor_updates is not None and batch.next_offset is not None:
+        cursor_updates[cursor_key] = str(batch.next_offset)
+    return batch.events
 
 
 def _optional_int(value: object) -> int | None:

@@ -21,7 +21,9 @@ Convert human requests into search/rank/reject/enqueue workflows.
 - ingest IMDb watchlist/list events from CSV exports or best-effort public page
   parsing,
 - ingest Letterboxd watchlist events from CSV exports,
-- ingest Telegram message updates through secret-backed polling,
+- ingest Telegram message updates through secret-backed polling with a required
+  chat allowlist and a durable cursor committed only after successful intent
+  processing,
 - merge Douban and IMDb source events into canonical Want List works through
   `douban:<subject_id>` and `imdb:<tt_id>` aliases,
 - normalize text,
@@ -38,6 +40,10 @@ Convert human requests into search/rank/reject/enqueue workflows.
   later search behavior,
 - preserve source evidence separately from canonical intent rows so repeated
   wants from different configured lists do not duplicate searches or downloads,
+- merge source aliases only from trusted source events; candidate release
+  metadata is search evidence and must never establish canonical identity,
+- treat `enqueued` and `rejected` as terminal for repeated source sync, and
+  replace an intent's saved release snapshot on each successful search,
 - keep search providers modular. M-Team remains the reference API provider;
   Torznab is available as the first non-M-Team provider to validate the
   `SearchProvider` boundary,
@@ -57,6 +63,10 @@ Convert human requests into search/rank/reject/enqueue workflows.
   search provider already returned them,
 - use the durable enqueue claim keyed by intent and release so concurrent Web,
   CLI, or scheduler workers cannot add the same release twice,
+- require exact season/episode token boundaries so `S02E03` cannot match
+  `S020E030`,
+- redact credential-like assignments before persisting intent raw text while
+  retaining stable source-event identity,
 - do not entangle source ingestion with downloader logic.
 
 ## Verification

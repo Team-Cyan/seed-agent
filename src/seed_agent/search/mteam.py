@@ -281,7 +281,7 @@ def _external_ids(intent: ResourceIntent) -> dict[str, str]:
 
 def _mode_for_intent(intent: ResourceIntent) -> str:
     media_type = str(intent.metadata.get("media_type") or intent.metadata.get("kind") or "").lower()
-    if intent.kind in {IntentKind.SHOW, IntentKind.EPISODE} or media_type == "tv":
+    if intent.kind in {IntentKind.SHOW, IntentKind.EPISODE} or media_type in {"tv", "anime"}:
         return "tvshow"
     return "movie"
 

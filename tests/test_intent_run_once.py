@@ -196,7 +196,7 @@ def test_intent_run_once_ingests_configured_douban_source(
     monkeypatch.setattr(
         cli,
         "_read_configured_source_events",
-        lambda config: [
+        lambda config, **kwargs: [
             SourceIntentEvent(
                 source=IntentSource.DOUBAN_WANTED,
                 raw_text="Inception 2010 1080p",

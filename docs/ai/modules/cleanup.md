@@ -59,6 +59,12 @@ balanced safety policy.
   cleanup classification with its latest completion/activity state and retained
   tracker evidence. Always request file deletion, then re-read state and report
   mutation failure if the hash remains,
+- for downloader adapters whose generic listing cannot return category labels,
+  scope the revalidation request to the expected category so category ownership
+  is still positively established,
+- count logical pool reclamation from total torrent size, but count forced
+  physical disk reclamation for incomplete downloads only from bytes already
+  downloaded,
 - keep policy reasoning auditable.
 - distinguish automated lifecycle cleanup from explicit operator cleanup. When
   the user gives a concrete category and age boundary, execute only that bounded

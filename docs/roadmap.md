@@ -400,6 +400,20 @@ by completion period, and unfinished work is ordered by current priority.
   - Keep the detailed acceptance matrix in
     `docs/plans/2026-07-11-runtime-hardening-refinement.md`.
 
+- Completed 2026-07 - Whole-repository correctness hardening
+  - Want List identity now comes only from trusted source evidence; tracker
+    candidate IDs cannot merge unrelated intents, terminal wants stay terminal,
+    and refreshed searches replace stale release snapshots.
+  - Candidate/intent lifecycle writes and intent merges are concurrency-safe,
+    enqueue claims block destructive merges, and SQLite restore excludes active
+    StateStore connections.
+  - Telegram polling is allowlisted and replay-safe, persisted text/error/audit
+    surfaces redact credentials, and tracker secret writes roll back if config
+    persistence fails.
+  - M-Team/RSS parsing, exact episode matching, Transmission ownership checks,
+    incomplete-download disk reclaim accounting, and cumulative metrics now
+    preserve their intended operational semantics.
+
 - Next P0 - Add scheduler and Web preview integration coverage
   - Add fake downloader/provider fixtures that can run a scheduler cycle without
     touching qBittorrent or a tracker.

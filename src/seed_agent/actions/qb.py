@@ -258,7 +258,11 @@ async def prune_cold_torrents(
             )
 
         if execute and classification.action == "delete":
-            current_supported, current = await _current_torrent(downloader, torrent.hash)
+            current_supported, current = await _current_torrent(
+                downloader,
+                torrent.hash,
+                policy.name,
+            )
             if current_supported and current is None:
                 classification = CleanupDecision(
                     action="keep",
@@ -312,7 +316,10 @@ async def prune_cold_torrents(
         if not execute:
             decisions.append(decision)
             if classification.action == "delete" and reclamation_needed:
-                reclaimed_bytes += max(int(torrent.size_bytes), 0)
+                reclaimed_bytes += _reclaim_progress_bytes(
+                    torrent,
+                    physical=force_space_reclamation,
+                )
             if classification.action == "delete" and classification.capacity_reclamation:
                 capacity_delete_count += 1
             continue
@@ -342,7 +349,10 @@ async def prune_cold_torrents(
             raise MutationBatchError("qBittorrent cleanup batch failed", decisions) from exc
         decisions.append(decision)
         if classification.action == "delete" and reclamation_needed:
-            reclaimed_bytes += max(int(torrent.size_bytes), 0)
+            reclaimed_bytes += _reclaim_progress_bytes(
+                torrent,
+                physical=force_space_reclamation,
+            )
         if classification.action == "delete" and classification.capacity_reclamation:
             capacity_delete_count += 1
 
@@ -352,12 +362,23 @@ async def prune_cold_torrents(
 async def _current_torrent(
     downloader: Downloader,
     torrent_hash: str,
+    category: str,
 ) -> tuple[bool, ManagedTorrent | None]:
     list_torrents = getattr(downloader, "list_torrents", None)
     if not callable(list_torrents):
         return False, None
-    torrents = await list_torrents(None, None)
+    torrents = await list_torrents(category, None)
     return True, next((item for item in torrents if item.hash == torrent_hash), None)
+
+
+def _reclaim_progress_bytes(torrent: ManagedTorrent, *, physical: bool) -> int:
+    size_bytes = max(int(torrent.size_bytes), 0)
+    if not physical:
+        return size_bytes
+    amount_left = torrent.metadata.get("amount_left_bytes")
+    if isinstance(amount_left, int | float) and amount_left > 0:
+        return min(max(int(torrent.downloaded_bytes), 0), size_bytes)
+    return size_bytes
 
 
 async def _delete_is_absent(downloader: Downloader, torrent_hash: str) -> bool:

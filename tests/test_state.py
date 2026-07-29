@@ -1,5 +1,6 @@
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from threading import Event, Thread
 
 from seed_agent.actions.intent import add_intent
 from seed_agent.models import LifecycleState, ManagedTorrent
@@ -98,6 +99,67 @@ def test_state_store_preserves_existing_score_and_hash_when_incoming_values_are_
     assert row["state"] == LifecycleState.ENQUEUED.value
     assert row["score"] == 91
     assert row["torrent_hash"] == "deadbeef"
+
+
+def test_candidate_state_cannot_regress_during_concurrent_upserts(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from seed_agent import state as state_module
+
+    store = StateStore(tmp_path / "state.sqlite3")
+    store.upsert_candidate(
+        stable_id="demo:one",
+        title="One",
+        site="demo",
+        state=LifecycleState.DISCOVERED,
+        score=None,
+        torrent_hash=None,
+    )
+    entered = Event()
+    release = Event()
+    original = state_module._monotonic_values
+
+    def controlled(current, incoming_state, incoming_score, incoming_torrent_hash):
+        if incoming_state == LifecycleState.ENQUEUED:
+            entered.set()
+            assert release.wait(timeout=5)
+        return original(current, incoming_state, incoming_score, incoming_torrent_hash)
+
+    monkeypatch.setattr(state_module, "_monotonic_values", controlled)
+    enqueued = Thread(
+        target=store.upsert_candidate,
+        kwargs={
+            "stable_id": "demo:one",
+            "title": "One",
+            "site": "demo",
+            "state": LifecycleState.ENQUEUED,
+            "score": 90,
+            "torrent_hash": "hash-one",
+        },
+    )
+    scored = Thread(
+        target=store.upsert_candidate,
+        kwargs={
+            "stable_id": "demo:one",
+            "title": "One",
+            "site": "demo",
+            "state": LifecycleState.SCORED,
+            "score": 80,
+            "torrent_hash": None,
+        },
+    )
+    enqueued.start()
+    assert entered.wait(timeout=5)
+    scored.start()
+    release.set()
+    enqueued.join(timeout=5)
+    scored.join(timeout=5)
+
+    row = store.get_candidate("demo:one")
+    assert row is not None
+    assert row["state"] == LifecycleState.ENQUEUED.value
+    assert row["torrent_hash"] == "hash-one"
 
 
 def test_state_store_persists_candidate_free_window_expiry(tmp_path: Path) -> None:

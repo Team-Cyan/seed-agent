@@ -89,6 +89,22 @@ def restore_sqlite_database(
     *,
     execute: bool,
 ) -> dict[str, Any]:
+    lock_path = Path(f"{current}.access.lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with lock_path.open("a+b") as access_lock:
+        fcntl.flock(access_lock.fileno(), fcntl.LOCK_EX)
+        try:
+            return _restore_sqlite_database_locked(current, backup, execute=execute)
+        finally:
+            fcntl.flock(access_lock.fileno(), fcntl.LOCK_UN)
+
+
+def _restore_sqlite_database_locked(
+    current: Path,
+    backup: Path,
+    *,
+    execute: bool,
+) -> dict[str, Any]:
     verification = verify_sqlite_database(backup)
     lease = _active_scheduler_lease(current)
     payload = {

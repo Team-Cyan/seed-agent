@@ -172,13 +172,11 @@ def _title_token_variants(title: str) -> list[set[str]]:
 
 
 def _has_season(title: str, season: int) -> bool:
-    token = f"s{season:02d}"
-    return any(item.startswith(token) for item in _tokens(title))
+    return re.search(rf"(?<![a-z])s0*{season}(?!\d)", title, re.IGNORECASE) is not None
 
 
 def _has_episode(title: str, episode: int) -> bool:
-    token = f"e{episode:02d}"
-    return any(token in item for item in _tokens(title))
+    return re.search(rf"(?<![a-z])e0*{episode}(?!\d)", title, re.IGNORECASE) is not None
 
 
 def _requires_episode_match(intent: ResourceIntent, intent_config: IntentConfig) -> bool:

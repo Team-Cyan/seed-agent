@@ -76,13 +76,17 @@ def make_handler(config_path: Path) -> type[BaseHTTPRequestHandler]:
 
     class SeedAgentWebHandler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
-            if self.path.startswith("/api/") and not self._authorize_api_request():
-                return
             try:
                 metrics_config = load_config(resolved_config_path).metrics
             except OSError, ValueError:
                 metrics_config = None
-            if metrics_config is not None and self.path == metrics_config.path:
+            request_path = urlparse(self.path).path
+            protected = request_path.startswith("/api/") or (
+                metrics_config is not None and request_path == metrics_config.path
+            )
+            if protected and not self._authorize_api_request():
+                return
+            if metrics_config is not None and request_path == metrics_config.path:
                 if not metrics_config.enabled:
                     self._send_json({"error": "not found"}, status=HTTPStatus.NOT_FOUND)
                     return
@@ -859,14 +863,14 @@ def _enqueue_want_payload(
         if execute:
             _write_audit_decisions(config, decisions)
     except ValueError as exc:
-        return {"error": str(exc)}, HTTPStatus.BAD_REQUEST
+        return {"error": redact_sensitive_text(str(exc))}, HTTPStatus.BAD_REQUEST
     except MutationBatchError as exc:
         decisions.extend(exc.decisions)
         _write_audit_decisions(config, decisions)
         failed_reasons = [item.reason for item in decisions if item.action.endswith(".failed")]
-        message = failed_reasons[-1] if failed_reasons else str(exc)
+        message = redact_sensitive_text(failed_reasons[-1] if failed_reasons else str(exc))
         return {
-            "error": str(exc),
+            "error": redact_sensitive_text(str(exc)),
             "execute": execute,
             "enqueued": _executed_enqueue_count(decisions),
             "decisions": [_decision_summary_payload(item) for item in decisions],
@@ -1126,8 +1130,12 @@ def _want_item(
     )
     return {
         "intent_id": row.get("intent_id") or normalized.get("intent_id"),
-        "title": row.get("title") or normalized.get("title") or row.get("raw_text") or "",
-        "raw_text": row.get("raw_text") or normalized.get("raw_text") or "",
+        "title": redact_sensitive_text(
+            str(row.get("title") or normalized.get("title") or row.get("raw_text") or "")
+        ),
+        "raw_text": redact_sensitive_text(
+            str(row.get("raw_text") or normalized.get("raw_text") or "")
+        ),
         "kind": row.get("kind") or normalized.get("kind") or "unknown",
         "media_type": _want_media_type(normalized, metadata),
         "source": source,
@@ -1794,7 +1802,7 @@ def _content_type_for(path: Path) -> str:
 
 
 def _friendly_error(exc: Exception) -> str:
-    message = str(exc)
+    message = redact_sensitive_text(str(exc))
     if "api_key_ref is required when discovery_mode=api" in message:
         return "api_key_ref is required when discovery_mode=api"
     if "type is required" in message:

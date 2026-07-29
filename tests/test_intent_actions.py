@@ -323,7 +323,7 @@ def test_ingest_events_records_duplicate_evidence_from_incoming_source(
 
 
 @pytest.mark.asyncio
-async def test_search_intent_saves_candidates_on_canonical_after_release_id_merge(
+async def test_search_intent_does_not_merge_from_candidate_external_ids(
     tmp_path: Path,
 ) -> None:
     store = StateStore(tmp_path / "state.db")
@@ -372,14 +372,14 @@ async def test_search_intent_saves_candidates_on_canonical_after_release_id_merg
 
     searched, ranked, _ = await search_intent(newer.intent_id, store, [FakeProvider()])
 
-    assert searched.intent_id == older.intent_id
-    assert ranked[0].intent_id == older.intent_id
-    assert store.get_intent(newer.intent_id) is None
-    assert store.get_intent(older.intent_id)["state"] == IntentState.SEARCHED.value
-    assert [row["intent_id"] for row in store.list_release_candidates(older.intent_id)] == [
-        older.intent_id
+    assert searched.intent_id == newer.intent_id
+    assert ranked[0].intent_id == newer.intent_id
+    assert store.get_intent(newer.intent_id)["state"] == IntentState.SEARCHED.value
+    assert store.get_intent(older.intent_id)["state"] == IntentState.RECEIVED.value
+    assert store.list_release_candidates(older.intent_id) == []
+    assert [row["intent_id"] for row in store.list_release_candidates(newer.intent_id)] == [
+        newer.intent_id
     ]
-    assert store.list_release_candidates(newer.intent_id) == []
 
 
 @pytest.mark.asyncio
@@ -444,7 +444,7 @@ async def test_run_intent_once_searches_canonical_duplicate_only_once(
 
 
 @pytest.mark.asyncio
-async def test_run_intent_once_ranks_canonical_after_release_id_merge(
+async def test_run_intent_once_does_not_merge_from_release_metadata(
     tmp_path: Path,
 ) -> None:
     store = StateStore(tmp_path / "state.db")
@@ -497,10 +497,94 @@ async def test_run_intent_once_ranks_canonical_after_release_id_merge(
         source_events=[imdb_event],
     )
 
-    assert [intent.intent_id for intent in result.searched] == [older.intent_id]
-    assert [ranked.intent_id for ranked in result.ranked] == [older.intent_id]
-    assert store.get_intent("imdb_watchlist:tt5726616") is None
-    assert store.get_intent(older.intent_id)["state"] == IntentState.CONFIRMATION_REQUIRED.value
+    searched_id = result.ingested[0].intent_id
+    assert searched_id != older.intent_id
+    assert [intent.intent_id for intent in result.searched] == [searched_id]
+    assert [ranked.intent_id for ranked in result.ranked] == [searched_id]
+    assert store.get_intent(searched_id)["state"] == IntentState.CONFIRMATION_REQUIRED.value
+    assert store.get_intent(older.intent_id)["state"] == IntentState.RECEIVED.value
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("terminal_state", [IntentState.ENQUEUED, IntentState.REJECTED])
+async def test_run_intent_once_does_not_research_terminal_intents(
+    tmp_path: Path,
+    terminal_state: IntentState,
+) -> None:
+    store = StateStore(tmp_path / "state.db")
+    event = SourceIntentEvent(
+        source=IntentSource.DOUBAN_WANTED,
+        raw_text="Inception 2010",
+        source_event_id="douban:1292720",
+        requested_at=REQUESTED_AT,
+        metadata={"external_ids": {"douban": "1292720"}},
+    )
+    intent = ingest_events([event], store)[0][0]
+    store.update_intent_state(intent.intent_id, terminal_state)
+
+    class FailingProvider:
+        async def search(self, intent):
+            raise AssertionError("terminal intent must not be searched")
+
+    result = await run_intent_once(
+        None,
+        store,
+        [FailingProvider()],
+        IntentConfig(),
+        SearchConfig(),
+        _UnusedDownloader(),
+        _policy(),
+        execute=True,
+        source_events=[event],
+    )
+
+    assert result.searched == []
+    assert result.ranked == []
+    assert result.enqueue_selected == []
+    assert store.get_intent(intent.intent_id)["state"] == terminal_state.value
+
+
+@pytest.mark.asyncio
+async def test_search_intent_replaces_previous_search_snapshot(tmp_path: Path) -> None:
+    store = StateStore(tmp_path / "state.db")
+    intent = ResourceIntent(
+        intent_id="cli:inception",
+        source=IntentSource.CLI,
+        raw_text="Inception 2010",
+        kind=IntentKind.MOVIE,
+        title="Inception",
+        year=2010,
+        requested_at=REQUESTED_AT,
+    )
+    store.upsert_intent(intent)
+
+    class Provider:
+        def __init__(self) -> None:
+            self.release_id = "old"
+
+        async def search(self, intent):
+            return [
+                ReleaseCandidate(
+                    release_id=self.release_id,
+                    site="demo",
+                    title=f"Inception 2010 {self.release_id}",
+                    source_url=f"https://tracker.example/{self.release_id}",
+                    download_url=f"https://tracker.example/{self.release_id}.torrent",
+                    size_bytes=1,
+                    seeders=1,
+                    leechers=1,
+                    discount=Discount.NORMAL,
+                )
+            ]
+
+    provider = Provider()
+    await search_intent(intent.intent_id, store, [provider])
+    provider.release_id = "new"
+    await search_intent(intent.intent_id, store, [provider])
+
+    assert [row["release_id"] for row in store.list_release_candidates(intent.intent_id)] == [
+        "new"
+    ]
 
 
 def test_ingest_inbox_missing_file_returns_empty_list(tmp_path: Path) -> None:

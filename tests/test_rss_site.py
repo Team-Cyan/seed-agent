@@ -189,6 +189,36 @@ async def test_fetch_rss_candidates_uses_httpx_async_client() -> None:
     assert candidates[0].download_url.endswith("passkey=download-secret")
 
 
+@pytest.mark.asyncio
+@respx.mock
+async def test_fetch_mteam_rss_propagates_enrichment_rate_limit(monkeypatch) -> None:
+    from seed_agent.sites import mteam as mteam_site
+
+    xml = FIXTURE.read_text(encoding="utf-8")
+    respx.get("https://tracker.example/rss.php").mock(
+        return_value=httpx.Response(200, text=xml)
+    )
+
+    async def rate_limited(*args, **kwargs):
+        raise mteam_site.MTeamApiResponseError(
+            endpoint="torrent/detail",
+            code="1",
+            message="請求過於頻繁",
+        )
+
+    monkeypatch.setattr(mteam_site, "enrich_candidates", rate_limited)
+
+    with pytest.raises(mteam_site.MTeamApiResponseError) as exc_info:
+        await fetch_rss_candidates(
+            "https://tracker.example/rss.php",
+            site="mt",
+            site_type="mteam",
+            api_key="secret",
+        )
+
+    assert exc_info.value.rate_limited is True
+
+
 def test_parse_rss_candidates_supports_mteam_sparse_feed() -> None:
     xml = """
     <rss version="2.0">

@@ -1,3 +1,4 @@
+import stat
 from pathlib import Path
 
 from seed_agent.audit import AuditLogger, redact_payload, redact_sensitive_text
@@ -95,6 +96,20 @@ def test_redact_payload_masks_api_key_fields_and_assignments() -> None:
     assert "id=42" in redacted_text
 
 
+def test_redact_payload_masks_authorization_headers() -> None:
+    redacted = redact_payload(
+        {
+            "Authorization": "Bearer secret-token",
+            "Proxy-Authorization": "Basic secret-proxy",
+        }
+    )
+
+    assert redacted == {
+        "Authorization": "<redacted>",
+        "Proxy-Authorization": "<redacted>",
+    }
+
+
 def test_audit_logger_writes_redacted_jsonl(tmp_path: Path) -> None:
     path = tmp_path / "logs" / "audit.jsonl"
     decision = Decision(
@@ -121,3 +136,4 @@ def test_audit_logger_writes_redacted_jsonl(tmp_path: Path) -> None:
     assert "<redacted>" in written[0]
     assert '"action": "upload"' in written[0]
     assert '"new_state": {' in written[0]
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600

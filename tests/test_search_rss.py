@@ -91,6 +91,34 @@ async def test_rss_search_provider_filters_by_intent_tokens_and_resolution() -> 
 
 
 @pytest.mark.asyncio
+async def test_rss_search_provider_passes_keyword_only_site_type() -> None:
+    async def keyword_only_fetcher(
+        url: str,
+        site: str,
+        cookie: str | None,
+        api_key: str | None,
+        *,
+        site_type: str,
+    ):
+        assert (url, site, cookie, api_key, site_type) == (
+            "https://tracker.example/rss.php",
+            "demo",
+            None,
+            None,
+            "nexusphp",
+        )
+        return []
+
+    provider = RssSearchProvider(
+        url="https://tracker.example/rss.php",
+        site="demo",
+        fetcher=keyword_only_fetcher,
+    )
+
+    assert await provider.search(_intent()) == []
+
+
+@pytest.mark.asyncio
 async def test_rss_search_provider_matches_episode_tokens() -> None:
     xml = """
     <rss version="2.0">
@@ -108,6 +136,15 @@ async def test_rss_search_provider_matches_episode_tokens() -> None:
           <title>Severance S02E04 2160p WEB-DL</title>
           <link>https://tracker.example/details.php?id=11</link>
           <enclosure url="https://tracker.example/download.php?id=11" />
+          <seeders>40</seeders>
+          <leechers>12</leechers>
+          <size>8589934592</size>
+          <discount>free</discount>
+        </item>
+        <item>
+          <title>Severance S020E030 2160p WEB-DL</title>
+          <link>https://tracker.example/details.php?id=12</link>
+          <enclosure url="https://tracker.example/download.php?id=12" />
           <seeders>40</seeders>
           <leechers>12</leechers>
           <size>8589934592</size>

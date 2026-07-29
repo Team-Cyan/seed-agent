@@ -396,12 +396,22 @@ def save_tracker_draft(config_path: Path, draft: TrackerDraft) -> SiteConfig:
         if not replaced:
             sites.append(site_data)
 
-        _write_secret_value(
+        SeedAgentConfig.model_validate(raw)
+        secret_backup = _secret_backup(
             config_path,
             site.api_key_ref,
             draft.api_key_value,
         )
-        write_config_mapping(config_path, raw)
+        try:
+            _write_secret_value(
+                config_path,
+                site.api_key_ref,
+                draft.api_key_value,
+            )
+            write_config_mapping(config_path, raw)
+        except Exception:
+            _restore_secret_backup(secret_backup)
+            raise
         return site
 
 
@@ -456,6 +466,33 @@ def _write_secret_value(
     root = _repo_root_for_config(config_path)
     secret_path = _resolve_secret_write_path(secret_ref, root)
     atomic_write_text(secret_path, secret_value, mode=0o600)
+
+
+def _secret_backup(
+    config_path: Path,
+    secret_ref: str | None,
+    secret_value: str | None,
+) -> tuple[Path, str | None, int | None] | None:
+    if not secret_ref or secret_value is None:
+        return None
+    secret_path = _resolve_secret_write_path(secret_ref, _repo_root_for_config(config_path))
+    if not secret_path.exists():
+        return secret_path, None, None
+    return (
+        secret_path,
+        secret_path.read_text(encoding="utf-8"),
+        secret_path.stat().st_mode & 0o777,
+    )
+
+
+def _restore_secret_backup(backup: tuple[Path, str | None, int | None] | None) -> None:
+    if backup is None:
+        return
+    path, content, mode = backup
+    if content is None:
+        path.unlink(missing_ok=True)
+        return
+    atomic_write_text(path, content, mode=mode)
 
 
 def _repo_root_for_config(config_path: Path) -> Path:

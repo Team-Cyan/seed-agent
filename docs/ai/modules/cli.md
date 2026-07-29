@@ -121,7 +121,9 @@ Expose the operator-facing command surface and safe summaries.
 - heartbeat reporting and healthcheck probes for long-running deployments.
 - optional Prometheus `/metrics` output derived only from local SQLite and
   heartbeat evidence, with fixed low-cardinality labels and no tracker or
-  downloader calls during scrape.
+  downloader calls during scrape. Cumulative counters aggregate the complete
+  database history, expired backoffs are inactive, and the route honors the
+  optional Web API token.
 
 ## Expectations
 

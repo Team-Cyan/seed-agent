@@ -89,6 +89,33 @@ async def test_mteam_search_provider_keeps_non_matching_candidates_for_review() 
 
 
 @pytest.mark.asyncio
+async def test_mteam_search_provider_maps_anime_metadata_to_tvshow_mode() -> None:
+    calls: list[dict[str, object]] = []
+
+    async def fake_fetch_candidates(**kwargs):
+        calls.append(kwargs)
+        return []
+
+    provider = MTeamSearchProvider(
+        site="mt",
+        api_key="secret-api-key",
+        search_config=SearchConfig(),
+        fetch_candidates=fake_fetch_candidates,
+    )
+
+    await provider.search(
+        _intent(
+            raw_text="Frieren 2023",
+            title="Frieren",
+            metadata={"media_type": "anime"},
+        )
+    )
+
+    assert calls
+    assert all(call["options"].mode == "tvshow" for call in calls)
+
+
+@pytest.mark.asyncio
 async def test_mteam_search_provider_propagates_rate_limit() -> None:
     calls: list[dict[str, object]] = []
 

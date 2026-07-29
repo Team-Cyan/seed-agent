@@ -88,11 +88,53 @@ def test_state_store_upserts_and_lists_intents(tmp_path: Path) -> None:
     assert updated["selected_release_id"] == "demo:https://tracker.example/details.php?id=42"
     assert updated["created_at"] == row["created_at"]
     assert updated["updated_at"] >= row["updated_at"]
-    assert [item["intent_id"] for item in store.list_intents_by_state(IntentState.RECEIVED)] == []
-    assert [
-        item["intent_id"]
-        for item in store.list_intents_by_state(IntentState.CONFIRMATION_REQUIRED)
-    ] == [intent.intent_id]
+
+
+def test_state_store_does_not_regress_terminal_intent_on_stale_upsert(tmp_path: Path) -> None:
+    store = StateStore(tmp_path / "state.sqlite3")
+    intent = _intent(state=IntentState.SEARCHED)
+    store.upsert_intent(intent)
+    store.update_intent_state(intent.intent_id, IntentState.ENQUEUED)
+
+    store.upsert_intent(
+        intent.model_copy(
+            update={
+                "state": IntentState.SEARCHED,
+                "metadata": {"refreshed": True},
+            }
+        )
+    )
+
+    row = store.get_intent(intent.intent_id)
+    assert row is not None
+    assert row["state"] == IntentState.ENQUEUED.value
+    assert json.loads(row["normalized_json"])["state"] == IntentState.ENQUEUED.value
+    assert json.loads(row["normalized_json"])["metadata"]["refreshed"] is True
+
+
+def test_state_store_defers_intent_merge_while_enqueue_claim_is_active(tmp_path: Path) -> None:
+    store = StateStore(tmp_path / "state.sqlite3")
+    canonical = _intent(intent_id="canonical")
+    duplicate = _intent(intent_id="duplicate")
+    store.upsert_intent(canonical)
+    store.upsert_intent(duplicate)
+    claim = store.acquire_intent_enqueue_claim(
+        duplicate.intent_id,
+        "release-one",
+        "owner-one",
+        ttl_seconds=60,
+    )
+    assert claim["acquired"] is True
+
+    assert store.merge_intents(canonical.intent_id, duplicate.intent_id) is False
+    assert store.get_intent(duplicate.intent_id) is not None
+
+    assert store.release_intent_enqueue_claim(duplicate.intent_id, "owner-one") is True
+    assert store.merge_intents(canonical.intent_id, duplicate.intent_id) is True
+    assert store.get_intent(duplicate.intent_id) is None
+    assert [item["intent_id"] for item in store.list_intents_by_state(IntentState.RECEIVED)] == [
+        canonical.intent_id
+    ]
 
 
 def test_state_store_updates_intent_state_without_losing_normalized_payload(

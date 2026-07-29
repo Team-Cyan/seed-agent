@@ -4,6 +4,35 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.20.1 - 2026-07-29
+
+### Changed
+
+- Telegram polling now requires an explicit chat allowlist and advances a
+  durable update cursor only after the intent cycle succeeds.
+- Upgraded the async test runtime to `pytest-asyncio` 1.4 for native Python
+  3.14 support instead of retaining the pre-1.0 event-loop policy integration.
+- Prometheus counters now aggregate the complete SQLite history, expired
+  tracker backoffs no longer report active, and the metrics route follows the
+  same optional Web token policy as API routes.
+
+### Fixed
+
+- Prevented candidate release metadata from merging unrelated Want List
+  intents, terminal intents from being searched again, stale search results
+  from surviving refresh, and stale concurrent writes from regressing terminal
+  candidate or intent state.
+- Serialized SQLite restore against StateStore access, made intent merges
+  atomic with enqueue claims, and restored tracker secrets if the corresponding
+  config write fails.
+- Corrected exact season/episode matching, anime M-Team search mode, RSS
+  enrichment error propagation, M-Team zero peer counts, Transmission
+  category revalidation, and physical reclaim accounting for incomplete
+  downloads.
+- Redacted sensitive intent text and Web errors, protected audit files with
+  owner-only permissions, covered authorization headers, and rejected negative
+  scoring-weight compensation.
+
 ## 0.20.0 - 2026-07-23
 
 ### Added

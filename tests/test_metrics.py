@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -78,3 +79,58 @@ def test_prometheus_metrics_are_local_bounded_and_secret_free(tmp_path: Path) ->
     assert "secret-pool-name" not in output
     assert "secret-token" not in output
     assert "torrent_hash" not in output
+
+
+def test_prometheus_totals_are_cumulative_and_expired_backoff_is_inactive(
+    tmp_path: Path,
+) -> None:
+    state_path = tmp_path / ".seed-agent" / "state.db"
+    heartbeat_path = tmp_path / "missing-heartbeat.json"
+    store = StateStore(state_path)
+    store.set_tracker_backoff(
+        site="mt",
+        endpoint="torrent/search",
+        until=(datetime.now(UTC) - timedelta(minutes=1)).isoformat(),
+        reason="expired",
+    )
+    with sqlite3.connect(state_path) as conn:
+        conn.execute(
+            """
+            WITH RECURSIVE seq(value) AS (
+              SELECT 1
+              UNION ALL
+              SELECT value + 1 FROM seq WHERE value < 1001
+            )
+            INSERT INTO scheduler_runs (
+              run_id, started_at, status, command, execute, prune_enabled,
+              intent_enabled, intent_execute, backoff_active, warning_count,
+              summary_json
+            )
+            SELECT
+              printf('run-%04d', value), '2026-01-01T00:00:00+00:00',
+              'success', 'schedule-run', 0, 0, 0, 0, 0, 0, '{}'
+            FROM seq
+            """
+        )
+        conn.execute(
+            """
+            WITH RECURSIVE seq(value) AS (
+              SELECT 1
+              UNION ALL
+              SELECT value + 1 FROM seq WHERE value < 10001
+            )
+            INSERT INTO tracker_api_events (
+              site, endpoint, event, created_at, rate_limited
+            )
+            SELECT
+              'mt', 'torrent/search', 'ok',
+              '2026-01-01T00:00:00+00:00', 0
+            FROM seq
+            """
+        )
+
+    output = render_prometheus_metrics(state_path, heartbeat_path)
+
+    assert 'seed_agent_scheduler_runs_total{status="success"} 1001.000000' in output
+    assert 'seed_agent_tracker_api_events_total{event="ok"} 10001.000000' in output
+    assert "seed_agent_tracker_backoff_active 0.000000" in output

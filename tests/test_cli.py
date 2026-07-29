@@ -2137,7 +2137,7 @@ def test_intent_run_once_reports_source_warnings(
         assert kwargs["source_events"] == []
         return FakeIntentResult()
 
-    def fail_read_configured_source_events(loaded):
+    def fail_read_configured_source_events(loaded, **kwargs):
         raise RuntimeError("douban 403")
 
     class FakeDownloader:
@@ -4691,17 +4691,28 @@ want_sources:
 
     def fake_poll(**kwargs):
         calls.append(kwargs)
-        return [
-            SourceIntentEvent(
-                source=IntentSource.TELEGRAM,
-                raw_text="Inception 2010",
-                source_event_id="telegram:12345:42",
-            )
-        ]
+        from seed_agent.sources.telegram import TelegramPollBatch
 
-    monkeypatch.setattr(cli, "poll_telegram_updates", fake_poll)
+        return TelegramPollBatch(
+            events=[
+                SourceIntentEvent(
+                    source=IntentSource.TELEGRAM,
+                    raw_text="Inception 2010",
+                    source_event_id="telegram:12345:42",
+                )
+            ],
+            next_offset=102,
+        )
 
-    events = cli._read_configured_source_events(cli.load_config(config_path))
+    monkeypatch.setattr(cli, "poll_telegram_update_batch", fake_poll)
+
+    store = StateStore(tmp_path / ".seed-agent" / "state.db")
+    cursor_updates: dict[str, str] = {}
+    events = cli._read_configured_source_events(
+        cli.load_config(config_path),
+        store=store,
+        cursor_updates=cursor_updates,
+    )
 
     assert [event.source for event in events] == [IntentSource.TELEGRAM]
     assert calls == [
@@ -4712,6 +4723,38 @@ want_sources:
             "allowed_chat_ids": {"12345", "999"},
         }
     ]
+    assert store.get_source_cursor("telegram:local/secrets/telegram.yaml") is None
+    assert cursor_updates == {"telegram:local/secrets/telegram.yaml": "102"}
+
+    monkeypatch.setattr(cli, "_build_search_providers", lambda _config: [])
+    payload = cli._intent_run_once_payload(config_path, execute=False)
+
+    assert payload["ingested"] == 1
+    assert StateStore(tmp_path / ".seed-agent" / "state.db").get_source_cursor(
+        "telegram:local/secrets/telegram.yaml"
+    ) == "102"
+
+
+def test_read_configured_telegram_requires_chat_allowlist(tmp_path: Path) -> None:
+    from seed_agent import cli
+
+    config_path = _config_file(tmp_path)
+    secret = tmp_path / "local" / "secrets" / "telegram.yaml"
+    secret.parent.mkdir(parents=True)
+    secret.write_text("bot_token: secret-token\n", encoding="utf-8")
+    config_path.write_text(
+        config_path.read_text(encoding="utf-8")
+        + """
+want_sources:
+  telegram:
+    enabled: true
+    secret_ref: local/secrets/telegram.yaml
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="allowed_chat_ids"):
+        cli._read_configured_source_events(cli.load_config(config_path))
 
 
 def test_config_export_and_import_dry_run_report_changed_sections(tmp_path: Path) -> None:

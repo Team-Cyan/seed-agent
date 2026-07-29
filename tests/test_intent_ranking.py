@@ -345,3 +345,23 @@ def test_rank_releases_can_require_episode_when_configured() -> None:
     )
 
     assert "episode missing" in ranked[0].risks
+
+
+def test_rank_releases_does_not_match_episode_or_season_prefixes() -> None:
+    ranked = rank_releases(
+        _intent(
+            kind=IntentKind.EPISODE,
+            title="Severance",
+            raw_text="Severance S02E03 2025",
+            year=2025,
+            season=2,
+            episode=3,
+            resolution="2160p",
+        ),
+        [_release(title="Severance 2025 S020E030 2160p WEB-DL")],
+        _intent_config(default_resolution="2160p", series_search_mode="episode"),
+        _search_config(),
+    )
+
+    assert "season missing" in ranked[0].risks
+    assert "episode missing" in ranked[0].risks

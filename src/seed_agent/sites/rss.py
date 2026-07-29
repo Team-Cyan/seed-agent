@@ -125,6 +125,10 @@ async def fetch_rss_candidates(
                 cookie=cookie,
                 api_key=api_key,
             )
+        except mteam_site.MTeamApiResponseError:
+            raise
+        except (httpx.TimeoutException, httpx.NetworkError):
+            raise
         except Exception:
             return candidates
     return candidates

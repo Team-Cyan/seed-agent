@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
@@ -13,6 +14,12 @@ MESSAGE_KEYS = ("message", "edited_message", "channel_post", "edited_channel_pos
 FetchTelegramUpdates = Callable[[str, dict[str, object]], dict[str, Any]]
 
 
+@dataclass(frozen=True)
+class TelegramPollBatch:
+    events: list[SourceIntentEvent]
+    next_offset: int | None
+
+
 def poll_telegram_updates(
     *,
     bot_token: str,
@@ -21,17 +28,38 @@ def poll_telegram_updates(
     allowed_chat_ids: set[str] | None = None,
     fetcher: FetchTelegramUpdates | None = None,
 ) -> list[SourceIntentEvent]:
+    return poll_telegram_update_batch(
+        bot_token=bot_token,
+        offset=offset,
+        timeout_seconds=timeout_seconds,
+        allowed_chat_ids=allowed_chat_ids,
+        fetcher=fetcher,
+    ).events
+
+
+def poll_telegram_update_batch(
+    *,
+    bot_token: str,
+    offset: int | None = None,
+    timeout_seconds: int = 0,
+    allowed_chat_ids: set[str] | None = None,
+    fetcher: FetchTelegramUpdates | None = None,
+) -> TelegramPollBatch:
     params: dict[str, object] = {"timeout": max(timeout_seconds, 0)}
     if offset is not None:
         params["offset"] = offset
     payload = (fetcher or _fetch_updates)(bot_token, params)
     updates = payload.get("result") if isinstance(payload, dict) else None
     if not isinstance(updates, list):
-        return []
+        return TelegramPollBatch(events=[], next_offset=offset)
     events: list[SourceIntentEvent] = []
+    next_offset = offset
     for update in updates:
         if not isinstance(update, dict):
             continue
+        update_id = update.get("update_id")
+        if isinstance(update_id, int):
+            next_offset = max(next_offset or 0, update_id + 1)
         event = parse_telegram_update(update)
         if event is None:
             continue
@@ -39,7 +67,7 @@ def poll_telegram_updates(
         if allowed_chat_ids and str(chat_id) not in allowed_chat_ids:
             continue
         events.append(event)
-    return events
+    return TelegramPollBatch(events=events, next_offset=next_offset)
 
 
 def parse_telegram_update(payload: dict[str, Any]) -> SourceIntentEvent | None:

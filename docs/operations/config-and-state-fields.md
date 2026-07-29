@@ -389,6 +389,12 @@ paid release for a requested work, subject to its category and capacity gates.
 - `request_json`
 - `response_json`
 
+`source_cursors`
+
+- `source`
+- `cursor`
+- `updated_at`
+
 `want_search_runs`
 
 - `id`
