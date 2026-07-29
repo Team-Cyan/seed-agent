@@ -14,6 +14,10 @@ All notable project changes are tracked here.
   3.14 support instead of retaining the pre-1.0 event-loop policy integration.
 - Want List candidate buttons now execute the reviewed qB add immediately,
   removing the redundant preview-and-confirm step from the Web UI.
+- Scheduled Want List source refresh now follows the configured daily/every-cycle
+  cadence independently from tracker search. M-Team backoff no longer prevents
+  the daily Douban/IMDb refresh, while already-enqueued intents remain excluded
+  from candidate searches.
 - Prometheus counters now aggregate the complete SQLite history, expired
   tracker backoffs no longer report active, and the metrics route follows the
   same optional Web token policy as API routes.

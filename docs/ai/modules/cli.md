@@ -65,13 +65,15 @@ Expose the operator-facing command surface and safe summaries.
   from the YAML `scheduler` section. Explicit CLI flags and container variables
   override those defaults and are reported in scheduler summaries; the Web
   scheduler page also lists environment-derived overrides. Configured
-  Want List sources are refreshed every enabled cycle; scheduled torrent search
-  follows `scheduler.intent_search_mode` (`daily` once at or after
+  Want List source refresh and torrent search independently follow
+  `scheduler.intent_search_mode` (`daily` once at or after
   `intent_search_hour` by default, with missed runs caught up on the next
-  cycle, or `every_cycle`). Operators can still trigger filtered or
+  cycle, or `every_cycle`). Tracker backoff skips M-Team search but does not
+  suppress a due Douban/IMDb source refresh. Intents already enqueued or
+  rejected are not searched again. Operators can still trigger filtered or
   single-item Want List searches manually from the Web UI. Scheduled resource
-  enqueue remains a dry-run unless `--intent-execute` is explicitly set, and the
-  loop can be disabled with `--no-intent`,
+  enqueue remains a dry-run unless `--intent-execute` is explicitly set, and
+  the loop can be disabled with `--no-intent`,
 - `schedule-trigger` asks the already-running scheduler process to start one
   cycle immediately. The durable scheduler control state rejects the request
   while a cycle is already running, so the command cannot create a concurrent

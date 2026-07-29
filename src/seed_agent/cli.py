@@ -1809,45 +1809,62 @@ def schedule_run(
         payload["scheduler_cli_overrides"] = scheduler_cli_overrides
         payload["scheduler_lease"] = lease
         payload["manual_trigger"] = manual_trigger
-        if payload.get("schedule_backoff", {}).get("active"):
-            payload["intent_search_enabled"] = False
-            if intent and "intent" not in payload:
-                payload["intent"] = _intent_backoff_skip_payload(
-                    execute=intent_execute,
-                    backoff=payload["schedule_backoff"],
-                    run_id=run_id,
-                )
-        elif intent and "error" not in payload:
-            lease_heartbeat.ensure_owned()
+        if intent and "error" not in payload:
+            intent_refresh = _scheduled_intent_search_due(
+                mode=scheduler.intent_search_mode,
+                hour=scheduler.intent_search_hour,
+                last_search_at=_latest_scheduled_intent_refresh_at(store_for_run),
+            )
             intent_search = _scheduled_intent_search_due(
                 mode=scheduler.intent_search_mode,
                 hour=scheduler.intent_search_hour,
                 last_search_at=_latest_scheduled_intent_search_at(store_for_run),
             )
-            _record_schedule_phase(
-                store_for_run,
-                run_id=run_id,
-                phase="intent_search" if intent_search else "intent_source_sync",
-                event="start",
-                payload={"search_enabled": intent_search},
-            )
-            intent_payload = _intent_run_once_payload(
-                config,
-                execute=intent_execute,
-                search_ingested=intent_search,
-                run_id=run_id,
-            )
-            _record_schedule_phase(
-                store_for_run,
-                run_id=run_id,
-                phase="intent_search" if intent_search else "intent_source_sync",
-                event="end",
-                payload=_intent_payload_summary(intent_payload),
-            )
-            payload["intent"] = intent_payload
+            active_backoff = payload.get("schedule_backoff", {}).get("active") is True
+            if active_backoff:
+                intent_search = False
+            run_intent_cycle = intent_refresh or intent_search
+            payload["intent_refresh_enabled"] = run_intent_cycle
             payload["intent_search_enabled"] = intent_search
-            if "error" in intent_payload:
-                payload["error"] = f"intent: {intent_payload['error']}"
+            if run_intent_cycle:
+                lease_heartbeat.ensure_owned()
+                phase = "intent_search" if intent_search else "intent_source_sync"
+                _record_schedule_phase(
+                    store_for_run,
+                    run_id=run_id,
+                    phase=phase,
+                    event="start",
+                    payload={
+                        "refresh_enabled": True,
+                        "search_enabled": intent_search,
+                        "schedule_backoff_active": active_backoff,
+                    },
+                )
+                intent_payload = _intent_run_once_payload(
+                    config,
+                    execute=intent_execute,
+                    search_ingested=intent_search,
+                    run_id=run_id,
+                )
+                if active_backoff:
+                    intent_payload["schedule_backoff"] = payload["schedule_backoff"]
+                    intent_payload["search_skipped_by_backoff"] = True
+                _record_schedule_phase(
+                    store_for_run,
+                    run_id=run_id,
+                    phase=phase,
+                    event="end",
+                    payload=_intent_payload_summary(intent_payload),
+                )
+                payload["intent"] = intent_payload
+                if "error" in intent_payload:
+                    payload["error"] = f"intent: {intent_payload['error']}"
+            elif active_backoff and "intent" not in payload:
+                payload["intent"] = _intent_backoff_skip_payload(
+                    execute=intent_execute,
+                    backoff=payload["schedule_backoff"],
+                    run_id=run_id,
+                )
         if heartbeat_file is not None:
             _write_heartbeat(
                 heartbeat_file,
@@ -2067,6 +2084,31 @@ def _latest_scheduled_intent_search_at(store: StateStore) -> datetime | None:
         except KeyError, ValueError:
             continue
         return searched_at
+    return None
+
+
+def _latest_scheduled_intent_refresh_at(store: StateStore) -> datetime | None:
+    for row in store.list_scheduler_runs(limit=100):
+        if not row.get("finished_at"):
+            continue
+        try:
+            summary = json.loads(str(row.get("summary_json") or "{}"))
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(summary, dict):
+            continue
+        if (
+            summary.get("intent_refresh_enabled") is not True
+            and summary.get("intent_search_enabled") is not True
+        ):
+            continue
+        try:
+            refreshed_at = datetime.fromisoformat(
+                str(row["finished_at"]).replace("Z", "+00:00")
+            )
+        except KeyError, ValueError:
+            continue
+        return refreshed_at
     return None
 
 
@@ -3250,6 +3292,7 @@ def _write_heartbeat(
         "accepted": payload.get("accepted"),
         "enqueued": payload.get("enqueued"),
         "intent": _intent_payload_summary(payload.get("intent")),
+        "intent_refresh_enabled": payload.get("intent_refresh_enabled"),
         "intent_search_enabled": payload.get("intent_search_enabled"),
         "schedule_backoff": payload.get("schedule_backoff"),
         "skipped_by_backoff": payload.get("skipped_by_backoff"),
@@ -4630,6 +4673,7 @@ def _schedule_log_summary(payload: dict[str, Any]) -> dict[str, Any]:
         "scheduler_config_source",
         "scheduler_cli_overrides",
         "manual_trigger",
+        "intent_refresh_enabled",
         "intent_search_enabled",
         "schedule_backoff",
         "skipped_by_backoff",
@@ -4736,6 +4780,10 @@ def _intent_payload_summary(payload: object) -> dict[str, Any] | None:
         summary["source_warnings"] = payload.get("source_warnings")
     if payload.get("skipped_by_backoff"):
         summary["skipped_by_backoff"] = payload.get("skipped_by_backoff")
+    if payload.get("search_skipped_by_backoff"):
+        summary["search_skipped_by_backoff"] = payload.get(
+            "search_skipped_by_backoff"
+        )
     if payload.get("schedule_backoff"):
         summary["schedule_backoff"] = payload.get("schedule_backoff")
     return summary

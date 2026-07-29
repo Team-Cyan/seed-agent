@@ -157,10 +157,12 @@ by completion period, and unfinished work is ordered by current priority.
     Web UI vs CLI decision path, runtime provenance checks, and the
     preview-first Want List refresh/search boundary.
   - Want List refresh/search actions show immediate in-progress feedback in the
-    Web UI. `schedule-run` refreshes configured Want List sources every enabled
-    cycle and searches according to the YAML scheduler policy (`daily` by
-    default or `every_cycle`) while keeping scheduled enqueue dry-run unless
-    intent execution is explicitly enabled.
+    Web UI. `schedule-run` refreshes configured Want List sources and searches
+    according to the YAML scheduler policy (`daily` by default or
+    `every_cycle`). Source refresh has its own durable cadence and still runs
+    when M-Team backoff suppresses tracker search; already-enqueued intents are
+    not searched again. Scheduled enqueue stays dry-run unless intent execution
+    is explicitly enabled.
   - M-Team tracker rate-limit responses now trigger a persistent scheduler
     backoff; the container keeps heartbeat liveness and local prune active while
     skipping PT discovery and Want List tracker searches. Backoff starts at one
