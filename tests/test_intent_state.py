@@ -3,6 +3,8 @@ import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
+
 from seed_agent.models import (
     Discount,
     IntentKind,
@@ -239,6 +241,115 @@ def test_state_store_replaces_ranked_release_without_duplicate_rows(tmp_path: Pa
     assert len(rows) == 1
     assert rows[0]["score"] == 95
     assert rows[0]["confidence"] == 0.97
+
+
+def test_state_store_saves_want_search_batch_in_one_atomic_commit(tmp_path: Path) -> None:
+    path = tmp_path / "state.sqlite3"
+    store = StateStore(path)
+    first = _intent(intent_id="first", title="First")
+    second = _intent(intent_id="second", title="Second")
+    store.upsert_intent(first)
+    store.upsert_intent(second)
+    store.save_ranked_releases(
+        [
+            _ranked(
+                intent_id=first.intent_id,
+                release=_release(release_id="old-first"),
+            ),
+            _ranked(
+                intent_id=second.intent_id,
+                release=_release(release_id="old-second"),
+            ),
+        ]
+    )
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            """
+            CREATE TRIGGER fail_second_search
+            BEFORE INSERT ON release_candidates
+            WHEN NEW.intent_id = 'second'
+            BEGIN
+              SELECT RAISE(ABORT, 'injected batch failure');
+            END
+            """
+        )
+
+    with pytest.raises(sqlite3.IntegrityError, match="injected batch failure"):
+        store.save_want_search_batch(
+            [
+                (
+                    first,
+                    [
+                        _ranked(
+                            intent_id=first.intent_id,
+                            release=_release(release_id="new-first"),
+                        )
+                    ],
+                ),
+                (
+                    second,
+                    [
+                        _ranked(
+                            intent_id=second.intent_id,
+                            release=_release(release_id="new-second"),
+                        )
+                    ],
+                ),
+            ],
+            source="web",
+        )
+
+    assert [row["release_id"] for row in store.list_release_candidates(first.intent_id)] == [
+        "old-first"
+    ]
+    assert [row["release_id"] for row in store.list_release_candidates(second.intent_id)] == [
+        "old-second"
+    ]
+    assert store.list_want_search_runs(intent_id=first.intent_id) == []
+    assert store.list_want_search_runs(intent_id=second.intent_id) == []
+
+
+def test_state_store_want_search_batch_skips_concurrently_enqueued_intent(
+    tmp_path: Path,
+) -> None:
+    store = StateStore(tmp_path / "state.sqlite3")
+    intent = _intent(intent_id="concurrent")
+    store.upsert_intent(intent)
+    original = _ranked(
+        intent_id=intent.intent_id,
+        release=_release(release_id="selected"),
+    )
+    store.save_ranked_releases([original])
+    store.update_intent_state(
+        intent.intent_id,
+        IntentState.ENQUEUED,
+        selected_release_id=original.release.release_id,
+    )
+
+    committed = store.save_want_search_batch(
+        [
+            (
+                intent,
+                [
+                    _ranked(
+                        intent_id=intent.intent_id,
+                        release=_release(release_id="stale-search-result"),
+                    )
+                ],
+            )
+        ],
+        source="web",
+    )
+
+    assert committed == 0
+    assert [row["release_id"] for row in store.list_release_candidates(intent.intent_id)] == [
+        "selected"
+    ]
+    row = store.get_intent(intent.intent_id)
+    assert row is not None
+    assert row["state"] == IntentState.ENQUEUED.value
+    assert row["selected_release_id"] == "selected"
+    assert store.list_want_search_runs(intent_id=intent.intent_id) == []
 
 
 def test_state_store_keeps_same_release_for_multiple_intents(tmp_path: Path) -> None:

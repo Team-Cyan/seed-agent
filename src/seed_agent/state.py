@@ -43,6 +43,47 @@ _UNSET = object()
 SQLITE_TIMEOUT_SECONDS = 30.0
 SQLITE_BUSY_TIMEOUT_MS = 30_000
 SITE_HISTORY_MIN_SAMPLES = 3
+_RELEASE_CANDIDATE_UPSERT_SQL = """
+    INSERT INTO release_candidates (
+        release_id,
+        intent_id,
+        site,
+        title,
+        score,
+        confidence,
+        accepted,
+        confirmation_required,
+        release_json,
+        created_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(intent_id, release_id) DO UPDATE SET
+        site = excluded.site,
+        title = excluded.title,
+        score = excluded.score,
+        confidence = excluded.confidence,
+        accepted = excluded.accepted,
+        confirmation_required = excluded.confirmation_required,
+        release_json = excluded.release_json
+"""
+_WANT_SEARCH_RUN_INSERT_SQL = """
+    INSERT INTO want_search_runs (
+      intent_id,
+      run_id,
+      source,
+      searched_at,
+      status,
+      search_enabled,
+      results_count,
+      best_score,
+      selected_release_id,
+      backoff_active,
+      backoff_until,
+      message,
+      payload_json
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+"""
 
 
 class StateStore:
@@ -716,24 +757,7 @@ class StateStore:
     ) -> None:
         with self._connect() as conn:
             conn.execute(
-                """
-                INSERT INTO want_search_runs (
-                  intent_id,
-                  run_id,
-                  source,
-                  searched_at,
-                  status,
-                  search_enabled,
-                  results_count,
-                  best_score,
-                  selected_release_id,
-                  backoff_active,
-                  backoff_until,
-                  message,
-                  payload_json
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
+                _WANT_SEARCH_RUN_INSERT_SQL,
                 (
                     intent_id,
                     run_id,
@@ -2072,6 +2096,7 @@ class StateStore:
         replace_intent_id: str | None = None,
     ) -> None:
         now = _utc_now()
+        rows = [_ranked_release_row(ranked, now) for ranked in releases]
         with self._connect() as conn:
             if replace_intent_id is not None:
                 if any(ranked.intent_id != replace_intent_id for ranked in releases):
@@ -2080,44 +2105,104 @@ class StateStore:
                     "DELETE FROM release_candidates WHERE intent_id = ?",
                     (replace_intent_id,),
                 )
-            for ranked in releases:
+            conn.executemany(_RELEASE_CANDIDATE_UPSERT_SQL, rows)
+
+    def save_want_search_batch(
+        self,
+        results: list[tuple[ResourceIntent, list[RankedRelease]]],
+        *,
+        source: str,
+        searched_at: datetime | None = None,
+    ) -> int:
+        """Atomically replace candidates, intent states, and history for a search batch."""
+        if not results:
+            return 0
+        intent_ids = [intent.intent_id for intent, _ in results]
+        if len(intent_ids) != len(set(intent_ids)):
+            raise ValueError("want search batch contains duplicate intents")
+        for intent, ranked in results:
+            if any(item.intent_id != intent.intent_id for item in ranked):
+                raise ValueError("ranked releases must belong to their batch intent")
+
+        now = _utc_now()
+        search_time = (searched_at or _utc_now_datetime()).isoformat()
+        candidate_rows = {
+            intent.intent_id: [_ranked_release_row(item, now) for item in ranked]
+            for intent, ranked in results
+        }
+        committed = 0
+        history_rows: list[tuple[object, ...]] = []
+        with self._connect(row_factory=sqlite3.Row) as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            for intent, ranked in results:
+                current_row = conn.execute(
+                    "SELECT * FROM intents WHERE intent_id = ?",
+                    (intent.intent_id,),
+                ).fetchone()
+                if current_row is None:
+                    raise ValueError(f"unknown intent: {intent.intent_id}")
+                current = dict(current_row)
+                current_intent = ResourceIntent.model_validate(
+                    json.loads(str(current["normalized_json"]))
+                )
+                if current_intent.state in {
+                    IntentState.ENQUEUED,
+                    IntentState.REJECTED,
+                    IntentState.FAILED,
+                } or current.get("selected_release_id") is not None:
+                    continue
+                next_state = _want_search_state(ranked)
+                effective_intent = _monotonic_intent(
+                    current,
+                    current_intent.model_copy(update={"state": next_state}),
+                )
+                conn.execute(
+                    "DELETE FROM release_candidates WHERE intent_id = ?",
+                    (intent.intent_id,),
+                )
+                conn.executemany(
+                    _RELEASE_CANDIDATE_UPSERT_SQL,
+                    candidate_rows[intent.intent_id],
+                )
                 conn.execute(
                     """
-                    INSERT INTO release_candidates (
-                        release_id,
-                        intent_id,
-                        site,
-                        title,
-                        score,
-                        confidence,
-                        accepted,
-                        confirmation_required,
-                        release_json,
-                        created_at
-                    )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(intent_id, release_id) DO UPDATE SET
-                        site = excluded.site,
-                        title = excluded.title,
-                        score = excluded.score,
-                        confidence = excluded.confidence,
-                        accepted = excluded.accepted,
-                        confirmation_required = excluded.confirmation_required,
-                        release_json = excluded.release_json
+                    UPDATE intents
+                    SET state = ?, normalized_json = ?, updated_at = ?
+                    WHERE intent_id = ?
                     """,
                     (
-                        ranked.release.release_id,
-                        ranked.intent_id,
-                        ranked.release.site,
-                        ranked.release.title,
-                        ranked.score,
-                        ranked.confidence,
-                        int(ranked.accepted),
-                        int(ranked.confirmation_required),
-                        _json_dumps(ranked.model_dump(mode="json")),
+                        effective_intent.state.value,
+                        _json_dumps(effective_intent.model_dump(mode="json")),
                         now,
+                        intent.intent_id,
                     ),
                 )
+                best_score = max((item.score for item in ranked), default=None)
+                history_rows.append(
+                    (
+                        intent.intent_id,
+                        None,
+                        source,
+                        search_time,
+                        "searched",
+                        1,
+                        len(ranked),
+                        best_score,
+                        None,
+                        0,
+                        None,
+                        None,
+                        _json_dumps(
+                            {
+                                "state": effective_intent.state.value,
+                                "title": effective_intent.title,
+                            }
+                        ),
+                    )
+                )
+                committed += 1
+            conn.executemany(_WANT_SEARCH_RUN_INSERT_SQL, history_rows)
+        return committed
 
     def list_release_candidates(self, intent_id: str) -> list[dict[str, Any]]:
         with self._connect(row_factory=sqlite3.Row) as conn:
@@ -2787,6 +2872,27 @@ def _monotonic_intent(
             ),
         }
     )
+
+
+def _ranked_release_row(ranked: RankedRelease, created_at: str) -> tuple[object, ...]:
+    return (
+        ranked.release.release_id,
+        ranked.intent_id,
+        ranked.release.site,
+        ranked.release.title,
+        ranked.score,
+        ranked.confidence,
+        int(ranked.accepted),
+        int(ranked.confirmation_required),
+        _json_dumps(ranked.model_dump(mode="json")),
+        created_at,
+    )
+
+
+def _want_search_state(ranked: list[RankedRelease]) -> IntentState:
+    if not ranked or ranked[0].confirmation_required:
+        return IntentState.CONFIRMATION_REQUIRED
+    return IntentState.SEARCHED
 
 
 def _sqlite_access_lock_path(path: Path) -> Path:

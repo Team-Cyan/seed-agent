@@ -816,6 +816,77 @@ def test_http_wants_search_records_ranked_release_history_without_downloader(
     assert row["state"] == IntentState.CONFIRMATION_REQUIRED.value
 
 
+def test_http_wants_search_persists_multiple_results_as_one_sqlite_batch(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from seed_agent.web import app as web_app
+
+    class FakeSearchProvider:
+        async def search(self, intent):
+            return [
+                ReleaseCandidate(
+                    release_id=f"demo:{intent.intent_id}",
+                    site="demo",
+                    title=f"{intent.title} 2026 2160p WEB-DL",
+                    source_url=f"https://tracker.example/{intent.intent_id}",
+                    download_url=f"https://tracker.example/download/{intent.intent_id}",
+                    size_bytes=10 * 1024**3,
+                    seeders=10,
+                    leechers=1,
+                    discount=Discount.FREE,
+                )
+            ]
+
+    config_path = _write_minimal_config(tmp_path)
+    store = StateStore(tmp_path / ".seed-agent" / "state.db")
+    intents = [
+        ingest_events(
+            [
+                SourceIntentEvent(
+                    source=IntentSource.DOUBAN_WANTED,
+                    raw_text=f"Batch Movie {number} 2026",
+                    source_event_id=f"douban:batch-{number}",
+                    requested_at=datetime(2025, 1, number, tzinfo=UTC),
+                    metadata={
+                        "media_type": "movie",
+                        "source_config_id": "douban-me",
+                    },
+                )
+            ],
+            store,
+        )[0][0]
+        for number in (2, 3)
+    ]
+    batch_sizes: list[int] = []
+    original = StateStore.save_want_search_batch
+
+    def capture_batch(self, results, **kwargs):
+        batch_sizes.append(len(results))
+        return original(self, results, **kwargs)
+
+    monkeypatch.setattr(
+        web_app,
+        "_build_want_search_providers",
+        lambda config: [FakeSearchProvider()],
+    )
+    monkeypatch.setattr(StateStore, "save_want_search_batch", capture_batch)
+
+    with _running_server(config_path) as base_url:
+        payload = _request_json(
+            base_url,
+            "POST",
+            "/api/wants/search",
+            {"source": "douban-me", "media_type": "movie"},
+        )
+
+    assert payload["searched"] == 2
+    assert batch_sizes == [2]
+    for intent in intents:
+        assert len(store.list_release_candidates(intent.intent_id)) == 1
+        assert len(store.list_want_search_runs(intent_id=intent.intent_id)) == 1
+
+
 def test_http_wants_search_skips_enqueued_wants(
     tmp_path: Path,
     monkeypatch,

@@ -15,8 +15,6 @@ from urllib.parse import unquote, urlparse
 from seed_agent.actions.intent import (
     enqueue_intent,
     ingest_events,
-    rank_intent,
-    search_intent,
 )
 from seed_agent.actions.pt import (
     _discover_site_candidates,
@@ -36,7 +34,15 @@ from seed_agent.config import (
     resolve_runtime_secret_path,
 )
 from seed_agent.metrics import render_prometheus_metrics
-from seed_agent.models import Decision, IntentSource, IntentState, RankedRelease, ReleaseCandidate
+from seed_agent.models import (
+    Decision,
+    IntentSource,
+    IntentState,
+    RankedRelease,
+    ReleaseCandidate,
+    ResourceIntent,
+)
+from seed_agent.policies.intent_ranking import rank_releases
 from seed_agent.quality_tags import matching_quality_tag_groups
 from seed_agent.search.base import SearchProvider
 from seed_agent.state import StateStore
@@ -1107,27 +1113,21 @@ async def _search_want_items(
     intent_config: SeedIntentConfig,
     search_config: SearchConfig,
 ) -> int:
-    searched = 0
+    results: list[tuple[ResourceIntent, list[RankedRelease]]] = []
     for item in items:
         intent_id = str(item.get("intent_id") or "")
         if not intent_id:
             continue
-        searched_intent, _, _ = await search_intent(intent_id, store, providers)
-        _, ranked, _ = rank_intent(
-            searched_intent.intent_id,
-            store,
-            intent_config,
-            search_config,
-        )
-        _record_want_search_run(
-            store,
-            searched_intent,
-            source="web",
-            search_enabled=True,
-            ranked=ranked,
-        )
-        searched += 1
-    return searched
+        row = store.get_intent(intent_id)
+        if row is None:
+            continue
+        intent = ResourceIntent.model_validate(json.loads(str(row["normalized_json"])))
+        releases: list[ReleaseCandidate] = []
+        for provider in providers:
+            releases.extend(await provider.search(intent))
+        ranked = rank_releases(intent, releases, intent_config, search_config)
+        results.append((intent, ranked))
+    return store.save_want_search_batch(results, source="web")
 
 
 def _record_want_search_backoff_skips(
@@ -1173,32 +1173,6 @@ def _record_single_want_search_skip(
         backoff_until=str(backoff.get("until")) if backoff.get("until") else None,
         message="M-Team backoff active; skipped Want List search",
         payload={"title": row.get("title") or normalized.get("title")},
-    )
-
-
-def _record_want_search_run(
-    store: StateStore,
-    intent: Any,
-    *,
-    source: str,
-    search_enabled: bool,
-    ranked: list[RankedRelease],
-) -> None:
-    best = ranked[0] if ranked else None
-    row = store.get_intent(intent.intent_id) or {}
-    store.record_want_search_run(
-        intent_id=intent.intent_id,
-        source=source,
-        status="searched" if search_enabled else "skipped",
-        search_enabled=search_enabled,
-        results_count=len(ranked),
-        best_score=best.score if best is not None else None,
-        selected_release_id=str(row.get("selected_release_id"))
-        if row.get("selected_release_id") is not None
-        else None,
-        backoff_active=False,
-        message=None,
-        payload={"state": row.get("state"), "title": getattr(intent, "title", None)},
     )
 
 

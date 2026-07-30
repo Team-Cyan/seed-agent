@@ -57,6 +57,10 @@ Persist local lifecycle knowledge and durable decision evidence.
   transaction, and keep intent merge data movement atomic with enqueue-claim
   checks. When a duplicate terminal state wins, its selected release must win
   with it and its Want List search history must move to the canonical intent,
+- commit Web Want List batch-search candidates, intent states, and search
+  history in one `BEGIN IMMEDIATE` transaction after network search completes.
+  A failed batch write must roll back every intent, and a terminal or selected
+  intent observed at commit time must not be overwritten by stale search data,
 - keep state changes explainable and reviewable.
 - renew the mutable scheduler lease in the background during long tracker,
   prune, discovery, and intent phases, and verify ownership at phase boundaries,

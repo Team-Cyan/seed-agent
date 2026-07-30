@@ -238,6 +238,10 @@ by completion period, and unfinished work is ordered by current priority.
   - Web writes require bounded JSON and same-origin browser context, static
     assets revalidate, SQLite files are owner-only, and credential redaction
     covers authorization schemes and Telegram bot URL tokens.
+  - Web Want List batch search now prepares tracker results in memory and
+    persists all candidate replacements, intent states, and search history in
+    one atomic SQLite transaction with failure rollback and concurrent terminal
+    intent protection.
 
 - Completed 2026-07 - Review roadmap execution
   - `site_history_score` now has a real state-derived feedback loop. The state

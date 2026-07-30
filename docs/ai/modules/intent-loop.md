@@ -75,6 +75,9 @@ Convert human requests into search/rank/reject/enqueue workflows.
 - evaluate enqueue runtime gates before resolving a deferred tracker download
   token, and preserve distinct already-enqueued/in-progress outcomes for
   idempotent callers.
+- prepare Web batch-search rankings in memory, then persist the complete batch
+  through the StateStore atomic batch boundary rather than committing
+  candidates, state, and history separately for every Want.
 
 ## Verification
 

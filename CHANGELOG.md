@@ -4,6 +4,16 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.20.3 - 2026-07-30
+
+### Fixed
+
+- Persisted Web Want List batch-search candidates, intent states, and search
+  history in one atomic SQLite transaction, using bulk upserts and full rollback
+  on any write failure instead of opening several write transactions per item.
+- Preserved terminal or concurrently enqueued intents when a slower batch search
+  completes, preventing stale results from replacing the selected candidate.
+
 ## 0.20.2 - 2026-07-30
 
 ### Changed
