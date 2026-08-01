@@ -45,6 +45,8 @@ Expose the operator-facing command surface and safe summaries.
 - the Web UI downloader page exposes visual editors for qB category policies,
   budget pools, and Want List media-type-to-category routing, while still
   preserving the per-section YAML editor for advanced edits,
+- the validated config-section API also accepts `pt_scoring`, allowing an
+  operator to tune the enqueue threshold atomically without direct host edits,
 - schema-validated web config previews that return before/after diffs before
   non-tracker section saves write YAML,
 - validated config and secret writes use same-directory atomic replacement, so
@@ -70,7 +72,10 @@ Expose the operator-facing command surface and safe summaries.
   `intent_search_hour` by default, with missed runs caught up on the next
   cycle, or `every_cycle`). Refresh and search use separate durable success
   markers rather than a bounded recent-run window, so failed refreshes retry
-  while a successful search does not repeat. Tracker backoff skips M-Team
+  while a successful search does not repeat. Normalized intents created after
+  the daily success marker remain independently eligible for scheduled catch-up
+  search. Catch-up runs drain at most ten intents per cycle so tracker failures
+  do not turn a late source sync into one large burst. Tracker backoff skips M-Team
   search but does not suppress a due Douban/IMDb source refresh, and source-only
   refresh does not initialize qB or search providers. Intents already enqueued
   or rejected are not searched again. Operators can still trigger filtered or
@@ -167,6 +172,9 @@ Expose the operator-facing command surface and safe summaries.
 - keep configured Want List source refresh failures fail-soft so Douban/IMDb
   availability issues do not restart long-running scheduler containers. Do not
   advance replay cursors or the daily refresh success marker on those failures,
+- keep pending normalized Wants eligible after the daily search marker, and
+  persist a scheduled search batch only after every provider call and ranking
+  operation in that batch succeeds,
 - expose cleanup preview details before execute-mode mutation,
 - pass the scheduler interval into per-cycle pruning so persisted free-window
   expiries can be evaluated against the next scheduled check,

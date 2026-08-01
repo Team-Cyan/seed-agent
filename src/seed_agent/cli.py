@@ -70,6 +70,7 @@ from seed_agent.models import (
     Decision,
     IntentKind,
     IntentSource,
+    IntentState,
     LifecycleState,
     ManagedTorrent,
     RankedRelease,
@@ -113,6 +114,7 @@ MTEAM_RATE_LIMIT_MARKERS = ("請求過於頻繁", "请求过于频繁")
 MTEAM_RATE_LIMIT_BACKOFF_HOURS = (1, 4, 12, 24)
 MTEAM_NETWORK_BACKOFF_MINUTES = 30
 MTEAM_BACKFILL_FALLBACK_REFRESH_HOURS = 6
+SCHEDULED_INTENT_SEARCH_BATCH_SIZE = 10
 MTEAM_NETWORK_ERROR_TYPES = {
     "ConnectError",
     "ConnectTimeout",
@@ -1820,11 +1822,12 @@ def schedule_run(
                 hour=scheduler.intent_search_hour,
                 last_search_at=_latest_scheduled_intent_search_at(store_for_run),
             )
+            intent_search = intent_search or _pending_intent_search_due(store_for_run)
             active_backoff = payload.get("schedule_backoff", {}).get("active") is True
             if active_backoff:
                 intent_search = False
             run_intent_cycle = intent_refresh or intent_search
-            payload["intent_refresh_enabled"] = run_intent_cycle
+            payload["intent_refresh_enabled"] = intent_refresh
             payload["intent_search_enabled"] = intent_search
             if run_intent_cycle:
                 lease_heartbeat.ensure_owned()
@@ -1835,7 +1838,7 @@ def schedule_run(
                     phase=phase,
                     event="start",
                     payload={
-                        "refresh_enabled": True,
+                        "refresh_enabled": intent_refresh,
                         "search_enabled": intent_search,
                         "schedule_backoff_active": active_backoff,
                     },
@@ -1845,6 +1848,8 @@ def schedule_run(
                         config,
                         execute=intent_execute,
                         search_ingested=intent_search,
+                        refresh_sources=intent_refresh,
+                        search_limit=SCHEDULED_INTENT_SEARCH_BATCH_SIZE,
                         run_id=run_id,
                     )
                 except Exception as exc:
@@ -2100,6 +2105,11 @@ def _scheduled_intent_search_due(
     if previous.tzinfo is None:
         previous = previous.replace(tzinfo=UTC)
     return previous.astimezone(current.tzinfo) < scheduled_at
+
+
+def _pending_intent_search_due(store: StateStore) -> bool:
+    """Keep scheduled search active until all normalized intents are drained."""
+    return bool(store.list_intents_by_state(IntentState.NORMALIZED))
 
 
 def _latest_scheduled_intent_search_at(store: StateStore) -> datetime | None:
@@ -3122,6 +3132,8 @@ def _intent_run_once_payload(
     *,
     execute: bool,
     search_ingested: bool = True,
+    refresh_sources: bool = True,
+    search_limit: int | None = None,
     run_id: str | None = None,
 ) -> dict[str, Any]:
     loaded = load_config(config_path)
@@ -3167,24 +3179,26 @@ def _intent_run_once_payload(
     )
     source_warnings: list[dict[str, str]] = []
     pending_source_cursors: dict[str, str] = {}
-    source_refresh_succeeded = True
-    try:
-        source_events = _read_configured_source_events(
-            loaded,
-            store=store,
-            cursor_updates=pending_source_cursors,
-        )
-    except Exception as exc:
-        source_events = []
-        pending_source_cursors.clear()
-        source_refresh_succeeded = False
-        source_warnings.append(
-            {
-                "source": "configured_sources",
-                "error_type": type(exc).__name__,
-                "message": _runtime_error_summary(exc),
-            }
-        )
+    source_refresh_succeeded: bool | None = None
+    source_events: list[Any] = []
+    if refresh_sources:
+        source_refresh_succeeded = True
+        try:
+            source_events = _read_configured_source_events(
+                loaded,
+                store=store,
+                cursor_updates=pending_source_cursors,
+            )
+        except Exception as exc:
+            pending_source_cursors.clear()
+            source_refresh_succeeded = False
+            source_warnings.append(
+                {
+                    "source": "configured_sources",
+                    "error_type": type(exc).__name__,
+                    "message": _runtime_error_summary(exc),
+                }
+            )
     try:
         release_resolver = (
             _build_release_download_resolver(loaded) if search_ingested else None
@@ -3207,6 +3221,9 @@ def _intent_run_once_payload(
                 policy_resolver=policy_resolver,
                 enqueue_context_resolver=enqueue_context_resolver,
                 search_ingested=search_ingested,
+                search_limit=search_limit,
+                search_source="intent-run-once",
+                run_id=run_id,
             )
         )
         for source, cursor in pending_source_cursors.items():
@@ -3252,13 +3269,6 @@ def _intent_run_once_payload(
     if effective_pause_reasons:
         payload["enqueue_blocked_reasons"] = effective_pause_reasons
     if result is not None:
-        _record_intent_search_runs(
-            store,
-            intents=result.searched,
-            run_id=run_id,
-            source="intent-run-once",
-            search_enabled=search_ingested,
-        )
         payload["intents"] = [_intent_summary(intent) for intent in result.searched]
         payload["selected"] = [_ranked_release_summary(item) for item in result.enqueue_selected]
     search_diagnostics = _search_provider_diagnostics(providers)

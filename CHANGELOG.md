@@ -4,6 +4,22 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.20.4 - 2026-08-01
+
+### Changed
+
+- Exposed `pt_scoring` through the validated atomic config-section API so live
+  enqueue thresholds can be tuned without direct host-file edits.
+
+### Fixed
+
+- Kept normalized Want List items eligible for scheduled catch-up even when a
+  daily search had already succeeded before those items were synced, draining
+  the backlog in bounded ten-item batches.
+- Reused the atomic Want List batch boundary for scheduler searches and attached
+  the scheduler run ID to search history, preventing provider failures from
+  leaving partially updated candidates or intent states.
+
 ## 0.20.3 - 2026-07-30
 
 ### Fixed

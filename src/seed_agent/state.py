@@ -2112,6 +2112,7 @@ class StateStore:
         results: list[tuple[ResourceIntent, list[RankedRelease]]],
         *,
         source: str,
+        run_id: str | None = None,
         searched_at: datetime | None = None,
     ) -> int:
         """Atomically replace candidates, intent states, and history for a search batch."""
@@ -2181,7 +2182,7 @@ class StateStore:
                 history_rows.append(
                     (
                         intent.intent_id,
-                        None,
+                        run_id,
                         source,
                         search_time,
                         "searched",

@@ -12,8 +12,11 @@ from typer.testing import CliRunner
 from seed_agent.config import DiscoveryConfig, ScoringConfig, SeedAgentConfig
 from seed_agent.models import (
     Decision,
+    IntentSource,
+    IntentState,
     LifecycleState,
     ManagedTorrent,
+    ResourceIntent,
     ScoreBreakdown,
     TorrentCandidate,
 )
@@ -973,6 +976,8 @@ def test_schedule_run_executes_single_cycle_and_emits_schedule_metadata(
         *,
         execute: bool,
         search_ingested: bool = True,
+        refresh_sources: bool = True,
+        search_limit: int | None = None,
         run_id: str | None = None,
     ) -> dict[str, object]:
         intent_seen.append((config_path_value, execute, search_ingested))
@@ -1123,6 +1128,8 @@ def test_schedule_run_can_skip_intent_cycle(
         *,
         execute: bool,
         search_ingested: bool = True,
+        refresh_sources: bool = True,
+        search_limit: int | None = None,
         run_id: str | None = None,
     ) -> dict[str, object]:
         nonlocal intent_called
@@ -1390,6 +1397,27 @@ def test_scheduled_intent_search_runs_once_after_daily_hour() -> None:
     )
 
 
+def test_pending_normalized_intent_keeps_scheduled_search_due(tmp_path: Path) -> None:
+    from seed_agent import cli
+
+    store = StateStore(tmp_path / "state.db")
+    assert cli._pending_intent_search_due(store) is False
+
+    store.upsert_intent(
+        ResourceIntent(
+            intent_id="cli:pending",
+            source=IntentSource.CLI,
+            raw_text="Inception 2010",
+            title="Inception",
+            year=2010,
+            requested_at=datetime(2026, 8, 1, tzinfo=UTC),
+            state=IntentState.NORMALIZED,
+        )
+    )
+
+    assert cli._pending_intent_search_due(store) is True
+
+
 @pytest.mark.parametrize(
     "summary",
     [
@@ -1632,6 +1660,8 @@ def test_schedule_run_refreshes_sources_but_skips_search_after_mteam_rate_limit(
         *,
         execute: bool,
         search_ingested: bool = True,
+        refresh_sources: bool = True,
+        search_limit: int | None = None,
         run_id: str | None = None,
     ) -> dict[str, object]:
         intent_search_modes.append(search_ingested)
@@ -1957,6 +1987,8 @@ def test_schedule_run_records_network_backoff_after_mteam_timeout(
         *,
         execute: bool,
         search_ingested: bool = True,
+        refresh_sources: bool = True,
+        search_limit: int | None = None,
         run_id: str | None = None,
     ) -> dict[str, object]:
         intent_search_modes.append(search_ingested)
@@ -2071,6 +2103,8 @@ def test_schedule_run_prunes_after_tracker_backfill_network_backoff(
         *,
         execute: bool,
         search_ingested: bool = True,
+        refresh_sources: bool = True,
+        search_limit: int | None = None,
         run_id: str | None = None,
     ) -> dict[str, object]:
         intent_search_modes.append(search_ingested)
@@ -2164,6 +2198,8 @@ def test_schedule_run_skips_work_while_backoff_is_active(
         *,
         execute: bool,
         search_ingested: bool = True,
+        refresh_sources: bool = True,
+        search_limit: int | None = None,
         run_id: str | None = None,
     ) -> dict[str, object]:
         intent_search_modes.append(search_ingested)
@@ -2235,6 +2271,8 @@ def test_schedule_run_skips_work_from_sqlite_tracker_backoff(
         *,
         execute: bool,
         search_ingested: bool = True,
+        refresh_sources: bool = True,
+        search_limit: int | None = None,
         run_id: str | None = None,
     ) -> dict[str, object]:
         intent_search_modes.append(search_ingested)
@@ -2470,6 +2508,8 @@ def test_schedule_run_can_execute_intent_cycle_when_explicit(
         *,
         execute: bool,
         search_ingested: bool = True,
+        refresh_sources: bool = True,
+        search_limit: int | None = None,
         run_id: str | None = None,
     ) -> dict[str, object]:
         seen_execute.append(execute)
@@ -2769,6 +2809,8 @@ scheduler:
         *,
         execute: bool,
         search_ingested: bool = True,
+        refresh_sources: bool = True,
+        search_limit: int | None = None,
         run_id: str | None = None,
     ) -> dict[str, object]:
         seen.append(("intent", execute))
@@ -3158,6 +3200,8 @@ def test_schedule_run_persists_phase_order_with_shared_run_id(
         *,
         execute: bool,
         search_ingested: bool = True,
+        refresh_sources: bool = True,
+        search_limit: int | None = None,
         run_id: str | None = None,
     ) -> dict[str, object]:
         intent_run_ids.append(run_id)

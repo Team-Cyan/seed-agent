@@ -637,6 +637,35 @@ def test_http_config_section_save_updates_safe_phase2_fields(tmp_path: Path) -> 
     assert "secret-token" not in saved
 
 
+def test_http_config_section_save_updates_pt_scoring(tmp_path: Path) -> None:
+    config_path = _write_minimal_config(tmp_path)
+
+    with _running_server(config_path) as base_url:
+        payload = _request_json(
+            base_url,
+            "POST",
+            "/api/config/sections",
+            {
+                "section": "pt_scoring",
+                "data": {
+                    "min_score_to_enqueue": 80,
+                    "weights": {
+                        "discount": 30,
+                        "leechers": 25,
+                        "seeders": 15,
+                        "left_time": 15,
+                        "size": 10,
+                        "site_history": 5,
+                    },
+                },
+            },
+        )
+
+    assert payload["section"] == "pt_scoring"
+    assert payload["data"]["min_score_to_enqueue"] == 80
+    assert "min_score_to_enqueue: 80" in config_path.read_text(encoding="utf-8")
+
+
 def test_http_wants_lists_canonical_source_rows_without_manual_add(tmp_path: Path) -> None:
     config_path = _write_minimal_config(tmp_path)
     store = StateStore(tmp_path / ".seed-agent" / "state.db")
