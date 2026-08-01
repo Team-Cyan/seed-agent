@@ -15,6 +15,7 @@ from urllib.parse import unquote, urlparse
 from seed_agent.actions.intent import (
     enqueue_intent,
     ingest_events,
+    search_intents_batch,
 )
 from seed_agent.actions.pt import (
     _discover_site_candidates,
@@ -42,7 +43,6 @@ from seed_agent.models import (
     ReleaseCandidate,
     ResourceIntent,
 )
-from seed_agent.policies.intent_ranking import rank_releases
 from seed_agent.quality_tags import matching_quality_tag_groups
 from seed_agent.search.base import SearchProvider
 from seed_agent.state import StateStore
@@ -1113,7 +1113,7 @@ async def _search_want_items(
     intent_config: SeedIntentConfig,
     search_config: SearchConfig,
 ) -> int:
-    results: list[tuple[ResourceIntent, list[RankedRelease]]] = []
+    intents: list[ResourceIntent] = []
     for item in items:
         intent_id = str(item.get("intent_id") or "")
         if not intent_id:
@@ -1122,12 +1122,16 @@ async def _search_want_items(
         if row is None:
             continue
         intent = ResourceIntent.model_validate(json.loads(str(row["normalized_json"])))
-        releases: list[ReleaseCandidate] = []
-        for provider in providers:
-            releases.extend(await provider.search(intent))
-        ranked = rank_releases(intent, releases, intent_config, search_config)
-        results.append((intent, ranked))
-    return store.save_want_search_batch(results, source="web")
+        intents.append(intent)
+    batch = await search_intents_batch(
+        intents,
+        store,
+        providers,
+        intent_config,
+        search_config,
+        source="web",
+    )
+    return batch.committed
 
 
 def _record_want_search_backoff_skips(

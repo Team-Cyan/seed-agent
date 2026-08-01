@@ -242,6 +242,9 @@ by completion period, and unfinished work is ordered by current priority.
     persists all candidate replacements, intent states, and search history in
     one atomic SQLite transaction with failure rollback and concurrent terminal
     intent protection.
+  - Scheduled Want List search now also uses that atomic batch boundary and
+    keeps late-added normalized intents eligible after the daily success marker,
+    draining catch-up work in bounded ten-intent cycles.
 
 - Completed 2026-07 - Review roadmap execution
   - `site_history_score` now has a real state-derived feedback loop. The state

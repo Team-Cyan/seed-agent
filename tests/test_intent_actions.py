@@ -509,6 +509,88 @@ async def test_run_intent_once_searches_canonical_duplicate_only_once(
 
 
 @pytest.mark.asyncio
+async def test_run_intent_once_searches_preexisting_normalized_intents_in_batches(
+    tmp_path: Path,
+) -> None:
+    store = StateStore(tmp_path / "state.db")
+    first, _ = add_intent("Inception 2010", store, requested_at=REQUESTED_AT)
+    second, _ = add_intent("Arrival 2016", store, requested_at=REQUESTED_AT)
+
+    class EmptyProvider:
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+
+        async def search(self, intent):
+            self.calls.append(intent.intent_id)
+            return []
+
+    provider = EmptyProvider()
+    result = await run_intent_once(
+        None,
+        store,
+        [provider],
+        IntentConfig(),
+        SearchConfig(),
+        _UnusedDownloader(),
+        _policy(),
+        execute=False,
+        source_events=[],
+        search_limit=1,
+        run_id="sched-test",
+    )
+
+    assert [intent.intent_id for intent in result.searched] == [first.intent_id]
+    assert provider.calls == [first.intent_id]
+    assert (
+        store.get_intent(first.intent_id)["state"]
+        == IntentState.CONFIRMATION_REQUIRED.value
+    )
+    assert store.get_intent(second.intent_id)["state"] == IntentState.NORMALIZED.value
+    history = store.list_want_search_runs(intent_id=first.intent_id)
+    assert history[0]["run_id"] == "sched-test"
+
+
+@pytest.mark.asyncio
+async def test_run_intent_once_does_not_persist_partial_search_batch(
+    tmp_path: Path,
+) -> None:
+    store = StateStore(tmp_path / "state.db")
+    first, _ = add_intent("Inception 2010", store, requested_at=REQUESTED_AT)
+    second, _ = add_intent("Arrival 2016", store, requested_at=REQUESTED_AT)
+
+    class FailingProvider:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def search(self, intent):
+            self.calls += 1
+            if self.calls == 2:
+                raise RuntimeError("injected provider failure")
+            return []
+
+    with pytest.raises(RuntimeError, match="injected provider failure"):
+        await run_intent_once(
+            None,
+            store,
+            [FailingProvider()],
+            IntentConfig(),
+            SearchConfig(),
+            _UnusedDownloader(),
+            _policy(),
+            execute=False,
+            source_events=[],
+            run_id="sched-test",
+        )
+
+    assert store.get_intent(first.intent_id)["state"] == IntentState.NORMALIZED.value
+    assert store.get_intent(second.intent_id)["state"] == IntentState.NORMALIZED.value
+    assert store.list_release_candidates(first.intent_id) == []
+    assert store.list_release_candidates(second.intent_id) == []
+    assert store.list_want_search_runs(intent_id=first.intent_id) == []
+    assert store.list_want_search_runs(intent_id=second.intent_id) == []
+
+
+@pytest.mark.asyncio
 async def test_run_intent_once_does_not_merge_from_release_metadata(
     tmp_path: Path,
 ) -> None:

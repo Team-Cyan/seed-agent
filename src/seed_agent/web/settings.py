@@ -27,6 +27,7 @@ from seed_agent.models import safe_url_identity
 CONFIG_SECTION_NAMES = {
     "download_client",
     "pt_filters",
+    "pt_scoring",
     "seed_cleanup",
     "want_decision",
     "release_preferences",
@@ -37,6 +38,7 @@ CONFIG_SECTION_NAMES = {
 ConfigSectionName = Literal[
     "download_client",
     "pt_filters",
+    "pt_scoring",
     "seed_cleanup",
     "want_decision",
     "release_preferences",

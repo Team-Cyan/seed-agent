@@ -46,6 +46,12 @@ class IntentRunResult:
     decisions: list[Decision] = field(default_factory=list)
 
 
+@dataclass(frozen=True)
+class IntentSearchBatchResult:
+    results: list[tuple[ResourceIntent, list[RankedRelease]]] = field(default_factory=list)
+    committed: int = 0
+
+
 def add_intent(
     raw_text: str,
     store: StateStore,
@@ -403,41 +409,36 @@ async def run_intent_once(
     policy_resolver: IntentPolicyResolver | None = None,
     enqueue_context_resolver: IntentEnqueueContextResolver | None = None,
     search_ingested: bool = True,
+    search_limit: int | None = None,
+    search_source: str = "intent-run-once",
+    run_id: str | None = None,
 ) -> IntentRunResult:
     ingested_pairs = ingest_inbox(inbox_path, store) if inbox_path is not None else []
     ingested_pairs.extend(ingest_events(source_events, store))
     ingested = [item[0] for item in ingested_pairs]
     decisions = [item[1] for item in ingested_pairs]
-    pending_search = (
-        [
-            intent
-            for intent in _dedupe_intents_by_id(ingested)
-            if intent.state not in {IntentState.ENQUEUED, IntentState.REJECTED}
-        ]
-        if search_ingested
-        else []
-    )
+    pending_search = _normalized_intents(store) if search_ingested else []
+    if search_limit is not None:
+        pending_search = pending_search[: max(search_limit, 0)]
     searched: list[ResourceIntent] = []
     ranked_releases: list[RankedRelease] = []
     enqueue_selected: list[RankedRelease] = []
-    provider_list = list(providers)
-    for intent in pending_search:
-        searched_intent, _, search_decision = await search_intent(
-            intent.intent_id,
-            store,
-            provider_list,
-        )
+    batch = await search_intents_batch(
+        pending_search,
+        store,
+        providers,
+        intent_config,
+        search_config,
+        source=search_source,
+        run_id=run_id,
+    )
+    for intent, ranked in batch.results:
+        next_state = _ranked_state(ranked)
+        searched_intent = intent.model_copy(update={"state": next_state})
         searched.append(searched_intent)
-        decisions.append(search_decision)
-
-        _, ranked, rank_decision = rank_intent(
-            searched_intent.intent_id,
-            store,
-            intent_config,
-            search_config,
-        )
+        decisions.append(_search_decision(intent, ranked))
         ranked_releases.extend(ranked)
-        decisions.append(rank_decision)
+        decisions.append(_rank_decision(intent, ranked, next_state))
 
         if ranked and ranked[0].accepted and not ranked[0].confirmation_required:
             _, selected, enqueue_decisions = await enqueue_intent(
@@ -463,6 +464,40 @@ async def run_intent_once(
         enqueue_selected=enqueue_selected,
         decisions=decisions,
     )
+
+
+async def search_intents_batch(
+    intents: Iterable[ResourceIntent],
+    store: StateStore,
+    providers: Iterable[SearchProvider],
+    intent_config: IntentConfig,
+    search_config: SearchConfig,
+    *,
+    source: str,
+    run_id: str | None = None,
+) -> IntentSearchBatchResult:
+    """Search and rank a batch before atomically replacing its persisted state."""
+    results: list[tuple[ResourceIntent, list[RankedRelease]]] = []
+    provider_list = list(providers)
+    for intent in _dedupe_intents_by_id(intents):
+        releases: list[ReleaseCandidate] = []
+        for provider in provider_list:
+            releases.extend(await provider.search(intent))
+        ranked = rank_releases(intent, releases, intent_config, search_config)
+        results.append((intent, ranked))
+    committed = store.save_want_search_batch(
+        results,
+        source=source,
+        run_id=run_id,
+    )
+    return IntentSearchBatchResult(results=results, committed=committed)
+
+
+def _normalized_intents(store: StateStore) -> list[ResourceIntent]:
+    return [
+        ResourceIntent.model_validate(json.loads(str(row["normalized_json"])))
+        for row in store.list_intents_by_state(IntentState.NORMALIZED)
+    ]
 
 
 def _dedupe_intents_by_id(intents: Iterable[ResourceIntent]) -> list[ResourceIntent]:
