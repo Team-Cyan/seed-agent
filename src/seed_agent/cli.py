@@ -5352,9 +5352,13 @@ def _build_intent_enqueue_context_resolver(
     )
     reserved_pool_bytes: dict[str, int] = {}
     reserved_download_bytes = 0
-    reserved_active_downloads = 0
+    reserved_seed_downloads = 0
     existing_download_bytes = sum(_download_liability_bytes(item) for item in torrents)
-    existing_active_downloads = int(_runtime_activity_summary(torrents)["active_download_count"])
+    seed_category = config.download_client.default_category
+    seed_torrents = [item for item in torrents if item.category == seed_category]
+    existing_seed_downloads = int(
+        _runtime_activity_summary(seed_torrents)["active_download_count"]
+    )
     disk_state = _disk_headroom_state(config, downloader_status, torrents)
     max_active_downloads = config.pt_filters.max_active_downloads
     max_download_bytes = (
@@ -5368,7 +5372,7 @@ def _build_intent_enqueue_context_resolver(
         policy: CategoryPolicyConfig,
         score: ScoreBreakdown,
     ) -> tuple[bool, PoolUsage | None, list[str]]:
-        nonlocal reserved_active_downloads, reserved_download_bytes
+        nonlocal reserved_seed_downloads, reserved_download_bytes
         del intent
         candidate_bytes = max(int(score.candidate.size_bytes), 0)
         base_pool_usage = pool_usage_by_name.get(policy.budget_pool)
@@ -5392,8 +5396,12 @@ def _build_intent_enqueue_context_resolver(
                 f"{round((pool_usage.size_bytes + candidate_bytes) / 1024**4, 4)} TiB "
                 f"> max {round(pool_usage.max_size_bytes / 1024**4, 4)} TiB"
             )
-        projected_active_downloads = existing_active_downloads + reserved_active_downloads
-        if max_active_downloads is not None and projected_active_downloads >= max_active_downloads:
+        projected_active_downloads = existing_seed_downloads + reserved_seed_downloads
+        if (
+            policy.name == seed_category
+            and max_active_downloads is not None
+            and projected_active_downloads >= max_active_downloads
+        ):
             reasons.append(
                 f"active downloads {projected_active_downloads} >= max {max_active_downloads}"
             )
@@ -5414,7 +5422,8 @@ def _build_intent_enqueue_context_resolver(
         if not reasons:
             reserved_pool_bytes[policy.budget_pool] = reserved_for_pool + candidate_bytes
             reserved_download_bytes += candidate_bytes
-            reserved_active_downloads += 1
+            if policy.name == seed_category:
+                reserved_seed_downloads += 1
         return bool(reasons), pool_usage, reasons
 
     return resolve
@@ -5484,7 +5493,12 @@ def _enqueue_candidate_batches(
     )
     planned_left_bytes = sum(_download_liability_bytes(torrent) for torrent in torrents)
     planned_new_bytes = 0
-    runtime = _runtime_activity_summary(torrents)
+    seed_torrents = [
+        torrent
+        for torrent in torrents
+        if torrent.category == config.download_client.default_category
+    ]
+    runtime = _runtime_activity_summary(seed_torrents)
     planned_active_downloads = int(runtime["active_download_count"])
     max_active_downloads = config.pt_filters.max_active_downloads
     planned_pool_new_bytes = 0
@@ -5625,7 +5639,12 @@ def _enqueue_pause_reasons(
             f"({round(pool_usage.size_bytes / 1024**4, 2)} / "
             f"{round(pool_usage.max_size_bytes / 1024**4, 2)} TiB)"
         )
-    runtime = _runtime_activity_summary(torrents)
+    seed_torrents = [
+        torrent
+        for torrent in torrents
+        if torrent.category == config.download_client.default_category
+    ]
+    runtime = _runtime_activity_summary(seed_torrents)
     max_active_downloads = config.pt_filters.max_active_downloads
     if (
         max_active_downloads is not None

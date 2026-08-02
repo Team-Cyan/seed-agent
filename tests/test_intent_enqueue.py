@@ -266,7 +266,7 @@ def test_intent_enqueue_dry_run_reports_runtime_activity_when_qb_visible(
     assert payload["enqueue_paused_by_pool_policy"] is False
 
 
-def test_intent_enqueue_dry_run_reports_pause_reasons_when_runtime_gate_exceeded(
+def test_intent_enqueue_media_ignores_seed_active_download_gate(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -308,9 +308,10 @@ def test_intent_enqueue_dry_run_reports_pause_reasons_when_runtime_gate_exceeded
     assert result.exit_code == 0
     payload = _json_output(result)
     assert payload["enqueue_paused_by_pool_policy"] is False
-    assert payload["enqueue_blocked_by_runtime_gate"] is True
-    assert payload["enqueue_blocked_reasons"] == ["active downloads 1 >= max 0"]
-    assert payload["decisions"][0]["action"] == "qb.enqueue.rejected"
+    assert payload["enqueue_blocked_by_runtime_gate"] is False
+    assert "enqueue_blocked_reasons" not in payload
+    assert payload["decisions"][0]["action"] == "qb.enqueue"
+    assert payload["decisions"][0]["new_state"]["category"] == "movie"
 
 
 def test_intent_enqueue_execute_can_select_release_id_and_updates_state(

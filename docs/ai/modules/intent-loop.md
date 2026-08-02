@@ -53,8 +53,12 @@ Convert human requests into search/rank/reject/enqueue workflows.
 - keep Want List acquisition independent from the PT upload-farming
   `pt_filters.allow_non_free` switch. A requested work may use a paid release,
   while PT discovery remains free-only when that switch is false,
-- apply the selected movie/TV/seed category policy, shared pool size, active
-  slot, amount-left, and disk-reserve gates before enqueue. Reserve each
+- keep PT upload-farming `max_active_downloads` scoped to the configured
+  default `seed` category; movie, TV, and anime acquisition must not be blocked
+  by seed-only active slots,
+- apply the selected movie/TV/seed category policy, shared pool size,
+  amount-left, and disk-reserve gates before enqueue, plus the active-slot gate
+  for seed-category candidates. Reserve each
   accepted candidate in the same batch so later candidates cannot reuse its
   projected headroom,
 - keep the operator-facing release score uncapped so strong candidates remain

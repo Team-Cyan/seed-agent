@@ -1852,7 +1852,7 @@ def test_http_want_enqueue_already_enqueued_is_idempotent_without_qb(
     assert payload["decisions"][0]["reason"] == "already enqueued"
 
 
-def test_http_want_enqueue_runtime_gate_reports_warning_without_qb_add(
+def test_http_want_enqueue_media_ignores_seed_active_download_gate(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1863,6 +1863,22 @@ def test_http_want_enqueue_runtime_gate_reports_warning_without_qb_add(
         config_path.read_text(encoding="utf-8").replace(
             "  allow_hr: false",
             "  allow_hr: false\n  max_active_downloads: 0",
+        ).replace(
+            "      tags: [seed-agent]\n  budget_pools:",
+            "      tags: [seed-agent]\n"
+            "    - name: movie\n"
+            "      mode: add_only\n"
+            "      budget_pool: media\n"
+            "      delete_enabled: false\n"
+            "      over_budget_behavior: reject\n"
+            "      tags: [seed-agent, movie]\n"
+            "  budget_pools:",
+        ).replace(
+            "    - name: downloads\n      max_size_tib: 1",
+            "    - name: downloads\n"
+            "      max_size_tib: 1\n"
+            "    - name: media\n"
+            "      max_size_tib: 1",
         ),
         encoding="utf-8",
     )
@@ -1927,10 +1943,11 @@ def test_http_want_enqueue_runtime_gate_reports_warning_without_qb_add(
             {"release_id": release_id},
         )
 
-    assert payload["outcome"] == "rejected"
-    assert payload["enqueued"] == 0
-    assert payload["status"] == [{"level": "warning", "message": "入队被运行时安全门禁拒绝"}]
-    assert downloader.add_calls == 0
+    assert payload["outcome"] == "enqueued"
+    assert payload["enqueued"] == 1
+    assert payload["status"] == [{"level": "ok", "message": "已加入 qB"}]
+    assert payload["decisions"][0]["new_state"]["category"] == "movie"
+    assert downloader.add_calls == 1
 
 
 def test_http_want_enqueue_parallel_request_reports_in_progress(
