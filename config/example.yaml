@@ -77,8 +77,9 @@ pt_filters:
   # for upload-farming profiles that intentionally allow very large hot packs,
   # or lower it for space-saving profiles.
   size_partial_max_gb: 150
-  # Optional conservative runtime gates. When reached, automatic enqueue is
-  # rejected before the downloader is called.
+  # Optional conservative runtime gates. max_active_downloads applies only to
+  # the default seed category; media acquisition does not consume seed slots.
+  # When reached, seed enqueue is rejected before the downloader is called.
   # max_active_downloads: 3
   # max_total_amount_left_gb: 150
   # min_free_disk_gb keeps this much downloader-reported free disk space

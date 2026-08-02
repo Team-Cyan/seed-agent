@@ -247,6 +247,29 @@ def _managed_incomplete_torrent(**overrides: object) -> ManagedTorrent:
     return _managed_torrent(**data)
 
 
+def test_seed_active_download_gate_ignores_media_category_torrents() -> None:
+    from seed_agent import cli
+
+    config = _config()
+    config = config.model_copy(
+        update={
+            "pt_filters": config.pt_filters.model_copy(update={"max_active_downloads": 1})
+        }
+    )
+    media_download = _managed_incomplete_torrent(category="movie")
+    candidate = _scored()
+
+    batches = cli._enqueue_candidate_batches(
+        [candidate],
+        config,
+        [media_download],
+        PoolUsage(pool_name="downloads", size_bytes=0, max_size_bytes=10 * 1024**4),
+        None,
+    )
+
+    assert batches == [([candidate], False, [])]
+
+
 def test_qb_only_backfill_targets_prioritize_unknown_incomplete_risk(
     tmp_path: Path,
 ) -> None:

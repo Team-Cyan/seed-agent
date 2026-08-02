@@ -4,6 +4,16 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.20.5 - 2026-08-02
+
+### Fixed
+
+- Scoped `pt_filters.max_active_downloads` to the configured default `seed`
+  category so upload-farming headroom no longer blocks Want List movie, TV, or
+  anime downloads. Media acquisition remains independent from PT FREE-only
+  filtering while retaining its selected pool, remaining-download, and disk
+  safety checks.
+
 ## 0.20.4 - 2026-08-01
 
 ### Changed

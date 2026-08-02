@@ -21,6 +21,9 @@ Use this guide when tuning tracker candidate selection from live evidence.
   - downloader free-disk reserve through `pt_filters.min_free_disk_gb`.
 - Keep FREE/2xFREE, H&R protection, dry-run first, and mutable-category cleanup
   boundaries unless the operator explicitly changes them.
+- Treat `pt_filters.max_active_downloads` as upload-farming headroom for the
+  configured default `seed` category. Media acquisition categories do not
+  consume or inherit that seed-only slot limit.
 
 ## Recommended Config Examples
 

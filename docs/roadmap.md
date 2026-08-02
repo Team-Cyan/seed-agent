@@ -438,6 +438,12 @@ by completion period, and unfinished work is ordered by current priority.
     incomplete-download disk reclaim accounting, and cumulative metrics now
     preserve their intended operational semantics.
 
+- Completed 2026-08 - Seed-only active download headroom
+  - `pt_filters.max_active_downloads` counts and limits only the configured
+    default `seed` category. Want List movie, TV, and anime acquisition remains
+    independent from upload-farming slots while retaining its selected pool
+    and disk safety checks.
+
 - Next P0 - Add scheduler and Web preview integration coverage
   - Add fake downloader/provider fixtures that can run a scheduler cycle without
     touching qBittorrent or a tracker.
