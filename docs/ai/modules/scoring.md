@@ -43,12 +43,28 @@ Score discovered torrents or ranked releases using explicit policy weights and e
   contribution.
 - `pt_filters.min_seeders` and `pt_filters.max_leechers` are hard bounds when
   configured; they protect the seed pool from dead or overly crowded candidates.
+  `max_leechers=0` disables the upper bound.
 - `pt_filters.leecher_score_full_at_multiplier` is a soft demand-shaping knob.
   The default `1.0` preserves the old behavior where `min_leechers` gets full
   leecher credit. Values above `1.0` make candidates ramp from partial credit at
   `min_leechers` to full credit at `min_leechers * multiplier`.
 - `pt_filters.target_seed_leecher_ratio` is a soft seed-pressure score input,
   computed as `seeders / max(leechers, 1)`.
+- `pt_filters.max_seed_leecher_ratio` is an optional hard competition ceiling.
+  It rejects only poor ratios, so large torrents with high absolute seeder and
+  leecher counts remain eligible when proportional demand is strong. Set it to
+  `0` or `null` to disable the ceiling.
+- Candidate age is an independent `freshness` score component. Candidates at
+  or below `freshness_full_score_hours` receive full credit, then taper to zero
+  at `freshness_zero_score_hours`; missing or older timestamps are not hard
+  rejected.
+- `freshness_zero_score_hours=0` disables age decay and grants full freshness
+  credit. `weights.freshness=0` also disables its ranking influence when the
+  other weights are rebalanced to keep the total at 100.
+- Execute-mode M-Team enqueue refreshes the torrent detail and re-scores current
+  seeders/leechers, discount, and free-window state before requesting a download
+  token. The accepted values are persisted separately as an immutable enqueue
+  snapshot for later 2/8/24-hour outcome comparisons.
 - `pt_filters.size_partial_max_gb` is the soft size-credit ceiling after
   `preferred_size_max_gb`. Raise it for upload-farming strategies that allow
   very large hot packs; lower it for space-saving strategies.

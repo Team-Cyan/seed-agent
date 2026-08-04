@@ -444,6 +444,18 @@ by completion period, and unfinished work is ordered by current priority.
     independent from upload-farming slots while retaining its selected pool
     and disk safety checks.
 
+- Completed 2026-08 - Demand-quality admission and enqueue evidence
+  - PT scoring supports a hard seeders/leechers competition ceiling while
+    preserving large high-demand candidates and adds publication freshness as
+    an explainable weighted signal.
+  - M-Team execute preflight re-scores refreshed swarm data before token
+    generation, exact duplicate titles are suppressed against the live qB pool
+    and within each candidate batch, and immutable enqueue snapshots preserve
+    the accepted swarm ratio, candidate age, score, and hash.
+  - SQLite WAL mode is selected during schema initialization instead of every
+    read connection, and state/ops Web reads use bounded read paths that return
+    JSON errors instead of dropping the HTTP connection.
+
 - Next P0 - Add scheduler and Web preview integration coverage
   - Add fake downloader/provider fixtures that can run a scheduler cycle without
     touching qBittorrent or a tracker.

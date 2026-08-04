@@ -17,8 +17,10 @@ Persist local lifecycle knowledge and durable decision evidence.
 - persist release candidates and enqueue metadata,
 - persist candidate `free_window_expires_at` for execute-mode enqueue when a
   finite free window is known,
-- persist enqueue-time candidate snapshots such as size, seeders/leechers,
-  discount, left time, and score reasons so later qB outcomes can be explained,
+- persist an immutable `candidate_enqueue_snapshots` row with refreshed size,
+  seeders/leechers ratio, publication age, score, reasons, hash, and enqueue time
+  so later 2/8/24-hour qB outcomes can be compared against the actual enqueue
+  decision rather than a later overwritten candidate row,
 - persist scheduler runs, scheduler phase events, tracker backoffs, tracker API
   events, and Want List search runs so operator reports and Web ops surfaces can
   explain recent unattended behavior,

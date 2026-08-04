@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import asdict, dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -516,6 +517,9 @@ def _runtime_outcomes(
         "by_candidate_score": _evidence_outcome_buckets(
             evidence_summaries, _score_bucket_from_evidence
         ),
+        "by_enqueue_age": _evidence_outcome_buckets(
+            evidence_summaries, _enqueue_age_bucket_from_evidence
+        ),
     }
 
 
@@ -597,6 +601,26 @@ def _size_bucket_from_evidence(evidence: dict[str, Any]) -> str:
 
 def _score_bucket_from_evidence(evidence: dict[str, Any]) -> str:
     return _score_value_bucket(int(evidence.get("score") or 0))
+
+
+def _enqueue_age_bucket_from_evidence(evidence: dict[str, Any]) -> str:
+    raw_enqueued_at = evidence.get("enqueued_at")
+    if not isinstance(raw_enqueued_at, str) or not raw_enqueued_at:
+        return "unknown"
+    try:
+        enqueued_at = datetime.fromisoformat(raw_enqueued_at)
+    except ValueError:
+        return "unknown"
+    if enqueued_at.tzinfo is None:
+        enqueued_at = enqueued_at.replace(tzinfo=UTC)
+    age_hours = max(0.0, (datetime.now(UTC) - enqueued_at).total_seconds() / 3600)
+    if age_hours < 2:
+        return "0-2h"
+    if age_hours < 8:
+        return "2-8h"
+    if age_hours < 24:
+        return "8-24h"
+    return "24h+"
 
 
 def _count_bucket(value: int) -> str:

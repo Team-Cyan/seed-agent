@@ -274,6 +274,43 @@ def test_state_store_persists_candidate_snapshot_fields(tmp_path: Path) -> None:
     assert linked[0]["score_reasons"] == ["discount 30.0", "leechers 25.0"]
 
 
+def test_state_store_preserves_immutable_enqueue_snapshot(tmp_path: Path) -> None:
+    store = StateStore(tmp_path / "state.sqlite3")
+    store.record_candidate_enqueue_snapshot(
+        stable_id="demo:snapshot",
+        torrent_hash="hash-one",
+        seeders=20,
+        leechers=10,
+        size_bytes=40 * 1024**3,
+        published_at="2026-08-04T01:00:00+00:00",
+        candidate_age_minutes=90,
+        score=88,
+        score_reasons=["enqueue preflight accepted"],
+    )
+    store.record_candidate_enqueue_snapshot(
+        stable_id="demo:snapshot",
+        torrent_hash="hash-two",
+        seeders=200,
+        leechers=1,
+        size_bytes=50 * 1024**3,
+        published_at=None,
+        candidate_age_minutes=None,
+        score=1,
+        score_reasons=["later overwrite"],
+    )
+
+    snapshot = store.get_candidate_enqueue_snapshot("demo:snapshot")
+
+    assert snapshot is not None
+    assert snapshot["torrent_hash"] == "hash-one"
+    assert snapshot["seeders"] == 20
+    assert snapshot["leechers"] == 10
+    assert snapshot["seed_leecher_ratio"] == 2.0
+    assert snapshot["candidate_age_minutes"] == 90
+    assert snapshot["score"] == 88
+    assert snapshot["score_reasons"] == ["enqueue preflight accepted"]
+
+
 def test_state_store_preserves_candidate_snapshot_when_unset(tmp_path: Path) -> None:
     store = StateStore(tmp_path / "state.sqlite3")
 

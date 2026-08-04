@@ -488,6 +488,36 @@ def test_http_ops_payload_exposes_scheduler_and_tracker_state(tmp_path: Path) ->
     assert payload["want_search_runs"][0]["intent_id"] == "intent-web"
 
 
+@pytest.mark.parametrize(
+    ("path", "payload_name", "expected_error"),
+    [
+        ("/api/ops", "_ops_payload", "operations database unavailable"),
+        ("/api/state/summary", "_state_summary_payload", "state database unavailable"),
+    ],
+)
+def test_http_state_reads_return_json_when_payload_build_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    path: str,
+    payload_name: str,
+    expected_error: str,
+) -> None:
+    from seed_agent.web import app as web_app
+
+    config_path = _write_minimal_config(tmp_path)
+
+    def fail(*args: object, **kwargs: object) -> dict[str, Any]:
+        raise RuntimeError("simulated state read failure")
+
+    monkeypatch.setattr(web_app, payload_name, fail)
+
+    with _running_server(config_path) as base_url:
+        payload = _request_json(base_url, "GET", path, expected_status=503)
+
+    assert payload["error"] == expected_error
+    assert "simulated state read failure" in payload["detail"]
+
+
 def test_http_logs_merges_durable_events_and_redacts_secrets(tmp_path: Path) -> None:
     config_path = _write_minimal_config(tmp_path)
     store = StateStore(tmp_path / ".seed-agent" / "state.db")

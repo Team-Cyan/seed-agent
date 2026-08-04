@@ -270,6 +270,35 @@ def test_seed_active_download_gate_ignores_media_category_torrents() -> None:
     assert batches == [([candidate], False, [])]
 
 
+def test_zero_runtime_upper_limits_are_disabled() -> None:
+    from seed_agent import cli
+
+    config = _config()
+    config = config.model_copy(
+        update={
+            "pt_filters": config.pt_filters.model_copy(
+                update={
+                    "max_active_downloads": 0,
+                    "max_total_amount_left_gb": 0,
+                }
+            )
+        }
+    )
+    active_seed = _managed_incomplete_torrent(
+        category="seed",
+        metadata={"amount_left_bytes": 500 * 1024**3, "dlspeed_bps": 1024},
+    )
+
+    reasons = cli._enqueue_pause_reasons(
+        config,
+        [active_seed],
+        pool_usage=None,
+        downloader_status=None,
+    )
+
+    assert reasons == []
+
+
 def test_qb_only_backfill_targets_prioritize_unknown_incomplete_risk(
     tmp_path: Path,
 ) -> None:
@@ -3431,6 +3460,37 @@ def test_execute_enqueue_persists_candidate_free_window_expiry(
     row = StateStore(state_path).get_candidate(candidate.stable_id)
     assert row is not None
     assert row["free_window_expires_at"] is not None
+    snapshot = StateStore(state_path).get_candidate_enqueue_snapshot(candidate.stable_id)
+    assert snapshot is not None
+    assert snapshot["torrent_hash"] == "abcd1234"
+    assert snapshot["seeders"] == candidate.seeders
+    assert snapshot["leechers"] == candidate.leechers
+
+
+def test_duplicate_candidate_titles_keep_strongest_candidate() -> None:
+    from seed_agent import cli
+
+    weaker = _scored(
+        candidate=_candidate(
+            source_url="https://tracker.example/details.php?id=weak",
+            seeders=100,
+            leechers=30,
+        ),
+        score=85,
+    )
+    stronger = _scored(
+        candidate=_candidate(
+            source_url="https://tracker.example/details.php?id=strong",
+            seeders=30,
+            leechers=60,
+        ),
+        score=92,
+    )
+
+    filtered, skipped = cli._filter_duplicate_candidate_titles([weaker, stronger])
+
+    assert skipped == 1
+    assert filtered == [stronger]
 
 
 def test_run_once_persists_candidate_snapshot_fields(

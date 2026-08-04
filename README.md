@@ -167,6 +167,8 @@ scheduler fields through environment variables.
 
 See:
 
+- [Configuration Guide](docs/operations/configuration-guide.md)
+- [Config And State Field Inventory](docs/operations/config-and-state-fields.md)
 - [Docker Compose User Guide](docs/operations/docker-compose-user-guide.md)
 - [Docker Scheduling](docs/operations/docker-scheduling.md)
 - [Compose Example](deploy/docker-compose.example.yml)
@@ -265,6 +267,8 @@ These guards help avoid:
 ## Documentation
 
 - [Docs Index](docs/README.md)
+- [Configuration Guide](docs/operations/configuration-guide.md)
+- [Config And State Field Inventory](docs/operations/config-and-state-fields.md)
 - [Architecture And Supported Features](docs/architecture.md)
 - [Roadmap](docs/roadmap.md)
 - [Docker Compose User Guide](docs/operations/docker-compose-user-guide.md)

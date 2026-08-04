@@ -22,7 +22,10 @@ pt_filters:
   min_seeders: 1
   min_leechers: 5
   leecher_score_full_at_multiplier: 3.0
-  target_seed_leecher_ratio: 30
+  target_seed_leecher_ratio: 2
+  max_seed_leecher_ratio: 10
+  freshness_full_score_hours: 6
+  freshness_zero_score_hours: 48
   max_size_gb: null
   preferred_size_min_gb: 2
   preferred_size_max_gb: 120
@@ -33,11 +36,12 @@ pt_filters:
   allow_hr: false
 
 pt_scoring:
-  min_score_to_enqueue: 68
+  min_score_to_enqueue: 80
   weights:
-    discount: 25
-    leechers: 35
-    seeders: 15
-    left_time: 10
-    size: 10
-    site_history: 5
+    discount: 20
+    leechers: 30
+    seeders: 25
+    freshness: 15
+    left_time: 5
+    size: 3
+    site_history: 2

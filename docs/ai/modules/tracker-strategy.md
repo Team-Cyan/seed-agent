@@ -10,6 +10,9 @@ Use this guide when tuning tracker candidate selection from live evidence.
   - `pt_filters.min_leechers`,
   - `pt_filters.leecher_score_full_at_multiplier`,
   - `pt_filters.target_seed_leecher_ratio`,
+  - `pt_filters.max_seed_leecher_ratio`,
+  - `pt_filters.freshness_full_score_hours`,
+  - `pt_filters.freshness_zero_score_hours`,
   - `pt_filters.max_size_gb`,
   - `pt_filters.preferred_size_min_gb`,
   - `pt_filters.preferred_size_max_gb`,
@@ -67,7 +70,12 @@ For upload farming:
 
 - sort M-Team API discovery by `leechers desc`,
 - increase `max_pages`,
-- raise `target_seed_leecher_ratio`,
+- lower `target_seed_leecher_ratio` to favor stronger live demand and use
+  `max_seed_leecher_ratio` as the separate hard competition ceiling,
+- give `leechers`, `seeders`, and `freshness` meaningful score weight,
+- keep the freshness window short enough to distinguish newly published
+  candidates while retaining `freshness_zero_score_hours=0` as the explicit
+  disable sentinel,
 - raise `size_partial_max_gb`,
 - remove or raise `max_size_gb`,
 - increase leecher weight,

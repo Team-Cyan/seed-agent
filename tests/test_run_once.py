@@ -918,11 +918,11 @@ def test_run_once_dry_run_pauses_enqueue_when_runtime_download_gate_exceeded(
     config_path = _config_file(
         tmp_path,
         secret_ref="local/secrets/qb.yaml",
-        discovery_extra="  max_active_downloads: 0\n",
+        discovery_extra="  max_active_downloads: 1\n",
     )
     config = _config(
         secret_ref="local/secrets/qb.yaml",
-        discovery_overrides={"max_active_downloads": 0},
+        discovery_overrides={"max_active_downloads": 1},
     )
 
     async def fake_discover_candidates(config: SeedAgentConfig):
@@ -943,7 +943,7 @@ def test_run_once_dry_run_pauses_enqueue_when_runtime_download_gate_exceeded(
     ):
         assert paused is True
         assert pool_usage is not None
-        assert pause_reasons == ["active downloads 1 >= max 0"]
+        assert pause_reasons == ["active downloads 1 >= max 1"]
         return []
 
     class FakeDownloader:
@@ -987,7 +987,7 @@ def test_run_once_dry_run_pauses_enqueue_when_runtime_download_gate_exceeded(
     payload = _json_output(result)
     assert payload["enqueue_paused_by_pool_policy"] is False
     assert payload["enqueue_blocked_by_runtime_gate"] is True
-    assert "active downloads 1 >= max 0" in payload["enqueue_blocked_reasons"]
+    assert "active downloads 1 >= max 1" in payload["enqueue_blocked_reasons"]
     assert payload["decisions"] == []
 
 
@@ -1478,11 +1478,11 @@ def test_run_once_dry_run_counts_stalled_downloads_for_runtime_gate(
     config_path = _config_file(
         tmp_path,
         secret_ref="local/secrets/qb.yaml",
-        discovery_extra="  max_active_downloads: 0\n",
+        discovery_extra="  max_active_downloads: 1\n",
     )
     config = _config(
         secret_ref="local/secrets/qb.yaml",
-        discovery_overrides={"max_active_downloads": 0},
+        discovery_overrides={"max_active_downloads": 1},
     )
 
     async def fake_discover_candidates(config: SeedAgentConfig):
@@ -1502,7 +1502,7 @@ def test_run_once_dry_run_counts_stalled_downloads_for_runtime_gate(
         pause_reasons=None,
     ):
         assert paused is True
-        assert pause_reasons == ["active downloads 1 >= max 0"]
+        assert pause_reasons == ["active downloads 1 >= max 1"]
         return []
 
     class FakeDownloader:
@@ -1548,4 +1548,4 @@ def test_run_once_dry_run_counts_stalled_downloads_for_runtime_gate(
     assert payload["runtime_activity"]["stalled_download_count"] == 1
     assert payload["enqueue_paused_by_pool_policy"] is False
     assert payload["enqueue_blocked_by_runtime_gate"] is True
-    assert payload["enqueue_blocked_reasons"] == ["active downloads 1 >= max 0"]
+    assert payload["enqueue_blocked_reasons"] == ["active downloads 1 >= max 1"]

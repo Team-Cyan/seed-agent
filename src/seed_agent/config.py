@@ -176,6 +176,9 @@ class DiscoveryConfig(BaseModel):
     min_left_time_minutes: int
     min_leechers: int
     target_seed_leecher_ratio: float = 16.0
+    max_seed_leecher_ratio: float | None = None
+    freshness_full_score_hours: float = 6.0
+    freshness_zero_score_hours: float = 72.0
     allow_non_free: bool = False
     allow_hr: bool = False
     min_seeders: int | None = None
@@ -210,6 +213,9 @@ class DiscoveryConfig(BaseModel):
             "preferred_size_max_gb",
             "size_partial_max_gb",
             "target_seed_leecher_ratio",
+            "max_seed_leecher_ratio",
+            "freshness_full_score_hours",
+            "freshness_zero_score_hours",
             "max_active_downloads",
             "max_total_amount_left_gb",
             "min_free_disk_gb",
@@ -219,20 +225,25 @@ class DiscoveryConfig(BaseModel):
                 raise ValueError(f"{field_name} must be >= 0")
         if (
             self.min_size_gb is not None
-            and self.max_size_gb is not None
+            and self.max_size_gb not in {None, 0}
             and self.max_size_gb < self.min_size_gb
         ):
             raise ValueError("max_size_gb must be >= min_size_gb")
-        if self.max_size_gb is not None and self.max_size_gb <= 0:
-            raise ValueError("max_size_gb must be > 0")
         if (
             self.preferred_size_min_gb is not None
             and self.preferred_size_max_gb is not None
             and self.preferred_size_max_gb < self.preferred_size_min_gb
         ):
             raise ValueError("preferred_size_max_gb must be >= preferred_size_min_gb")
-        if self.leecher_score_full_at_multiplier < 1:
-            raise ValueError("leecher_score_full_at_multiplier must be >= 1")
+        if 0 < self.leecher_score_full_at_multiplier < 1:
+            raise ValueError("leecher_score_full_at_multiplier must be 0 or >= 1")
+        if (
+            self.freshness_zero_score_hours > 0
+            and self.freshness_zero_score_hours <= self.freshness_full_score_hours
+        ):
+            raise ValueError(
+                "freshness_zero_score_hours must be 0 or > freshness_full_score_hours"
+            )
         return self
 
 
@@ -243,6 +254,7 @@ class ScoringConfig(BaseModel):
         "discount",
         "leechers",
         "seeders",
+        "freshness",
         "left_time",
         "size",
         "site_history",
@@ -250,6 +262,16 @@ class ScoringConfig(BaseModel):
 
     min_score_to_enqueue: int
     weights: dict[str, int]
+
+    @model_validator(mode="before")
+    @classmethod
+    def default_legacy_freshness_weight(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        weights = value.get("weights")
+        if not isinstance(weights, dict) or "freshness" in weights:
+            return value
+        return {**value, "weights": {**weights, "freshness": 0}}
 
     @model_validator(mode="after")
     def validate_weights(self) -> ScoringConfig:

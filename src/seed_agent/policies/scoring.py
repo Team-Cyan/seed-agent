@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 
 from seed_agent.config import DiscoveryConfig, ScoringConfig
@@ -48,6 +49,10 @@ def score_candidate(
     total += seeder_component.score
     reasons.append(seeder_component.reason)
     hard_reject = hard_reject or seeder_component.hard_reject
+
+    freshness_component = _score_freshness(candidate, discovery, scoring)
+    total += freshness_component.score
+    reasons.append(freshness_component.reason)
 
     size_component = _score_size(candidate, discovery, scoring)
     total += size_component.score
@@ -149,7 +154,7 @@ def _score_leechers(
     if leechers < minimum:
         return _ComponentScore(0.0, f"leechers {leechers} < min {minimum}", True)
     maximum = discovery.max_leechers
-    if maximum is not None and leechers > maximum:
+    if maximum is not None and maximum > 0 and leechers > maximum:
         return _ComponentScore(0.0, f"leechers {leechers} > max {maximum}", True)
     multiplier = discovery.leecher_score_full_at_multiplier
     if minimum <= 0 or multiplier <= 1:
@@ -174,10 +179,17 @@ def _score_seeders(
     minimum = discovery.min_seeders
     if minimum is not None and seeders < minimum:
         return _ComponentScore(0.0, f"seeders {seeders} < min {minimum}", True)
+    ratio = seeders / max(candidate.leechers, 1)
+    maximum = discovery.max_seed_leecher_ratio
+    if maximum is not None and maximum > 0 and ratio > maximum:
+        return _ComponentScore(
+            0.0,
+            f"seeder_leecher_ratio {ratio:.2f} > max {maximum:.2f}",
+            True,
+        )
     target = discovery.target_seed_leecher_ratio
     if target <= 0:
         return _ComponentScore(weight, "seeder_leecher_ratio disabled")
-    ratio = seeders / max(candidate.leechers, 1)
     if ratio <= target:
         return _ComponentScore(weight, f"seeder_leecher_ratio {ratio:.2f} <= target {target:.2f}")
     ceiling = max(target * 2, target + 1)
@@ -195,6 +207,36 @@ def _score_seeders(
     )
 
 
+def _score_freshness(
+    candidate: TorrentCandidate,
+    discovery: DiscoveryConfig,
+    scoring: ScoringConfig,
+) -> _ComponentScore:
+    weight = scoring.weights["freshness"]
+    if discovery.freshness_zero_score_hours <= 0:
+        return _ComponentScore(weight, "freshness disabled")
+    published_at = candidate.published_at
+    if published_at is None:
+        return _ComponentScore(0.0, "freshness unavailable")
+    if published_at.tzinfo is None:
+        published_at = published_at.replace(tzinfo=UTC)
+    age_hours = max(0.0, (datetime.now(UTC) - published_at).total_seconds() / 3600)
+    full_hours = discovery.freshness_full_score_hours
+    zero_hours = discovery.freshness_zero_score_hours
+    if age_hours <= full_hours:
+        return _ComponentScore(
+            weight,
+            f"freshness {age_hours:.1f}h <= full-score {full_hours:.1f}h",
+        )
+    if age_hours >= zero_hours:
+        return _ComponentScore(0.0, f"freshness {age_hours:.1f}h >= zero-score {zero_hours:.1f}h")
+    factor = 1.0 - ((age_hours - full_hours) / (zero_hours - full_hours))
+    return _ComponentScore(
+        weight * factor,
+        f"freshness {age_hours:.1f}h tapered before {zero_hours:.1f}h",
+    )
+
+
 def _score_size(
     candidate: TorrentCandidate,
     discovery: DiscoveryConfig,
@@ -208,7 +250,11 @@ def _score_size(
             f"size {size_gib:.1f} GiB < min {discovery.min_size_gb:.1f} GiB",
             True,
         )
-    if discovery.max_size_gb is not None and size_gib > discovery.max_size_gb:
+    if (
+        discovery.max_size_gb is not None
+        and discovery.max_size_gb > 0
+        and size_gib > discovery.max_size_gb
+    ):
         return _ComponentScore(
             0.0,
             f"size {size_gib:.1f} GiB > max {discovery.max_size_gb:.1f} GiB",

@@ -340,7 +340,7 @@ def test_intent_run_once_dry_run_reports_pause_reasons_when_runtime_gate_exceede
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(cli, "_build_search_providers", lambda config: [_FakeSearchProvider()])
-    config_path = _write_config(tmp_path, discovery_extra="  max_active_downloads: 0\n")
+    config_path = _write_config(tmp_path, discovery_extra="  max_active_downloads: 1\n")
     inbox = tmp_path / "local" / "inbox" / "intents.jsonl"
     inbox.write_text(
         json.dumps({"id": "movie-1", "text": "Inception 2010 1080p"}),
@@ -376,5 +376,5 @@ def test_intent_run_once_dry_run_reports_pause_reasons_when_runtime_gate_exceede
     payload = _json_output(result)
     assert payload["enqueue_paused_by_pool_policy"] is False
     assert payload["enqueue_blocked_by_runtime_gate"] is True
-    assert payload["enqueue_blocked_reasons"] == ["active downloads 1 >= max 0"]
+    assert payload["enqueue_blocked_reasons"] == ["active downloads 1 >= max 1"]
     assert payload["decisions"][-1]["action"] == "qb.enqueue.rejected"

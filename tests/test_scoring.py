@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+
 from seed_agent.config import DiscoveryConfig, ScoringConfig
 from seed_agent.models import Discount, TorrentCandidate
 from seed_agent.policies.scoring import score_candidate
@@ -230,6 +232,125 @@ def test_seeder_score_uses_upload_demand_ratio_not_absolute_seeders() -> None:
     assert high_demand.score > low_demand.score
     assert "seeder_leecher_ratio 8.00 <= target 10.00" in high_demand.reasons
     assert "seeder_leecher_ratio 80.00 >= 2x target 10.00" in low_demand.reasons
+
+
+def test_seeder_leecher_ratio_above_configured_max_is_hard_rejected() -> None:
+    result = score_candidate(
+        make_candidate(seeders=301, leechers=30),
+        discovery(max_seed_leecher_ratio=10),
+        scoring(),
+    )
+
+    assert result.accepted is False
+    assert result.score == 0
+    assert "seeder_leecher_ratio 10.03 > max 10.00" in result.reasons
+
+
+def test_zero_upper_limits_disable_hard_candidate_rejection() -> None:
+    result = score_candidate(
+        make_candidate(
+            size_bytes=500 * 1024**3,
+            seeders=301,
+            leechers=30,
+        ),
+        discovery(
+            max_size_gb=0,
+            max_leechers=0,
+            max_seed_leecher_ratio=0,
+        ),
+        scoring(min_score_to_enqueue=1),
+    )
+
+    assert result.accepted is True
+    assert result.score > 0
+    assert not any(" > max " in reason for reason in result.reasons)
+
+
+def test_hard_ratio_limit_still_applies_when_soft_ratio_score_is_disabled() -> None:
+    result = score_candidate(
+        make_candidate(seeders=301, leechers=30),
+        discovery(target_seed_leecher_ratio=0, max_seed_leecher_ratio=10),
+        scoring(),
+    )
+
+    assert result.accepted is False
+    assert "seeder_leecher_ratio 10.03 > max 10.00" in result.reasons
+
+
+def test_large_high_demand_candidate_remains_eligible_without_size_ceiling() -> None:
+    result = score_candidate(
+        make_candidate(
+            size_bytes=500 * 1024**3,
+            seeders=90,
+            leechers=60,
+            published_at=datetime.now(UTC) - timedelta(hours=2),
+        ),
+        discovery(max_size_gb=None, max_seed_leecher_ratio=10),
+        scoring(),
+    )
+
+    assert result.accepted is True
+    assert "size 500.0 GiB above preferred range" in result.reasons
+
+
+def test_freshness_prefers_new_candidate_without_hard_rejecting_old_candidate() -> None:
+    freshness_only = scoring(
+        min_score_to_enqueue=1,
+        weights={
+            "discount": 0,
+            "leechers": 0,
+            "seeders": 0,
+            "freshness": 100,
+            "left_time": 0,
+            "size": 0,
+            "site_history": 0,
+        },
+    )
+    now = datetime.now(UTC)
+    fresh = score_candidate(
+        make_candidate(published_at=now - timedelta(hours=2)),
+        discovery(freshness_full_score_hours=6, freshness_zero_score_hours=48),
+        freshness_only,
+    )
+    aging = score_candidate(
+        make_candidate(published_at=now - timedelta(hours=24)),
+        discovery(freshness_full_score_hours=6, freshness_zero_score_hours=48),
+        freshness_only,
+    )
+    old = score_candidate(
+        make_candidate(published_at=now - timedelta(hours=72)),
+        discovery(freshness_full_score_hours=6, freshness_zero_score_hours=48),
+        freshness_only,
+    )
+
+    assert fresh.score == 100
+    assert 0 < aging.score < fresh.score
+    assert old.score == 0
+    assert old.accepted is False
+
+
+def test_zero_freshness_window_disables_age_decay_with_full_credit() -> None:
+    freshness_only = scoring(
+        min_score_to_enqueue=1,
+        weights={
+            "discount": 0,
+            "leechers": 0,
+            "seeders": 0,
+            "freshness": 100,
+            "left_time": 0,
+            "size": 0,
+            "site_history": 0,
+        },
+    )
+    result = score_candidate(
+        make_candidate(published_at=None),
+        discovery(freshness_zero_score_hours=0),
+        freshness_only,
+    )
+
+    assert result.accepted is True
+    assert result.score == 100
+    assert "freshness disabled" in result.reasons
 
 
 def test_site_history_score_is_clamped_between_zero_and_one() -> None:

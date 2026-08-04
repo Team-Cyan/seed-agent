@@ -130,7 +130,13 @@ def make_handler(config_path: Path) -> type[BaseHTTPRequestHandler]:
                 )
                 return
             if self.path == "/api/state/summary":
-                self._send_json(_state_summary_payload(resolved_config_path, root))
+                try:
+                    self._send_json(_state_summary_payload(resolved_config_path, root))
+                except Exception as exc:
+                    self._send_json(
+                        {"error": "state database unavailable", "detail": _friendly_error(exc)},
+                        status=HTTPStatus.SERVICE_UNAVAILABLE,
+                    )
                 return
             if self.path == "/api/pools":
                 self._send_json(_pools_payload(resolved_config_path))
@@ -142,7 +148,16 @@ def make_handler(config_path: Path) -> type[BaseHTTPRequestHandler]:
                 self._send_json(_health_payload(root))
                 return
             if self.path == "/api/ops":
-                self._send_json(_ops_payload(root))
+                try:
+                    self._send_json(_ops_payload(root))
+                except Exception as exc:
+                    self._send_json(
+                        {
+                            "error": "operations database unavailable",
+                            "detail": _friendly_error(exc),
+                        },
+                        status=HTTPStatus.SERVICE_UNAVAILABLE,
+                    )
                 return
             if urlparse(self.path).path == "/api/logs":
                 self._send_json(_logs_payload(root))
@@ -575,14 +590,21 @@ def _state_summary_payload(config_path: Path, root: Path) -> dict[str, Any]:
         "candidates": {"total": 0, "by_state": {}},
         "intents": {"total": 0, "by_state": {}},
         "release_candidates": {"total": 0},
+        "candidate_enqueue_snapshots": {"total": 0},
         "torrent_runtime": {"total": 0},
     }
     if not state_path.exists():
         return payload
-    with sqlite3.connect(state_path) as conn:
+    with sqlite3.connect(state_path, timeout=30) as conn:
+        conn.execute("PRAGMA busy_timeout=30000")
+        conn.execute("PRAGMA query_only=ON")
         payload["candidates"] = _table_state_counts(conn, "candidates", "state")
         payload["intents"] = _table_state_counts(conn, "intents", "state")
         payload["release_candidates"] = {"total": _table_count(conn, "release_candidates")}
+        if _table_exists(conn, "candidate_enqueue_snapshots"):
+            payload["candidate_enqueue_snapshots"] = {
+                "total": _table_count(conn, "candidate_enqueue_snapshots")
+            }
         payload["torrent_runtime"] = {"total": _table_count(conn, "torrent_runtime")}
     return payload
 
@@ -591,7 +613,7 @@ def _apply_site_history_feedback(candidates: list[Any], root: Path) -> list[Any]
     state_path = _state_db_path(root)
     if not state_path.exists():
         return candidates
-    store = StateStore(state_path)
+    store = StateStore(state_path, initialize=False)
     return apply_site_history_feedback(candidates, store.site_history_scores())
 
 
@@ -634,7 +656,7 @@ def _wants_payload(root: Path) -> dict[str, Any]:
     }
     if not state_path.exists():
         return payload
-    store = StateStore(state_path)
+    store = StateStore(state_path, initialize=False)
     with sqlite3.connect(state_path) as conn:
         conn.row_factory = sqlite3.Row
         if not _table_exists(conn, "intents"):
@@ -817,7 +839,7 @@ def _want_candidates_payload(root: Path, intent_id: str) -> tuple[dict[str, Any]
     state_path = _state_db_path(root)
     if not state_path.exists():
         return {"error": "state db not found"}, HTTPStatus.NOT_FOUND
-    store = StateStore(state_path)
+    store = StateStore(state_path, initialize=False)
     row = store.get_intent(intent_id)
     if row is None:
         return {"error": "want not found"}, HTTPStatus.NOT_FOUND
@@ -1588,7 +1610,7 @@ def _ops_payload(root: Path) -> dict[str, Any]:
     }
     if not state_path.exists():
         return payload
-    store = StateStore(state_path)
+    store = StateStore(state_path, initialize=False)
     payload.update(
         {
             "scheduler_runs": store.list_scheduler_runs(limit=10),
@@ -1619,7 +1641,7 @@ def _logs_payload(root: Path, limit: int = 200) -> dict[str, Any]:
     entries: list[dict[str, Any]] = []
     state_path = _state_db_path(root)
     if state_path.exists():
-        store = StateStore(state_path)
+        store = StateStore(state_path, initialize=False)
         entries.extend(
             _scheduler_log_entry(row)
             for row in store.list_scheduler_run_events(limit=bounded_limit)
@@ -1819,7 +1841,7 @@ def _tracker_backoff_status(root: Path) -> dict[str, Any]:
     state_path = _state_db_path(root)
     if not state_path.exists():
         return {"active": False, "path": str(_schedule_backoff_path(root))}
-    store = StateStore(state_path)
+    store = StateStore(state_path, initialize=False)
     active_rows: list[dict[str, Any]] = []
     for row in store.list_tracker_backoffs():
         if str(row.get("site")) != "mteam" or not bool(row.get("active")):

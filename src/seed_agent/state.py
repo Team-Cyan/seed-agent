@@ -87,11 +87,12 @@ _WANT_SEARCH_RUN_INSERT_SQL = """
 
 
 class StateStore:
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, *, initialize: bool = True) -> None:
         self.path = path
         self.path.parent.mkdir(parents=True, exist_ok=True)
         _ensure_private_file(self.path)
-        self._initialize()
+        if initialize:
+            self._initialize()
 
     def acquire_scheduler_lease(
         self,
@@ -1012,6 +1013,83 @@ class StateStore:
                     now,
                 ),
             )
+
+    def record_candidate_enqueue_snapshot(
+        self,
+        *,
+        stable_id: str,
+        torrent_hash: str | None,
+        seeders: int,
+        leechers: int,
+        size_bytes: int,
+        published_at: str | None,
+        candidate_age_minutes: int | None,
+        score: int,
+        score_reasons: list[str],
+    ) -> None:
+        now = _utc_now()
+        ratio = seeders / max(leechers, 1)
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO candidate_enqueue_snapshots (
+                    stable_id,
+                    torrent_hash,
+                    seeders,
+                    leechers,
+                    seed_leecher_ratio,
+                    size_bytes,
+                    published_at,
+                    candidate_age_minutes,
+                    score,
+                    score_reasons,
+                    enqueued_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(stable_id) DO UPDATE SET
+                    torrent_hash = COALESCE(
+                        candidate_enqueue_snapshots.torrent_hash,
+                        excluded.torrent_hash
+                    )
+                """,
+                (
+                    stable_id,
+                    torrent_hash,
+                    seeders,
+                    leechers,
+                    ratio,
+                    size_bytes,
+                    published_at,
+                    candidate_age_minutes,
+                    score,
+                    _json_dumps(score_reasons),
+                    now,
+                ),
+            )
+
+    def get_candidate_enqueue_snapshot(self, stable_id: str) -> dict[str, Any] | None:
+        with self._connect(row_factory=sqlite3.Row) as conn:
+            row = conn.execute(
+                "SELECT * FROM candidate_enqueue_snapshots WHERE stable_id = ?",
+                (stable_id,),
+            ).fetchone()
+        return _enqueue_snapshot_row(row)
+
+    def get_candidate_enqueue_snapshot_by_hash(
+        self, torrent_hash: str
+    ) -> dict[str, Any] | None:
+        with self._connect(row_factory=sqlite3.Row) as conn:
+            row = conn.execute(
+                """
+                SELECT *
+                FROM candidate_enqueue_snapshots
+                WHERE torrent_hash = ?
+                ORDER BY enqueued_at DESC
+                LIMIT 1
+                """,
+                (torrent_hash,),
+            ).fetchone()
+        return _enqueue_snapshot_row(row)
 
     def get_candidate(self, stable_id: str) -> dict[str, Any] | None:
         with self._connect(row_factory=sqlite3.Row) as conn:
@@ -2230,6 +2308,9 @@ class StateStore:
 
     def _initialize(self) -> None:
         with self._connect() as conn:
+            journal_mode = conn.execute("PRAGMA journal_mode").fetchone()
+            if journal_mode is None or str(journal_mode[0]).lower() != "wal":
+                conn.execute("PRAGMA journal_mode=WAL")
             conn.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS candidates (
@@ -2251,6 +2332,21 @@ class StateStore:
                 );
                 CREATE INDEX IF NOT EXISTS idx_candidates_state ON candidates(state);
                 CREATE INDEX IF NOT EXISTS idx_candidates_hash ON candidates(torrent_hash);
+                CREATE TABLE IF NOT EXISTS candidate_enqueue_snapshots (
+                  stable_id TEXT PRIMARY KEY,
+                  torrent_hash TEXT,
+                  seeders INTEGER NOT NULL,
+                  leechers INTEGER NOT NULL,
+                  seed_leecher_ratio REAL NOT NULL,
+                  size_bytes INTEGER NOT NULL,
+                  published_at TEXT,
+                  candidate_age_minutes INTEGER,
+                  score INTEGER NOT NULL,
+                  score_reasons TEXT NOT NULL,
+                  enqueued_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_candidate_enqueue_snapshots_hash
+                  ON candidate_enqueue_snapshots(torrent_hash);
                 CREATE TABLE IF NOT EXISTS intents (
                   intent_id TEXT PRIMARY KEY,
                   source TEXT NOT NULL,
@@ -2452,7 +2548,6 @@ class StateStore:
             conn = sqlite3.connect(self.path, timeout=SQLITE_TIMEOUT_SECONDS)
             try:
                 conn.execute(f"PRAGMA busy_timeout={SQLITE_BUSY_TIMEOUT_MS}")
-                conn.execute("PRAGMA journal_mode=WAL")
                 _ensure_sqlite_sidecars_private(self.path)
                 if row_factory is not None:
                     conn.row_factory = row_factory
@@ -2744,6 +2839,14 @@ def _candidate_row(row: sqlite3.Row | None) -> dict[str, Any] | None:
         return None
     data = dict(row)
     data["score_reasons"] = _json_loads_list(data.get("score_reasons"))
+    return data
+
+
+def _enqueue_snapshot_row(row: sqlite3.Row | None) -> dict[str, Any] | None:
+    if row is None:
+        return None
+    data = dict(row)
+    data["score_reasons"] = _json_loads_list(data.get("score_reasons")) or []
     return data
 
 

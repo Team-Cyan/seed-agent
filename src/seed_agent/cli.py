@@ -306,6 +306,7 @@ def enqueue(
                 require_known_free_window=require_known_free_window,
             )
         )
+    scored_by_id = {item.candidate_id: item for item in scored}
     default_policy = _default_category_policy(loaded)
     (
         downloader,
@@ -320,6 +321,8 @@ def enqueue(
         store, scored, live_torrents
     )
     skipped_existing += skipped_live_existing
+    scored, skipped_duplicate_titles = _filter_duplicate_candidate_titles(scored)
+    skipped_existing += skipped_duplicate_titles
     batch_error = None
     enqueue_batches = _enqueue_candidate_batches(
         scored,
@@ -344,6 +347,8 @@ def enqueue(
         decisions = exc.decisions
         batch_error = exc
     _write_audit_decisions(loaded, decisions)
+    if execute:
+        _persist_enqueue_state(store, scored_by_id, decisions)
     payload = {
         "command": "enqueue",
         "config": str(config),
@@ -352,6 +357,7 @@ def enqueue(
         "scored": len(scored),
         "accepted": sum(1 for item in scored if item.accepted),
         "skipped_existing": skipped_existing,
+        "skipped_duplicate_titles": skipped_duplicate_titles,
         "enqueued": sum(1 for item in decisions if item.action == "qb.enqueue"),
         "scores": [_score_summary(item) for item in scored],
         "decisions": [_decision_summary(item) for item in decisions],
@@ -3003,6 +3009,8 @@ def _run_once_payload(
         store, scored, live_torrents
     )
     skipped_existing += skipped_live_existing
+    scored, skipped_duplicate_titles = _filter_duplicate_candidate_titles(scored)
+    skipped_existing += skipped_duplicate_titles
     batch_error = None
     enqueue_batches = _enqueue_candidate_batches(
         scored,
@@ -3085,6 +3093,7 @@ def _run_once_payload(
         "scored": len(scored),
         "accepted": sum(1 for item in scored if item.accepted),
         "skipped_existing": skipped_existing,
+        "skipped_duplicate_titles": skipped_duplicate_titles,
         "enqueued": sum(1 for item in decisions if item.action == "qb.enqueue"),
         "scores": [_score_summary(item) for item in scored],
         "decisions": [_decision_summary(item) for item in decisions],
@@ -3369,20 +3378,20 @@ def _link_existing_live_torrent_candidates(
     scored: list[ScoreBreakdown],
     torrents: list[ManagedTorrent],
 ) -> tuple[list[ScoreBreakdown], int]:
-    live_by_identity: dict[tuple[str, int], ManagedTorrent] = {}
+    live_by_title: dict[str, ManagedTorrent] = {}
     for torrent in torrents:
         if not torrent.hash:
             continue
-        identity = _live_torrent_identity(torrent)
-        if identity is not None:
-            live_by_identity[identity] = torrent
-    if not live_by_identity:
+        title = _normalize_torrent_title(torrent.name)
+        if title:
+            live_by_title[title] = torrent
+    if not live_by_title:
         return scored, 0
 
     filtered: list[ScoreBreakdown] = []
     skipped = 0
     for item in scored:
-        torrent = live_by_identity.get(_candidate_live_identity(item.candidate))
+        torrent = live_by_title.get(_normalize_torrent_title(item.candidate.title))
         if item.accepted and torrent is not None:
             store.upsert_candidate(
                 item.candidate_id,
@@ -3401,6 +3410,31 @@ def _link_existing_live_torrent_candidates(
             continue
         filtered.append(item)
     return filtered, skipped
+
+
+def _filter_duplicate_candidate_titles(
+    scored: list[ScoreBreakdown],
+) -> tuple[list[ScoreBreakdown], int]:
+    winners: dict[str, ScoreBreakdown] = {}
+    rejected: list[ScoreBreakdown] = []
+    skipped = 0
+    for item in scored:
+        if not item.accepted:
+            rejected.append(item)
+            continue
+        title_key = _normalize_torrent_title(item.candidate.title) or item.candidate_id
+        current = winners.get(title_key)
+        if current is None:
+            winners[title_key] = item
+            continue
+        skipped += 1
+        if (item.score, item.candidate.leechers, -item.candidate.seeders) > (
+            current.score,
+            current.candidate.leechers,
+            -current.candidate.seeders,
+        ):
+            winners[title_key] = item
+    return [*winners.values(), *rejected], skipped
 
 
 def _candidate_live_identity(candidate: TorrentCandidate) -> tuple[str, int]:
@@ -5172,7 +5206,8 @@ def _candidate_evidence_summary(store: StateStore, torrent_hash: str) -> dict[st
         return None
     non_qb_rows = [row for row in rows if row.get("site") != "qb"]
     row = (non_qb_rows or rows)[-1]
-    return {
+    snapshot = store.get_candidate_enqueue_snapshot_by_hash(torrent_hash)
+    evidence = {
         "candidate_id": row["stable_id"],
         "candidate_state": row["state"],
         "site": row["site"],
@@ -5190,6 +5225,21 @@ def _candidate_evidence_summary(store: StateStore, torrent_hash: str) -> dict[st
         "first_seen_at": row.get("first_seen_at"),
         "updated_at": row.get("updated_at"),
     }
+    if snapshot is not None:
+        evidence.update(
+            {
+                "seeders": snapshot["seeders"],
+                "leechers": snapshot["leechers"],
+                "seed_leecher_ratio": snapshot["seed_leecher_ratio"],
+                "size_gb": round(snapshot["size_bytes"] / 1024**3, 2),
+                "score": snapshot["score"],
+                "score_reasons": snapshot["score_reasons"],
+                "published_at": snapshot["published_at"],
+                "candidate_age_minutes": snapshot["candidate_age_minutes"],
+                "enqueued_at": snapshot["enqueued_at"],
+            }
+        )
+    return evidence
 
 
 def _policy_lookup(config: SeedAgentConfig) -> dict[str, CategoryPolicyConfig]:
@@ -5298,7 +5348,8 @@ def _default_category_budget_state_from_torrents(
         torrents,
     )
     pool_usage = usage[default_policy.budget_pool]
-    paused = pool_usage.over_budget and config.pt_filters.max_total_amount_left_gb is None
+    max_total_amount_left_gb = config.pt_filters.max_total_amount_left_gb or None
+    paused = pool_usage.over_budget and max_total_amount_left_gb is None
     return paused, pool_usage
 
 
@@ -5360,10 +5411,11 @@ def _build_intent_enqueue_context_resolver(
         _runtime_activity_summary(seed_torrents)["active_download_count"]
     )
     disk_state = _disk_headroom_state(config, downloader_status, torrents)
-    max_active_downloads = config.pt_filters.max_active_downloads
+    max_active_downloads = config.pt_filters.max_active_downloads or None
+    max_total_amount_left_gb = config.pt_filters.max_total_amount_left_gb or None
     max_download_bytes = (
-        int(config.pt_filters.max_total_amount_left_gb * 1024**3)
-        if config.pt_filters.max_total_amount_left_gb is not None
+        int(max_total_amount_left_gb * 1024**3)
+        if max_total_amount_left_gb is not None
         else None
     )
 
@@ -5485,7 +5537,7 @@ def _enqueue_candidate_batches(
     if hard_reasons:
         return [(accepted, True, hard_reasons)]
 
-    max_left_gb = config.pt_filters.max_total_amount_left_gb
+    max_left_gb = config.pt_filters.max_total_amount_left_gb or None
     max_left_bytes = int(max_left_gb * 1024**3) if max_left_gb is not None else None
     disk_state = _disk_headroom_state(config, downloader_status, torrents)
     disk_max_new_bytes = (
@@ -5500,7 +5552,7 @@ def _enqueue_candidate_batches(
     ]
     runtime = _runtime_activity_summary(seed_torrents)
     planned_active_downloads = int(runtime["active_download_count"])
-    max_active_downloads = config.pt_filters.max_active_downloads
+    max_active_downloads = config.pt_filters.max_active_downloads or None
     planned_pool_new_bytes = 0
     active: list[ScoreBreakdown] = []
     paused_for_amount: list[ScoreBreakdown] = []
@@ -5645,7 +5697,7 @@ def _enqueue_pause_reasons(
         if torrent.category == config.download_client.default_category
     ]
     runtime = _runtime_activity_summary(seed_torrents)
-    max_active_downloads = config.pt_filters.max_active_downloads
+    max_active_downloads = config.pt_filters.max_active_downloads or None
     if (
         max_active_downloads is not None
         and runtime["active_download_count"] >= max_active_downloads
@@ -5656,7 +5708,7 @@ def _enqueue_pause_reasons(
     disk_state = _disk_headroom_state(config, downloader_status, torrents)
     if disk_state is not None and bool(disk_state["over_existing_liability"]):
         reasons.append(_disk_headroom_existing_reason(disk_state))
-    max_total_amount_left_gb = config.pt_filters.max_total_amount_left_gb
+    max_total_amount_left_gb = config.pt_filters.max_total_amount_left_gb or None
     if not include_amount:
         return reasons
     total_amount_left_bytes = sum(_download_liability_bytes(torrent) for torrent in torrents)
@@ -5682,7 +5734,7 @@ def _capacity_reclaim_target_bytes(
         targets.append(max(pool_usage.size_bytes + accepted_bytes - pool_usage.max_size_bytes, 0))
 
     existing_liability = sum(_download_liability_bytes(torrent) for torrent in torrents)
-    max_total_amount_left_gb = config.pt_filters.max_total_amount_left_gb
+    max_total_amount_left_gb = config.pt_filters.max_total_amount_left_gb or None
     if max_total_amount_left_gb is not None:
         max_total_amount_left_bytes = int(max_total_amount_left_gb * 1024**3)
         targets.append(
@@ -6335,6 +6387,26 @@ def _persist_enqueue_state(
                 scored_item.candidate,
                 score_reasons=list(scored_item.reasons),
             ),
+        )
+        published_at = scored_item.candidate.published_at
+        candidate_age_minutes = None
+        if published_at is not None:
+            if published_at.tzinfo is None:
+                published_at = published_at.replace(tzinfo=UTC)
+            candidate_age_minutes = max(
+                0,
+                int((datetime.now(UTC) - published_at).total_seconds() // 60),
+            )
+        store.record_candidate_enqueue_snapshot(
+            stable_id=scored_item.candidate_id,
+            torrent_hash=str(torrent_hash) if torrent_hash is not None else None,
+            seeders=scored_item.candidate.seeders,
+            leechers=scored_item.candidate.leechers,
+            size_bytes=scored_item.candidate.size_bytes,
+            published_at=published_at.isoformat() if published_at is not None else None,
+            candidate_age_minutes=candidate_age_minutes,
+            score=scored_item.score,
+            score_reasons=list(scored_item.reasons),
         )
 
 

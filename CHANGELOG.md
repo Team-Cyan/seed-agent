@@ -4,6 +4,31 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.21.0 - 2026-08-04
+
+### Added
+
+- Added a configurable hard seeders/leechers ratio ceiling and publication-age
+  scoring so upload-farming admission can prefer fresh, proportionally demanded
+  torrents without imposing a hard large-torrent size ceiling.
+- Standardized optional PT upper limits so `0` and `null` both disable the
+  configured ceiling, including size, competition, leecher, active-download,
+  and remaining-download limits.
+- Added immutable enqueue-time swarm snapshots with candidate age, score,
+  reasons, and qB hash for later 2/8/24-hour outcome analysis.
+
+### Changed
+
+- Re-score refreshed M-Team detail data immediately before download-token
+  generation and suppress exact duplicate torrent titles against the live qB
+  pool and within each enqueue batch.
+
+### Fixed
+
+- Stop renegotiating SQLite WAL mode on every state read, use non-migrating Web
+  read paths, and return structured 503 JSON if `/api/ops` or
+  `/api/state/summary` cannot read SQLite instead of dropping the connection.
+
 ## 0.20.5 - 2026-08-02
 
 ### Fixed

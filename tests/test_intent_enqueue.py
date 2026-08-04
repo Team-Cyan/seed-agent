@@ -274,7 +274,7 @@ def test_intent_enqueue_media_ignores_seed_active_download_gate(
     from seed_agent.models import ManagedTorrent
 
     monkeypatch.chdir(tmp_path)
-    config_path = _write_config(tmp_path, discovery_extra="  max_active_downloads: 0\n")
+    config_path = _write_config(tmp_path, discovery_extra="  max_active_downloads: 1\n")
     store = StateStore(tmp_path / ".seed-agent" / "state.db")
     intent, _ = add_intent("Inception 2010 1080p", store)
     ranked = _ranked(intent.intent_id)

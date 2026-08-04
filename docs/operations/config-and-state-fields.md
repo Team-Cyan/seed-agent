@@ -79,6 +79,9 @@ page labels.
 - `min_left_time_minutes`
 - `min_leechers`
 - `target_seed_leecher_ratio`
+- `max_seed_leecher_ratio`
+- `freshness_full_score_hours`
+- `freshness_zero_score_hours`
 - `allow_non_free`
 - `allow_hr`
 - `min_seeders`
@@ -97,12 +100,18 @@ page labels.
 enqueue. Want List acquisition is intentionally independent and may enqueue a
 paid release for a requested work, subject to its category and capacity gates.
 
+For optional PT upper limits, both `0` and `null` mean disabled. This applies to
+`max_leechers`, `max_seed_leecher_ratio`, `max_size_gb`,
+`max_active_downloads`, and `max_total_amount_left_gb`. Minimums naturally have
+no restrictive effect at `0`; `freshness_zero_score_hours=0` disables age decay.
+
 `pt_scoring`
 
 - `min_score_to_enqueue`
 - `weights.discount`
 - `weights.leechers`
 - `weights.seeders`
+- `weights.freshness`
 - `weights.left_time`
 - `weights.size`
 - `weights.site_history`
@@ -236,6 +245,20 @@ paid release for a requested work, subject to its category and capacity gates.
 - `score_reasons`
 - `first_seen_at`
 - `updated_at`
+
+`candidate_enqueue_snapshots`
+
+- `stable_id`
+- `torrent_hash`
+- `seeders`
+- `leechers`
+- `seed_leecher_ratio`
+- `size_bytes`
+- `published_at`
+- `candidate_age_minutes`
+- `score`
+- `score_reasons`
+- `enqueued_at`
 
 `intents`
 

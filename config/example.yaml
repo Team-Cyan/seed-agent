@@ -63,11 +63,18 @@ pt_filters:
   # Soft scoring pressure: seeders / max(leechers, 1). Higher ratios lose
   # seeder-score credit but are not hard-rejected.
   target_seed_leecher_ratio: 10
+  # Hard competition ceiling. High absolute seeder counts remain eligible when
+  # demand is proportionally high; only the seeders/leechers ratio is bounded.
+  # Set to 0 or null to disable.
+  max_seed_leecher_ratio: 10
+  # Fresh candidates receive full freshness credit, then taper to zero.
+  freshness_full_score_hours: 6
+  freshness_zero_score_hours: 72
   # discounts is a strict allowlist unless this is true. Set true only when
   # NORMAL and partial-discount candidates are intentionally eligible.
   allow_non_free: false
   # Hard candidate size bounds. Use these to keep giant packs out of mutable seed pools.
-  # Set max_size_gb to null to disable the hard size ceiling.
+  # Set max_size_gb to 0 or null to disable the hard size ceiling.
   max_size_gb: 150
   # Soft scoring preference range. Candidates outside this range lose size points
   # but are not rejected unless they violate min_size_gb/max_size_gb.
@@ -80,6 +87,7 @@ pt_filters:
   # Optional conservative runtime gates. max_active_downloads applies only to
   # the default seed category; media acquisition does not consume seed slots.
   # When reached, seed enqueue is rejected before the downloader is called.
+  # Set either upper limit to 0 or null to disable it.
   # max_active_downloads: 3
   # max_total_amount_left_gb: 150
   # min_free_disk_gb keeps this much downloader-reported free disk space
@@ -93,6 +101,7 @@ pt_scoring:
     discount: 30
     leechers: 25
     seeders: 15
+    freshness: 0
     left_time: 15
     size: 10
     site_history: 5

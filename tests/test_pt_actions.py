@@ -1482,4 +1482,5 @@ def test_strategy_report_groups_tracker_signals_and_runtime_outcomes() -> None:
     assert report["runtime_outcomes"]["uploaded_count"] == 1
     assert report["runtime_outcomes"]["avg_uploaded_gb"] == 80.0
     assert report["runtime_outcomes"]["by_candidate_leechers"]["25+"]["avg_uploaded_gb"] == 80.0
+    assert report["runtime_outcomes"]["by_enqueue_age"]["unknown"]["avg_uploaded_gb"] == 80.0
     assert report["site_history"]["demo-free"]["score"] == 0.72
