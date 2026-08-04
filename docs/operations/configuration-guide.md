@@ -94,7 +94,7 @@ pt_filters:
   min_left_time_minutes: 120
   min_seeders: 1
   min_leechers: 30
-  leecher_score_full_at_multiplier: 2
+  leecher_score_full_at_multiplier: 3
   target_seed_leecher_ratio: 2
   max_seed_leecher_ratio: 10
   freshness_full_score_hours: 6
