@@ -90,6 +90,9 @@ Current fallback still present in code:
 - For upload discovery, `api_discovery.min_seeders` and `min_leechers` can be
   `null` to inherit global `pt_filters` thresholds. Explicit `0` keeps the
   native M-Team API lower-bound filter open.
+- `api_discovery.max_seeders` defaults to `0` (unbounded). Use a positive value
+  only for an intentional absolute discovery ceiling; demand competition is
+  normally controlled by the seed/leecher ratio score and hard ratio limit.
 - For intent search, keep user quality preferences generic in
   `release_preferences.quality_tag_scores` rather than inventing M-Team-only Remux/Profile
   switches. Use `want_decision.series_search_mode` for season-pack vs episode behavior.

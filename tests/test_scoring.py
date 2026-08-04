@@ -112,18 +112,6 @@ def test_low_leecher_candidate_is_rejected() -> None:
     assert "leechers 7 < min 8" in result.reasons
 
 
-def test_high_leecher_candidate_is_rejected_when_max_configured() -> None:
-    result = score_candidate(
-        make_candidate(leechers=51),
-        discovery(max_leechers=50),
-        scoring(),
-    )
-
-    assert result.accepted is False
-    assert result.score == 0
-    assert "leechers 51 > max 50" in result.reasons
-
-
 def test_low_seeder_candidate_is_rejected_when_min_configured() -> None:
     result = score_candidate(
         make_candidate(seeders=0),
@@ -255,7 +243,6 @@ def test_zero_upper_limits_disable_hard_candidate_rejection() -> None:
         ),
         discovery(
             max_size_gb=0,
-            max_leechers=0,
             max_seed_leecher_ratio=0,
         ),
         scoring(min_score_to_enqueue=1),

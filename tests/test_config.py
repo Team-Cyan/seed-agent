@@ -6,11 +6,16 @@ import yaml
 from pydantic import ValidationError
 
 from seed_agent.config import (
+    MTeamApiDiscoveryConfig,
     SchedulerConfig,
     SeedAgentConfig,
     load_config,
     write_config_mapping,
 )
+
+
+def test_mteam_api_discovery_defaults_to_no_seeder_ceiling() -> None:
+    assert MTeamApiDiscoveryConfig().max_seeders == 0
 
 
 def _valid_config_data(secret_ref: str) -> dict[str, object]:
@@ -537,6 +542,14 @@ def test_discovery_accepts_zero_max_size_as_disabled() -> None:
     config = SeedAgentConfig(**data)
 
     assert config.pt_filters.max_size_gb == 0
+
+
+def test_discovery_rejects_removed_max_leechers_field() -> None:
+    data = _valid_config_data("local/secrets/qb.yaml")
+    data["pt_filters"] = {**data["pt_filters"], "max_leechers": 50}
+
+    with pytest.raises(ValidationError, match="max_leechers"):
+        SeedAgentConfig(**data)
 
 
 def test_non_mteam_site_rejects_api_discovery_mode() -> None:

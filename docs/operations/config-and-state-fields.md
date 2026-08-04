@@ -85,7 +85,6 @@ page labels.
 - `allow_non_free`
 - `allow_hr`
 - `min_seeders`
-- `max_leechers`
 - `leecher_score_full_at_multiplier`
 - `min_size_gb`
 - `max_size_gb`
@@ -101,8 +100,8 @@ enqueue. Want List acquisition is intentionally independent and may enqueue a
 paid release for a requested work, subject to its category and capacity gates.
 
 For optional PT upper limits, both `0` and `null` mean disabled. This applies to
-`max_leechers`, `max_seed_leecher_ratio`, `max_size_gb`,
-`max_active_downloads`, and `max_total_amount_left_gb`. Minimums naturally have
+`max_seed_leecher_ratio`, `max_size_gb`, `max_active_downloads`, and
+`max_total_amount_left_gb`. Minimums naturally have
 no restrictive effect at `0`; `freshness_zero_score_hours=0` disables age decay.
 
 `pt_scoring`

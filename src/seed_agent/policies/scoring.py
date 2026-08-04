@@ -153,9 +153,6 @@ def _score_leechers(
     minimum = discovery.min_leechers
     if leechers < minimum:
         return _ComponentScore(0.0, f"leechers {leechers} < min {minimum}", True)
-    maximum = discovery.max_leechers
-    if maximum is not None and maximum > 0 and leechers > maximum:
-        return _ComponentScore(0.0, f"leechers {leechers} > max {maximum}", True)
     multiplier = discovery.leecher_score_full_at_multiplier
     if minimum <= 0 or multiplier <= 1:
         return _ComponentScore(weight, f"leechers {leechers} >= min {minimum}")

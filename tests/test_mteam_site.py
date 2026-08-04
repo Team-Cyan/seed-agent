@@ -24,6 +24,10 @@ from seed_agent.sites.mteam import (
 )
 
 
+def test_mteam_api_options_default_to_no_seeder_ceiling() -> None:
+    assert MTeamApiDiscoveryOptions().max_seeders == 0
+
+
 def test_parse_api_datetime_treats_naive_mteam_time_as_asia_shanghai() -> None:
     parsed = _parse_api_datetime("2026-07-12T09:22:00")
 

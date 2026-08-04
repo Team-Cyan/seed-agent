@@ -20,18 +20,20 @@ pt_filters:
   discounts: [free, 2xfree]
   min_left_time_minutes: 120
   min_seeders: 1
-  min_leechers: 5
+  min_leechers: 30
   leecher_score_full_at_multiplier: 3.0
   target_seed_leecher_ratio: 2
   max_seed_leecher_ratio: 10
   freshness_full_score_hours: 6
   freshness_zero_score_hours: 48
-  max_size_gb: null
+  min_size_gb: 0
+  max_size_gb: 0
   preferred_size_min_gb: 2
-  preferred_size_max_gb: 120
-  size_partial_max_gb: 300
-  max_active_downloads: 4
-  max_total_amount_left_gb: 300
+  preferred_size_max_gb: 300
+  size_partial_max_gb: 1000
+  max_active_downloads: 8
+  max_total_amount_left_gb: 1000
+  min_free_disk_gb: 0
   allow_non_free: false
   allow_hr: false
 

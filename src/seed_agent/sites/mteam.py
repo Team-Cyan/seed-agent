@@ -183,7 +183,7 @@ class MTeamApiDiscoveryOptions(BaseModel):
     dmm_field: str | None = None
     dmm_keyword: str | None = None
     min_seeders: int = 0
-    max_seeders: int | None = 200
+    max_seeders: int | None = 0
     min_leechers: int = 0
     min_times_completed: int = 0
 

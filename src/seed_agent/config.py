@@ -89,7 +89,7 @@ class MTeamApiDiscoveryConfig(BaseModel):
     )
     dmm_keyword: str | None = None
     min_seeders: int | None = 0
-    max_seeders: int | None = 200
+    max_seeders: int | None = 0
     min_leechers: int | None = 0
     min_times_completed: int = 0
 
@@ -182,7 +182,6 @@ class DiscoveryConfig(BaseModel):
     allow_non_free: bool = False
     allow_hr: bool = False
     min_seeders: int | None = None
-    max_leechers: int | None = None
     leecher_score_full_at_multiplier: float = 1.0
     min_size_gb: float | None = None
     max_size_gb: float | None = None
@@ -206,7 +205,6 @@ class DiscoveryConfig(BaseModel):
     def validate_optional_limits(self) -> DiscoveryConfig:
         for field_name in (
             "min_seeders",
-            "max_leechers",
             "min_size_gb",
             "max_size_gb",
             "preferred_size_min_gb",

@@ -47,6 +47,9 @@ Persist local lifecycle knowledge and durable decision evidence.
 - keep the primary SQLite database, its access lock, and existing WAL/SHM/
   journal sidecars owner-only (`0600`) because release evidence may contain
   credential-bearing download URLs,
+- open Web GET state access with `mode=ro`, `cache=private`, and
+  `PRAGMA query_only=ON`; Web readers must not initialize schemas, negotiate
+  WAL mode, or participate as writable SQLite connections,
 - preserve free-window state across scheduler cycles so later review and cleanup
   logic can reason from durable enqueue-time evidence,
 - expose persisted free-window expiry through managed torrent metadata during

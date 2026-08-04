@@ -87,10 +87,23 @@ _WANT_SEARCH_RUN_INSERT_SQL = """
 
 
 class StateStore:
-    def __init__(self, path: Path, *, initialize: bool = True) -> None:
+    def __init__(
+        self,
+        path: Path,
+        *,
+        initialize: bool = True,
+        read_only: bool = False,
+    ) -> None:
+        if read_only and initialize:
+            raise ValueError("read-only state stores cannot initialize the database")
         self.path = path
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        _ensure_private_file(self.path)
+        self.read_only = read_only
+        if read_only:
+            if not self.path.is_file():
+                raise FileNotFoundError(self.path)
+        else:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            _ensure_private_file(self.path)
         if initialize:
             self._initialize()
 
@@ -2538,23 +2551,36 @@ class StateStore:
 
     @contextmanager
     def _connect(self, *, row_factory: Any | None = None) -> Iterator[sqlite3.Connection]:
-        _ensure_private_file(self.path)
-        _ensure_sqlite_sidecars_private(self.path)
+        if not self.read_only:
+            _ensure_private_file(self.path)
+            _ensure_sqlite_sidecars_private(self.path)
         lock_path = _sqlite_access_lock_path(self.path)
         lock_path.parent.mkdir(parents=True, exist_ok=True)
         lock_fd = _open_private_file(lock_path)
         with os.fdopen(lock_fd, "a+b") as access_lock:
             fcntl.flock(access_lock.fileno(), fcntl.LOCK_SH)
-            conn = sqlite3.connect(self.path, timeout=SQLITE_TIMEOUT_SECONDS)
+            target: str | Path = self.path
+            if self.read_only:
+                target = f"file:{self.path.resolve()}?mode=ro&cache=private"
+            conn = sqlite3.connect(
+                target,
+                timeout=SQLITE_TIMEOUT_SECONDS,
+                uri=self.read_only,
+            )
             try:
                 conn.execute(f"PRAGMA busy_timeout={SQLITE_BUSY_TIMEOUT_MS}")
-                _ensure_sqlite_sidecars_private(self.path)
+                if self.read_only:
+                    conn.execute("PRAGMA query_only=ON")
+                else:
+                    _ensure_sqlite_sidecars_private(self.path)
                 if row_factory is not None:
                     conn.row_factory = row_factory
                 yield conn
-                conn.commit()
+                if not self.read_only:
+                    conn.commit()
             except Exception:
-                conn.rollback()
+                if not self.read_only:
+                    conn.rollback()
                 raise
             finally:
                 conn.close()

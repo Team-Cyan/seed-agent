@@ -25,7 +25,6 @@ disable the limit.
 
 | Field | Positive value | `0` or `null` |
 | --- | --- | --- |
-| `max_leechers` | Reject above the count | No leecher upper bound |
 | `max_seed_leecher_ratio` | Reject above the ratio | No hard ratio ceiling |
 | `max_size_gb` | Reject above the GiB size | No hard size ceiling |
 | `max_active_downloads` | Limit active seed downloads | No configured slot limit |
@@ -33,6 +32,11 @@ disable the limit.
 
 Minimum fields naturally stop restricting at `0`. Additional scoring controls
 use these disable rules:
+
+Leecher count intentionally has no upper limit: more leechers normally represent
+more demand. Use `max_seed_leecher_ratio` to reject oversupplied swarms, or the
+tracker-native `api_discovery.max_seeders` only when an absolute discovery cap
+is deliberately required.
 
 - `target_seed_leecher_ratio: 0` disables the soft ratio curve and grants the
   full ratio component.
@@ -76,7 +80,8 @@ tracker_sites:
 M-Team native `api_discovery.min_seeders` and `min_leechers` accept `null` to
 inherit global PT thresholds. Explicit `0` keeps native API filtering open so
 local scoring can make the final decision. `api_discovery.max_seeders: 0`
-disables that native upper bound.
+disables that native upper bound and is the default; set a positive value only
+when an absolute discovery ceiling is intentional.
 
 ## PT Admission Filters
 
@@ -89,7 +94,6 @@ pt_filters:
   min_left_time_minutes: 120
   min_seeders: 1
   min_leechers: 30
-  max_leechers: 0
   leecher_score_full_at_multiplier: 2
   target_seed_leecher_ratio: 2
   max_seed_leecher_ratio: 10

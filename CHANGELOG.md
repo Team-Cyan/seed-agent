@@ -4,6 +4,28 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.21.1 - 2026-08-04
+
+### Fixed
+
+- Open long-running Web state reads through private SQLite read-only URI
+  connections, isolating `/api/ops`, `/api/state/summary`, logs, Want List, and
+  tracker-backoff reads from the scheduler writer's WAL lifecycle.
+- Default M-Team native `api_discovery.max_seeders` to `0` so omitted settings
+  do not silently filter popular, high-demand torrents.
+
+### Changed
+
+- Align the upload-farming example profile with the reviewed high-demand live
+  strategy: stronger leecher admission, no hard size ceiling, and larger
+  download-capacity gates.
+
+### Removed
+
+- Removed `pt_filters.max_leechers` instead of preserving it as a compatibility
+  ceiling. High leecher counts represent demand; competition limits belong in
+  `max_seed_leecher_ratio` or the tracker-native `api_discovery.max_seeders`.
+
 ## 0.21.0 - 2026-08-04
 
 ### Added

@@ -48,6 +48,37 @@ def test_state_store_forces_private_database_lock_and_wal_permissions(tmp_path: 
     assert stat.S_IMODE(Path(f"{fresh_path}.access.lock").stat().st_mode) == 0o600
 
 
+def test_read_only_state_store_uses_existing_database_without_writes(tmp_path: Path) -> None:
+    path = tmp_path / "state.db"
+    writable = StateStore(path)
+    writable.upsert_candidate(
+        stable_id="demo:read-only",
+        title="Read Only",
+        site="demo",
+        state=LifecycleState.SCORED,
+        score=80,
+        torrent_hash=None,
+    )
+
+    read_only = StateStore(path, initialize=False, read_only=True)
+
+    assert read_only.get_candidate("demo:read-only") is not None
+    with pytest.raises(sqlite3.OperationalError, match="readonly"):
+        read_only.upsert_candidate(
+            stable_id="demo:blocked-write",
+            title="Blocked Write",
+            site="demo",
+            state=LifecycleState.SCORED,
+            score=80,
+            torrent_hash=None,
+        )
+
+
+def test_read_only_state_store_requires_existing_database(tmp_path: Path) -> None:
+    with pytest.raises(FileNotFoundError):
+        StateStore(tmp_path / "missing.db", initialize=False, read_only=True)
+
+
 def test_state_store_upserts_candidate_and_updates_existing_row(tmp_path: Path) -> None:
     path = tmp_path / "nested" / "state.sqlite3"
     store = StateStore(path)

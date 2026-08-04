@@ -41,9 +41,9 @@ Score discovered torrents or ranked releases using explicit policy weights and e
   bounds; set `max_size_gb` to `0` or `null` to disable the hard upper bound.
   `preferred_size_min_gb` and `preferred_size_max_gb` only affect the size score
   contribution.
-- `pt_filters.min_seeders` and `pt_filters.max_leechers` are hard bounds when
-  configured; they protect the seed pool from dead or overly crowded candidates.
-  `max_leechers=0` disables the upper bound.
+- `pt_filters.min_seeders` is a hard lower bound that avoids dead swarms.
+  Leecher count intentionally has no upper bound: more leechers represent more
+  demand. Use `max_seed_leecher_ratio` to reject oversupplied swarms.
 - `pt_filters.leecher_score_full_at_multiplier` is a soft demand-shaping knob.
   The default `1.0` preserves the old behavior where `min_leechers` gets full
   leecher credit. Values above `1.0` make candidates ramp from partial credit at
