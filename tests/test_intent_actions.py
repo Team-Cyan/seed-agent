@@ -9,6 +9,7 @@ from seed_agent.actions.intent import (
     enqueue_intent,
     ingest_events,
     ingest_inbox,
+    rank_intent,
     run_intent_once,
     search_intent,
 )
@@ -185,7 +186,7 @@ def test_add_intent_refreshes_metadata_without_resetting_existing_state(tmp_path
     )
     store.update_intent_state(intent.intent_id, IntentState.CONFIRMATION_REQUIRED)
     refreshed, decision = add_intent(
-        "隐秘的角落 2020",
+        "隐秘的角落 第三季 2020",
         store,
         source=IntentSource.DOUBAN_WANTED,
         source_event_id="douban:33404425",
@@ -195,8 +196,122 @@ def test_add_intent_refreshes_metadata_without_resetting_existing_state(tmp_path
 
     assert decision.new_state["existed"] is True
     assert refreshed.state == IntentState.CONFIRMATION_REQUIRED
+    assert refreshed.kind == IntentKind.SHOW
+    assert refreshed.season == 3
     assert refreshed.metadata["media_type"] == "tv"
     assert refreshed.metadata["douban_user_name"] == "example-user"
+
+
+def test_rank_intent_replaces_episode_candidates_excluded_in_season_mode(tmp_path: Path) -> None:
+    store = StateStore(tmp_path / "state.db")
+    intent, _ = add_intent(
+        "House of the Dragon Season 3 2026",
+        store,
+        requested_at=REQUESTED_AT,
+        metadata={"media_type": "tv"},
+    )
+    episode = ReleaseCandidate(
+        release_id="mteam:episode",
+        site="mteam",
+        title="House of the Dragon 2026 S03E01 2160p WEB-DL",
+        source_url="https://example.invalid/episode",
+        download_url="https://example.invalid/download/episode",
+        size_bytes=1,
+        seeders=1,
+        leechers=1,
+        discount=Discount.FREE,
+    )
+    season = episode.model_copy(
+        update={
+            "release_id": "mteam:season",
+            "title": "House of the Dragon 2026 S03 2160p WEB-DL",
+        }
+    )
+    store.save_ranked_releases(
+        [
+            RankedRelease(
+                intent_id=intent.intent_id,
+                release=episode,
+                score=0,
+                confidence=0,
+                accepted=False,
+                confirmation_required=True,
+                reasons=[],
+                risks=[],
+            ),
+            RankedRelease(
+                intent_id=intent.intent_id,
+                release=season,
+                score=0,
+                confidence=0,
+                accepted=False,
+                confirmation_required=True,
+                reasons=[],
+                risks=[],
+            ),
+        ],
+        replace_intent_id=intent.intent_id,
+    )
+
+    _, ranked, _ = rank_intent(
+        intent.intent_id,
+        store,
+        IntentConfig(series_search_mode="season"),
+        SearchConfig(),
+    )
+
+    assert [item.release.release_id for item in ranked] == ["mteam:season"]
+    rows = store.list_release_candidates(intent.intent_id)
+    assert [row["release_id"] for row in rows] == ["mteam:season"]
+
+
+@pytest.mark.asyncio
+async def test_search_intent_excludes_episode_candidates_in_season_mode(tmp_path: Path) -> None:
+    store = StateStore(tmp_path / "state.db")
+    intent, _ = add_intent(
+        "House of the Dragon Season 3 2026",
+        store,
+        requested_at=REQUESTED_AT,
+        metadata={"media_type": "tv"},
+    )
+
+    class Provider:
+        async def search(self, _intent: ResourceIntent) -> list[ReleaseCandidate]:
+            return [
+                ReleaseCandidate(
+                    release_id="mteam:episode",
+                    site="mteam",
+                    title="House of the Dragon 2026 S03E01 2160p WEB-DL",
+                    source_url="https://example.invalid/episode",
+                    download_url="https://example.invalid/download/episode",
+                    size_bytes=1,
+                    seeders=1,
+                    leechers=1,
+                    discount=Discount.FREE,
+                ),
+                ReleaseCandidate(
+                    release_id="mteam:season",
+                    site="mteam",
+                    title="House of the Dragon 2026 S03 2160p WEB-DL",
+                    source_url="https://example.invalid/season",
+                    download_url="https://example.invalid/download/season",
+                    size_bytes=1,
+                    seeders=1,
+                    leechers=1,
+                    discount=Discount.FREE,
+                ),
+            ]
+
+    _, ranked, _ = await search_intent(
+        intent.intent_id,
+        store,
+        [Provider()],
+        IntentConfig(series_search_mode="season"),
+    )
+
+    assert [item.release.release_id for item in ranked] == ["mteam:season"]
+    rows = store.list_release_candidates(intent.intent_id)
+    assert [row["release_id"] for row in rows] == ["mteam:season"]
 
 
 def test_ingest_inbox_reads_jsonl_events_and_skips_invalid_lines(tmp_path: Path) -> None:
@@ -435,7 +550,12 @@ async def test_search_intent_does_not_merge_from_candidate_external_ids(
                 )
             ]
 
-    searched, ranked, _ = await search_intent(newer.intent_id, store, [FakeProvider()])
+    searched, ranked, _ = await search_intent(
+        newer.intent_id,
+        store,
+        [FakeProvider()],
+        IntentConfig(),
+    )
 
     assert searched.intent_id == newer.intent_id
     assert ranked[0].intent_id == newer.intent_id
@@ -725,9 +845,9 @@ async def test_search_intent_replaces_previous_search_snapshot(tmp_path: Path) -
             ]
 
     provider = Provider()
-    await search_intent(intent.intent_id, store, [provider])
+    await search_intent(intent.intent_id, store, [provider], IntentConfig())
     provider.release_id = "new"
-    await search_intent(intent.intent_id, store, [provider])
+    await search_intent(intent.intent_id, store, [provider], IntentConfig())
 
     assert [row["release_id"] for row in store.list_release_candidates(intent.intent_id)] == ["new"]
 

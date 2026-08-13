@@ -328,6 +328,50 @@ def test_rank_releases_defaults_episode_intents_to_season_pack_matching() -> Non
     assert "episode missing" not in ranked[0].risks
 
 
+def test_rank_releases_excludes_episode_releases_in_season_mode() -> None:
+    ranked = rank_releases(
+        _intent(
+            kind=IntentKind.SHOW,
+            title="House of the Dragon",
+            raw_text="House of the Dragon Season 3 2026",
+            year=2026,
+            season=3,
+            resolution="2160p",
+            metadata={"media_type": "tv"},
+        ),
+        [
+            _release(title="House of the Dragon 2026 S03E01 2160p WEB-DL"),
+            _release(title="House of the Dragon 2026 S03 2160p WEB-DL"),
+        ],
+        _intent_config(default_resolution="2160p", series_search_mode="season"),
+        _search_config(),
+    )
+
+    assert [item.release.title for item in ranked] == [
+        "House of the Dragon 2026 S03 2160p WEB-DL"
+    ]
+    assert "full season pack title" in ranked[0].reasons
+
+
+def test_rank_releases_excludes_episode_ranges_in_season_mode() -> None:
+    ranked = rank_releases(
+        _intent(
+            kind=IntentKind.SHOW,
+            title="House of the Dragon",
+            raw_text="House of the Dragon Season 3 2026",
+            year=2026,
+            season=3,
+            resolution="2160p",
+            metadata={"media_type": "tv"},
+        ),
+        [_release(title="House of the Dragon 2026 S03E01-E06 2160p WEB-DL")],
+        _intent_config(default_resolution="2160p", series_search_mode="season"),
+        _search_config(),
+    )
+
+    assert ranked == []
+
+
 def test_rank_releases_can_require_episode_when_configured() -> None:
     ranked = rank_releases(
         _intent(

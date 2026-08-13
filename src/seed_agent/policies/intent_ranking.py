@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 
 from seed_agent.config import IntentConfig, SearchConfig
-from seed_agent.models import Discount, RankedRelease, ReleaseCandidate, ResourceIntent
+from seed_agent.models import Discount, IntentKind, RankedRelease, ReleaseCandidate, ResourceIntent
 from seed_agent.quality_tags import (
     QUALITY_TAG_GROUPS,
     matching_quality_tag_groups,
@@ -13,6 +13,11 @@ from seed_agent.quality_tags import (
 TOKEN_RE = re.compile(r"[a-z0-9]+|[\u4e00-\u9fff]+", re.IGNORECASE)
 LATIN_TOKEN_RE = re.compile(r"[a-z0-9]+", re.IGNORECASE)
 CJK_TOKEN_RE = re.compile(r"[\u4e00-\u9fff]+")
+SEASON_TOKEN_RE = re.compile(r"(?<![a-z0-9])s0*\d{1,2}(?!\d)", re.IGNORECASE)
+EPISODE_TOKEN_RE = re.compile(
+    r"(?<![a-z0-9])(?:s0*\d{1,2}[ ._-]*e0*\d{1,3}|e0*\d{1,3}|\d{1,2}x\d{1,3})(?!\d)",
+    re.IGNORECASE,
+)
 
 
 def rank_releases(
@@ -23,7 +28,7 @@ def rank_releases(
 ) -> list[RankedRelease]:
     scored = [
         _rank_one(intent, release, intent_config, search_config)
-        for release in releases
+        for release in filter_releases(intent, releases, intent_config)
     ]
     ordered = sorted(
         scored,
@@ -87,6 +92,9 @@ def _rank_one(
             reasons.append("season matched")
         else:
             risks.append("season missing")
+
+    if _requires_season_pack(intent, intent_config):
+        reasons.append("full season pack title")
 
     if _requires_episode_match(intent, intent_config):
         if _has_episode(release.title, intent.episode):
@@ -183,6 +191,41 @@ def _requires_episode_match(intent: ResourceIntent, intent_config: IntentConfig)
     if intent.episode is None:
         return False
     return intent_config.series_search_mode == "episode" or intent.season is None
+
+
+def _requires_season_pack(intent: ResourceIntent, intent_config: IntentConfig) -> bool:
+    media_type = str(intent.metadata.get("media_type") or "").lower()
+    is_series = (
+        intent.kind in {IntentKind.SHOW, IntentKind.EPISODE}
+        or media_type in {"tv", "anime"}
+    )
+    return is_series and intent_config.series_search_mode == "season"
+
+
+def _is_season_pack(title: str) -> bool:
+    return SEASON_TOKEN_RE.search(title) is not None and EPISODE_TOKEN_RE.search(title) is None
+
+
+def _is_candidate_eligible(
+    intent: ResourceIntent,
+    release: ReleaseCandidate,
+    intent_config: IntentConfig,
+) -> bool:
+    if not _requires_season_pack(intent, intent_config):
+        return True
+    return _is_season_pack(release.title)
+
+
+def filter_releases(
+    intent: ResourceIntent,
+    releases: list[ReleaseCandidate],
+    intent_config: IntentConfig,
+) -> list[ReleaseCandidate]:
+    return [
+        release
+        for release in releases
+        if _is_candidate_eligible(intent, release, intent_config)
+    ]
 
 
 def _quality_tag_score_adjustment(

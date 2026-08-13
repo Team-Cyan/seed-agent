@@ -11,6 +11,8 @@ YEAR_RE = re.compile(r"\b(19\d{2}|20\d{2}|21\d{2})\b")
 RESOLUTION_RE = re.compile(r"\b(720p|1080p|2160p|4320p|4k|8k)\b", re.IGNORECASE)
 EPISODE_RE = re.compile(r"\bS(?P<season>\d{1,2})E(?P<episode>\d{1,3})\b", re.IGNORECASE)
 SEASON_RE = re.compile(r"\bS(?P<season>\d{1,2})\b", re.IGNORECASE)
+SEASON_WORD_RE = re.compile(r"\bSeason[ ._-]*(?P<season>\d{1,2})(?!\d)", re.IGNORECASE)
+CHINESE_SEASON_RE = re.compile(r"第\s*(?P<season>[一二三四五六七八九十0-9]{1,3})\s*季")
 QUALITY_RE = re.compile(r"\b(BluRay|WEB[-_. ]?DL|WEBRip|HDRip|Remux|DVDRip)\b", re.IGNORECASE)
 LANGUAGE_RE = re.compile(r"\b(zh|chi|chs|cht|cn|en|eng|jpn|jp)\b", re.IGNORECASE)
 KIND_PREFIX_RE = re.compile(r"^\s*(?P<kind>movie|film|show|series|episode)\s+", re.IGNORECASE)
@@ -48,6 +50,10 @@ def parse_resource_intent(
     episode = int(episode_match.group("episode")) if episode_match is not None else None
     if season is None:
         season = _first_named_int(SEASON_RE, working, "season")
+    if season is None:
+        season = _first_named_int(SEASON_WORD_RE, working, "season")
+    if season is None:
+        season = _first_chinese_season(working)
     quality = _first_match(QUALITY_RE, working)
     if quality is not None:
         quality = quality.replace("_", "-").replace(" ", "-")
@@ -120,6 +126,8 @@ def _title_from_text(value: str) -> str:
         SENSITIVE_ASSIGNMENT_RE,
         EPISODE_RE,
         SEASON_RE,
+        SEASON_WORD_RE,
+        CHINESE_SEASON_RE,
         YEAR_RE,
         RESOLUTION_RE,
         QUALITY_RE,
@@ -150,6 +158,24 @@ def _first_named_int(pattern: re.Pattern[str], value: str, name: str) -> int | N
     if match is None:
         return None
     return int(match.group(name))
+
+
+def _first_chinese_season(value: str) -> int | None:
+    match = CHINESE_SEASON_RE.search(value)
+    if match is None:
+        return None
+    raw = match.group("season")
+    if raw.isdigit():
+        return int(raw)
+    numerals = {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
+    if raw == "十":
+        return 10
+    if "十" not in raw:
+        return numerals.get(raw)
+    tens, _, ones = raw.partition("十")
+    tens_value = numerals.get(tens, 1) if tens else 1
+    ones_value = numerals.get(ones, 0) if ones else 0
+    return tens_value * 10 + ones_value
 
 
 def _normalize_language(value: str | None) -> str | None:

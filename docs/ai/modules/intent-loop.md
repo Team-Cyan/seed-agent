@@ -27,6 +27,8 @@ Convert human requests into search/rank/reject/enqueue workflows.
 - merge Douban and IMDb source events into canonical Want List works through
   `douban:<subject_id>` and `imdb:<tt_id>` aliases,
 - normalize text,
+- preserve trusted TV/anime source classification as structured `SHOW` intents
+  and parse `S03`, `Season 3`, and `第三季` season notation,
 - search sources,
 - rank release candidates,
 - reject unwanted options,
@@ -72,6 +74,9 @@ Convert human requests into search/rank/reject/enqueue workflows.
   CLI, or scheduler workers cannot add the same release twice,
 - require exact season/episode token boundaries so `S02E03` cannot match
   `S020E030`,
+- when `series_search_mode=season`, exclude episode-labelled candidates from
+  search results before persistence; only an `Sxx` title without an episode
+  token is a provisional full-season match,
 - redact credential-like assignments before persisting intent raw text while
   retaining stable source-event identity,
 - keep source-only ingestion independent from downloader and search-provider

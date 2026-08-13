@@ -4,6 +4,17 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.21.2 - 2026-08-13
+
+### Fixed
+
+- Preserve trusted TV/anime source classification as structured show intents and
+  recognize `S03`, `Season 3`, and `第三季` season notation when normalizing
+  Want List entries.
+- When `want_decision.series_search_mode=season`, exclude single episodes and
+  partial episode ranges such as `S03E01` and `S03E01-E06` from persisted Want
+  List candidates across Web, scheduled, and CLI search flows.
+
 ## 0.21.1 - 2026-08-04
 
 ### Fixed

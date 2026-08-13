@@ -439,7 +439,9 @@ def intent_search(
     store = StateStore(_state_path(loaded))
     providers = _build_search_providers(loaded)
     try:
-        intent, ranked, decision = _run(search_intent(intent_id, store, providers))
+        intent, ranked, decision = _run(
+            search_intent(intent_id, store, providers, loaded.want_decision)
+        )
     except ValueError as exc:
         raise typer.BadParameter(str(exc)) from exc
     _write_audit_decisions(loaded, [decision])

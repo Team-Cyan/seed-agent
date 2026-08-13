@@ -53,6 +53,21 @@ def test_parse_show_request_without_episode() -> None:
     assert intent.resolution == "2160p"
 
 
+@pytest.mark.parametrize(
+    ("raw_text", "season"),
+    [
+        ("House of the Dragon Season 3 2026", 3),
+        ("龙之家族 第三季 2026", 3),
+    ],
+)
+def test_parse_named_season_notation(raw_text: str, season: int) -> None:
+    intent = parse_resource_intent(raw_text, requested_at=REQUESTED_AT)
+
+    assert intent.kind == IntentKind.SHOW
+    assert intent.season == season
+    assert intent.episode is None
+
+
 def test_parse_unknown_request_keeps_title_and_raw_text() -> None:
     intent = parse_resource_intent(
         "some obscure documentary",

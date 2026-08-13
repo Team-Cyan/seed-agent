@@ -14,6 +14,7 @@ from seed_agent.downloaders.base import Downloader
 from seed_agent.intent.parse import parse_resource_intent
 from seed_agent.models import (
     Decision,
+    IntentKind,
     IntentSource,
     IntentState,
     RankedRelease,
@@ -23,7 +24,7 @@ from seed_agent.models import (
     TorrentCandidate,
 )
 from seed_agent.policies.category_policy import PoolUsage
-from seed_agent.policies.intent_ranking import rank_releases
+from seed_agent.policies.intent_ranking import filter_releases, rank_releases
 from seed_agent.search.base import SearchProvider
 from seed_agent.sources.base import SourceIntentEvent
 from seed_agent.sources.file_inbox import read_file_inbox
@@ -69,6 +70,7 @@ def add_intent(
     )
     if metadata:
         intent = intent.model_copy(update={"metadata": _merge_metadata(intent.metadata, metadata)})
+    intent = _apply_source_media_shape(intent)
     aliases = _intent_aliases(intent)
     alias_intent_ids = {
         existing_id
@@ -89,8 +91,9 @@ def add_intent(
         if existing is not None:
             persisted = ResourceIntent.model_validate(json.loads(str(existing["normalized_json"])))
             merged_metadata = _merge_metadata(persisted.metadata, intent.metadata)
-            if merged_metadata != persisted.metadata:
-                persisted = persisted.model_copy(update={"metadata": merged_metadata})
+            refreshed = _refresh_source_intent(persisted, intent, merged_metadata)
+            if refreshed != persisted:
+                persisted = refreshed
                 store.upsert_intent(
                     persisted,
                     selected_release_id=existing["selected_release_id"],
@@ -102,8 +105,9 @@ def add_intent(
         persisted = ResourceIntent.model_validate(json.loads(str(existing["normalized_json"])))
         if metadata:
             merged_metadata = _merge_metadata(persisted.metadata, metadata)
-            if merged_metadata != persisted.metadata:
-                persisted = persisted.model_copy(update={"metadata": merged_metadata})
+            refreshed = _refresh_source_intent(persisted, intent, merged_metadata)
+            if refreshed != persisted:
+                persisted = refreshed
                 store.upsert_intent(
                     persisted,
                     selected_release_id=existing["selected_release_id"],
@@ -210,6 +214,30 @@ def _merge_metadata(
     return merged
 
 
+def _apply_source_media_shape(intent: ResourceIntent) -> ResourceIntent:
+    """Make trusted source media classification part of the structured intent."""
+    media_type = str(intent.metadata.get("media_type") or "").lower()
+    if media_type not in {"tv", "anime"}:
+        return intent
+    if intent.kind == IntentKind.EPISODE:
+        return intent
+    return intent.model_copy(update={"kind": IntentKind.SHOW})
+
+
+def _refresh_source_intent(
+    persisted: ResourceIntent,
+    incoming: ResourceIntent,
+    merged_metadata: dict[str, Any],
+) -> ResourceIntent:
+    """Repair missing parser fields when a trusted source is refreshed."""
+    updates: dict[str, Any] = {"metadata": merged_metadata}
+    if persisted.season is None and incoming.season is not None:
+        updates["season"] = incoming.season
+    if persisted.episode is None and incoming.episode is not None:
+        updates["episode"] = incoming.episode
+    return _apply_source_media_shape(persisted.model_copy(update=updates))
+
+
 def _dict_metadata(value: Any) -> dict[str, Any]:
     return dict(value) if isinstance(value, dict) else {}
 
@@ -248,11 +276,13 @@ async def search_intent(
     intent_id: str,
     store: StateStore,
     providers: Iterable[SearchProvider],
+    intent_config: IntentConfig,
 ) -> tuple[ResourceIntent, list[RankedRelease], Decision]:
     intent = _load_intent(store, intent_id)
     releases: list[ReleaseCandidate] = []
     for provider in providers:
         releases.extend(await provider.search(intent))
+    releases = filter_releases(intent, releases, intent_config)
     ranked = [_unranked_candidate(intent.intent_id, release) for release in releases]
     store.save_ranked_releases(ranked, replace_intent_id=intent.intent_id)
     store.update_intent_state(intent.intent_id, IntentState.SEARCHED)
@@ -269,7 +299,7 @@ def rank_intent(
     intent = _load_intent(store, intent_id)
     releases = _stored_releases(store.list_release_candidates(intent.intent_id))
     ranked = rank_releases(intent, releases, intent_config, search_config)
-    store.save_ranked_releases(ranked)
+    store.save_ranked_releases(ranked, replace_intent_id=intent.intent_id)
     next_state = _ranked_state(ranked)
     store.update_intent_state(intent.intent_id, next_state)
     return intent, ranked, _rank_decision(intent, ranked, next_state)

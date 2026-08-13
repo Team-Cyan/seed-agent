@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from seed_agent.actions.intent import add_intent, search_intent
+from seed_agent.config import IntentConfig
 from seed_agent.models import Discount, ReleaseCandidate
 from seed_agent.state import StateStore
 
@@ -71,6 +72,7 @@ async def test_search_provider_contract_persists_releases_through_intent_loop(
         intent.intent_id,
         store,
         [StaticProvider([_release()])],
+        IntentConfig(),
     )
 
     rows = store.list_release_candidates(intent.intent_id)
@@ -93,6 +95,7 @@ async def test_search_provider_contract_provider_errors_do_not_persist_partial_r
             intent.intent_id,
             store,
             [StaticProvider([_release()]), FailingProvider()],
+            IntentConfig(),
         )
 
     assert store.list_release_candidates(intent.intent_id) == []
