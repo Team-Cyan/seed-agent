@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sqlite3
 from datetime import UTC, datetime, timedelta
 from http.client import HTTPConnection
 from pathlib import Path
@@ -516,6 +517,29 @@ def test_http_state_reads_return_json_when_payload_build_fails(
 
     assert payload["error"] == expected_error
     assert "simulated state read failure" in payload["detail"]
+
+
+@pytest.mark.parametrize("path", ["/api/wants", "/api/logs"])
+def test_http_state_backed_reads_return_json_when_database_is_malformed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    path: str,
+) -> None:
+    from seed_agent.web import app as web_app
+
+    config_path = _write_minimal_config(tmp_path)
+
+    def fail(*args: object, **kwargs: object) -> dict[str, Any]:
+        raise sqlite3.DatabaseError("database disk image is malformed")
+
+    payload_name = "_wants_payload" if path == "/api/wants" else "_logs_payload"
+    monkeypatch.setattr(web_app, payload_name, fail)
+
+    with _running_server(config_path) as base_url:
+        payload = _request_json(base_url, "GET", path, expected_status=503)
+
+    assert payload["error"] == "state database unavailable"
+    assert payload["detail"] == "database disk image is malformed"
 
 
 def test_http_logs_merges_durable_events_and_redacts_secrets(tmp_path: Path) -> None:
@@ -1583,6 +1607,73 @@ def test_http_wants_payload_includes_best_candidate_score(tmp_path: Path) -> Non
 
     assert payload["items"][0]["release_count"] == 2
     assert payload["items"][0]["best_candidate_score"] == 86
+
+
+def test_http_want_candidates_hides_stale_episode_rows_in_season_mode(tmp_path: Path) -> None:
+    config_path = _write_minimal_config(tmp_path)
+    store = StateStore(tmp_path / ".seed-agent" / "state.db")
+    intent = ResourceIntent(
+        intent_id="douban_wanted:house-of-the-dragon-s03",
+        source=IntentSource.DOUBAN_WANTED,
+        raw_text="House of the Dragon Season 3 2026",
+        kind=IntentKind.SHOW,
+        title="House of the Dragon",
+        year=2026,
+        season=3,
+        requested_at=datetime(2026, 8, 22, tzinfo=UTC),
+        state=IntentState.CONFIRMATION_REQUIRED,
+        metadata={"media_type": "tv"},
+    )
+    store.upsert_intent(intent)
+    candidates = [
+        ReleaseCandidate(
+            release_id="mt:episode",
+            site="mt",
+            title="House of the Dragon 2026 S03.301-306 2160p WEB-DL",
+            source_url="https://example.invalid/episode",
+            download_url="mteam-api://torrent/episode",
+            size_bytes=1,
+            seeders=1,
+            leechers=1,
+            discount=Discount.FREE,
+        ),
+        ReleaseCandidate(
+            release_id="mt:season",
+            site="mt",
+            title="House of the Dragon 2026 S03 2160p WEB-DL",
+            source_url="https://example.invalid/season",
+            download_url="mteam-api://torrent/season",
+            size_bytes=1,
+            seeders=1,
+            leechers=1,
+            discount=Discount.FREE,
+        ),
+    ]
+    store.save_ranked_releases(
+        [
+            RankedRelease(
+                intent_id=intent.intent_id,
+                release=candidate,
+                score=80,
+                confidence=0.8,
+                accepted=False,
+                confirmation_required=True,
+                reasons=[],
+                risks=[],
+            )
+            for candidate in candidates
+        ]
+    )
+
+    with _running_server(config_path) as base_url:
+        payload = _request_json(
+            base_url,
+            "GET",
+            f"/api/wants/{intent.intent_id}/candidates",
+        )
+
+    assert payload["total"] == 1
+    assert [item["release_id"] for item in payload["items"]] == ["mt:season"]
 
 
 def test_http_want_enqueue_can_select_lower_match_release(

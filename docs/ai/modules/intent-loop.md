@@ -75,8 +75,10 @@ Convert human requests into search/rank/reject/enqueue workflows.
 - require exact season/episode token boundaries so `S02E03` cannot match
   `S020E030`,
 - when `series_search_mode=season`, exclude episode-labelled candidates from
-  search results before persistence; only an `Sxx` title without an episode
-  token is a provisional full-season match,
+  search results before persistence and candidate rendering; only an `Sxx`
+  title without an explicit or compact numbered episode token (for example
+  `S03E01-E06`, `S03.01-06`, or `S03.301-306`) is a provisional full-season
+  match,
 - redact credential-like assignments before persisting intent raw text while
   retaining stable source-event identity,
 - keep source-only ingestion independent from downloader and search-provider

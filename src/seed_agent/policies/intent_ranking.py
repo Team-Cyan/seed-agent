@@ -18,6 +18,10 @@ EPISODE_TOKEN_RE = re.compile(
     r"(?<![a-z0-9])(?:s0*\d{1,2}[ ._-]*e0*\d{1,3}|e0*\d{1,3}|\d{1,2}x\d{1,3})(?!\d)",
     re.IGNORECASE,
 )
+SEASON_TOKEN_WITH_NUMBER_RE = re.compile(
+    r"(?<![a-z0-9])s0*(?P<season>\d{1,2})(?!\d)[ ._-]*(?P<number>\d{1,4})(?![a-z0-9])",
+    re.IGNORECASE,
+)
 
 
 def rank_releases(
@@ -203,7 +207,41 @@ def _requires_season_pack(intent: ResourceIntent, intent_config: IntentConfig) -
 
 
 def _is_season_pack(title: str) -> bool:
-    return SEASON_TOKEN_RE.search(title) is not None and EPISODE_TOKEN_RE.search(title) is None
+    return (
+        SEASON_TOKEN_RE.search(title) is not None
+        and EPISODE_TOKEN_RE.search(title) is None
+        and not _has_numbered_episode_after_season(title)
+    )
+
+
+def _has_numbered_episode_after_season(title: str) -> bool:
+    """Recognize compact release names such as ``S01.01-06`` and ``S01.101``.
+
+    M-Team titles are not consistent about including an ``E`` before an episode.
+    Keep the number immediately attached to the season marker so that unrelated
+    years and resolutions (for example ``S01.1080p``) are not treated as episodes.
+    """
+
+    for match in SEASON_TOKEN_WITH_NUMBER_RE.finditer(title):
+        season = int(match.group("season"))
+        number = match.group("number")
+        if _is_episode_number(number):
+            return True
+        if _is_compact_season_episode(number, season):
+            return True
+    return False
+
+
+def _is_episode_number(value: str) -> bool:
+    return 1 <= int(value) <= 99
+
+
+def _is_compact_season_episode(value: str, season: int) -> bool:
+    season_prefix = str(season)
+    if not value.startswith(season_prefix):
+        return False
+    episode = value.removeprefix(season_prefix)
+    return len(episode) >= 2 and _is_episode_number(episode)
 
 
 def _is_candidate_eligible(

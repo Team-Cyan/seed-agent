@@ -43,6 +43,7 @@ from seed_agent.models import (
     ReleaseCandidate,
     ResourceIntent,
 )
+from seed_agent.policies.intent_ranking import filter_releases
 from seed_agent.quality_tags import matching_quality_tag_groups
 from seed_agent.search.base import SearchProvider
 from seed_agent.state import StateStore
@@ -111,7 +112,18 @@ def make_handler(config_path: Path) -> type[BaseHTTPRequestHandler]:
                 return
             want_candidates_id = _want_subresource_intent_id(self.path, "candidates")
             if want_candidates_id is not None:
-                payload, status = _want_candidates_payload(root, want_candidates_id)
+                try:
+                    payload, status = _want_candidates_payload(
+                        resolved_config_path,
+                        root,
+                        want_candidates_id,
+                    )
+                except sqlite3.DatabaseError as exc:
+                    self._send_json(
+                        _state_database_error_payload(exc),
+                        status=HTTPStatus.SERVICE_UNAVAILABLE,
+                    )
+                    return
                 self._send_json(payload, status=status)
                 return
             if self.path == "/api/config":
@@ -142,7 +154,13 @@ def make_handler(config_path: Path) -> type[BaseHTTPRequestHandler]:
                 self._send_json(_pools_payload(resolved_config_path))
                 return
             if self.path == "/api/wants":
-                self._send_json(_wants_payload(root))
+                try:
+                    self._send_json(_wants_payload(root))
+                except sqlite3.DatabaseError as exc:
+                    self._send_json(
+                        _state_database_error_payload(exc),
+                        status=HTTPStatus.SERVICE_UNAVAILABLE,
+                    )
                 return
             if self.path == "/api/health":
                 self._send_json(_health_payload(root))
@@ -160,7 +178,13 @@ def make_handler(config_path: Path) -> type[BaseHTTPRequestHandler]:
                     )
                 return
             if urlparse(self.path).path == "/api/logs":
-                self._send_json(_logs_payload(root))
+                try:
+                    self._send_json(_logs_payload(root))
+                except sqlite3.DatabaseError as exc:
+                    self._send_json(
+                        _state_database_error_payload(exc),
+                        status=HTTPStatus.SERVICE_UNAVAILABLE,
+                    )
                 return
             if self.path == "/":
                 self._send_static("index.html")
@@ -193,6 +217,11 @@ def make_handler(config_path: Path) -> type[BaseHTTPRequestHandler]:
                         "revision": exc.current,
                     },
                     status=HTTPStatus.CONFLICT,
+                )
+            except sqlite3.DatabaseError as exc:
+                self._send_json(
+                    _state_database_error_payload(exc),
+                    status=HTTPStatus.SERVICE_UNAVAILABLE,
                 )
             except Exception as exc:
                 self._send_json(
@@ -838,7 +867,11 @@ def _want_subresource_intent_id(path: str, action: str) -> str | None:
     return unquote(raw_intent_id)
 
 
-def _want_candidates_payload(root: Path, intent_id: str) -> tuple[dict[str, Any], HTTPStatus]:
+def _want_candidates_payload(
+    config_path: Path,
+    root: Path,
+    intent_id: str,
+) -> tuple[dict[str, Any], HTTPStatus]:
     state_path = _state_db_path(root)
     if not state_path.exists():
         return {"error": "state db not found"}, HTTPStatus.NOT_FOUND
@@ -846,7 +879,17 @@ def _want_candidates_payload(root: Path, intent_id: str) -> tuple[dict[str, Any]
     row = store.get_intent(intent_id)
     if row is None:
         return {"error": "want not found"}, HTTPStatus.NOT_FOUND
+    intent = ResourceIntent.model_validate(json.loads(str(row["normalized_json"])))
     ranked = [_ranked_release_from_row(item) for item in store.list_release_candidates(intent_id)]
+    allowed_release_ids = {
+        release.release_id
+        for release in filter_releases(
+            intent,
+            [item.release for item in ranked],
+            load_config(config_path).want_decision,
+        )
+    }
+    ranked = [item for item in ranked if item.release.release_id in allowed_release_ids]
     candidates = [_want_candidate_item(item, row.get("selected_release_id")) for item in ranked]
     candidates.sort(
         key=lambda item: (
@@ -1964,6 +2007,15 @@ def _friendly_error(exc: Exception) -> str:
     if "tracker name is required" in message:
         return "tracker name is required"
     return message
+
+
+def _state_database_error_payload(exc: Exception) -> dict[str, Any]:
+    detail = _friendly_error(exc)
+    return {
+        "error": "state database unavailable",
+        "detail": detail,
+        "status": [{"level": "warning", "message": f"state database unavailable: {detail}"}],
+    }
 
 
 def _has_blocking_tracker_status(status: list[dict[str, str]]) -> bool:

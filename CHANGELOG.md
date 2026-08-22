@@ -4,6 +4,18 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.21.3 - 2026-08-22
+
+### Fixed
+
+- In season search mode, reject compact numbered episode titles such as
+  `S03.01-06` and `S03.301-306` in addition to explicit `S03E01-E06`, while
+  retaining resolution labels such as `S03.1080p`.
+- Apply the same season-pack exclusion when rendering saved Want List candidates
+  so stale rows written before the policy fix cannot reappear in the Web UI.
+- Return structured HTTP 503 JSON from state-backed Want List and log endpoints
+  when SQLite is malformed instead of dropping the response connection.
+
 ## 0.21.2 - 2026-08-13
 
 ### Fixed

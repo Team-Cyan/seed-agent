@@ -444,6 +444,13 @@ by completion period, and unfinished work is ordered by current priority.
     independent from upload-farming slots while retaining its selected pool
     and disk safety checks.
 
+- Completed 2026-08 - Season-pack and malformed-state Web resilience
+  - Season-mode candidate filtering now recognizes explicit and compact episode
+    ranges, and applies again when displaying pre-existing saved candidates.
+  - State-backed Want List and log endpoints return structured 503 responses if
+    SQLite cannot be read, keeping the Web UI diagnosable instead of silently
+    dropping API connections.
+
 - Completed 2026-08 - Demand-quality admission and enqueue evidence
   - PT scoring supports a hard seeders/leechers competition ceiling while
     preserving large high-demand candidates and adds publication freshness as
