@@ -53,6 +53,14 @@ jobs:
 
       - name: Docker smoke healthcheck with example config
         run: |
+          state_dir="${RUNNER_TEMP}/seed-agent-state"
+          mkdir -p "${state_dir}"
+          docker run --rm \
+            --entrypoint python \
+            -v "${state_dir}:/app/.seed-agent" \
+            seed-agent:ci \
+            -c "from seed_agent.state import StateStore; StateStore('/app/.seed-agent/state.db')"
           docker run --rm \
             -v "${{ github.workspace }}/config:/app/config:ro" \
+            -v "${state_dir}:/app/.seed-agent" \
             seed-agent:ci healthcheck --config /app/config/example.yaml

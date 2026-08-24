@@ -4,6 +4,15 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.23.1 - 2026-08-25
+
+### Fixed
+
+- Initialize an isolated SQLite state database before the CI container
+  healthcheck smoke test. The smoke test now exercises the same mounted-state
+  contract as a running deployment, allowing successful CI to trigger GHCR
+  publication again.
+
 ## 0.23.0 - 2026-08-24
 
 ### Added

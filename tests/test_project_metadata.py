@@ -43,6 +43,10 @@ def test_ci_workflow_has_python_and_docker_smoke_gates() -> None:
     assert "uv run --with pip-audit pip-audit --strict --local" in step_text
     assert "docker compose --env-file deploy/seed-agent.env.example" in step_text
     assert "docker build -t seed-agent:ci ." in step_text
+    assert "--entrypoint python" in step_text
+    assert "StateStore(" in step_text
+    assert "/app/.seed-agent/state.db" in step_text
+    assert '"${state_dir}:/app/.seed-agent"' in step_text
     assert "seed-agent:ci healthcheck --config /app/config/example.yaml" in step_text
     assert workflow["concurrency"]["cancel-in-progress"] is True
     assert workflow["jobs"]["test"]["timeout-minutes"] == 30

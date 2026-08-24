@@ -482,6 +482,11 @@ by completion period, and unfinished work is ordered by current priority.
   - The `viewed` intent state is durable and terminal for search/enqueue while
     retaining source and candidate evidence for later inspection.
 
+- Completed 2026-08 - CI healthcheck smoke fixture
+  - CI initializes an isolated mounted SQLite state database before its Docker
+    healthcheck smoke run, matching the container runtime contract so a
+    successful `main` CI run can publish the current GHCR image.
+
 - Next P0 - Add scheduler and Web preview integration coverage
   - Add fake downloader/provider fixtures that can run a scheduler cycle without
     touching qBittorrent or a tracker.
