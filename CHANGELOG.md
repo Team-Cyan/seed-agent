@@ -4,6 +4,14 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.23.2 - 2026-08-25
+
+### Fixed
+
+- Construct the CI smoke-test SQLite state path as a `Path`, allowing the
+  isolated state initialization step to complete before the container
+  healthcheck runs.
+
 ## 0.23.1 - 2026-08-25
 
 ### Fixed

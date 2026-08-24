@@ -44,6 +44,7 @@ def test_ci_workflow_has_python_and_docker_smoke_gates() -> None:
     assert "docker compose --env-file deploy/seed-agent.env.example" in step_text
     assert "docker build -t seed-agent:ci ." in step_text
     assert "--entrypoint python" in step_text
+    assert "from pathlib import Path" in step_text
     assert "StateStore(" in step_text
     assert "/app/.seed-agent/state.db" in step_text
     assert '"${state_dir}:/app/.seed-agent"' in step_text

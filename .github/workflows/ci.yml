@@ -59,7 +59,7 @@ jobs:
             --entrypoint python \
             -v "${state_dir}:/app/.seed-agent" \
             seed-agent:ci \
-            -c "from seed_agent.state import StateStore; StateStore('/app/.seed-agent/state.db')"
+            -c "from pathlib import Path; from seed_agent.state import StateStore; StateStore(Path('/app/.seed-agent/state.db'))"
           docker run --rm \
             -v "${{ github.workspace }}/config:/app/config:ro" \
             -v "${state_dir}:/app/.seed-agent" \
