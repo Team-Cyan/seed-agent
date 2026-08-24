@@ -105,7 +105,8 @@ Default model:
 - `schedule-run`,
 - execute mode enabled,
 - heartbeat file enabled,
-- Docker healthcheck enabled.
+- Docker healthcheck enabled: it checks SQLite state and scheduler heartbeat,
+  plus the in-container Web endpoint when the Web UI is enabled.
 
 Main env vars:
 
@@ -237,11 +238,12 @@ docker compose --env-file deploy/seed-agent.env -f deploy/docker-compose.example
 If the container is unhealthy:
 
 1. check Compose logs,
-2. run `seed-agent runtime-status` inside the container,
-3. inspect `state/schedule-heartbeat.json`,
-4. confirm `config/config.yaml` is mounted where `SEED_AGENT_CONFIG` expects,
-5. confirm `local/secrets/` paths match the refs used in YAML,
-6. confirm qB Web API credentials work outside the container.
+2. when the Web UI is enabled, run `seed-agent healthcheck --config /app/config/config.yaml --heartbeat-file /state/schedule-heartbeat.json --web-health-url http://127.0.0.1:8765/api/health` inside the container (otherwise omit `--web-health-url`),
+3. run `seed-agent runtime-status` inside the container,
+4. inspect `state/schedule-heartbeat.json`,
+5. confirm `config/config.yaml` is mounted where `SEED_AGENT_CONFIG` expects,
+6. confirm `local/secrets/` paths match the refs used in YAML,
+7. confirm qB Web API credentials work outside the container.
 
 If the app starts but discovers nothing:
 

@@ -34,16 +34,8 @@ services:
     healthcheck:
       test:
         [
-          "CMD",
-          "/app/docker/entrypoint.sh",
-          "seed-agent",
-          "healthcheck",
-          "--config",
-          "/app/config/config.yaml",
-          "--heartbeat-file",
-          "/state/schedule-heartbeat.json",
-          "--max-staleness-minutes",
-          "90"
+          "CMD-SHELL",
+          "if [ \"$SEED_AGENT_WEB_ENABLED\" = \"true\" ]; then exec seed-agent healthcheck --config /app/config/config.yaml --heartbeat-file /state/schedule-heartbeat.json --max-staleness-minutes 90 --web-health-url http://127.0.0.1:8765/api/health; else exec seed-agent healthcheck --config /app/config/config.yaml --heartbeat-file /state/schedule-heartbeat.json --max-staleness-minutes 90; fi"
         ]
       interval: 1m
       timeout: 20s

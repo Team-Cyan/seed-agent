@@ -106,14 +106,22 @@ seed-agent runtime-status \
   --max-staleness-minutes 90
 ```
 
-For heartbeat-only checks, run:
+For the same complete health check used by DockerMan, run:
 
 ```sh
 seed-agent healthcheck \
   --config /workspace/runtime/config/config.yaml \
   --heartbeat-file /workspace/runtime/state/schedule-heartbeat.json \
-  --max-staleness-minutes 90
+  --max-staleness-minutes 90 \
+  --web-health-url http://127.0.0.1:8765/api/health
 ```
+
+It verifies a short read-only SQLite query, the scheduler heartbeat, and the
+actual local Web endpoint. A healthy scheduler heartbeat alone is therefore
+not enough to mark the container healthy.
+
+If `SEED_AGENT_WEB_ENABLED=false`, omit `--web-health-url` for a manual probe;
+the DockerMan template does this automatically.
 
 The heartbeat JSON now includes the package version and config path in addition
 to cycle, interval, execution mode, accepted/enqueued counts, and the last error

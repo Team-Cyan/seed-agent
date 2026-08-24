@@ -24,16 +24,25 @@ operations.
 By default the Web UI assumes a trusted local bind or LAN-only deployment. If
 the Web UI is reachable outside a trusted local network, set
 `SEED_AGENT_WEB_TOKEN` on the Web process. When this variable is non-empty,
-every Web API `GET` and `POST` must include either:
+every Web API `GET` and `POST` except the liveness-only `/api/health` endpoint
+must include either:
 
 - `X-Seed-Agent-Token: <token>`
 - `Authorization: Bearer <token>`
+
+`/api/health` is deliberately exempt so container health checks do not need to
+read or forward the token.
 
 The built-in UI keeps the token control hidden for unprotected deployments. If
 the server returns `401 Unauthorized`, the UI reveals the control, asks for the
 token, and keeps it in page memory only. It is not written to local storage.
 External health checks must also send the token. Do not put it in committed
 config files; keep it in local env or the host's secret manager.
+
+`/api/health` is the Web-process health boundary: it verifies a short read-only
+SQLite query before evaluating the scheduler heartbeat. A `200` response with
+`status: ok` means both the Web process can read current state and the
+scheduler heartbeat is fresh; unhealthy states return HTTP `503`.
 
 ## Config Concurrency And Secrets
 
@@ -113,6 +122,11 @@ status and config APIs expose paths such as:
 - `config_path`: the config file used by the Web UI process,
 - `state_path`: the SQLite state database backing status and Want List rows,
 - `heartbeat_file`: the scheduler heartbeat inspected by health status.
+
+When the Web UI is enabled, the container health check also calls the
+in-container `/api/health` endpoint. This catches a Web process whose open
+SQLite/WAL descriptors have become stale even while the separate scheduler
+process continues to update its heartbeat.
 
 The CLI `runtime-status` command gives a fuller provenance snapshot:
 

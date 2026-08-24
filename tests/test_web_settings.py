@@ -28,6 +28,7 @@ from seed_agent.models import (
 )
 from seed_agent.sources.base import SourceIntentEvent
 from seed_agent.state import StateStore
+from seed_agent.web import app as web_app
 from seed_agent.web import settings as web_settings
 from seed_agent.web.app import MAX_JSON_BODY_BYTES, make_handler
 from seed_agent.web.settings import (
@@ -217,6 +218,7 @@ tracker_sites:
 
 def test_http_status_payloads_expose_runtime_provenance(tmp_path: Path) -> None:
     config_path = _write_minimal_config(tmp_path)
+    StateStore(tmp_path / ".seed-agent" / "state.db")
     heartbeat_path = tmp_path / "state" / "schedule-heartbeat.json"
     heartbeat_path.parent.mkdir()
     heartbeat_path.write_text(
@@ -412,10 +414,17 @@ tracker_sites:
             "/api/wants",
             expected_status=401,
         )
+        health = _request_json(
+            base_url,
+            "GET",
+            "/api/health",
+            expected_status=503,
+        )
 
     serialized = json.dumps(payload)
     assert blocked == {"error": "unauthorized"}
     assert wants_blocked == {"error": "unauthorized"}
+    assert health["status"] == "state_database_unavailable"
     assert "secret-pass" not in serialized
     assert "secret-token" not in serialized
     assert "secret-sign" not in serialized
@@ -772,6 +781,41 @@ def test_http_wants_lists_canonical_source_rows_without_manual_add(tmp_path: Pat
     assert initial["items"][0]["added_at_precision"] == "date"
     assert initial["total"] == 1
     assert manual_payload["error"] == "not found"
+
+
+def test_http_wants_batches_source_evidence_in_one_read(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = _write_minimal_config(tmp_path)
+    store = StateStore(tmp_path / ".seed-agent" / "state.db")
+    ingest_events(
+        [
+            SourceIntentEvent(
+                source=IntentSource.DOUBAN_WANTED,
+                raw_text="A Movie 2025",
+                source_event_id="douban:1",
+                metadata={"external_ids": {"douban": "1"}},
+            ),
+            SourceIntentEvent(
+                source=IntentSource.DOUBAN_WANTED,
+                raw_text="Another Movie 2025",
+                source_event_id="douban:2",
+                metadata={"external_ids": {"douban": "2"}},
+            ),
+        ],
+        store,
+    )
+
+    def fail_per_item_evidence(*_args: object, **_kwargs: object) -> list[dict[str, Any]]:
+        raise AssertionError("/api/wants must batch source evidence")
+
+    monkeypatch.setattr(StateStore, "list_intent_source_evidence", fail_per_item_evidence)
+
+    with _running_server(config_path) as base_url:
+        payload = _request_json(base_url, "GET", "/api/wants")
+
+    assert payload["total"] == 2
 
 
 def test_http_wants_search_runs_filtered_search_without_downloader(
@@ -2611,6 +2655,76 @@ def test_http_state_summary_reports_local_state_counts(tmp_path: Path) -> None:
     assert payload["release_candidates"] == {"total": 0}
 
 
+def test_web_read_state_connection_closes_database_handle(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state_path = tmp_path / ".seed-agent" / "state.db"
+    StateStore(state_path)
+    opened: list[sqlite3.Connection] = []
+    original_connect = sqlite3.connect
+
+    def track_connect(*args: object, **kwargs: object) -> sqlite3.Connection:
+        connection = original_connect(*args, **kwargs)
+        opened.append(connection)
+        return connection
+
+    monkeypatch.setattr(web_app.sqlite3, "connect", track_connect)
+
+    with web_app._read_state_connection(state_path) as connection:
+        assert connection.execute("SELECT 1").fetchone() == (1,)
+
+    assert len(opened) == 1
+    with pytest.raises(sqlite3.ProgrammingError, match="closed database"):
+        opened[0].execute("SELECT 1")
+
+
+def test_audit_tail_reads_only_trailing_blocks(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    audit_path = tmp_path / ".seed-agent" / "audit.jsonl"
+    audit_path.parent.mkdir(parents=True)
+    old_prefix = b'{"id":"old"}\n' * 100_000
+    expected = [{"id": f"recent-{index}"} for index in range(25)]
+    audit_path.write_bytes(
+        old_prefix + b"".join(json.dumps(row).encode("utf-8") + b"\n" for row in expected)
+    )
+
+    def fail_full_read(*_args: object, **_kwargs: object) -> str:
+        raise AssertionError("audit tail must not read the whole file")
+
+    monkeypatch.setattr(Path, "read_text", fail_full_read)
+
+    rows = web_app._audit_tail(tmp_path, limit=20)
+
+    assert rows == expected[-20:]
+
+
+def test_audit_tail_has_a_hard_read_limit_for_a_malformed_long_line(tmp_path: Path) -> None:
+    audit_path = tmp_path / ".seed-agent" / "audit.jsonl"
+    audit_path.parent.mkdir(parents=True)
+    expected = [{"id": "recent-1"}, {"id": "recent-2"}]
+    audit_path.write_bytes(
+        b"x" * (128 * 1024)
+        + b"\n"
+        + b"".join(json.dumps(row).encode("utf-8") + b"\n" for row in expected)
+    )
+
+    lines = web_app._tail_text_lines(
+        audit_path,
+        limit=20,
+        block_size=1024,
+        max_bytes=4096,
+    )
+
+    assert [json.loads(line) for line in lines[-2:]] == expected
+
+
+def test_web_server_workers_are_daemonic() -> None:
+    assert web_app.SeedAgentThreadingHTTPServer.daemon_threads is True
+
+
 def test_http_metrics_endpoint_is_optional_and_prometheus_compatible(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -2643,6 +2757,7 @@ def test_http_metrics_endpoint_is_optional_and_prometheus_compatible(
 
 def test_http_health_reports_recent_heartbeat(tmp_path: Path) -> None:
     config_path = _write_minimal_config(tmp_path)
+    StateStore(tmp_path / ".seed-agent" / "state.db")
     heartbeat_path = tmp_path / "state" / "schedule-heartbeat.json"
     heartbeat_path.parent.mkdir()
     heartbeat_path.write_text(
@@ -2664,6 +2779,16 @@ def test_http_health_reports_recent_heartbeat(tmp_path: Path) -> None:
     assert payload["heartbeat_exists"] is True
     assert payload["heartbeat"]["cycle"] == 4
     assert payload["age_minutes"] < 10
+
+
+def test_http_health_reports_unavailable_when_state_database_is_missing(tmp_path: Path) -> None:
+    config_path = _write_minimal_config(tmp_path)
+
+    with _running_server(config_path) as base_url:
+        payload = _request_json(base_url, "GET", "/api/health", expected_status=503)
+
+    assert payload["status"] == "state_database_unavailable"
+    assert payload["error"] == "state database not found"
 
 
 def test_http_pools_reports_configured_budget_pools_without_live_polling(

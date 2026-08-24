@@ -128,7 +128,9 @@ Expose the operator-facing command surface and safe summaries.
 - `intent-run-once` payloads include `source_warnings` when configured Want
   List source refresh fails while the intent cycle continues with no new source
   events,
-- heartbeat reporting and healthcheck probes for long-running deployments.
+- heartbeat reporting and healthcheck probes for long-running deployments. When
+  `--web-health-url` is configured, `healthcheck` also requires the local Web
+  process to complete a state-database-backed `/api/health` request.
 - optional Prometheus `/metrics` output derived only from local SQLite and
   heartbeat evidence, with fixed low-cardinality labels and no tracker or
   downloader calls during scrape. Cumulative counters aggregate the complete

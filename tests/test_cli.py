@@ -3651,6 +3651,7 @@ def test_healthcheck_reports_recent_heartbeat(tmp_path: Path) -> None:
     from seed_agent.cli import app
 
     config_path = _config_file(tmp_path)
+    StateStore(tmp_path / ".seed-agent" / "state.db")
     heartbeat_path = tmp_path / "state" / "heartbeat.json"
     heartbeat_path.parent.mkdir(parents=True, exist_ok=True)
     heartbeat_path.write_text(
@@ -3682,6 +3683,7 @@ def test_healthcheck_reports_recent_heartbeat(tmp_path: Path) -> None:
     payload = _json_output(result)
     assert payload["command"] == "healthcheck"
     assert payload["status"] == "ok"
+    assert payload["state_database"]["status"] == "ok"
     assert payload["heartbeat"]["cycle"] == 2
     assert payload["heartbeat"]["interval_minutes"] == 30
 
@@ -3690,6 +3692,7 @@ def test_healthcheck_fails_for_stale_heartbeat(tmp_path: Path) -> None:
     from seed_agent.cli import app
 
     config_path = _config_file(tmp_path)
+    StateStore(tmp_path / ".seed-agent" / "state.db")
     heartbeat_path = tmp_path / "state" / "heartbeat.json"
     heartbeat_path.parent.mkdir(parents=True, exist_ok=True)
     heartbeat_path.write_text(
@@ -3722,6 +3725,76 @@ def test_healthcheck_fails_for_stale_heartbeat(tmp_path: Path) -> None:
     assert payload["command"] == "healthcheck"
     assert payload["status"] == "error"
     assert "heartbeat stale" in payload["error"]
+
+
+def test_healthcheck_fails_when_state_database_is_missing(tmp_path: Path) -> None:
+    from seed_agent.cli import app
+
+    config_path = _config_file(tmp_path)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "healthcheck",
+            "--config",
+            str(config_path),
+        ],
+    )
+
+    assert result.exit_code == 1
+    payload = _json_output(result)
+    assert payload["command"] == "healthcheck"
+    assert payload["status"] == "error"
+    assert "state database not found" in payload["error"]
+
+
+def test_healthcheck_can_verify_the_web_endpoint(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from seed_agent import cli
+
+    config_path = _config_file(tmp_path)
+    StateStore(tmp_path / ".seed-agent" / "state.db")
+    observed: dict[str, object] = {}
+
+    class FakeResponse:
+        def __enter__(self) -> FakeResponse:
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def read(self) -> bytes:
+            return b'{"status":"ok"}'
+
+    def fake_urlopen(request: object, *, timeout: int) -> FakeResponse:
+        observed["url"] = request.full_url  # type: ignore[attr-defined]
+        observed["timeout"] = timeout
+        return FakeResponse()
+
+    monkeypatch.setattr(cli, "urlopen", fake_urlopen)
+
+    result = CliRunner().invoke(
+        cli.app,
+        [
+            "healthcheck",
+            "--config",
+            str(config_path),
+            "--web-health-url",
+            "http://127.0.0.1:8765/api/health",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert _json_output(result)["web"] == {
+        "url": "http://127.0.0.1:8765/api/health",
+        "status": "ok",
+    }
+    assert observed == {
+        "url": "http://127.0.0.1:8765/api/health",
+        "timeout": 5,
+    }
 
 
 def test_runtime_status_reports_version_config_paths_and_heartbeat(tmp_path: Path) -> None:

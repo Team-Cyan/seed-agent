@@ -4,6 +4,19 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.22.1 - 2026-08-24
+
+### Fixed
+
+- Close every Web SQLite read connection explicitly, batch Want List source
+  evidence reads, and bound audit-log tail reads so a long-lived Web process
+  cannot accumulate stale WAL descriptors or load an entire audit file per
+  operations request.
+- Make `/api/health` verify a SQLite read as well as scheduler heartbeat
+  freshness, and make the Compose and Unraid container health checks call that
+  local endpoint when the Web UI is enabled. A stale Web process can no longer
+  appear healthy solely because the scheduler is still writing heartbeats.
+
 ## 0.22.0 - 2026-08-24
 
 ### Added

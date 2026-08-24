@@ -450,6 +450,10 @@ by completion period, and unfinished work is ordered by current priority.
   - State-backed Want List and log endpoints return structured 503 responses if
     SQLite cannot be read, keeping the Web UI diagnosable instead of silently
     dropping API connections.
+  - Web state reads now close their SQLite handles, batch Want List source
+    evidence, and bound audit tail reads. When enabled, container health also
+    verifies the actual Web endpoint instead of trusting scheduler heartbeat
+    alone.
 
 - Completed 2026-08 - Demand-quality admission and enqueue evidence
   - PT scoring supports a hard seeders/leechers competition ceiling while

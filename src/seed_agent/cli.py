@@ -9,6 +9,7 @@ import json
 import os
 import re
 import signal
+import sqlite3
 import threading
 import time
 import uuid
@@ -17,6 +18,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Any
 from urllib.parse import parse_qsl, urlparse
+from urllib.request import Request, urlopen
 
 import httpx
 import typer
@@ -790,20 +792,25 @@ def healthcheck(
     config: Annotated[Path, typer.Option("--config")] = DEFAULT_CONFIG,
     heartbeat_file: Annotated[Path | None, typer.Option("--heartbeat-file")] = None,
     max_staleness_minutes: Annotated[int, typer.Option("--max-staleness-minutes")] = 90,
+    web_health_url: Annotated[str | None, typer.Option("--web-health-url")] = None,
 ) -> None:
     if max_staleness_minutes < 1:
         raise typer.BadParameter("max_staleness_minutes must be >= 1")
-    load_config(config)
+    loaded = load_config(config)
+    state_health = _state_database_health(_state_path(loaded))
     payload: dict[str, Any] = {
         "command": "healthcheck",
         "config": str(config),
         "status": "ok",
+        "state_database": state_health,
     }
     if heartbeat_file is not None:
         payload["heartbeat"] = _heartbeat_status(
             heartbeat_file,
             max_staleness_minutes=max_staleness_minutes,
         )
+    if web_health_url is not None:
+        payload["web"] = _web_health_status(web_health_url)
     _print_json(payload)
 
 
@@ -3624,6 +3631,71 @@ def _heartbeat_status(
             )
         )
     return status
+
+
+def _state_database_health(state_path: Path) -> dict[str, Any]:
+    """Verify that the durable state database accepts a lightweight read."""
+
+    if not state_path.is_file():
+        raise typer.Exit(
+            code=_print_error_payload(
+                {
+                    "command": "healthcheck",
+                    "status": "error",
+                    "error": f"state database not found: {state_path}",
+                }
+            )
+        )
+    state_uri = f"file:{state_path.resolve()}?mode=ro&cache=private"
+    conn = sqlite3.connect(state_uri, timeout=5, uri=True)
+    try:
+        conn.execute("PRAGMA busy_timeout=5000")
+        conn.execute("PRAGMA query_only=ON")
+        conn.execute("SELECT 1 FROM sqlite_schema LIMIT 1").fetchone()
+    except sqlite3.DatabaseError as exc:
+        raise typer.Exit(
+            code=_print_error_payload(
+                {
+                    "command": "healthcheck",
+                    "status": "error",
+                    "error": f"state database unavailable: {exc}",
+                    "state_path": str(state_path),
+                }
+            )
+        ) from exc
+    finally:
+        conn.close()
+    return {"path": str(state_path), "status": "ok"}
+
+
+def _web_health_status(web_health_url: str) -> dict[str, Any]:
+    request = Request(web_health_url)
+    try:
+        with urlopen(request, timeout=5) as response:  # noqa: S310 - configured local health URL
+            payload = json.loads(response.read().decode("utf-8"))
+    except (OSError, ValueError) as exc:
+        raise typer.Exit(
+            code=_print_error_payload(
+                {
+                    "command": "healthcheck",
+                    "status": "error",
+                    "error": f"web health unavailable: {exc}",
+                    "web_health_url": web_health_url,
+                }
+            )
+        ) from exc
+    if not isinstance(payload, dict) or payload.get("status") != "ok":
+        raise typer.Exit(
+            code=_print_error_payload(
+                {
+                    "command": "healthcheck",
+                    "status": "error",
+                    "error": "web health reported an unhealthy state",
+                    "web_health_url": web_health_url,
+                }
+            )
+        )
+    return {"url": web_health_url, "status": "ok"}
 
 
 def _runtime_status_payload(

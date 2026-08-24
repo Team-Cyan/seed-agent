@@ -160,7 +160,9 @@ For long-running scheduler containers:
   site discovery is slow, so give Compose or your supervisor a few minutes of
   `start_period`,
 - run `seed-agent healthcheck --config /app/config/config.yaml --heartbeat-file ...`
-  from Docker Compose, Kubernetes, or another supervisor,
+  from Docker Compose, Kubernetes, or another supervisor; when the Web UI is
+  enabled, add `--web-health-url http://127.0.0.1:8765/api/health` so the
+  health check verifies the Web process and its SQLite read path too,
 - treat JSON stdout as the primary log stream,
 - persist `.seed-agent/audit.jsonl` and the heartbeat file if you want postmortem
   visibility after container restarts.

@@ -5,6 +5,7 @@ import os
 import secrets
 import sqlite3
 from asyncio import run
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -82,6 +83,12 @@ class RequestBodyTooLarge(ValueError):
     pass
 
 
+class SeedAgentThreadingHTTPServer(ThreadingHTTPServer):
+    """Threaded HTTP server whose request workers cannot block shutdown."""
+
+    daemon_threads = True
+
+
 def make_handler(config_path: Path) -> type[BaseHTTPRequestHandler]:
     resolved_config_path = config_path
     root = _repo_root_for_config(resolved_config_path)
@@ -93,7 +100,7 @@ def make_handler(config_path: Path) -> type[BaseHTTPRequestHandler]:
             except OSError, ValueError:
                 metrics_config = None
             request_path = urlparse(self.path).path
-            protected = request_path.startswith("/api/") or (
+            protected = (request_path.startswith("/api/") and request_path != "/api/health") or (
                 metrics_config is not None and request_path == metrics_config.path
             )
             if protected and not self._authorize_api_request():
@@ -163,7 +170,13 @@ def make_handler(config_path: Path) -> type[BaseHTTPRequestHandler]:
                     )
                 return
             if self.path == "/api/health":
-                self._send_json(_health_payload(root))
+                payload = _health_payload(root)
+                status = (
+                    HTTPStatus.OK
+                    if payload.get("status") == "ok"
+                    else HTTPStatus.SERVICE_UNAVAILABLE
+                )
+                self._send_json(payload, status=status)
                 return
             if self.path == "/api/ops":
                 try:
@@ -497,7 +510,7 @@ def _load_config_snapshot(config_path: Path) -> tuple[SeedAgentConfig, str]:
 
 
 def serve(config_path: Path, host: str, port: int) -> None:
-    server = ThreadingHTTPServer((host, port), make_handler(config_path))
+    server = SeedAgentThreadingHTTPServer((host, port), make_handler(config_path))
     try:
         server.serve_forever()
     finally:
@@ -624,10 +637,7 @@ def _state_summary_payload(config_path: Path, root: Path) -> dict[str, Any]:
     }
     if not state_path.exists():
         return payload
-    state_uri = f"file:{state_path.resolve()}?mode=ro&cache=private"
-    with sqlite3.connect(state_uri, timeout=30, uri=True) as conn:
-        conn.execute("PRAGMA busy_timeout=30000")
-        conn.execute("PRAGMA query_only=ON")
+    with _read_state_connection(state_path, timeout=30) as conn:
         payload["candidates"] = _table_state_counts(conn, "candidates", "state")
         payload["intents"] = _table_state_counts(conn, "intents", "state")
         payload["release_candidates"] = {"total": _table_count(conn, "release_candidates")}
@@ -686,10 +696,7 @@ def _wants_payload(root: Path) -> dict[str, Any]:
     }
     if not state_path.exists():
         return payload
-    store = StateStore(state_path, initialize=False, read_only=True)
-    state_uri = f"file:{state_path.resolve()}?mode=ro&cache=private"
-    with sqlite3.connect(state_uri, uri=True) as conn:
-        conn.execute("PRAGMA query_only=ON")
+    with _read_state_connection(state_path) as conn:
         conn.row_factory = sqlite3.Row
         if not _table_exists(conn, "intents"):
             return payload
@@ -712,6 +719,10 @@ def _wants_payload(root: Path) -> dict[str, Any]:
             LIMIT 500
             """
         ).fetchall()
+        evidence_by_intent = _intent_source_evidence_by_intent(
+            conn,
+            [str(row["intent_id"]) for row in rows],
+        )
     items = []
     for row in rows:
         if str(row["source"]) == IntentSource.MANUAL.value:
@@ -721,7 +732,7 @@ def _wants_payload(root: Path) -> dict[str, Any]:
             _want_item(
                 dict(row),
                 release_counts.get(intent_id, {}),
-                store.list_intent_source_evidence(intent_id),
+                evidence_by_intent.get(intent_id, []),
             )
         )
     payload["total"] = len(items)
@@ -1307,6 +1318,49 @@ def _want_searchable(item: dict[str, Any]) -> bool:
     return True
 
 
+def _intent_source_evidence_by_intent(
+    conn: sqlite3.Connection,
+    intent_ids: list[str],
+) -> dict[str, list[dict[str, Any]]]:
+    if not intent_ids or not _table_exists(conn, "intent_source_evidence"):
+        return {}
+    placeholders = ", ".join("?" for _ in intent_ids)
+    rows = conn.execute(
+        f"""
+        SELECT
+            evidence_id,
+            intent_id,
+            source,
+            source_event_id,
+            source_config_id,
+            source_label,
+            requested_at,
+            raw_text,
+            metadata_json,
+            created_at,
+            updated_at
+        FROM intent_source_evidence
+        WHERE intent_id IN ({placeholders})
+        ORDER BY
+            intent_id ASC,
+            COALESCE(requested_at, created_at) ASC,
+            created_at ASC,
+            evidence_id ASC
+        """,
+        intent_ids,
+    ).fetchall()
+    evidence_by_intent: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        item = dict(row)
+        try:
+            metadata = json.loads(str(item.pop("metadata_json")))
+        except json.JSONDecodeError:
+            metadata = {}
+        item["metadata"] = metadata if isinstance(metadata, dict) else {}
+        evidence_by_intent.setdefault(str(item["intent_id"]), []).append(item)
+    return evidence_by_intent
+
+
 def _intent_release_counts(conn: sqlite3.Connection) -> dict[str, dict[str, Any]]:
     if not _table_exists(conn, "release_candidates"):
         return {}
@@ -1640,6 +1694,26 @@ def _health_payload(root: Path) -> dict[str, Any]:
         **_runtime_provenance(root),
         "heartbeat_exists": heartbeat_path.exists(),
     }
+    state_path = _state_db_path(root)
+    if not state_path.is_file():
+        payload.update(
+            {
+                "status": "state_database_unavailable",
+                "error": "state database not found",
+            }
+        )
+        return payload
+    try:
+        with _read_state_connection(state_path) as conn:
+            conn.execute("SELECT 1 FROM sqlite_schema LIMIT 1").fetchone()
+    except sqlite3.DatabaseError as exc:
+        payload.update(
+            {
+                "status": "state_database_unavailable",
+                "error": f"state database unavailable: {_friendly_error(exc)}",
+            }
+        )
+        return payload
     if not heartbeat_path.exists():
         payload["status"] = "missing_heartbeat"
         return payload
@@ -1859,7 +1933,7 @@ def _audit_tail(root: Path, limit: int = 20) -> list[dict[str, Any]]:
     if not path.is_file():
         return []
     rows: list[dict[str, Any]] = []
-    for line in path.read_text(encoding="utf-8", errors="replace").splitlines()[-limit:]:
+    for line in _tail_text_lines(path, limit):
         try:
             loaded = json.loads(line)
         except json.JSONDecodeError:
@@ -1867,6 +1941,53 @@ def _audit_tail(root: Path, limit: int = 20) -> list[dict[str, Any]]:
         if isinstance(loaded, dict):
             rows.append(redact_payload(loaded))
     return rows
+
+
+@contextmanager
+def _read_state_connection(state_path: Path, *, timeout: float = 5.0):
+    """Open a short-lived read-only SQLite connection and always close it.
+
+    ``sqlite3.Connection`` implements transaction context-manager methods but
+    does not close itself when leaving a ``with`` block.  Web requests must not
+    retain database/WAL file descriptors after a response is sent.
+    """
+
+    state_uri = f"file:{state_path.resolve()}?mode=ro&cache=private"
+    conn = sqlite3.connect(state_uri, timeout=timeout, uri=True)
+    try:
+        conn.execute(f"PRAGMA busy_timeout={int(timeout * 1000)}")
+        conn.execute("PRAGMA query_only=ON")
+        yield conn
+    finally:
+        conn.close()
+
+
+def _tail_text_lines(
+    path: Path,
+    limit: int,
+    *,
+    block_size: int = 64 * 1024,
+    max_bytes: int = 1024 * 1024,
+) -> list[str]:
+    """Return at most ``limit`` lines without loading an unbounded audit log."""
+
+    if limit <= 0:
+        return []
+    with path.open("rb") as handle:
+        handle.seek(0, os.SEEK_END)
+        position = handle.tell()
+        chunks: list[bytes] = []
+        newline_count = 0
+        bytes_read = 0
+        while position > 0 and newline_count <= limit and bytes_read < max_bytes:
+            read_size = min(block_size, position, max_bytes - bytes_read)
+            position -= read_size
+            handle.seek(position)
+            chunk = handle.read(read_size)
+            chunks.append(chunk)
+            bytes_read += len(chunk)
+            newline_count += chunk.count(b"\n")
+    return b"".join(reversed(chunks)).decode("utf-8", errors="replace").splitlines()[-limit:]
 
 
 def _state_db_path(root: Path) -> Path:
