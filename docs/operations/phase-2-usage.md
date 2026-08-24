@@ -68,7 +68,6 @@ want_sources:
       label: 我
       enabled: true
       user_name: example-user
-      max_pages: 1
     - provider: imdb
       id: imdb-weekend
       label: 周末清单
@@ -186,10 +185,11 @@ The current integration adapters are local/off by default:
 - `file_inbox`: reads local JSONL inbox files.
 - `telegram`: parses Telegram update payloads without running a bot loop.
 - `wechat_bridge`: parses bridge payloads without depending on a live WeChat session.
-- `want_lists` with `provider: douban`: reads public Douban wanted pages through
-  `user_name`/`max_pages` and can also read local wanted-list export JSON. It
-  preserves Douban user, subject URL, wish date, intro, inferred media type, and
-  external IDs.
+- `want_lists` with `provider: douban`: reads the newest actions from Douban's
+  personal-interest RSS through `user_name` and can also read a local
+  wanted-list export JSON as the authoritative full-list recovery source. RSS
+  pagination is not available; the legacy `max_pages` field is accepted only
+  for backwards-compatible configuration parsing and has no effect.
 - `want_lists` with `provider: imdb`: reads IMDb watchlist/list CSV exports and
   best-effort public page data, preserving IMDb title IDs and source labels.
 

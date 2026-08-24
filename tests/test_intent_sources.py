@@ -8,8 +8,12 @@ import pytest
 from seed_agent.models import IntentSource
 from seed_agent.sources import telegram as telegram_source
 from seed_agent.sources.douban import (
+    build_douban_interest_rss_url,
     build_douban_wish_url,
+    enrich_douban_wanted_event,
+    fetch_douban_interest_rss,
     fetch_douban_wanted_user,
+    parse_douban_interest_rss,
     parse_douban_wish_html,
     read_douban_wanted,
 )
@@ -205,6 +209,117 @@ def test_douban_wanted_reads_local_export_shapes(tmp_path: Path) -> None:
     assert events[0].metadata["kind"] == "movie"
     assert events[0].metadata["media_type"] == "movie"
     assert events[0].metadata["external_ids"] == {"douban": "1292052"}
+
+
+def test_douban_interest_rss_reads_only_recent_movie_wishes() -> None:
+    rss = """
+    <rss version="2.0"><channel>
+      <item>
+        <title>想看 流媒体测试</title>
+        <link>https://movie.douban.com/subject/1292052/</link>
+        <pubDate>Sat, 22 Aug 2026 09:34:58 GMT</pubDate>
+      </item>
+      <item>
+        <title>看过 不能导入</title>
+        <link>https://movie.douban.com/subject/1292053/</link>
+        <pubDate>Sat, 22 Aug 2026 08:34:58 GMT</pubDate>
+      </item>
+      <item>
+        <title>想看 非影视条目</title>
+        <link>https://book.douban.com/subject/1292054/</link>
+      </item>
+      <item>
+        <title>想看 重复条目</title>
+        <link>https://movie.douban.com/subject/1292052/</link>
+      </item>
+    </channel></rss>
+    """
+
+    events = parse_douban_interest_rss(
+        rss,
+        user_name="example-user",
+        source_config_id="douban-rss",
+        label="Example",
+    )
+
+    assert len(events) == 1
+    assert events[0].source == IntentSource.DOUBAN_WANTED
+    assert events[0].raw_text == "流媒体测试"
+    assert events[0].source_event_id == "douban:1292052"
+    assert events[0].requested_at == datetime(2026, 8, 22, 9, 34, 58, tzinfo=UTC)
+    assert events[0].metadata["source_adapter"] == "douban_interest_rss"
+    assert events[0].metadata["source_config_id"] == "douban-rss"
+    assert events[0].metadata["external_ids"] == {"douban": "1292052"}
+
+
+def test_douban_interest_rss_fetches_personal_interests_url() -> None:
+    urls: list[str] = []
+
+    events = fetch_douban_interest_rss(
+        "example-user",
+        fetcher=lambda url: urls.append(url) or "<rss><channel /></rss>",
+    )
+
+    assert events == []
+    assert urls == [build_douban_interest_rss_url("example-user")]
+
+
+def test_douban_interest_rss_marks_explicit_season_as_tv() -> None:
+    rss = """
+    <rss version="2.0"><channel><item>
+      <title>想看 龙之家族 第三季</title>
+      <link>https://movie.douban.com/subject/99999999/</link>
+    </item></channel></rss>
+    """
+
+    event = parse_douban_interest_rss(rss)[0]
+
+    assert event.raw_text == "龙之家族 第三季"
+    assert event.metadata["kind"] == "tv"
+    assert event.metadata["media_type"] == "tv"
+
+
+def test_douban_subject_json_ld_enrichment_shapes_tv_and_year() -> None:
+    event = parse_douban_interest_rss(
+        """
+        <rss version="2.0"><channel><item>
+          <title>想看 无职转生</title>
+          <link>https://movie.douban.com/subject/99999998/</link>
+        </item></channel></rss>
+        """
+    )[0]
+    html = """
+    <html><head><script type="application/ld+json">
+      {"@context":"https://schema.org","@type":"TVSeries","datePublished":"2026-07-01"}
+    </script></head><body></body></html>
+    """
+
+    enriched = enrich_douban_wanted_event(event, fetcher=lambda _url: html)
+
+    assert enriched.raw_text == "无职转生 2026"
+    assert enriched.metadata["kind"] == "tv"
+    assert enriched.metadata["media_type"] == "tv"
+
+
+def test_douban_subject_json_ld_enrichment_preserves_animation_type() -> None:
+    event = parse_douban_interest_rss(
+        """
+        <rss version="2.0"><channel><item>
+          <title>想看 无职转生</title>
+          <link>https://movie.douban.com/subject/99999998/</link>
+        </item></channel></rss>
+        """
+    )[0]
+    html = """
+    <script type="application/ld+json">
+      {"@type":"TVSeries","genre":["Animation","Fantasy"]}
+    </script>
+    """
+
+    enriched = enrich_douban_wanted_event(event, fetcher=lambda _url: html)
+
+    assert enriched.metadata["kind"] == "anime"
+    assert enriched.metadata["media_type"] == "anime"
 
 
 def test_douban_wanted_parses_public_wish_html() -> None:

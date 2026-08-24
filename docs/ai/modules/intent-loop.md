@@ -15,9 +15,9 @@ Convert human requests into search/rank/reject/enqueue workflows.
 ## Current Responsibilities
 
 - ingest intents,
-- ingest Douban wanted events with source user, subject metadata, wish date, and
-  inferred media type, using mobile subject-page enrichment when the public list
-  page is ambiguous,
+- ingest Douban wanted events from the personal-interest RSS as a recent-additions
+  signal (currently newest 10 actions), retaining a local export as the full-list
+  recovery source; enrich subject metadata only after the list event is persisted,
 - ingest IMDb watchlist/list events from CSV exports or best-effort public page
   parsing,
 - ingest Letterboxd watchlist events from CSV exports,
@@ -83,6 +83,18 @@ Convert human requests into search/rank/reject/enqueue workflows.
   retaining stable source-event identity,
 - keep source-only ingestion independent from downloader and search-provider
   availability,
+- fetch configured Douban RSS, exports, and IMDb list events independently and
+  persist their names before optional metadata enrichment; preserve a successfully read
+  Douban list item when its mobile subject detail request fails, reuse
+  persisted subject metadata on later refreshes, parse JSON-LD subject type/year
+  when it is available, and use a strictly matched already-read IMDb Watch List
+  item as a no-extra-request fallback (year match, or one unique exact title
+  when RSS has no year),
+- in season mode, reject explicit or compact episode-labelled releases even
+  while a newly read RSS item remains untyped; require the `Sxx` full-season
+  marker once the item is known to be TV/anime,
+- keep one configured Want List source failure as a visible warning while
+  allowing successfully read exports and other configured sources to ingest,
 - evaluate enqueue runtime gates before resolving a deferred tracker download
   token, and preserve distinct already-enqueued/in-progress outcomes for
   idempotent callers.

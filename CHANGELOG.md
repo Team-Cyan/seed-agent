@@ -4,6 +4,26 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.22.0 - 2026-08-24
+
+### Added
+
+- Read Douban personal-interest RSS as a daily recent-additions signal while
+  retaining local Want List exports as the full-list recovery source.
+- Parse season notation directly from RSS titles and structured JSON-LD subject
+  metadata when available, preserving TV/anime intent shape and the published
+  year without requiring a separate IMDb detail request.
+
+### Fixed
+
+- In season search mode, reject explicit and compact episode releases even for
+  newly read RSS intents whose TV/anime metadata is temporarily unavailable.
+- When a Douban subject lookup fails, use exactly one already-read IMDb list
+  item with a year match or an unambiguous exact title to supply media metadata,
+  IMDb ID, and a missing year; ambiguous title-only matches remain untouched.
+- Document Douban `max_pages` as a legacy compatibility field with no effect on
+  the non-paginated RSS feed.
+
 ## 0.21.3 - 2026-08-22
 
 ### Fixed

@@ -840,18 +840,34 @@ def _sync_wants_payload(config_path: Path, root: Path) -> dict[str, Any]:
     config = load_config(config_path)
     state_path = _state_db_path(root)
     store = StateStore(state_path)
-    events = _read_configured_want_source_events(config)
-    ingested = ingest_events(events, store)
+    source_warnings: list[dict[str, str]] = []
+    list_events = _fetch_configured_want_source_events(
+        config,
+        store=store,
+        source_warnings=source_warnings,
+    )
+    ingested = ingest_events(list_events, store)
+    enriched_events = _enrich_configured_want_source_events(list_events, store=store)
+    ingest_events(enriched_events, store)
     payload = _wants_payload(root)
+    status = [
+        {
+            "level": "ok",
+            "message": f"synced {len(ingested)} configured wants",
+        }
+    ]
+    status.extend(
+        {
+            "level": "warning",
+            "message": f"{warning['source']}: {warning['message']}",
+        }
+        for warning in source_warnings
+    )
     return {
         "ingested": len(ingested),
         "total": payload["total"],
-        "status": [
-            {
-                "level": "ok",
-                "message": f"synced {len(ingested)} configured wants",
-            }
-        ],
+        "source_warnings": source_warnings,
+        "status": status,
     }
 
 
@@ -1168,10 +1184,20 @@ def _executed_enqueue_count(decisions: list[Any]) -> int:
     )
 
 
-def _read_configured_want_source_events(config) -> list[Any]:
-    from seed_agent.cli import _read_configured_source_events
+def _fetch_configured_want_source_events(config, **kwargs: Any) -> list[Any]:
+    from seed_agent.cli import _fetch_configured_want_list_events
 
-    return _read_configured_source_events(config)
+    return _fetch_configured_want_list_events(config, **kwargs)
+
+
+def _enrich_configured_want_source_events(
+    events: list[Any],
+    *,
+    store: StateStore,
+) -> list[Any]:
+    from seed_agent.cli import _enrich_configured_want_list_events
+
+    return _enrich_configured_want_list_events(events, store=store)
 
 
 async def _search_want_items(
@@ -1693,12 +1719,10 @@ def _logs_payload(root: Path, limit: int = 200) -> dict[str, Any]:
             for row in store.list_scheduler_run_events(limit=bounded_limit)
         )
         entries.extend(
-            _tracker_log_entry(row)
-            for row in store.list_tracker_api_events(limit=bounded_limit)
+            _tracker_log_entry(row) for row in store.list_tracker_api_events(limit=bounded_limit)
         )
         entries.extend(
-            _want_search_log_entry(row)
-            for row in store.list_want_search_runs(limit=bounded_limit)
+            _want_search_log_entry(row) for row in store.list_want_search_runs(limit=bounded_limit)
         )
     entries.extend(_audit_log_entry(row) for row in _audit_tail(root, limit=bounded_limit))
     entries.sort(key=lambda row: str(row.get("timestamp") or ""), reverse=True)

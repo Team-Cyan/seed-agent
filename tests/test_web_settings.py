@@ -1269,8 +1269,8 @@ def test_http_wants_sync_ingests_configured_sources(
     config_path = _write_minimal_config(tmp_path)
     monkeypatch.setattr(
         web_app,
-        "_read_configured_want_source_events",
-        lambda config: [
+        "_fetch_configured_want_source_events",
+        lambda config, **_kwargs: [
             SourceIntentEvent(
                 source=IntentSource.DOUBAN_WANTED,
                 raw_text="葬送的芙莉莲 2023",
@@ -1284,6 +1284,11 @@ def test_http_wants_sync_ingests_configured_sources(
                 },
             )
         ],
+    )
+    monkeypatch.setattr(
+        web_app,
+        "_enrich_configured_want_source_events",
+        lambda events, *, store: events,
     )
 
     with _running_server(config_path) as base_url:
@@ -1309,8 +1314,8 @@ def test_http_wants_search_syncs_sources_before_search(
     config_path = _write_minimal_config(tmp_path)
     monkeypatch.setattr(
         web_app,
-        "_read_configured_want_source_events",
-        lambda config: [
+        "_fetch_configured_want_source_events",
+        lambda config, **_kwargs: [
             SourceIntentEvent(
                 source=IntentSource.IMDB_WATCHLIST,
                 raw_text="Frieren Beyond Journey's End 2023",
@@ -1324,6 +1329,11 @@ def test_http_wants_search_syncs_sources_before_search(
                 },
             )
         ],
+    )
+    monkeypatch.setattr(
+        web_app,
+        "_enrich_configured_want_source_events",
+        lambda events, *, store: events,
     )
     monkeypatch.setattr(
         web_app,
@@ -1489,8 +1499,8 @@ want_decision:
     )
     monkeypatch.setattr(
         web_app,
-        "_read_configured_want_source_events",
-        lambda config: [
+        "_fetch_configured_want_source_events",
+        lambda config, **_kwargs: [
             SourceIntentEvent(
                 source=IntentSource.DOUBAN_WANTED,
                 raw_text="请以你的名字呼唤我 Call Me by Your Name 2017",
@@ -1504,6 +1514,11 @@ want_decision:
                 },
             )
         ],
+    )
+    monkeypatch.setattr(
+        web_app,
+        "_enrich_configured_want_source_events",
+        lambda events, *, store: events,
     )
     monkeypatch.setattr(
         web_app,
@@ -1531,13 +1546,8 @@ want_decision:
         "DTS-HD MA",
     ]
     assert candidates_payload["items"][0]["size_gb"] == 66.0
-    assert (
-        candidates_payload["items"][0]["subtitle"]
-        == "请以你的名字呼唤我 导演剪辑版"
-    )
-    assert candidates_payload["items"][0]["media_info"] == (
-        "Duration: 02:12:00\nVideo: HEVC"
-    )
+    assert candidates_payload["items"][0]["subtitle"] == "请以你的名字呼唤我 导演剪辑版"
+    assert candidates_payload["items"][0]["media_info"] == ("Duration: 02:12:00\nVideo: HEVC")
     assert candidates_payload["items"][1]["matches_requirements"] is False
     assert candidates_payload["items"][1]["status_label"] == "不符合偏好"
     assert "quality tag score -30: WEB-DL" in candidates_payload["items"][1]["reasons"]
@@ -1981,10 +1991,12 @@ def test_http_want_enqueue_media_ignores_seed_active_download_gate(
 
     config_path = _write_minimal_config(tmp_path)
     config_path.write_text(
-        config_path.read_text(encoding="utf-8").replace(
+        config_path.read_text(encoding="utf-8")
+        .replace(
             "  allow_hr: false",
             "  allow_hr: false\n  max_active_downloads: 0",
-        ).replace(
+        )
+        .replace(
             "      tags: [seed-agent]\n  budget_pools:",
             "      tags: [seed-agent]\n"
             "    - name: movie\n"
@@ -1994,7 +2006,8 @@ def test_http_want_enqueue_media_ignores_seed_active_download_gate(
             "      over_budget_behavior: reject\n"
             "      tags: [seed-agent, movie]\n"
             "  budget_pools:",
-        ).replace(
+        )
+        .replace(
             "    - name: downloads\n      max_size_tib: 1",
             "    - name: downloads\n"
             "      max_size_tib: 1\n"

@@ -505,6 +505,7 @@ class DoubanWantedSourceConfig(BaseModel):
     enabled: bool = False
     export_ref: str | None = None
     user_name: str | None = None
+    # Compatibility-only: the personal-interest RSS has no pagination.
     max_pages: int = 1
 
     @model_validator(mode="after")
@@ -524,6 +525,8 @@ class WantListSourceConfig(BaseModel):
     user_name: str | None = None
     watchlist_url: str | None = None
     export_ref: str | None = None
+    # Compatibility-only for provider configs that used public-page paging.
+    # Douban personal-interest RSS ignores this value.
     max_pages: int = 1
 
     @model_validator(mode="after")

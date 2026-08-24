@@ -221,10 +221,10 @@ want_sources:
     secret_ref: local/secrets/wechat-bridge.yaml
   douban_wanted:
     enabled: false
-    # Public Douban user name or profile URL, for example example-user or
+    # Douban user name or profile URL, for example example-user or
     # https://www.douban.com/people/example-user
     user_name: null
-    max_pages: 1
+    # Legacy compatibility field; the personal-interest RSS has no pagination.
     # Optional local export fallback. Keep private exports under local/inbox.
     export_ref: local/inbox/douban-wanted.json
   # Canonical Want List sources shown by the Web UI and synced by intent runs.
@@ -236,7 +236,7 @@ want_sources:
       label: Example Douban list
       enabled: false
       user_name: example-user
-      max_pages: 1
+      # Legacy compatibility field; the personal-interest RSS has no pagination.
       # Optional local export fallback. Keep private exports under local/inbox.
       # export_ref: local/inbox/douban-me.json
     - provider: imdb

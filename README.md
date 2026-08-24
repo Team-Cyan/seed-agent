@@ -83,7 +83,7 @@ operator choices into explainable scoring feedback.
 | file inbox | Wired | JSONL inbox ingestion is the supported local source path. |
 | Telegram | Wired | Polls Telegram updates through a local secret-backed bot token and converts messages into source events. |
 | WeChat bridge | Parser skeleton | Parses bridge payloads; no personal-account automation is shipped. |
-| Douban wanted | Wired | Reads one or more public Douban wanted pages or local wanted-list export JSON files. |
+| Douban wanted | Wired | Reads recent Douban personal-interest RSS actions and local wanted-list export JSON files for full-list recovery. |
 | IMDb watchlist/list | Wired | Reads IMDb watchlist/list CSV exports and best-effort public page data when reachable. |
 | Letterboxd watchlist | Wired | Reads Letterboxd CSV exports as Want List source events. |
 | subscription | Planned | Config shape exists for future rules, but no subscription runner is shipped. |
@@ -195,8 +195,10 @@ For M-Team, the preferred authenticated path is API-driven discovery with
 compatibility flows.
 
 For resource intents, `want_sources.want_lists` can hold multiple Douban users and
-IMDb watchlists/lists. Douban source entries use `user_name`; IMDb entries use
-`watchlist_url` or a CSV `export_ref`. The intent loop merges repeated wants by
+IMDb watchlists/lists. Douban `user_name` entries read the personal-interest RSS
+as a recent-additions signal (currently the newest 10 actions); keep `export_ref`
+as the authoritative full-list snapshot for recovery and missed entries. IMDb
+entries use `watchlist_url` or a CSV `export_ref`. The intent loop merges repeated wants by
 Douban/IMDb IDs, then `release_preferences.quality_tag_scores` describes the desired release
 shape with integer adjustments for tag groups such as Remux, Blu-ray, WEB-DL,
 Dolby Vision, HDR10+, DDP, TrueHD, FLAC, or ASS subtitles.

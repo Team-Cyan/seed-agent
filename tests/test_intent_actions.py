@@ -202,6 +202,30 @@ def test_add_intent_refreshes_metadata_without_resetting_existing_state(tmp_path
     assert refreshed.metadata["douban_user_name"] == "example-user"
 
 
+def test_add_intent_refreshes_missing_year_from_later_source_metadata(tmp_path: Path) -> None:
+    store = StateStore(tmp_path / "state.db")
+
+    first, _ = add_intent(
+        "无职转生",
+        store,
+        source=IntentSource.DOUBAN_WANTED,
+        source_event_id="douban:99999998",
+        requested_at=REQUESTED_AT,
+    )
+    refreshed, _ = add_intent(
+        "无职转生 2026",
+        store,
+        source=IntentSource.DOUBAN_WANTED,
+        source_event_id="douban:99999998",
+        requested_at=REQUESTED_AT,
+        metadata={"media_type": "tv"},
+    )
+
+    assert first.year is None
+    assert refreshed.year == 2026
+    assert refreshed.kind == IntentKind.SHOW
+
+
 def test_rank_intent_replaces_episode_candidates_excluded_in_season_mode(tmp_path: Path) -> None:
     store = StateStore(tmp_path / "state.db")
     intent, _ = add_intent(

@@ -249,6 +249,15 @@ def _is_candidate_eligible(
     release: ReleaseCandidate,
     intent_config: IntentConfig,
 ) -> bool:
+    if intent_config.series_search_mode != "season":
+        return True
+    # Source metadata can be unavailable for a newly added RSS item. Explicit
+    # episode markers are never a complete season, so reject them even before
+    # the item can be confidently shaped as TV/anime.
+    if EPISODE_TOKEN_RE.search(release.title) is not None or _has_numbered_episode_after_season(
+        release.title
+    ):
+        return False
     if not _requires_season_pack(intent, intent_config):
         return True
     return _is_season_pack(release.title)

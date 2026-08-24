@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -21,6 +22,7 @@ from seed_agent.models import (
     TorrentCandidate,
 )
 from seed_agent.policies.category_policy import PoolUsage
+from seed_agent.sources.base import SourceIntentEvent
 from seed_agent.state import StateStore
 
 _HELP_ENV = {"COLUMNS": "160", "GITHUB_ACTIONS": ""}
@@ -252,9 +254,7 @@ def test_seed_active_download_gate_ignores_media_category_torrents() -> None:
 
     config = _config()
     config = config.model_copy(
-        update={
-            "pt_filters": config.pt_filters.model_copy(update={"max_active_downloads": 1})
-        }
+        update={"pt_filters": config.pt_filters.model_copy(update={"max_active_downloads": 1})}
     )
     media_download = _managed_incomplete_torrent(category="movie")
     candidate = _scored()
@@ -608,9 +608,9 @@ async def test_backfill_skips_fallback_for_fresh_tracker_evidence(
     assert results[0]["status"] == "batch_miss_cached"
     assert results[0]["site"] == "mteam"
     assert results[0]["reason"] == "batch miss; detail/search fallback is cooling down"
-    assert cli._tracker_source_backfill_unresolved_risk_hashes(
-        {"results": results}
-    ) == {torrent.hash}
+    assert cli._tracker_source_backfill_unresolved_risk_hashes({"results": results}) == {
+        torrent.hash
+    }
 
 
 @pytest.mark.asyncio
@@ -679,9 +679,9 @@ async def test_backfill_does_not_fallback_after_batch_application_error(
     assert results[0]["endpoint"] == "member/getUserTorrentList"
     assert results[0]["reason"] == "invalid request"
     assert request_budget == {"remaining": 20, "used": 0}
-    assert cli._tracker_source_backfill_unresolved_risk_hashes(
-        {"results": results}
-    ) == {torrent.hash}
+    assert cli._tracker_source_backfill_unresolved_risk_hashes({"results": results}) == {
+        torrent.hash
+    }
 
 
 def test_live_reconciliation_links_unlinked_candidate_by_tracker_tid(
@@ -1827,10 +1827,7 @@ def test_schedule_run_contains_intent_mteam_rate_limit_and_finishes_run(
     assert run["finished_at"] is not None
     assert run["status"] == "skipped_backoff"
     events = store.list_scheduler_run_events(run_id=str(run["run_id"]), limit=20)
-    assert any(
-        row["phase"] == "intent_search" and row["event"] == "warning"
-        for row in events
-    )
+    assert any(row["phase"] == "intent_search" and row["event"] == "warning" for row in events)
 
 
 def test_schedule_run_contains_generic_intent_search_failure_as_warning(
@@ -2669,7 +2666,7 @@ def test_intent_run_once_reports_source_warnings(
         assert kwargs["source_events"] == []
         return FakeIntentResult()
 
-    def fail_read_configured_source_events(loaded, **kwargs):
+    def fail_fetch_configured_want_list_events(loaded, **kwargs):
         raise RuntimeError("douban 403")
 
     class FakeDownloader:
@@ -2679,7 +2676,11 @@ def test_intent_run_once_reports_source_warnings(
             return []
 
     monkeypatch.setattr(cli, "load_config", lambda path: config)
-    monkeypatch.setattr(cli, "_read_configured_source_events", fail_read_configured_source_events)
+    monkeypatch.setattr(
+        cli,
+        "_fetch_configured_want_list_events",
+        fail_fetch_configured_want_list_events,
+    )
     monkeypatch.setattr(cli, "run_intent_once", fake_run_intent_once)
     monkeypatch.setattr(cli, "_maybe_build_downloader", lambda loaded: FakeDownloader())
 
@@ -2717,22 +2718,27 @@ def test_intent_source_only_refresh_does_not_load_downloader_or_search_providers
     monkeypatch.setattr(
         cli,
         "_enqueue_runtime_context",
-        lambda *args, **kwargs: pytest.fail(
-            "source-only refresh must not load qB runtime context"
-        ),
+        lambda *args, **kwargs: pytest.fail("source-only refresh must not load qB runtime context"),
     )
     monkeypatch.setattr(
         cli,
         "_build_search_providers",
-        lambda *args, **kwargs: pytest.fail(
-            "source-only refresh must not build search providers"
-        ),
+        lambda *args, **kwargs: pytest.fail("source-only refresh must not build search providers"),
     )
     monkeypatch.setattr(
         cli,
-        "_read_configured_source_events",
+        "_fetch_configured_want_list_events",
         lambda *args, **kwargs: [event],
     )
+    def enrich_after_list_persistence(
+        events: list[SourceIntentEvent],
+        *,
+        store: StateStore,
+    ) -> list[SourceIntentEvent]:
+        assert store.find_intent_id_by_alias("douban:1292720") is not None
+        return events
+
+    monkeypatch.setattr(cli, "_enrich_configured_want_list_events", enrich_after_list_persistence)
 
     payload = cli._intent_run_once_payload(
         config_path,
@@ -2763,12 +2769,13 @@ def test_intent_source_failure_does_not_commit_pending_cursor(
         *,
         store: StateStore,
         cursor_updates: dict[str, str],
+        source_warnings: list[dict[str, str]],
     ) -> list[object]:
-        del loaded, store
+        del loaded, store, source_warnings
         cursor_updates[cursor_key] = "42"
         raise RuntimeError("douban unavailable after telegram poll")
 
-    monkeypatch.setattr(cli, "_read_configured_source_events", fail_after_poll)
+    monkeypatch.setattr(cli, "_fetch_configured_want_list_events", fail_after_poll)
 
     payload = cli._intent_run_once_payload(
         config_path,
@@ -2779,11 +2786,46 @@ def test_intent_source_failure_does_not_commit_pending_cursor(
 
     store = StateStore(tmp_path / ".seed-agent" / "state.db")
     assert payload["source_refresh_succeeded"] is False
-    assert payload["source_warnings"][0]["message"] == (
-        "douban unavailable after telegram poll"
-    )
+    assert payload["source_warnings"][0]["message"] == ("douban unavailable after telegram poll")
     assert store.get_source_cursor(cursor_key) is None
     assert cli._schedule_run_status({"intent": payload}) == "warning"
+
+
+def test_intent_source_warning_does_not_commit_pending_cursor(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from seed_agent import cli
+
+    config_path = _config_file(tmp_path)
+    cursor_key = "telegram:local/secrets/telegram.yaml"
+
+    def partial_source_read(
+        loaded,
+        *,
+        store: StateStore,
+        cursor_updates: dict[str, str],
+        source_warnings: list[dict[str, str]],
+    ) -> list[object]:
+        del loaded, store
+        cursor_updates[cursor_key] = "42"
+        source_warnings.append(
+            {"source": "douban-me", "error_type": "HTTPStatusError", "message": "403"}
+        )
+        return []
+
+    monkeypatch.setattr(cli, "_fetch_configured_want_list_events", partial_source_read)
+
+    payload = cli._intent_run_once_payload(
+        config_path,
+        execute=False,
+        search_ingested=False,
+        run_id="sched-source-warning",
+    )
+
+    store = StateStore(tmp_path / ".seed-agent" / "state.db")
+    assert payload["source_refresh_succeeded"] is False
+    assert store.get_source_cursor(cursor_key) is None
 
 
 def test_schedule_run_can_prune_each_cycle(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -2940,9 +2982,9 @@ scheduler:
     assert payload["intent_search_enabled"] is False
     assert payload["prune"]["command"] == "prune"
     assert payload["tracker_source_backfill"]["command"] == "tracker-source-backfill"
-    api_events = StateStore(
-        tmp_path / ".seed-agent" / "state.db"
-    ).list_tracker_api_events(site="mteam", endpoint="member/getUserTorrentList")
+    api_events = StateStore(tmp_path / ".seed-agent" / "state.db").list_tracker_api_events(
+        site="mteam", endpoint="member/getUserTorrentList"
+    )
     assert api_events[0]["event"] == "success"
 
 
@@ -5397,9 +5439,340 @@ want_sources:
     payload = cli._intent_run_once_payload(config_path, execute=False)
 
     assert payload["ingested"] == 1
-    assert StateStore(tmp_path / ".seed-agent" / "state.db").get_source_cursor(
-        "telegram:local/secrets/telegram.yaml"
-    ) == "102"
+    assert (
+        StateStore(tmp_path / ".seed-agent" / "state.db").get_source_cursor(
+            "telegram:local/secrets/telegram.yaml"
+        )
+        == "102"
+    )
+
+
+def test_configured_douban_source_keeps_local_names_when_rss_fetch_is_blocked(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from seed_agent import cli
+
+    config_path = _config_file(tmp_path)
+    export_path = tmp_path / "local" / "inbox" / "douban.json"
+    export_path.parent.mkdir(parents=True)
+    export_path.write_text(
+        json.dumps(
+            {"items": [{"id": "1292052", "title": "The Shawshank Redemption", "year": 1994}]}
+        ),
+        encoding="utf-8",
+    )
+    config_path.write_text(
+        config_path.read_text(encoding="utf-8")
+        + """
+want_sources:
+  want_lists:
+    - provider: douban
+      id: douban-me
+      label: Me
+      export_ref: local/inbox/douban.json
+      user_name: LancerC
+""",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        cli,
+        "fetch_douban_interest_rss",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("douban 403")),
+    )
+    monkeypatch.setattr(cli, "enrich_douban_wanted_event", lambda event: event)
+    warnings: list[dict[str, str]] = []
+
+    events = cli._read_configured_source_events(
+        cli.load_config(config_path),
+        source_warnings=warnings,
+    )
+
+    assert [event.raw_text for event in events] == ["The Shawshank Redemption 1994"]
+    assert warnings == [
+        {"source": "douban-me", "error_type": "RuntimeError", "message": "douban 403"}
+    ]
+
+
+def test_configured_douban_detail_failure_uses_matching_imdb_watchlist_event(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from seed_agent import cli
+
+    config_path = _config_file(tmp_path)
+    config_path.write_text(
+        config_path.read_text(encoding="utf-8")
+        + """
+want_sources:
+  want_lists:
+    - provider: douban
+      id: douban-me
+      label: Me
+      user_name: LancerC
+    - provider: imdb
+      id: imdb-me
+      label: Me
+      watchlist_url: https://www.imdb.com/user/example/watchlist/
+""",
+        encoding="utf-8",
+    )
+    douban_event = SourceIntentEvent(
+        source=IntentSource.DOUBAN_WANTED,
+        raw_text="请以你的名字呼唤我 Call Me by Your Name 2017",
+        source_event_id="douban:26799731",
+        metadata={"external_ids": {"douban": "26799731"}, "media_type": "movie"},
+    )
+    imdb_event = SourceIntentEvent(
+        source=IntentSource.IMDB_WATCHLIST,
+        raw_text="Call Me by Your Name 2017",
+        source_event_id="imdb:tt5726616",
+        metadata={
+            "external_ids": {"imdb": "tt5726616"},
+            "media_type": "movie",
+            "kind": "movie",
+            "genres": "Drama",
+        },
+    )
+    monkeypatch.setattr(cli, "fetch_douban_interest_rss", lambda *_args, **_kwargs: [douban_event])
+    monkeypatch.setattr(cli, "fetch_imdb_watchlist", lambda *_args, **_kwargs: [imdb_event])
+    detail_calls: list[str] = []
+
+    def failed_detail(event: SourceIntentEvent) -> SourceIntentEvent:
+        detail_calls.append(event.source_event_id or "")
+        return SourceIntentEvent(
+            source=event.source,
+            raw_text=event.raw_text,
+            source_event_id=event.source_event_id,
+            requested_at=event.requested_at,
+            metadata={**event.metadata, "subject_lookup_status": "failed"},
+        )
+
+    monkeypatch.setattr(
+        cli,
+        "enrich_douban_wanted_event",
+        failed_detail,
+    )
+
+    events = cli._fetch_configured_want_list_events(cli.load_config(config_path))
+    assert detail_calls == []
+    assert [event.source for event in events] == [
+        IntentSource.DOUBAN_WANTED,
+        IntentSource.IMDB_WATCHLIST,
+    ]
+
+    events = cli._enrich_configured_want_list_events(events, store=None)
+    enriched = events[0]
+
+    assert detail_calls == ["douban:26799731"]
+    assert enriched.metadata["subject_lookup_status"] == "imdb_fallback"
+    assert enriched.metadata["detail_adapter"] == "imdb_watchlist_fallback"
+    assert enriched.metadata["external_ids"] == {"douban": "26799731", "imdb": "tt5726616"}
+    assert enriched.metadata["genres"] == "Drama"
+
+
+def test_douban_rss_detail_failure_uses_unique_exact_imdb_title_without_year(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from seed_agent import cli
+
+    douban_event = SourceIntentEvent(
+        source=IntentSource.DOUBAN_WANTED,
+        raw_text="无职转生",
+        source_event_id="douban:99999998",
+        metadata={"external_ids": {"douban": "99999998"}},
+    )
+    imdb_event = SourceIntentEvent(
+        source=IntentSource.IMDB_WATCHLIST,
+        raw_text="无职转生 2026",
+        source_event_id="imdb:tt9999999",
+        metadata={
+            "external_ids": {"imdb": "tt9999999"},
+            "media_type": "tv",
+            "kind": "tv",
+            "title_type": "tvSeries",
+        },
+    )
+    monkeypatch.setattr(
+        cli,
+        "enrich_douban_wanted_event",
+        lambda event: replace(
+            event,
+            metadata={**event.metadata, "subject_lookup_status": "failed"},
+        ),
+    )
+
+    events = cli._enrich_configured_want_list_events([douban_event, imdb_event], store=None)
+    enriched = events[0]
+
+    assert enriched.raw_text == "无职转生 2026"
+    assert enriched.metadata["subject_lookup_status"] == "imdb_fallback"
+    assert enriched.metadata["media_type"] == "tv"
+    assert enriched.metadata["external_ids"] == {"douban": "99999998", "imdb": "tt9999999"}
+
+
+def test_douban_rss_detail_failure_deduplicates_identical_imdb_source_events(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from seed_agent import cli
+
+    douban_event = SourceIntentEvent(
+        source=IntentSource.DOUBAN_WANTED,
+        raw_text="无职转生",
+        source_event_id="douban:99999998",
+        metadata={"external_ids": {"douban": "99999998"}},
+    )
+    imdb_event = SourceIntentEvent(
+        source=IntentSource.IMDB_WATCHLIST,
+        raw_text="无职转生 2026",
+        source_event_id="imdb:tt9999999",
+        metadata={"external_ids": {"imdb": "tt9999999"}, "media_type": "tv"},
+    )
+    monkeypatch.setattr(
+        cli,
+        "enrich_douban_wanted_event",
+        lambda event: replace(
+            event,
+            metadata={**event.metadata, "subject_lookup_status": "failed"},
+        ),
+    )
+
+    events = cli._enrich_configured_want_list_events(
+        [douban_event, imdb_event, imdb_event], store=None
+    )
+
+    assert events[0].metadata["subject_lookup_status"] == "imdb_fallback"
+
+
+def test_douban_rss_detail_failure_does_not_match_ambiguous_imdb_title_without_year(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from seed_agent import cli
+
+    douban_event = SourceIntentEvent(
+        source=IntentSource.DOUBAN_WANTED,
+        raw_text="同名作品",
+        source_event_id="douban:99999997",
+        metadata={"external_ids": {"douban": "99999997"}},
+    )
+    imdb_events = [
+        SourceIntentEvent(
+            source=IntentSource.IMDB_WATCHLIST,
+            raw_text=f"同名作品 {year}",
+            source_event_id=f"imdb:tt99999{year}",
+            metadata={"external_ids": {"imdb": f"tt99999{year}"}, "media_type": "tv"},
+        )
+        for year in (2024, 2026)
+    ]
+    monkeypatch.setattr(
+        cli,
+        "enrich_douban_wanted_event",
+        lambda event: replace(
+            event,
+            metadata={**event.metadata, "subject_lookup_status": "failed"},
+        ),
+    )
+
+    events = cli._enrich_configured_want_list_events([douban_event, *imdb_events], store=None)
+
+    assert events[0].metadata["subject_lookup_status"] == "failed"
+    assert events[0].metadata["external_ids"] == {"douban": "99999997"}
+
+
+def test_configured_douban_source_reuses_persisted_subject_detail(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from seed_agent import cli
+    from seed_agent.actions.intent import ingest_events
+
+    config_path = _config_file(tmp_path)
+    config_path.write_text(
+        config_path.read_text(encoding="utf-8")
+        + """
+want_sources:
+  want_lists:
+    - provider: douban
+      id: douban-me
+      label: Me
+      user_name: LancerC
+""",
+        encoding="utf-8",
+    )
+    stored = SourceIntentEvent(
+        source=IntentSource.DOUBAN_WANTED,
+        raw_text="The Shawshank Redemption 1994",
+        source_event_id="douban:1292052",
+        metadata={
+            "external_ids": {"douban": "1292052", "imdb": "tt0111161"},
+            "media_type": "movie",
+            "subject_adapter": "douban_mobile_subject",
+            "subject_lookup_status": "success",
+        },
+    )
+    store = StateStore(tmp_path / ".seed-agent" / "state.db")
+    ingest_events([stored], store)
+    incoming = SourceIntentEvent(
+        source=IntentSource.DOUBAN_WANTED,
+        raw_text="The Shawshank Redemption 1994",
+        source_event_id="douban:1292052",
+        metadata={"external_ids": {"douban": "1292052"}, "media_type": "movie"},
+    )
+    monkeypatch.setattr(cli, "fetch_douban_interest_rss", lambda *_args, **_kwargs: [incoming])
+    monkeypatch.setattr(
+        cli,
+        "enrich_douban_wanted_event",
+        lambda _event: pytest.fail("persisted detail must be reused"),
+    )
+
+    events = cli._read_configured_source_events(cli.load_config(config_path), store=store)
+
+    assert events[0].metadata["external_ids"] == {"douban": "1292052", "imdb": "tt0111161"}
+    assert events[0].metadata["subject_lookup_status"] == "success"
+
+
+def test_douban_detail_enrichment_is_deduplicated_within_one_refresh(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from seed_agent import cli
+
+    first = SourceIntentEvent(
+        source=IntentSource.DOUBAN_WANTED,
+        raw_text="The Shawshank Redemption 1994",
+        source_event_id="douban:1292052",
+        metadata={"external_ids": {"douban": "1292052"}, "source_label": "豆瓣-我"},
+    )
+    second = SourceIntentEvent(
+        source=IntentSource.DOUBAN_WANTED,
+        raw_text="The Shawshank Redemption 1994",
+        source_event_id="douban:1292052",
+        metadata={"external_ids": {"douban": "1292052"}, "source_label": "豆瓣-备用"},
+    )
+    calls: list[str] = []
+
+    def enrich(event: SourceIntentEvent) -> SourceIntentEvent:
+        calls.append(event.source_event_id or "")
+        return SourceIntentEvent(
+            source=event.source,
+            raw_text=event.raw_text,
+            source_event_id=event.source_event_id,
+            requested_at=event.requested_at,
+            metadata={
+                **event.metadata,
+                "subject_lookup_status": "success",
+                "external_ids": {"douban": "1292052", "imdb": "tt0111161"},
+            },
+        )
+
+    monkeypatch.setattr(cli, "enrich_douban_wanted_event", enrich)
+    events = [first, second]
+
+    cli._enrich_douban_source_events(events, [0, 1], store=None)
+
+    assert calls == ["douban:1292052"]
+    assert events[1].metadata["source_label"] == "豆瓣-备用"
+    assert events[1].metadata["external_ids"] == {"douban": "1292052", "imdb": "tt0111161"}
 
 
 def test_read_configured_telegram_requires_chat_allowlist(tmp_path: Path) -> None:

@@ -186,7 +186,7 @@ no restrictive effect at `0`; `freshness_zero_score_hours=0` disables age decay.
 - `douban_wanted.enabled`
 - `douban_wanted.export_ref`
 - `douban_wanted.user_name`
-- `douban_wanted.max_pages`
+- `douban_wanted.max_pages` (legacy compatibility; RSS has no pagination)
 - `want_lists[].provider`
 - `want_lists[].id`
 - `want_lists[].label`
@@ -194,7 +194,7 @@ no restrictive effect at `0`; `freshness_zero_score_hours=0` disables age decay.
 - `want_lists[].user_name`
 - `want_lists[].watchlist_url`
 - `want_lists[].export_ref`
-- `want_lists[].max_pages`
+- `want_lists[].max_pages` (legacy compatibility; ignored for Douban RSS)
 - `subscription.enabled`
 - `subscription.rules_ref`
 

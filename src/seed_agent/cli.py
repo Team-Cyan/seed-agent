@@ -26,6 +26,7 @@ from seed_agent import __version__
 from seed_agent.actions.intent import (
     add_intent,
     enqueue_intent,
+    ingest_events,
     ingest_inbox,
     rank_intent,
     reject_intent,
@@ -99,7 +100,11 @@ from seed_agent.sites.mteam import (
     fetch_api_candidates as fetch_mteam_api_candidates,
 )
 from seed_agent.sources.base import SourceIntentEvent
-from seed_agent.sources.douban import fetch_douban_wanted_user, read_douban_wanted
+from seed_agent.sources.douban import (
+    enrich_douban_wanted_event,
+    fetch_douban_interest_rss,
+    read_douban_wanted,
+)
 from seed_agent.sources.imdb import fetch_imdb_watchlist, read_imdb_watchlist_csv
 from seed_agent.sources.letterboxd import read_letterboxd_watchlist_csv
 from seed_agent.sources.telegram import poll_telegram_update_batch
@@ -1798,9 +1803,7 @@ def schedule_run(
         payload["run_id"] = run_id
         payload["cycle"] = cycle
         payload["interval_minutes"] = interval_minutes
-        payload["capacity_guard_interval_seconds"] = (
-            scheduler.capacity_guard_interval_seconds
-        )
+        payload["capacity_guard_interval_seconds"] = scheduler.capacity_guard_interval_seconds
         payload["scheduled_at"] = datetime.now(UTC).isoformat()
         payload["min_free_window_minutes"] = min_free_window_minutes
         payload["require_known_free_window"] = require_known_free_window if execute else False
@@ -1808,9 +1811,7 @@ def schedule_run(
         payload["tracker_backfill_enabled"] = tracker_backfill
         payload["tracker_backfill_category"] = tracker_backfill_category
         payload["tracker_backfill_unbounded"] = False
-        payload["tracker_backfill_max_api_requests"] = (
-            scheduler.tracker_backfill_max_api_requests
-        )
+        payload["tracker_backfill_max_api_requests"] = scheduler.tracker_backfill_max_api_requests
         payload["intent_enabled"] = intent
         payload["intent_execute"] = intent_execute
         payload["scheduler_config_source"] = (
@@ -2043,9 +2044,7 @@ def _capacity_guard_payload(config_path: Path, *, execute: bool) -> dict[str, An
             "execute": execute,
             "triggered": False,
             "hard_cap_satisfied": True,
-            "pool_usage": {
-                name: _pool_usage_item_summary(item) for name, item in usage.items()
-            },
+            "pool_usage": {name: _pool_usage_item_summary(item) for name, item in usage.items()},
         }
 
     payload = _prune_payload(
@@ -2081,9 +2080,7 @@ def _capacity_guard_payload_summary(payload: dict[str, Any]) -> dict[str, Any]:
         ),
         "hard_cap_satisfied": payload.get("hard_cap_satisfied"),
         "hard_cap_violations_by_pool": payload.get("hard_cap_violations_by_pool", {}),
-        "verified_committed_reclaim_by_pool": payload.get(
-            "verified_committed_reclaim_by_pool", {}
-        ),
+        "verified_committed_reclaim_by_pool": payload.get("verified_committed_reclaim_by_pool", {}),
         "pool_usage": payload.get("pool_usage"),
         "error": payload.get("error"),
     }
@@ -2103,9 +2100,7 @@ def _scheduled_intent_search_due(
         current = current.astimezone()
     scheduled_today = current.replace(hour=hour, minute=0, second=0, microsecond=0)
     scheduled_at = (
-        scheduled_today
-        if current >= scheduled_today
-        else scheduled_today - timedelta(days=1)
+        scheduled_today if current >= scheduled_today else scheduled_today - timedelta(days=1)
     )
     if last_search_at is None:
         return True
@@ -2121,9 +2116,7 @@ def _pending_intent_search_due(store: StateStore) -> bool:
 
 
 def _latest_scheduled_intent_search_at(store: StateStore) -> datetime | None:
-    succeeded = store.latest_completed_scheduler_run(
-        summary_flag="intent_search_succeeded"
-    )
+    succeeded = store.latest_completed_scheduler_run(summary_flag="intent_search_succeeded")
     succeeded_at = _scheduler_run_finished_at(succeeded)
     if succeeded_at is not None:
         return succeeded_at
@@ -2135,9 +2128,7 @@ def _latest_scheduled_intent_search_at(store: StateStore) -> datetime | None:
 
 
 def _latest_scheduled_intent_refresh_at(store: StateStore) -> datetime | None:
-    succeeded = store.latest_completed_scheduler_run(
-        summary_flag="intent_refresh_succeeded"
-    )
+    succeeded = store.latest_completed_scheduler_run(summary_flag="intent_refresh_succeeded")
     succeeded_at = _scheduler_run_finished_at(succeeded)
     if succeeded_at is not None:
         return succeeded_at
@@ -2170,8 +2161,7 @@ def _latest_legacy_scheduled_intent_at(
             continue
         intent_summary = summary.get("intent")
         if isinstance(intent_summary, dict) and (
-            intent_summary.get("source_warnings")
-            or intent_summary.get("search_warning")
+            intent_summary.get("source_warnings") or intent_summary.get("search_warning")
         ):
             continue
         finished_at = _scheduler_run_finished_at(row)
@@ -2232,9 +2222,7 @@ def _schedule_run_status(summary: dict[str, Any]) -> str:
     if _tracker_source_backfill_has_unresolved(summary.get("tracker_source_backfill")):
         return "warning"
     intent = summary.get("intent")
-    if isinstance(intent, dict) and (
-        intent.get("source_warnings") or intent.get("search_warning")
-    ):
+    if isinstance(intent, dict) and (intent.get("source_warnings") or intent.get("search_warning")):
         return "warning"
     return "success"
 
@@ -2854,9 +2842,7 @@ def _prune_payload(
         "reclaim_targets_by_pool": effective_reclaim_targets,
         "reclaimed_capacity_by_pool": reclaimed_by_pool,
         "verified_committed_reclaim_by_pool": verified_reclaimed_by_pool,
-        "verified_downloaded_reclaim_by_pool": _reclaimed_downloaded_bytes_by_pool(
-            decisions
-        ),
+        "verified_downloaded_reclaim_by_pool": _reclaimed_downloaded_bytes_by_pool(decisions),
         "hard_cap_satisfied": not hard_cap_violations,
         "hard_cap_violations_by_pool": hard_cap_violations,
         "unknown_free_risk_count": len(unknown_free_risk_hashes),
@@ -2866,8 +2852,7 @@ def _prune_payload(
         "candidate_reconciliation": candidate_reconciliation,
         "pool_usage_before": _pool_usage_summary(loaded, all_torrents),
         "pool_usage": {
-            name: _pool_usage_item_summary(item)
-            for name, item in final_usage_by_name.items()
+            name: _pool_usage_item_summary(item) for name, item in final_usage_by_name.items()
         },
         "decisions": [_decision_summary(item) for item in decisions],
         "preview": preview,
@@ -3195,11 +3180,20 @@ def _intent_run_once_payload(
     if refresh_sources:
         source_refresh_succeeded = True
         try:
-            source_events = _read_configured_source_events(
+            source_events = _fetch_configured_want_list_events(
                 loaded,
                 store=store,
                 cursor_updates=pending_source_cursors,
+                source_warnings=source_warnings,
             )
+            ingest_events(source_events, store)
+            source_events = _enrich_configured_want_list_events(
+                source_events,
+                store=store,
+            )
+            if source_warnings:
+                source_refresh_succeeded = False
+                pending_source_cursors.clear()
         except Exception as exc:
             pending_source_cursors.clear()
             source_refresh_succeeded = False
@@ -3211,9 +3205,7 @@ def _intent_run_once_payload(
                 }
             )
     try:
-        release_resolver = (
-            _build_release_download_resolver(loaded) if search_ingested else None
-        )
+        release_resolver = _build_release_download_resolver(loaded) if search_ingested else None
         result = _run(
             run_intent_once(
                 inbox_path=inbox_path,
@@ -4963,12 +4955,8 @@ def _prune_payload_summary(payload: object) -> dict[str, Any] | None:
         ),
         "reclaim_targets_by_pool": payload.get("reclaim_targets_by_pool"),
         "reclaimed_capacity_by_pool": payload.get("reclaimed_capacity_by_pool"),
-        "verified_committed_reclaim_by_pool": payload.get(
-            "verified_committed_reclaim_by_pool"
-        ),
-        "verified_downloaded_reclaim_by_pool": payload.get(
-            "verified_downloaded_reclaim_by_pool"
-        ),
+        "verified_committed_reclaim_by_pool": payload.get("verified_committed_reclaim_by_pool"),
+        "verified_downloaded_reclaim_by_pool": payload.get("verified_downloaded_reclaim_by_pool"),
         "hard_cap_satisfied": payload.get("hard_cap_satisfied"),
         "hard_cap_violations_by_pool": payload.get("hard_cap_violations_by_pool"),
         "unknown_free_risk_count": payload.get("unknown_free_risk_count"),
@@ -5027,9 +5015,7 @@ def _intent_payload_summary(payload: object) -> dict[str, Any] | None:
     if payload.get("skipped_by_backoff"):
         summary["skipped_by_backoff"] = payload.get("skipped_by_backoff")
     if payload.get("search_skipped_by_backoff"):
-        summary["search_skipped_by_backoff"] = payload.get(
-            "search_skipped_by_backoff"
-        )
+        summary["search_skipped_by_backoff"] = payload.get("search_skipped_by_backoff")
     if payload.get("schedule_backoff"):
         summary["schedule_backoff"] = payload.get("schedule_backoff")
     return summary
@@ -5409,16 +5395,12 @@ def _build_intent_enqueue_context_resolver(
     existing_download_bytes = sum(_download_liability_bytes(item) for item in torrents)
     seed_category = config.download_client.default_category
     seed_torrents = [item for item in torrents if item.category == seed_category]
-    existing_seed_downloads = int(
-        _runtime_activity_summary(seed_torrents)["active_download_count"]
-    )
+    existing_seed_downloads = int(_runtime_activity_summary(seed_torrents)["active_download_count"])
     disk_state = _disk_headroom_state(config, downloader_status, torrents)
     max_active_downloads = config.pt_filters.max_active_downloads or None
     max_total_amount_left_gb = config.pt_filters.max_total_amount_left_gb or None
     max_download_bytes = (
-        int(max_total_amount_left_gb * 1024**3)
-        if max_total_amount_left_gb is not None
-        else None
+        int(max_total_amount_left_gb * 1024**3) if max_total_amount_left_gb is not None else None
     )
 
     def resolve(
@@ -5663,8 +5645,7 @@ def _intent_enqueue_pause_state(
     if not enqueue_states:
         return fallback_paused, list(fallback_reasons)
     paused = any(
-        bool(state.get("paused")) or bool(state.get("rejected"))
-        for state in enqueue_states
+        bool(state.get("paused")) or bool(state.get("rejected")) for state in enqueue_states
     )
     reasons: list[str] = []
     for state in enqueue_states:
@@ -6160,13 +6141,15 @@ def _build_search_providers(config: SeedAgentConfig) -> list[SearchProvider]:
     return providers
 
 
-def _read_configured_source_events(
+def _fetch_configured_want_list_events(
     config: SeedAgentConfig,
     *,
     store: StateStore | None = None,
     cursor_updates: dict[str, str] | None = None,
+    source_warnings: list[dict[str, str]] | None = None,
 ) -> list[SourceIntentEvent]:
     events: list[SourceIntentEvent] = []
+
     if config.want_sources.telegram.enabled:
         events.extend(
             _read_configured_telegram_events(
@@ -6179,67 +6162,297 @@ def _read_configured_source_events(
         if not source.enabled:
             continue
         if source.provider == "douban":
-            if source.export_ref:
-                export_path = _resolve_path(source.export_ref, config.config_dir)
-                if export_path is not None:
+            try:
+                if source.export_ref:
+                    export_path = _resolve_path(source.export_ref, config.config_dir)
+                    if export_path is not None:
+                        events.extend(
+                            read_douban_wanted(
+                                export_path,
+                                source_config_id=source.id,
+                                label=source.label,
+                            )
+                        )
+                if source.user_name:
                     events.extend(
-                        read_douban_wanted(
-                            export_path,
+                        fetch_douban_interest_rss(
+                            source.user_name,
                             source_config_id=source.id,
                             label=source.label,
                         )
                     )
-            if source.user_name:
-                events.extend(
-                    fetch_douban_wanted_user(
-                        source.user_name,
-                        max_pages=source.max_pages,
-                        source_config_id=source.id,
-                        label=source.label,
-                    )
-                )
+            except Exception as exc:
+                _append_source_warning(source_warnings, source.id, exc)
             continue
         if source.provider == "imdb":
-            if source.export_ref:
-                export_path = _resolve_path(source.export_ref, config.config_dir)
-                if export_path is not None:
+            try:
+                if source.export_ref:
+                    export_path = _resolve_path(source.export_ref, config.config_dir)
+                    if export_path is not None:
+                        events.extend(
+                            read_imdb_watchlist_csv(
+                                export_path,
+                                source_config_id=source.id,
+                                label=source.label,
+                            )
+                        )
+                if source.watchlist_url:
                     events.extend(
-                        read_imdb_watchlist_csv(
-                            export_path,
+                        fetch_imdb_watchlist(
+                            source.watchlist_url,
                             source_config_id=source.id,
                             label=source.label,
                         )
                     )
-            if source.watchlist_url:
-                events.extend(
-                    fetch_imdb_watchlist(
-                        source.watchlist_url,
-                        source_config_id=source.id,
-                        label=source.label,
-                    )
-                )
+            except Exception as exc:
+                _append_source_warning(source_warnings, source.id, exc)
             continue
         if source.provider == "letterboxd":
-            if source.export_ref:
-                export_path = _resolve_path(source.export_ref, config.config_dir)
-                if export_path is not None:
-                    events.extend(
-                        read_letterboxd_watchlist_csv(
-                            export_path,
-                            source_config_id=source.id,
-                            label=source.label,
+            try:
+                if source.export_ref:
+                    export_path = _resolve_path(source.export_ref, config.config_dir)
+                    if export_path is not None:
+                        events.extend(
+                            read_letterboxd_watchlist_csv(
+                                export_path,
+                                source_config_id=source.id,
+                                label=source.label,
+                            )
                         )
-                    )
+            except Exception as exc:
+                _append_source_warning(source_warnings, source.id, exc)
     douban = config.want_sources.douban_wanted
-    if not douban.enabled:
-        return events
-    if douban.export_ref:
-        export_path = _resolve_path(douban.export_ref, config.config_dir)
-        if export_path is not None:
-            events.extend(read_douban_wanted(export_path))
-    if douban.user_name:
-        events.extend(fetch_douban_wanted_user(douban.user_name, max_pages=douban.max_pages))
+    if douban.enabled:
+        try:
+            if douban.export_ref:
+                export_path = _resolve_path(douban.export_ref, config.config_dir)
+                if export_path is not None:
+                    events.extend(read_douban_wanted(export_path))
+            if douban.user_name:
+                events.extend(
+                    fetch_douban_interest_rss(
+                        douban.user_name,
+                    )
+                )
+        except Exception as exc:
+            _append_source_warning(source_warnings, "douban_wanted", exc)
     return events
+
+
+def _enrich_configured_want_list_events(
+    events: list[SourceIntentEvent],
+    *,
+    store: StateStore | None,
+) -> list[SourceIntentEvent]:
+    enriched = list(events)
+    douban_event_indexes = [
+        index
+        for index, event in enumerate(enriched)
+        if event.source == IntentSource.DOUBAN_WANTED
+    ]
+    _enrich_douban_source_events(enriched, douban_event_indexes, store=store)
+    return enriched
+
+
+def _read_configured_source_events(
+    config: SeedAgentConfig,
+    *,
+    store: StateStore | None = None,
+    cursor_updates: dict[str, str] | None = None,
+    source_warnings: list[dict[str, str]] | None = None,
+) -> list[SourceIntentEvent]:
+    """Compatibility wrapper for callers that need fetched and enriched events."""
+    events = _fetch_configured_want_list_events(
+        config,
+        store=store,
+        cursor_updates=cursor_updates,
+        source_warnings=source_warnings,
+    )
+    return _enrich_configured_want_list_events(events, store=store)
+
+
+def _append_source_warning(
+    source_warnings: list[dict[str, str]] | None,
+    source: str,
+    exc: Exception,
+) -> None:
+    if source_warnings is None:
+        return
+    source_warnings.append(
+        {
+            "source": source,
+            "error_type": type(exc).__name__,
+            "message": _runtime_error_summary(exc),
+        }
+    )
+
+
+def _enrich_douban_source_events(
+    events: list[SourceIntentEvent],
+    douban_event_indexes: list[int],
+    *,
+    store: StateStore | None,
+) -> None:
+    imdb_events = [event for event in events if event.source == IntentSource.IMDB_WATCHLIST]
+    resolved_by_douban_id: dict[str, SourceIntentEvent] = {}
+    for index in douban_event_indexes:
+        event = events[index]
+        if event.source_event_id and event.source_event_id in resolved_by_douban_id:
+            events[index] = _apply_douban_detail_metadata(
+                event,
+                resolved_by_douban_id[event.source_event_id].metadata,
+            )
+            continue
+        cached = _cached_douban_subject_event(event, store)
+        if cached is not None:
+            events[index] = cached
+            if event.source_event_id:
+                resolved_by_douban_id[event.source_event_id] = cached
+            continue
+        enriched = enrich_douban_wanted_event(event)
+        if enriched.metadata.get("subject_lookup_status") == "failed":
+            fallback = _matching_imdb_event(enriched, imdb_events)
+            if fallback is not None:
+                enriched = _merge_imdb_fallback(enriched, fallback)
+        events[index] = enriched
+        if event.source_event_id:
+            resolved_by_douban_id[event.source_event_id] = enriched
+
+
+def _cached_douban_subject_event(
+    event: SourceIntentEvent,
+    store: StateStore | None,
+) -> SourceIntentEvent | None:
+    if store is None or not event.source_event_id:
+        return None
+    intent_id = store.find_intent_id_by_alias(event.source_event_id)
+    if intent_id is None:
+        return None
+    row = store.get_intent(intent_id)
+    if row is None:
+        return None
+    try:
+        normalized = json.loads(str(row.get("normalized_json") or "{}"))
+    except json.JSONDecodeError:
+        return None
+    metadata = normalized.get("metadata") if isinstance(normalized, dict) else None
+    if not isinstance(metadata, dict):
+        return None
+    status = str(metadata.get("subject_lookup_status") or "")
+    has_legacy_subject_metadata = metadata.get("subject_adapter") == "douban_mobile_subject"
+    if status not in {"success", "imdb_fallback"} and not has_legacy_subject_metadata:
+        return None
+    return _apply_douban_detail_metadata(event, metadata)
+
+
+def _apply_douban_detail_metadata(
+    event: SourceIntentEvent,
+    detail_metadata: dict[str, Any] | dict[str, object],
+) -> SourceIntentEvent:
+    detail_keys = (
+        "subject_adapter",
+        "subject_mobile_url",
+        "subject_lookup_status",
+        "detail_adapter",
+        "detail_source_event_id",
+        "kind",
+        "media_type",
+        "title_type",
+        "genres",
+    )
+    merged_metadata = {**event.metadata}
+    for key in detail_keys:
+        if detail_metadata.get(key) is not None:
+            merged_metadata[key] = detail_metadata[key]
+    merged_metadata["external_ids"] = {
+        **_event_external_ids(event),
+        **_metadata_external_ids(detail_metadata),
+    }
+    return SourceIntentEvent(
+        source=event.source,
+        raw_text=event.raw_text,
+        source_event_id=event.source_event_id,
+        requested_at=event.requested_at,
+        metadata=merged_metadata,
+    )
+
+
+def _matching_imdb_event(
+    douban_event: SourceIntentEvent,
+    imdb_events: list[SourceIntentEvent],
+) -> SourceIntentEvent | None:
+    douban_year = _source_event_year(douban_event)
+    douban_title = _source_event_title_key(douban_event)
+    minimum_title_length = 8 if douban_year is not None else 3
+    if len(douban_title) < minimum_title_length:
+        return None
+    matches: dict[str, SourceIntentEvent] = {}
+    for imdb_event in imdb_events:
+        imdb_title = _source_event_title_key(imdb_event)
+        imdb_year = _source_event_year(imdb_event)
+        if len(imdb_title) < minimum_title_length:
+            continue
+        if douban_year is not None:
+            if imdb_year != douban_year:
+                continue
+            if douban_title == imdb_title or imdb_title in douban_title:
+                matches[imdb_event.source_event_id or imdb_event.raw_text] = imdb_event
+            continue
+        # RSS has no year. Without it, only one exact normalized title is safe
+        # enough to attach a second provider's durable external ID.
+        if douban_title == imdb_title:
+            matches[imdb_event.source_event_id or imdb_event.raw_text] = imdb_event
+    return next(iter(matches.values())) if len(matches) == 1 else None
+
+
+def _merge_imdb_fallback(
+    douban_event: SourceIntentEvent,
+    imdb_event: SourceIntentEvent,
+) -> SourceIntentEvent:
+    imdb_metadata = imdb_event.metadata
+    metadata = {
+        **douban_event.metadata,
+        "detail_adapter": "imdb_watchlist_fallback",
+        "detail_source_event_id": imdb_event.source_event_id or "",
+        "subject_lookup_status": "imdb_fallback",
+        "external_ids": {
+            **_event_external_ids(douban_event),
+            **_event_external_ids(imdb_event),
+        },
+    }
+    for key in ("kind", "media_type", "title_type", "genres"):
+        if imdb_metadata.get(key) is not None:
+            metadata[key] = imdb_metadata[key]
+    imdb_year = _source_event_year(imdb_event)
+    raw_text = douban_event.raw_text
+    if imdb_year is not None and _source_event_year(douban_event) is None:
+        raw_text = f"{raw_text} {imdb_year}"
+    return SourceIntentEvent(
+        source=douban_event.source,
+        raw_text=raw_text,
+        source_event_id=douban_event.source_event_id,
+        requested_at=douban_event.requested_at,
+        metadata=metadata,
+    )
+
+
+def _event_external_ids(event: SourceIntentEvent) -> dict[str, Any]:
+    return _metadata_external_ids(event.metadata)
+
+
+def _metadata_external_ids(metadata: dict[str, Any] | dict[str, object]) -> dict[str, Any]:
+    external_ids = metadata.get("external_ids")
+    return dict(external_ids) if isinstance(external_ids, dict) else {}
+
+
+def _source_event_year(event: SourceIntentEvent) -> str | None:
+    match = re.search(r"\b(19\d{2}|20\d{2}|21\d{2})\b", event.raw_text)
+    return match.group(1) if match is not None else None
+
+
+def _source_event_title_key(event: SourceIntentEvent) -> str:
+    without_year = re.sub(r"\b(19\d{2}|20\d{2}|21\d{2})\b", " ", event.raw_text)
+    return re.sub(r"[^0-9a-z\u4e00-\u9fff]+", "", without_year.lower())
 
 
 def _read_configured_telegram_events(
@@ -6265,9 +6478,7 @@ def _read_configured_telegram_events(
     stored_offset = _optional_int(store.get_source_cursor(cursor_key)) if store else None
     batch = poll_telegram_update_batch(
         bot_token=bot_token,
-        offset=stored_offset
-        if stored_offset is not None
-        else _optional_int(secret.get("offset")),
+        offset=stored_offset if stored_offset is not None else _optional_int(secret.get("offset")),
         timeout_seconds=_optional_int(secret.get("timeout_seconds")) or 0,
         allowed_chat_ids=allowed_chat_ids,
     )

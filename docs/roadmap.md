@@ -463,6 +463,15 @@ by completion period, and unfinished work is ordered by current priority.
     read connection, and state/ops Web reads use bounded read paths that return
     JSON errors instead of dropping the HTTP connection.
 
+- Completed 2026-08 - Resilient Douban RSS Want List ingestion
+  - Douban personal-interest RSS is treated as a daily recent-additions signal,
+    with local exports retained for full-list recovery and compatibility-only
+    `max_pages` settings explicitly documented as no-ops.
+  - JSON-LD subject metadata and a unique exact-title IMDb fallback can enrich
+    new RSS entries without another IMDb request; all season-mode searches now
+    reject explicit or compact episode releases even before an RSS title can be
+    conclusively classified as TV/anime.
+
 - Next P0 - Add scheduler and Web preview integration coverage
   - Add fake downloader/provider fixtures that can run a scheduler cycle without
     touching qBittorrent or a tracker.

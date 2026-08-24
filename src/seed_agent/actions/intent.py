@@ -231,6 +231,8 @@ def _refresh_source_intent(
 ) -> ResourceIntent:
     """Repair missing parser fields when a trusted source is refreshed."""
     updates: dict[str, Any] = {"metadata": merged_metadata}
+    if persisted.year is None and incoming.year is not None:
+        updates["year"] = incoming.year
     if persisted.season is None and incoming.season is not None:
         updates["season"] = incoming.season
     if persisted.episode is None and incoming.episode is not None:

@@ -4,10 +4,12 @@ import json
 import re
 from dataclasses import replace
 from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 from html import unescape
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlparse
+from xml.etree import ElementTree
 
 import httpx
 
@@ -41,7 +43,15 @@ TAG_RE = re.compile(r"<[^>]+>")
 YEAR_RE = re.compile(r"\b(19\d{2}|20\d{2}|21\d{2})\b")
 EPISODE_COUNT_RE = re.compile(r"\b\d+\s*集\b")
 SUBJECT_TITLE_RE = re.compile(r"<title>(?P<title>.*?)</title>", re.IGNORECASE | re.DOTALL)
+LD_JSON_RE = re.compile(
+    r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(?P<payload>.*?)</script>',
+    re.IGNORECASE | re.DOTALL,
+)
 IMDB_ID_RE = re.compile(r"\btt\d{6,12}\b", re.IGNORECASE)
+RSS_SEASON_RE = re.compile(
+    r"(?:\bS\d{1,2}\b|\bSeason[ ._-]*\d{1,2}\b|第\s*[一二三四五六七八九十0-9]{1,3}\s*季)",
+    re.IGNORECASE,
+)
 
 
 def read_douban_wanted(
@@ -86,7 +96,7 @@ def fetch_douban_wanted_user(
             label=label,
         ):
             if enrich_subjects:
-                event = _enrich_event_from_subject(event, fetch)
+                event = enrich_douban_wanted_event(event, fetcher=fetch)
             event_id = event.source_event_id or event.raw_text
             if event_id in seen_ids:
                 continue
@@ -95,9 +105,35 @@ def fetch_douban_wanted_user(
     return events
 
 
+def fetch_douban_interest_rss(
+    user_name_or_url: str,
+    *,
+    fetcher: Any | None = None,
+    source_config_id: str | None = None,
+    label: str | None = None,
+) -> list[SourceIntentEvent]:
+    """Read recent film wishes from Douban's personal-interest RSS feed.
+
+    The feed is deliberately treated as an incremental signal rather than a
+    full Want List snapshot: Douban currently exposes only its latest items.
+    """
+    html = (fetcher or _fetch_url)(build_douban_interest_rss_url(user_name_or_url))
+    return parse_douban_interest_rss(
+        html,
+        user_name=_douban_user_name(user_name_or_url),
+        source_config_id=source_config_id,
+        label=label,
+    )
+
+
 def build_douban_wish_url(user_name_or_url: str, *, start: int = 0) -> str:
     user_name = quote(_douban_user_name(user_name_or_url), safe="")
     return f"https://movie.douban.com/people/{user_name}/wish?start={start}"
+
+
+def build_douban_interest_rss_url(user_name_or_url: str) -> str:
+    user_name = quote(_douban_user_name(user_name_or_url), safe="")
+    return f"https://www.douban.com/feed/people/{user_name}/interests"
 
 
 def build_douban_mobile_subject_url(douban_id: str) -> str:
@@ -121,6 +157,64 @@ def parse_douban_wish_html(
         )
         if event is not None:
             events.append(event)
+    return events
+
+
+def parse_douban_interest_rss(
+    rss_xml: str,
+    *,
+    user_name: str | None = None,
+    source_config_id: str | None = None,
+    label: str | None = None,
+) -> list[SourceIntentEvent]:
+    """Parse only movie/TV ``想看`` entries from the interests RSS feed."""
+    try:
+        root = ElementTree.fromstring(rss_xml)
+    except ElementTree.ParseError as exc:
+        raise ValueError("Douban interests RSS is not valid XML") from exc
+
+    events: list[SourceIntentEvent] = []
+    seen_ids: set[str] = set()
+    for item in root.findall(".//item"):
+        title = _clean_text(item.findtext("title") or "")
+        if not title.startswith("想看"):
+            continue
+        url = _clean_text(item.findtext("link") or "")
+        subject_match = SUBJECT_URL_RE.search(url)
+        if subject_match is None:
+            continue
+        douban_id = subject_match.group("id")
+        if douban_id in seen_ids:
+            continue
+        subject_title = _clean_title(title.removeprefix("想看"))
+        if not subject_title:
+            continue
+        requested_at = _parse_rss_date(item.findtext("pubDate"))
+        metadata = {
+            "source_adapter": "douban_interest_rss",
+            "url": f"https://movie.douban.com/subject/{douban_id}/",
+            "douban_user_name": user_name,
+            "external_ids": {"douban": douban_id},
+        }
+        # A season marker is source evidence, not a title heuristic: the parser
+        # can extract it deterministically, and this keeps a season-only item
+        # on the TV path even if later subject enrichment fails.
+        if RSS_SEASON_RE.search(subject_title):
+            metadata["kind"] = "tv"
+            metadata["media_type"] = "tv"
+        if user_name:
+            metadata["douban_rss_url"] = build_douban_interest_rss_url(user_name)
+        metadata.update(_source_metadata("douban", source_config_id, label))
+        events.append(
+            SourceIntentEvent(
+                source=IntentSource.DOUBAN_WANTED,
+                raw_text=subject_title,
+                source_event_id=f"douban:{douban_id}",
+                requested_at=requested_at,
+                metadata=metadata,
+            )
+        )
+        seen_ids.add(douban_id)
     return events
 
 
@@ -167,9 +261,7 @@ def _event_from_html_item(
     intro = _clean_text(_strip_tags(intro_match.group("intro"))) if intro_match is not None else ""
     date_match = DATE_RE.search(item)
     wish_date = (
-        _clean_text(_strip_tags(date_match.group("date")))
-        if date_match is not None
-        else None
+        _clean_text(_strip_tags(date_match.group("date"))) if date_match is not None else None
     )
     year_match = YEAR_RE.search(intro)
     year = year_match.group(1) if year_match is not None else None
@@ -230,6 +322,15 @@ def _event_from_item(
     )
 
 
+def enrich_douban_wanted_event(
+    event: SourceIntentEvent,
+    *,
+    fetcher: Any | None = None,
+) -> SourceIntentEvent:
+    """Best-effort Douban subject enrichment that never discards a list item."""
+    return _enrich_event_from_subject(event, fetcher or _fetch_url)
+
+
 def _enrich_event_from_subject(event: SourceIntentEvent, fetch: Any) -> SourceIntentEvent:
     douban_id = _event_douban_id(event)
     if douban_id is None:
@@ -237,11 +338,23 @@ def _enrich_event_from_subject(event: SourceIntentEvent, fetch: Any) -> SourceIn
     try:
         html = fetch(build_douban_mobile_subject_url(douban_id))
     except Exception:
-        return event
-    media_type = _media_type_from_subject_html(html)
+        return replace(
+            event,
+            metadata={**event.metadata, "subject_lookup_status": "failed"},
+        )
+    media_type, year = _subject_metadata_from_html(html)
     imdb_id = _imdb_id_from_html(html)
-    if media_type is None and imdb_id is None:
-        return event
+    raw_text = _with_year(event.raw_text, year)
+    if media_type is None and imdb_id is None and raw_text == event.raw_text:
+        return replace(
+            event,
+            metadata={
+                **event.metadata,
+                "subject_adapter": "douban_mobile_subject",
+                "subject_mobile_url": build_douban_mobile_subject_url(douban_id),
+                "subject_lookup_status": "success",
+            },
+        )
     external_ids = dict(event.metadata.get("external_ids") or {})
     if imdb_id is not None:
         external_ids["imdb"] = imdb_id
@@ -249,12 +362,13 @@ def _enrich_event_from_subject(event: SourceIntentEvent, fetch: Any) -> SourceIn
         **event.metadata,
         "subject_adapter": "douban_mobile_subject",
         "subject_mobile_url": build_douban_mobile_subject_url(douban_id),
+        "subject_lookup_status": "success",
         "external_ids": external_ids,
     }
     if media_type is not None:
         metadata["kind"] = media_type
         metadata["media_type"] = media_type
-    return replace(event, metadata=metadata)
+    return replace(event, raw_text=raw_text, metadata=metadata)
 
 
 def _imdb_id_from_html(html: str) -> str | None:
@@ -286,6 +400,54 @@ def _event_douban_id(event: SourceIntentEvent) -> str | None:
         if match is not None:
             return match.group("id")
     return None
+
+
+def _subject_metadata_from_html(html: str) -> tuple[str | None, str | None]:
+    structured_media_type, structured_year = _structured_subject_metadata(html)
+    return structured_media_type or _media_type_from_subject_html(html), structured_year
+
+
+def _structured_subject_metadata(html: str) -> tuple[str | None, str | None]:
+    for match in LD_JSON_RE.finditer(html):
+        try:
+            payload = json.loads(unescape(match.group("payload").strip()))
+        except json.JSONDecodeError:
+            continue
+        for item in _iter_json_objects(payload):
+            media_type = _json_ld_media_type(item)
+            year = _normalize_year(item.get("datePublished") or item.get("dateCreated"))
+            if media_type is not None or year is not None:
+                return media_type, year
+    return None, None
+
+
+def _iter_json_objects(value: Any):
+    if isinstance(value, dict):
+        yield value
+        for child in value.values():
+            yield from _iter_json_objects(child)
+    elif isinstance(value, list):
+        for child in value:
+            yield from _iter_json_objects(child)
+
+
+def _json_ld_media_type(item: dict[str, Any]) -> str | None:
+    raw_type = item.get("@type")
+    values = raw_type if isinstance(raw_type, list) else [raw_type]
+    types = {str(value).strip().lower() for value in values if value is not None}
+    genres = item.get("genre")
+    genre_values = genres if isinstance(genres, list) else [genres]
+    if any("animation" in str(value).lower() for value in genre_values if value is not None):
+        return "anime"
+    if types.intersection({"tvseries", "tvminiseries", "tvepisode", "tvshow"}):
+        return "tv"
+    return None
+
+
+def _with_year(raw_text: str, year: str | None) -> str:
+    if year is None or YEAR_RE.search(raw_text):
+        return raw_text
+    return f"{raw_text} {year}"
 
 
 def _media_type_from_subject_html(html: str) -> str | None:
@@ -396,3 +558,22 @@ def _parse_wish_date(value: str | None) -> datetime | None:
     if parsed.tzinfo is None:
         return parsed.replace(tzinfo=UTC)
     return parsed
+
+
+def _parse_rss_date(value: str | None) -> datetime | None:
+    if value is None or not value.strip():
+        return None
+    try:
+        parsed = parsedate_to_datetime(value.strip())
+    except (TypeError, ValueError):
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
+def _normalize_year(value: object) -> str | None:
+    if value is None:
+        return None
+    match = YEAR_RE.search(str(value))
+    return match.group(1) if match is not None else None

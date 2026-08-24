@@ -195,7 +195,7 @@ def test_intent_run_once_ingests_configured_douban_source(
     monkeypatch.setattr(cli, "_build_search_providers", lambda config: [_FakeSearchProvider()])
     monkeypatch.setattr(
         cli,
-        "_read_configured_source_events",
+        "_fetch_configured_want_list_events",
         lambda config, **kwargs: [
             SourceIntentEvent(
                 source=IntentSource.DOUBAN_WANTED,
@@ -204,6 +204,11 @@ def test_intent_run_once_ingests_configured_douban_source(
                 metadata={"source_adapter": "douban_wanted_public"},
             )
         ],
+    )
+    monkeypatch.setattr(
+        cli,
+        "_enrich_configured_want_list_events",
+        lambda events, **_kwargs: events,
     )
     config_path = _write_config(tmp_path)
     content = config_path.read_text(encoding="utf-8").replace(
@@ -225,6 +230,37 @@ def test_intent_run_once_ingests_configured_douban_source(
     rows = store.list_intents_by_state(IntentState.SEARCHED)
     assert len(rows) == 1
     assert rows[0]["source"] == IntentSource.DOUBAN_WANTED.value
+
+
+def test_configured_douban_user_source_uses_interest_rss(tmp_path: Path, monkeypatch) -> None:
+    from seed_agent import cli
+    from seed_agent.config import load_config
+    from seed_agent.models import IntentSource
+    from seed_agent.sources.base import SourceIntentEvent
+
+    config_path = _write_config(tmp_path)
+    content = config_path.read_text(encoding="utf-8").replace(
+        "enabled: false\n    export_ref: null",
+        "enabled: true\n    export_ref: null\n    user_name: example-user",
+    )
+    config_path.write_text(content, encoding="utf-8")
+    calls: list[str] = []
+    monkeypatch.setattr(
+        cli,
+        "fetch_douban_interest_rss",
+        lambda user_name, **_kwargs: calls.append(user_name)
+        or [
+            SourceIntentEvent(
+                source=IntentSource.DOUBAN_WANTED,
+                raw_text="RSS Title",
+                source_event_id="douban:1292052",
+            )
+        ],
+    )
+    events = cli._fetch_configured_want_list_events(load_config(config_path))
+
+    assert calls == ["example-user"]
+    assert [event.source_event_id for event in events] == ["douban:1292052"]
 
 
 def test_intent_run_once_ingests_configured_letterboxd_source(

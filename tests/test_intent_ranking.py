@@ -103,6 +103,30 @@ def test_rank_releases_flags_missing_resolution_for_confirmation() -> None:
     assert "resolution missing" in ranked[0].risks
 
 
+def test_season_mode_excludes_episode_candidates_for_untyped_rss_intent() -> None:
+    ranked = rank_releases(
+        _intent(
+            raw_text="无职转生",
+            kind=IntentKind.UNKNOWN,
+            title="无职转生",
+            year=None,
+            resolution=None,
+            metadata={},
+        ),
+        [
+            _release(title="无职转生 S03E01 1080p WEB-DL"),
+            _release(
+                release_id="demo:movie",
+                title="无职转生 完整版 1080p WEB-DL",
+            ),
+        ],
+        _intent_config(series_search_mode="season"),
+        _search_config(),
+    )
+
+    assert [item.release.release_id for item in ranked] == ["demo:movie"]
+
+
 def test_rank_releases_penalizes_hr_risk() -> None:
     ranked = rank_releases(
         _intent(),
