@@ -4,6 +4,23 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.23.0 - 2026-08-24
+
+### Added
+
+- Add the terminal `viewed` state to Want List items. Operators can mark an
+  item viewed directly from the list, and viewed items are retained as source
+  evidence without being searched or enqueued again.
+- Add Want List download-status filtering, defaulting the list to `not
+  downloaded`, with distinct `no resource found`, `not downloaded`,
+  `downloaded`, and `viewed` states.
+
+### Changed
+
+- Align the Want List status controls, row and mobile-card typography, and
+  Chinese/English status labels. Terminal downloaded and viewed items no longer
+  expose misleading search or enqueue controls.
+
 ## 0.22.1 - 2026-08-24
 
 ### Fixed

@@ -84,6 +84,7 @@ class IntentState(StrEnum):
     REJECTED = "rejected"
     ENQUEUED = "enqueued"
     FAILED = "failed"
+    VIEWED = "viewed"
 
 
 def safe_url_identity(url: str) -> str:

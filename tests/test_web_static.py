@@ -297,14 +297,37 @@ def test_want_list_toolbar_exposes_manual_refresh_and_seed_search() -> None:
     assert 'data-want-action="sync"' in script
     assert 'data-want-action="search"' in script
     assert 'data-want-action="search-one"' in script
+    assert 'data-want-action="mark-viewed"' in script
+    assert 'data-want-filter="status"' in script
+    assert 'status: "not_downloaded"' in script
     assert "refreshWants" in script
     assert "searchTorrentsCurrentFilter" in script
     assert "searchOneWant" in script
     assert 'if (action === "sync")' in script
     assert 'if (action === "search-one")' in script
+    assert 'if (action === "mark-viewed")' in script
+    assert "/viewed`, {" in script
     assert "/search`, {" in script
     assert "await syncConfiguredWants(panel);" in script
     assert "await loadWants();" in script
+
+
+def test_want_list_status_actions_have_a_consistent_layout_group() -> None:
+    script = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
+    styles = (STATIC_ROOT / "styles.css").read_text(encoding="utf-8")
+
+    assert 'class="want-status-cell"' in script
+    assert 'class="want-status-line"' in script
+    assert 'class="want-row-actions"' in script
+    assert "function wantStatusLabel(status, fallback)" in script
+    assert 'downloaded: uiText("downloaded")' in script
+    assert 'viewed: uiText("viewed")' in script
+    assert "function wantCanSearch(item)" in script
+    assert '!["downloaded", "viewed"].includes(item.status)' in script
+    assert "function wantCanEnqueue(intent)" in script
+    assert "renderWantCandidateList(payload.items || [], payload.intent || {})" in script
+    assert ".want-status-line,\n.want-row-actions" in styles
+    assert "grid-template-columns: repeat(3, minmax(0, 1fr));" in styles
 
 
 def test_want_list_actions_show_immediate_busy_feedback() -> None:
@@ -314,6 +337,7 @@ def test_want_list_actions_show_immediate_busy_feedback() -> None:
     assert "searchingWants" in script
     assert "setWantActionBusy(panel, button, true)" in script
     assert "setWantActionBusy(panel, button, false)" in script
+    assert '[data-want-action="mark-viewed"]' in script
     assert 'item.setAttribute("aria-busy", busy ? "true" : "false")' in script
     assert (
         "`<div class=\"status-item info\">${escapeHtml(uiText(\"syncingWants\"))}</div>`"

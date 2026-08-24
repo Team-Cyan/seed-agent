@@ -1663,6 +1663,115 @@ def test_http_wants_payload_includes_best_candidate_score(tmp_path: Path) -> Non
     assert payload["items"][0]["best_candidate_score"] == 86
 
 
+def test_http_wants_mark_viewed_and_expose_download_statuses(tmp_path: Path) -> None:
+    config_path = _write_minimal_config(tmp_path)
+    store = StateStore(tmp_path / ".seed-agent" / "state.db")
+    intents = {
+        "not_found": ResourceIntent(
+            intent_id="douban_wanted:not-found",
+            source=IntentSource.DOUBAN_WANTED,
+            raw_text="No Resource 2026",
+            kind=IntentKind.MOVIE,
+            title="No Resource",
+            year=2026,
+            requested_at=datetime(2026, 8, 24, tzinfo=UTC),
+            state=IntentState.NORMALIZED,
+        ),
+        "not_downloaded": ResourceIntent(
+            intent_id="douban_wanted:not-downloaded",
+            source=IntentSource.DOUBAN_WANTED,
+            raw_text="Ready To Download 2026",
+            kind=IntentKind.MOVIE,
+            title="Ready To Download",
+            year=2026,
+            requested_at=datetime(2026, 8, 24, tzinfo=UTC),
+            state=IntentState.CONFIRMATION_REQUIRED,
+        ),
+        "downloaded": ResourceIntent(
+            intent_id="douban_wanted:downloaded",
+            source=IntentSource.DOUBAN_WANTED,
+            raw_text="Downloaded 2026",
+            kind=IntentKind.MOVIE,
+            title="Downloaded",
+            year=2026,
+            requested_at=datetime(2026, 8, 24, tzinfo=UTC),
+            state=IntentState.ENQUEUED,
+        ),
+        "viewed": ResourceIntent(
+            intent_id="douban_wanted:viewed",
+            source=IntentSource.DOUBAN_WANTED,
+            raw_text="Viewed 2026",
+            kind=IntentKind.MOVIE,
+            title="Viewed",
+            year=2026,
+            requested_at=datetime(2026, 8, 24, tzinfo=UTC),
+            state=IntentState.VIEWED,
+        ),
+    }
+    for intent in intents.values():
+        store.upsert_intent(intent)
+    store.save_ranked_releases(
+        [
+            RankedRelease(
+                intent_id=intents["not_downloaded"].intent_id,
+                release=ReleaseCandidate(
+                    release_id="mt:ready",
+                    site="mt",
+                    title="Ready To Download 2026 1080p WEB-DL",
+                    source_url="https://tracker.example/ready",
+                    download_url="https://tracker.example/download/ready",
+                    size_bytes=8 * 1024**3,
+                    seeders=5,
+                    leechers=1,
+                    discount=Discount.FREE,
+                ),
+                score=80,
+                confidence=0.8,
+                accepted=True,
+                confirmation_required=False,
+                reasons=[],
+                risks=[],
+            )
+        ]
+    )
+
+    with _running_server(config_path) as base_url:
+        initial = _request_json(base_url, "GET", "/api/wants")
+        marked = _request_json(
+            base_url,
+            "POST",
+            f"/api/wants/{intents['not_downloaded'].intent_id}/viewed",
+        )
+        after = _request_json(base_url, "GET", "/api/wants")
+        skipped_search = _request_json(
+            base_url,
+            "POST",
+            f"/api/wants/{intents['not_downloaded'].intent_id}/search",
+        )
+
+    initial_statuses = {item["intent_id"]: item["status"] for item in initial["items"]}
+    assert initial_statuses == {
+        intents["not_found"].intent_id: "not_found",
+        intents["not_downloaded"].intent_id: "not_downloaded",
+        intents["downloaded"].intent_id: "downloaded",
+        intents["viewed"].intent_id: "viewed",
+    }
+    assert marked == {
+        "outcome": "viewed",
+        "status": [{"level": "ok", "message": "已标记为已看"}],
+    }
+    assert (
+        next(
+            item
+            for item in after["items"]
+            if item["intent_id"] == intents["not_downloaded"].intent_id
+        )["status"]
+        == "viewed"
+    )
+    assert skipped_search["searched"] == 0
+    assert skipped_search["skipped"] == 1
+
+
 def test_http_want_candidates_hides_stale_episode_rows_in_season_mode(tmp_path: Path) -> None:
     config_path = _write_minimal_config(tmp_path)
     store = StateStore(tmp_path / ".seed-agent" / "state.db")

@@ -377,6 +377,11 @@ def make_handler(config_path: Path) -> type[BaseHTTPRequestHandler]:
                 )
                 self._send_json(payload, status=status)
                 return
+            want_viewed_id = _want_subresource_intent_id(self.path, "viewed")
+            if want_viewed_id is not None:
+                payload, status = _mark_want_viewed_payload(root, want_viewed_id)
+                self._send_json(payload, status=status)
+                return
             self._send_json({"error": "not found"}, status=HTTPStatus.NOT_FOUND)
 
         def log_message(self, format: str, *args: object) -> None:
@@ -936,6 +941,29 @@ def _want_candidates_payload(
     }, HTTPStatus.OK
 
 
+def _mark_want_viewed_payload(
+    root: Path,
+    intent_id: str,
+) -> tuple[dict[str, Any], HTTPStatus]:
+    state_path = _state_db_path(root)
+    if not state_path.exists():
+        return {"error": "state db not found"}, HTTPStatus.NOT_FOUND
+    store = StateStore(state_path)
+    outcome = store.mark_intent_viewed(intent_id)
+    if outcome == "missing":
+        return {"error": "want not found"}, HTTPStatus.NOT_FOUND
+    if outcome == "enqueue_in_progress":
+        return {
+            "error": "want enqueue is in progress",
+            "outcome": outcome,
+            "status": [{"level": "warning", "message": "资源正在加入 qB，请稍后再标记已看"}],
+        }, HTTPStatus.CONFLICT
+    return {
+        "outcome": outcome,
+        "status": [{"level": "ok", "message": "已标记为已看"}],
+    }, HTTPStatus.OK
+
+
 def _enqueue_want_payload(
     body: dict[str, Any],
     config_path: Path,
@@ -1297,11 +1325,14 @@ def _filter_want_items(
 ) -> list[dict[str, Any]]:
     source = str(filters.get("source") or "all")
     media_type = str(filters.get("media_type") or "all")
+    status = str(filters.get("status") or "all")
     filtered = items
     if source != "all":
         filtered = [item for item in filtered if source in set(item.get("source_keys") or [])]
     if media_type != "all":
         filtered = [item for item in filtered if item.get("media_type") == media_type]
+    if status != "all":
+        filtered = [item for item in filtered if item.get("status") == status]
     return filtered
 
 
@@ -1311,7 +1342,7 @@ def _filter_searchable_want_items(items: list[dict[str, Any]]) -> list[dict[str,
 
 def _want_searchable(item: dict[str, Any]) -> bool:
     state = str(item.get("state") or "")
-    if state == "enqueued":
+    if state in {IntentState.ENQUEUED.value, IntentState.VIEWED.value}:
         return False
     if item.get("selected_release_id"):
         return False
@@ -1664,25 +1695,22 @@ def _want_source_key(source: str, metadata: dict[str, Any]) -> str:
 
 
 def _want_download_status(state: str, release_count: int, selected: bool) -> str:
-    if state == "enqueued" or selected:
-        return "queued"
-    if state == "failed":
-        return "failed"
-    if state == "rejected":
-        return "rejected"
+    if state == IntentState.VIEWED.value:
+        return "viewed"
+    if state == IntentState.ENQUEUED.value or selected:
+        return "downloaded"
     if release_count > 0:
-        return "found"
-    return "pending"
+        return "not_downloaded"
+    return "not_found"
 
 
 def _want_download_status_label(state: str, release_count: int, selected: bool) -> str:
     status = _want_download_status(state, release_count, selected)
     labels = {
-        "queued": "已加入下载队列",
-        "found": "已找到候选",
-        "pending": "待搜索",
-        "failed": "失败",
-        "rejected": "已拒绝",
+        "not_found": "未找到资源",
+        "not_downloaded": "未下载",
+        "downloaded": "已下载",
+        "viewed": "已看",
     }
     return labels[status]
 

@@ -476,6 +476,12 @@ by completion period, and unfinished work is ordered by current priority.
     reject explicit or compact episode releases even before an RSS title can be
     conclusively classified as TV/anime.
 
+- Completed 2026-08 - Want List viewed status
+  - Want List now filters by `未找到资源`, `未下载`, `已下载`, and `已看`, defaulting to
+    `未下载`; operators can mark an item as viewed from its row/card.
+  - The `viewed` intent state is durable and terminal for search/enqueue while
+    retaining source and candidate evidence for later inspection.
+
 - Next P0 - Add scheduler and Web preview integration coverage
   - Add fake downloader/provider fixtures that can run a scheduler cycle without
     touching qBittorrent or a tracker.

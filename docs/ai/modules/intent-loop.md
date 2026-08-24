@@ -47,7 +47,7 @@ Convert human requests into search/rank/reject/enqueue workflows.
   updates replayable,
 - merge source aliases only from trusted source events; candidate release
   metadata is search evidence and must never establish canonical identity,
-- treat `enqueued` and `rejected` as terminal for repeated source sync, and
+- treat `enqueued`, `rejected`, and operator-marked `viewed` intents as terminal for repeated source sync, and
   replace an intent's saved release snapshot on each successful search,
 - keep search providers modular. M-Team remains the reference API provider;
   Torznab is available as the first non-M-Team provider to validate the
@@ -101,6 +101,8 @@ Convert human requests into search/rank/reject/enqueue workflows.
 - prepare Web and scheduled batch-search rankings in memory, then persist the
   complete batch through the StateStore atomic batch boundary rather than
   committing candidates, state, and history separately for every Want.
+- let operators mark a Want as viewed without removing its source/candidate
+  evidence; viewed Wants must not be searched or enqueued again.
 
 ## Verification
 

@@ -366,6 +366,13 @@ async def enqueue_intent(
                     ranked,
                     [_enqueue_skip_decision(refreshed, ranked, "already enqueued")],
                 )
+            if status == "already_viewed":
+                refreshed, _ = _load_intent_with_selected(store, intent.intent_id)
+                return (
+                    refreshed,
+                    ranked,
+                    [_enqueue_skip_decision(refreshed, ranked, "already viewed")],
+                )
             if status == "in_progress":
                 return (
                     intent,
@@ -417,7 +424,10 @@ async def enqueue_intent(
             claim_owner_id,
         ):
             raise RuntimeError("intent enqueue claim was lost before state commit")
-        updated = intent.model_copy(update={"state": IntentState.ENQUEUED})
+        # A user may have marked the item viewed after an expired claim and
+        # before this enqueue completed. The store preserves that terminal
+        # state, so reload it instead of returning a stale enqueued state.
+        updated, _ = _load_intent_with_selected(store, intent.intent_id)
     elif claim_owner_id is not None:
         store.release_intent_enqueue_claim(intent.intent_id, claim_owner_id)
     return updated, ranked, decisions
@@ -643,6 +653,8 @@ def _enqueueable_release(
     ranked = _stored_ranked(rows)
     if intent.state == IntentState.REJECTED:
         raise ValueError(f"intent is rejected: {intent.intent_id}")
+    if intent.state == IntentState.VIEWED:
+        raise ValueError(f"intent is already viewed: {intent.intent_id}")
     if release_id is not None:
         selected = next(
             (item for item in ranked if item.release.release_id == release_id),

@@ -37,6 +37,7 @@ INTENT_STATE_PRIORITY = {
     IntentState.REJECTED.value: 4,
     IntentState.FAILED.value: 4,
     IntentState.ENQUEUED.value: 5,
+    IntentState.VIEWED.value: 6,
 }
 GIB = 1024**3
 _UNSET = object()
@@ -1760,6 +1761,41 @@ class StateStore:
         self.upsert_intent(intent, selected_release_id=selected_release_id)
         return True
 
+    def mark_intent_viewed(self, intent_id: str) -> str:
+        """Mark an intent as viewed unless an enqueue is currently in flight."""
+        now = _utc_now()
+        current_time = _utc_now_datetime()
+        with self._connect(row_factory=sqlite3.Row) as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT state, normalized_json FROM intents WHERE intent_id = ?",
+                (intent_id,),
+            ).fetchone()
+            if row is None:
+                return "missing"
+            if str(row["state"]) == IntentState.VIEWED.value:
+                return "already_viewed"
+            claim = conn.execute(
+                "SELECT expires_at FROM intent_enqueue_claims WHERE intent_id = ?",
+                (intent_id,),
+            ).fetchone()
+            if claim is not None:
+                expires_at = _parse_datetime(claim["expires_at"])
+                if expires_at is not None and expires_at > current_time:
+                    return "enqueue_in_progress"
+            normalized = json.loads(str(row["normalized_json"]))
+            normalized["state"] = IntentState.VIEWED.value
+            ResourceIntent.model_validate(normalized)
+            conn.execute(
+                """
+                UPDATE intents
+                SET state = ?, normalized_json = ?, updated_at = ?
+                WHERE intent_id = ?
+                """,
+                (IntentState.VIEWED.value, _json_dumps(normalized), now, intent_id),
+            )
+        return "viewed"
+
     def acquire_intent_enqueue_claim(
         self,
         intent_id: str,
@@ -1779,6 +1815,8 @@ class StateStore:
             ).fetchone()
             if intent is None:
                 return {"acquired": False, "status": "missing"}
+            if str(intent["state"]) == IntentState.VIEWED.value:
+                return {"acquired": False, "status": "already_viewed"}
             if str(intent["state"]) == IntentState.ENQUEUED.value:
                 return {
                     "acquired": False,
@@ -1849,11 +1887,25 @@ class StateStore:
             ):
                 return False
             row = conn.execute(
-                "SELECT normalized_json FROM intents WHERE intent_id = ?",
+                "SELECT state, normalized_json FROM intents WHERE intent_id = ?",
                 (intent_id,),
             ).fetchone()
             if row is None:
                 return False
+            if str(row["state"]) == IntentState.VIEWED.value:
+                conn.execute(
+                    """
+                    UPDATE intents
+                    SET selected_release_id = ?, updated_at = ?
+                    WHERE intent_id = ?
+                    """,
+                    (release_id, now, intent_id),
+                )
+                conn.execute(
+                    "DELETE FROM intent_enqueue_claims WHERE intent_id = ? AND owner_id = ?",
+                    (intent_id, owner_id),
+                )
+                return True
             normalized = json.loads(str(row["normalized_json"]))
             normalized["state"] = IntentState.ENQUEUED.value
             ResourceIntent.model_validate(normalized)
@@ -2068,6 +2120,7 @@ class StateStore:
                 IntentState.ENQUEUED,
                 IntentState.REJECTED,
                 IntentState.FAILED,
+                IntentState.VIEWED,
             }:
                 selected_release_id = state_winner["selected_release_id"]
             else:
@@ -2237,11 +2290,16 @@ class StateStore:
                 current_intent = ResourceIntent.model_validate(
                     json.loads(str(current["normalized_json"]))
                 )
-                if current_intent.state in {
-                    IntentState.ENQUEUED,
-                    IntentState.REJECTED,
-                    IntentState.FAILED,
-                } or current.get("selected_release_id") is not None:
+                if (
+                    current_intent.state
+                    in {
+                        IntentState.ENQUEUED,
+                        IntentState.REJECTED,
+                        IntentState.FAILED,
+                        IntentState.VIEWED,
+                    }
+                    or current.get("selected_release_id") is not None
+                ):
                     continue
                 next_state = _want_search_state(ranked)
                 effective_intent = _monotonic_intent(

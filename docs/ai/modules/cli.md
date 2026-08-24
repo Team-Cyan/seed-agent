@@ -32,6 +32,9 @@ Expose the operator-facing command surface and safe summaries.
   search-only dry runs for current filters or a single item, reviewing saved
   release candidates, and enqueueing one reviewed release through the same
   intent enqueue path with a single explicit candidate-button click,
+- a Want List `viewed` action that persists an operator-marked terminal state;
+  the list derives `未找到资源`, `未下载`, `已下载`, and `已看` from saved candidates,
+  selected releases, and that state,
 - the Web UI Want List toolbar separates source refresh from torrent search:
   refresh syncs configured Douban/IMDb sources into local intent state, while
   search runs the non-mutating torrent search for the current filters. Each

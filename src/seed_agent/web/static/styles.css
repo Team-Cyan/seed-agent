@@ -1156,6 +1156,8 @@ body.dark .secondary-button {
 
 .want-table {
   border-collapse: collapse;
+  font-size: 14px;
+  line-height: 1.4;
   width: 100%;
 }
 
@@ -1170,6 +1172,30 @@ body.dark .secondary-button {
 .want-table th {
   color: var(--muted);
   font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.want-table td:first-child strong,
+.want-card strong {
+  font-size: 15px;
+  line-height: 1.35;
+}
+
+.want-status-cell {
+  min-width: 220px;
+}
+
+.want-status-line,
+.want-row-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.want-row-actions {
+  margin-top: 8px;
 }
 
 .want-row,
@@ -1229,6 +1255,7 @@ body.dark .secondary-button {
 }
 
 .want-card-footer {
+  align-items: center;
   display: flex;
   gap: 8px;
   justify-content: flex-end;
@@ -1239,7 +1266,6 @@ body.dark .secondary-button {
   display: inline-flex;
   font-size: 12px;
   font-weight: 800;
-  margin-top: 6px;
 }
 
 .want-score-pill {
@@ -1250,7 +1276,6 @@ body.dark .secondary-button {
   display: inline-flex;
   font-size: 12px;
   font-weight: 800;
-  margin-top: 6px;
   padding: 4px 8px;
 }
 
@@ -1568,7 +1593,7 @@ body.dark .secondary-button {
 
   .want-filters {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   .compact-field {
@@ -1750,6 +1775,15 @@ body.dark .secondary-button {
     justify-items: start;
   }
 
+  .want-card-footer {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .want-card-footer .inline-action {
+    grid-column: 1 / -1;
+  }
+
   .help {
     height: 32px;
     width: 32px;
@@ -1804,6 +1838,10 @@ body.dark .secondary-button {
   .sticky-actions .tracker-actions-group,
   .candidate-actions {
     grid-template-columns: 1fr;
+  }
+
+  .want-row-actions {
+    align-items: stretch;
   }
 
   .candidate-actions button:last-child {

@@ -14,6 +14,7 @@ const state = {
     filters: {
       source: "all",
       media_type: "all",
+      status: "not_downloaded",
     },
   },
   logs: {
@@ -180,6 +181,12 @@ const copy = {
       addedAt: "添加时间",
       addSource: "新增来源",
       all: "全部",
+      markViewed: "标记已看",
+      markViewedCompleted: "已标记为已看",
+      notFound: "未找到资源",
+      notDownloaded: "未下载",
+      downloaded: "已下载",
+      viewed: "已看",
       apiKeyExists: "API key 文件已存在",
       apiKeyFile: "API key 文件",
       apiKeyFileHelp: "API 发现方式需要。这里只保存本地 secret 文件路径，例如 local/secrets/mt_api_key。",
@@ -488,6 +495,12 @@ const copy = {
       addedAt: "Added at",
       addSource: "Add source",
       all: "All",
+      markViewed: "Mark viewed",
+      markViewedCompleted: "Marked as viewed",
+      notFound: "No resource found",
+      notDownloaded: "Not downloaded",
+      downloaded: "Downloaded",
+      viewed: "Viewed",
       apiKeyExists: "API key file exists",
       apiKeyFile: "API key file",
       apiKeyFileHelp: "Required for API discovery. Stores only the local secret file path, for example local/secrets/mt_api_key.",
@@ -1941,6 +1954,16 @@ function renderWantsPanel() {
             <option value="anime">${escapeHtml(uiText("anime"))}</option>
           </select>
         </label>
+        <label class="field compact-field">
+          <span>${escapeHtml(uiText("status"))}</span>
+          <select data-want-filter="status">
+            <option value="all">${escapeHtml(uiText("all"))}</option>
+            <option value="not_found">${escapeHtml(uiText("notFound"))}</option>
+            <option value="not_downloaded">${escapeHtml(uiText("notDownloaded"))}</option>
+            <option value="downloaded">${escapeHtml(uiText("downloaded"))}</option>
+            <option value="viewed">${escapeHtml(uiText("viewed"))}</option>
+          </select>
+        </label>
       </div>
       <div class="tracker-actions-group">
         <button class="secondary-button" type="button" data-want-action="sync" aria-label="${escapeAttribute(uiText("refreshWants"))}">${escapeHtml(uiText("refreshWants"))}</button>
@@ -1955,6 +1978,7 @@ function renderWantsPanel() {
   `;
   panel.querySelector('[data-want-filter="source"]').value = state.wants.filters.source;
   panel.querySelector('[data-want-filter="media_type"]').value = state.wants.filters.media_type;
+  panel.querySelector('[data-want-filter="status"]').value = state.wants.filters.status;
   panel.append(renderWantTable());
   panel.addEventListener("change", (event) => {
     const filter = event.target?.dataset?.wantFilter;
@@ -2213,8 +2237,33 @@ function filteredWantItems() {
     const typeOk =
       state.wants.filters.media_type === "all" ||
       item.media_type === state.wants.filters.media_type;
-    return sourceOk && typeOk;
+    const statusOk =
+      state.wants.filters.status === "all" ||
+      item.status === state.wants.filters.status;
+    return sourceOk && typeOk && statusOk;
   });
+}
+
+function wantStatusBadgeClass(status) {
+  return ["downloaded", "viewed"].includes(status) ? "ok" : "";
+}
+
+function wantStatusLabel(status, fallback) {
+  const labels = {
+    not_found: uiText("notFound"),
+    not_downloaded: uiText("notDownloaded"),
+    downloaded: uiText("downloaded"),
+    viewed: uiText("viewed"),
+  };
+  return labels[status] || fallback || status;
+}
+
+function wantCanSearch(item) {
+  return !["downloaded", "viewed"].includes(item.status);
+}
+
+function wantCanEnqueue(intent) {
+  return !["downloaded", "viewed"].includes(intent?.status);
 }
 
 function renderWantRow(item) {
@@ -2228,11 +2277,16 @@ function renderWantRow(item) {
       <td>${escapeHtml(formatMediaType(item.media_type))}</td>
       <td>${escapeHtml(item.source_label || item.source)}</td>
       <td>${escapeHtml(formatDate(item.added_at))}</td>
-      <td>
-        <span class="badge ${item.status === "queued" ? "ok" : ""}">${escapeHtml(item.status_label || item.state)}</span>
-        ${bestScore ? `<span class="want-score-pill">${escapeHtml(bestScore)}</span>` : ""}
-        <button class="secondary-button compact-button" type="button" data-want-action="search-one" data-want-id="${escapeAttribute(item.intent_id)}">${escapeHtml(uiText("searchOneWant"))}</button>
-        <span class="inline-action">${escapeHtml(uiText("viewCandidates"))}</span>
+      <td class="want-status-cell">
+        <div class="want-status-line">
+          <span class="badge ${wantStatusBadgeClass(item.status)}">${escapeHtml(wantStatusLabel(item.status, item.status_label || item.state))}</span>
+          ${bestScore ? `<span class="want-score-pill">${escapeHtml(bestScore)}</span>` : ""}
+        </div>
+        <div class="want-row-actions">
+          ${wantCanSearch(item) ? `<button class="secondary-button compact-button" type="button" data-want-action="search-one" data-want-id="${escapeAttribute(item.intent_id)}">${escapeHtml(uiText("searchOneWant"))}</button>` : ""}
+          ${item.status !== "viewed" ? `<button class="secondary-button compact-button" type="button" data-want-action="mark-viewed" data-want-id="${escapeAttribute(item.intent_id)}">${escapeHtml(uiText("markViewed"))}</button>` : ""}
+          <span class="inline-action">${escapeHtml(uiText("viewCandidates"))}</span>
+        </div>
       </td>
     </tr>
   `;
@@ -2245,7 +2299,7 @@ function renderWantCard(item) {
       <div class="want-card-header">
         <strong>${escapeHtml(item.title || item.raw_text)}</strong>
         <div class="want-card-status">
-          <span class="badge ${item.status === "queued" ? "ok" : ""}">${escapeHtml(item.status_label || item.state)}</span>
+          <span class="badge ${wantStatusBadgeClass(item.status)}">${escapeHtml(wantStatusLabel(item.status, item.status_label || item.state))}</span>
           ${bestScore ? `<span class="want-score-pill">${escapeHtml(bestScore)}</span>` : ""}
         </div>
       </div>
@@ -2256,7 +2310,8 @@ function renderWantCard(item) {
         <span>${escapeHtml(formatDate(item.added_at))}</span>
       </div>
       <div class="want-card-footer">
-        <button class="secondary-button compact-button" type="button" data-want-action="search-one" data-want-id="${escapeAttribute(item.intent_id)}">${escapeHtml(uiText("searchOneWant"))}</button>
+        ${wantCanSearch(item) ? `<button class="secondary-button compact-button" type="button" data-want-action="search-one" data-want-id="${escapeAttribute(item.intent_id)}">${escapeHtml(uiText("searchOneWant"))}</button>` : ""}
+        ${item.status !== "viewed" ? `<button class="secondary-button compact-button" type="button" data-want-action="mark-viewed" data-want-id="${escapeAttribute(item.intent_id)}">${escapeHtml(uiText("markViewed"))}</button>` : ""}
         <span class="inline-action">${escapeHtml(uiText("viewCandidates"))}</span>
       </div>
     </article>
@@ -2287,7 +2342,7 @@ async function openWantCandidates(panel, intentId, statusItem = null) {
       throw new Error(payload.error || `${uiText("requestFailedPrefix")}: ${response.status}`);
     }
     title.textContent = payload.intent?.title || uiText("candidateTorrents");
-    list.innerHTML = renderWantCandidateList(payload.items || []);
+    list.innerHTML = renderWantCandidateList(payload.items || [], payload.intent || {});
   } catch (error) {
     list.innerHTML = `<div class="status-item warning">${escapeHtml(error.message)}</div>`;
   }
@@ -2304,7 +2359,7 @@ function renderWantCandidateStatus(statusItem) {
   return `<div class="status-item ${escapeAttribute(level)}">${escapeHtml(message)}</div>`;
 }
 
-function renderWantCandidateList(items) {
+function renderWantCandidateList(items, intent = {}) {
   if (items.length === 0) {
     return `<div class="empty-state">${escapeHtml(uiText("noCandidates"))}</div>`;
   }
@@ -2312,9 +2367,9 @@ function renderWantCandidateList(items) {
   const lower = items.filter((item) => !item.matches_requirements);
   return `
     ${matching.length ? `<div class="candidate-group-title">${escapeHtml(uiText("matchingPreference"))}</div>` : ""}
-    ${matching.map(renderWantCandidateCard).join("")}
+    ${matching.map((item) => renderWantCandidateCard(item, intent)).join("")}
     ${lower.length ? `<div class="candidate-group-title muted">${escapeHtml(uiText("lowerMatch"))}</div>` : ""}
-    ${lower.map(renderWantCandidateCard).join("")}
+    ${lower.map((item) => renderWantCandidateCard(item, intent)).join("")}
   `;
 }
 
@@ -2448,7 +2503,7 @@ function formatCandidateNote(note) {
   return text;
 }
 
-function renderWantCandidateCard(item) {
+function renderWantCandidateCard(item, intent = {}) {
   const tags = candidateDisplayTags(item);
   const actionLabel = item.matches_requirements ? uiText("enqueueQb") : uiText("forceEnqueueQb");
   const subtitle = item.subtitle && item.subtitle.trim() !== String(item.title || "").trim()
@@ -2461,6 +2516,9 @@ function renderWantCandidateCard(item) {
         <pre>${escapeHtml(item.media_info)}</pre>
       </details>
     `
+    : "";
+  const enqueueAction = wantCanEnqueue(intent)
+    ? `<button class="${item.matches_requirements ? "primary-button" : "secondary-button"}" type="button" data-want-candidate-action="enqueue" data-release-id="${escapeAttribute(item.release_id)}">${escapeHtml(actionLabel)}</button>`
     : "";
   return `
     <article class="candidate-card ${item.matches_requirements ? "" : "dimmed"} ${item.selected ? "selected" : ""}" data-release-id="${escapeAttribute(item.release_id)}">
@@ -2488,7 +2546,7 @@ function renderWantCandidateCard(item) {
       <div class="candidate-card-footer">
         <div class="candidate-confidence">${escapeHtml(item.matches_requirements ? uiText("matchingPreference") : uiText("candidateNeedsReview"))}</div>
         <div class="tracker-actions-group candidate-actions">
-          <button class="${item.matches_requirements ? "primary-button" : "secondary-button"}" type="button" data-want-candidate-action="enqueue" data-release-id="${escapeAttribute(item.release_id)}">${escapeHtml(actionLabel)}</button>
+          ${enqueueAction}
         </div>
       </div>
     </article>
@@ -2597,6 +2655,10 @@ async function handleWantAction(panel, action, event) {
   }
   if (action === "search-one") {
     await searchSingleWant(panel, event);
+    return;
+  }
+  if (action === "mark-viewed") {
+    await markWantViewed(panel, event);
     return;
   }
   if (action === "config-open") {
@@ -2724,6 +2786,39 @@ async function searchSingleWant(panel, button) {
   }
 }
 
+async function markWantViewed(panel, button) {
+  const intentId = button?.dataset?.wantId;
+  const status = panel.querySelector("[data-want-status]");
+  if (!intentId) {
+    return;
+  }
+  setWantActionBusy(panel, button, true);
+  if (status) {
+    status.innerHTML = `<div class="status-item info">${escapeHtml(uiText("processing"))}</div>`;
+  }
+  try {
+    const response = await apiFetch(`/api/wants/${encodeURIComponent(intentId)}/viewed`, {
+      method: "POST",
+    });
+    const payload = await response.json();
+    if (!response.ok) {
+      throw new Error(payload.error || payload.status?.[0]?.message || `${uiText("requestFailedPrefix")}: ${response.status}`);
+    }
+    await loadWants();
+    renderSection();
+    const refreshedStatus = document.querySelector("[data-want-status]");
+    if (refreshedStatus) {
+      refreshedStatus.innerHTML = `<div class="status-item ok">${escapeHtml(uiText("markViewedCompleted"))}</div>`;
+    }
+  } catch (error) {
+    if (status) {
+      status.innerHTML = `<div class="status-item warning">${escapeHtml(error.message)}</div>`;
+    }
+  } finally {
+    setWantActionBusy(panel, button, false);
+  }
+}
+
 async function syncConfiguredWants(panel) {
   const status = panel.querySelector("[data-want-config-status]") || panel.querySelector("[data-want-status]");
   if (status) {
@@ -2748,7 +2843,7 @@ async function syncConfiguredWants(panel) {
 }
 
 function setWantActionBusy(panel, button, busy) {
-  panel.querySelectorAll('[data-want-action="sync"], [data-want-action="search"], [data-want-action="search-one"]').forEach((item) => {
+  panel.querySelectorAll('[data-want-action="sync"], [data-want-action="search"], [data-want-action="search-one"], [data-want-action="mark-viewed"]').forEach((item) => {
     item.disabled = busy;
     item.setAttribute("aria-busy", busy ? "true" : "false");
   });

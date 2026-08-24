@@ -114,6 +114,27 @@ def test_state_store_does_not_regress_terminal_intent_on_stale_upsert(tmp_path: 
     assert json.loads(row["normalized_json"])["metadata"]["refreshed"] is True
 
 
+def test_state_store_marks_intent_viewed_as_a_terminal_state(tmp_path: Path) -> None:
+    store = StateStore(tmp_path / "state.sqlite3")
+    intent = _intent(state=IntentState.CONFIRMATION_REQUIRED)
+    store.upsert_intent(intent)
+
+    assert store.mark_intent_viewed(intent.intent_id) == "viewed"
+    assert store.mark_intent_viewed(intent.intent_id) == "already_viewed"
+
+    store.upsert_intent(intent.model_copy(update={"state": IntentState.SEARCHED}))
+    row = store.get_intent(intent.intent_id)
+
+    assert row is not None
+    assert row["state"] == IntentState.VIEWED.value
+    assert json.loads(row["normalized_json"])["state"] == IntentState.VIEWED.value
+    assert store.acquire_intent_enqueue_claim(
+        intent.intent_id,
+        "release-one",
+        "owner-one",
+    ) == {"acquired": False, "status": "already_viewed"}
+
+
 def test_state_store_defers_intent_merge_while_enqueue_claim_is_active(tmp_path: Path) -> None:
     store = StateStore(tmp_path / "state.sqlite3")
     canonical = _intent(intent_id="canonical")
