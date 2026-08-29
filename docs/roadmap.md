@@ -143,6 +143,10 @@ by completion period, and unfinished work is ordered by current priority.
   - Settings pages include mobile section switching and sticky draft/preview/save
     actions inspired by the reference repo UI patterns, without adopting a
     dashboard-first product shape.
+  - Web UI language, light/dark display mode, and active section now persist as
+    local non-sensitive preferences. Section URL fragments preserve the current
+    screen across refreshes and browser navigation without persisting Web API
+    tokens.
   - Mobile Web UI ergonomics now include touch-sized controls, clearer Want List
     row/card affordances, keyboard-accessible candidate opening, sticky modal
     headers, backdrop/Escape modal close behavior, and stronger lower-match

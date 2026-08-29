@@ -1151,6 +1151,8 @@ const navigationSections = [
   "config_file",
 ];
 
+const uiPreferencesStorageKey = "seed-agent.ui-preferences.v1";
+
 const sectionGroupBySection = {
   overview: "operations",
   logs: "operations",
@@ -1206,9 +1208,7 @@ addTrackerButton.addEventListener("click", () => {
 });
 
 themeButton.addEventListener("click", () => {
-  state.dark = !state.dark;
-  document.body.classList.toggle("dark", state.dark);
-  themeButton.textContent = state.dark ? "☾" : "☀";
+  setTheme(!state.dark);
 });
 
 languageButton.addEventListener("click", () => {
@@ -1262,6 +1262,8 @@ function switchSection(section) {
     return;
   }
   state.currentSection = section;
+  saveUiPreferences();
+  updateSectionLocation(section);
   navItems.forEach((navItem) => {
     navItem.classList.toggle("active", navItem.dataset.section === section);
   });
@@ -1276,6 +1278,68 @@ function switchSection(section) {
       }
     });
   }
+}
+
+function readUiPreferences() {
+  try {
+    const rawPreferences = globalThis.localStorage.getItem(uiPreferencesStorageKey);
+    const preferences = rawPreferences ? JSON.parse(rawPreferences) : {};
+    return {
+      language: preferences.language === "EN" ? "EN" : "CN",
+      dark: preferences.dark === true,
+      currentSection: navigationSections.includes(preferences.currentSection)
+        ? preferences.currentSection
+        : "overview",
+    };
+  } catch {
+    return { language: "CN", dark: false, currentSection: "overview" };
+  }
+}
+
+function saveUiPreferences() {
+  try {
+    globalThis.localStorage.setItem(
+      uiPreferencesStorageKey,
+      JSON.stringify({
+        language: state.language,
+        dark: state.dark,
+        currentSection: state.currentSection,
+      }),
+    );
+  } catch {
+    // Browser privacy mode or a restricted embedded browser can deny storage.
+  }
+}
+
+function sectionFromLocation() {
+  const section = globalThis.location.hash.replace(/^#/, "");
+  return navigationSections.includes(section) ? section : null;
+}
+
+function updateSectionLocation(section) {
+  if (globalThis.location.hash !== `#${section}`) {
+    globalThis.location.hash = section;
+  }
+}
+
+function applyTheme() {
+  document.body.classList.toggle("dark", state.dark);
+  themeButton.textContent = state.dark ? "☾" : "☀";
+}
+
+function setTheme(dark) {
+  state.dark = dark;
+  applyTheme();
+  saveUiPreferences();
+}
+
+function restoreUiPreferences() {
+  const preferences = readUiPreferences();
+  state.language = preferences.language;
+  state.dark = preferences.dark;
+  state.currentSection = sectionFromLocation() || preferences.currentSection;
+  document.documentElement.lang = state.language === "CN" ? "zh-CN" : "en";
+  applyTheme();
 }
 
 function syncNavigationLabels() {
@@ -3323,8 +3387,17 @@ function setModalBusy(modal, busy) {
   });
 }
 
+restoreUiPreferences();
 syncNavigationLabels();
+switchSection(state.currentSection);
 loadInitialData();
+
+globalThis.addEventListener("hashchange", () => {
+  const section = sectionFromLocation();
+  if (section && section !== state.currentSection) {
+    switchSection(section);
+  }
+});
 
 globalThis.setInterval(() => {
   const nextCycle = document.querySelector("[data-scheduler-next-cycle]");
@@ -3347,11 +3420,12 @@ globalThis.setInterval(async () => {
 }, 30_000);
 
 function setLanguage(language) {
-  state.language = language;
-  document.documentElement.lang = language === "CN" ? "zh-CN" : "en";
+  state.language = language === "EN" ? "EN" : "CN";
+  document.documentElement.lang = state.language === "CN" ? "zh-CN" : "en";
   languageMenu.hidden = true;
-  addTrackerButton.textContent = copy[language].addTracker;
+  addTrackerButton.textContent = copy[state.language].addTracker;
   syncNavigationLabels();
+  saveUiPreferences();
   renderSection();
 }
 

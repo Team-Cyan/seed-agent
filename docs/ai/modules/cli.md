@@ -22,7 +22,9 @@ Expose the operator-facing command surface and safe summaries.
 - Docker entrypoint support for running the settings Web UI beside
   `schedule-run` when `SEED_AGENT_WEB_ENABLED=true`,
 - grouped Web UI navigation, mobile section switching, touch-sized controls, and
-  modal interactions for the local settings surface,
+  modal interactions for the local settings surface; non-sensitive language,
+  theme, and active-section preferences persist locally, while the active
+  section is also reflected in the URL fragment for refresh and history,
 - read-only web API endpoints for state summary, configured budget pools, and
   heartbeat health,
 - a read-only Web UI operations log that merges persisted scheduler phase,

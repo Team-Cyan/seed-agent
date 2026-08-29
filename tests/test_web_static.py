@@ -19,7 +19,7 @@ def test_web_brand_uses_the_canonical_runtime_icon() -> None:
     assert "favicon.svg" not in html
 
 
-def test_web_token_stays_in_memory_and_is_attached_to_api_requests() -> None:
+def test_web_token_stays_in_memory_while_ui_preferences_are_persisted() -> None:
     html = (STATIC_ROOT / "index.html").read_text(encoding="utf-8")
     script = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
 
@@ -31,7 +31,11 @@ def test_web_token_stays_in_memory_and_is_attached_to_api_requests() -> None:
     assert 'headers.set("Content-Type", "application/json")' in script
     assert 'requestInit.body = "{}"' in script
     assert 'webTokenButton?.removeAttribute("hidden")' in script
-    assert "localStorage" not in script
+    assert "seed-agent.ui-preferences.v1" in script
+    preferences_block = script[
+        script.index("function readUiPreferences") : script.index("function sectionFromLocation")
+    ]
+    assert "webToken" not in preferences_block
     assert "sessionStorage" not in script
 
 
@@ -647,6 +651,11 @@ def test_javascript_handles_language_menu_and_section_navigation() -> None:
     assert "setLanguage" in script
     assert "Downloader" in script
     assert "configPath" in script
+    assert "restoreUiPreferences" in script
+    assert "updateSectionLocation" in script
+    assert 'globalThis.addEventListener("hashchange"' in script
+    assert "sectionFromLocation() || preferences.currentSection" in script
+    assert "globalThis.location.hash = section" in script
     assert ".language-menu[hidden]" in styles
     assert ".config-path" in styles
 
