@@ -103,6 +103,7 @@ from seed_agent.sites.mteam import (
 )
 from seed_agent.sources.base import SourceIntentEvent
 from seed_agent.sources.douban import (
+    DOUBAN_SUBJECT_CLASSIFICATION_VERSION,
     enrich_douban_wanted_event,
     fetch_douban_interest_rss,
     read_douban_wanted,
@@ -6412,7 +6413,11 @@ def _cached_douban_subject_event(
         return None
     status = str(metadata.get("subject_lookup_status") or "")
     has_legacy_subject_metadata = metadata.get("subject_adapter") == "douban_mobile_subject"
-    if status not in {"success", "imdb_fallback"} and not has_legacy_subject_metadata:
+    classification_version = metadata.get("subject_media_classification_version")
+    if (
+        (status not in {"success", "imdb_fallback"} and not has_legacy_subject_metadata)
+        or classification_version != DOUBAN_SUBJECT_CLASSIFICATION_VERSION
+    ):
         return None
     return _apply_douban_detail_metadata(event, metadata)
 
@@ -6425,6 +6430,7 @@ def _apply_douban_detail_metadata(
         "subject_adapter",
         "subject_mobile_url",
         "subject_lookup_status",
+        "subject_media_classification_version",
         "detail_adapter",
         "detail_source_event_id",
         "kind",

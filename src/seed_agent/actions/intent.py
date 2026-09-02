@@ -217,11 +217,13 @@ def _merge_metadata(
 def _apply_source_media_shape(intent: ResourceIntent) -> ResourceIntent:
     """Make trusted source media classification part of the structured intent."""
     media_type = str(intent.metadata.get("media_type") or "").lower()
-    if media_type not in {"tv", "anime"}:
-        return intent
     if intent.kind == IntentKind.EPISODE:
         return intent
-    return intent.model_copy(update={"kind": IntentKind.SHOW})
+    if media_type in {"tv", "anime"}:
+        return intent.model_copy(update={"kind": IntentKind.SHOW})
+    if media_type == "movie":
+        return intent.model_copy(update={"kind": IntentKind.MOVIE})
+    return intent
 
 
 def _refresh_source_intent(

@@ -13,6 +13,7 @@ from typer.testing import CliRunner
 from seed_agent.config import DiscoveryConfig, ScoringConfig, SeedAgentConfig
 from seed_agent.models import (
     Decision,
+    IntentKind,
     IntentSource,
     IntentState,
     LifecycleState,
@@ -5782,6 +5783,7 @@ want_sources:
             "media_type": "movie",
             "subject_adapter": "douban_mobile_subject",
             "subject_lookup_status": "success",
+            "subject_media_classification_version": 2,
         },
     )
     store = StateStore(tmp_path / ".seed-agent" / "state.db")
@@ -5803,6 +5805,52 @@ want_sources:
 
     assert events[0].metadata["external_ids"] == {"douban": "1292052", "imdb": "tt0111161"}
     assert events[0].metadata["subject_lookup_status"] == "success"
+
+
+def test_configured_douban_source_refreshes_legacy_subject_classification(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from seed_agent import cli
+    from seed_agent.actions.intent import ingest_events
+
+    stored = SourceIntentEvent(
+        source=IntentSource.DOUBAN_WANTED,
+        raw_text="小黄人与大怪兽 2026",
+        source_event_id="douban:36962219",
+        metadata={
+            "external_ids": {"douban": "36962219"},
+            "media_type": "anime",
+            "subject_adapter": "douban_mobile_subject",
+            "subject_lookup_status": "success",
+        },
+    )
+    store = StateStore(tmp_path / ".seed-agent" / "state.db")
+    ingest_events([stored], store)
+    incoming = SourceIntentEvent(
+        source=IntentSource.DOUBAN_WANTED,
+        raw_text="小黄人与大怪兽 2026",
+        source_event_id="douban:36962219",
+        metadata={"external_ids": {"douban": "36962219"}, "media_type": "anime"},
+    )
+    refreshed = SourceIntentEvent(
+        source=IntentSource.DOUBAN_WANTED,
+        raw_text=incoming.raw_text,
+        source_event_id=incoming.source_event_id,
+        metadata={
+            **incoming.metadata,
+            "media_type": "movie",
+            "subject_lookup_status": "success",
+            "subject_media_classification_version": 2,
+        },
+    )
+    monkeypatch.setattr(cli, "enrich_douban_wanted_event", lambda _event: refreshed)
+
+    events = cli._enrich_configured_want_list_events([incoming], store=store)
+    intent, _ = ingest_events(events, store)[0]
+
+    assert events[0].metadata["media_type"] == "movie"
+    assert intent.kind == IntentKind.MOVIE
 
 
 def test_douban_detail_enrichment_is_deduplicated_within_one_refresh(

@@ -27,8 +27,9 @@ Convert human requests into search/rank/reject/enqueue workflows.
 - merge Douban and IMDb source events into canonical Want List works through
   `douban:<subject_id>` and `imdb:<tt_id>` aliases,
 - normalize text,
-- preserve trusted TV/anime source classification as structured `SHOW` intents
-  and parse `S03`, `Season 3`, and `第三季` season notation,
+- classify animated films as `movie` and animated TV series as `anime`; preserve
+  trusted TV/anime source classification as structured `SHOW` intents and parse
+  `S03`, `Season 3`, and `第三季` season notation,
 - search sources,
 - rank release candidates,
 - reject unwanted options,

@@ -262,10 +262,8 @@ def _iter_genres(value: Any) -> Iterable[str]:
 def _media_type(title_type: str | None, genres: str) -> str:
     type_key = str(title_type or "").strip().lower()
     genre_key = genres.lower()
-    if "animation" in genre_key:
-        return "anime"
     if type_key in {"tvseries", "tvminiseries", "tvepisode", "tvshort", "tv"}:
-        return "tv"
+        return "anime" if "animation" in genre_key else "tv"
     return "movie"
 
 

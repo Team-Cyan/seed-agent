@@ -29,9 +29,10 @@ Implemented today:
 - M-Team API-backed resource intent search, using the same search endpoint while
   keeping download-token resolution deferred until execute-mode intent enqueue
 - ID-first intent search through native M-Team `douban` and `imdb` filters when
-  the source event provides external IDs, with Douban tried first, IMDb used as
-  a supplement, and a broad title/year keyword fallback added to catch rows that
-  lack external-ID metadata
+  the source event provides external IDs. Durable aliases retain compact IDs,
+  while M-Team request payloads always use canonical full Douban/IMDb URLs;
+  those exact-identifier queries omit the broad `mode` filter. A title/year
+  keyword query is used only when an intent has no external identifier.
 - search result metadata captures M-Team API tag fields such as medium,
   standard, video codec, audio codec, and labels for Web UI candidate review
 - search result metadata also preserves subtitle and MediaInfo/NFO text when

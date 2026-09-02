@@ -88,6 +88,10 @@ by completion period, and unfinished work is ordered by current priority.
   - M-Team API-backed intent search uses native search, prefers Douban/IMDb ID
     filters when available, and defers download-token resolution until
     execute-mode enqueue.
+  - M-Team identifier searches send canonical full provider URLs; Douban subject
+    enrichment and fallback inference classify animated films as movies and
+    animated TV series as anime. Exact identifier queries omit M-Team's broad
+    movie/TV mode filter and do not make a title fallback request.
   - Search preferences use `quality_tag_scores`, a generic tag-group score map
     where aliases such as `BluRay` and `Blu-ray` count once.
   - `want_decision.series_search_mode` controls TV/anime season-pack vs episode search

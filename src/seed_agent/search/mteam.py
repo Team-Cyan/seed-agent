@@ -205,7 +205,10 @@ def _api_option_sequence_for_intent(
 ) -> list[MTeamApiDiscoveryOptions]:
     external_ids = _external_ids(intent)
     identifier_updates: dict[str, object] = {
-        "mode": _mode_for_intent(intent),
+        # An external work URL is more precise than the broad movie/tvshow
+        # buckets. Omitting mode also prevents a stale source classification
+        # from suppressing an otherwise exact tracker match.
+        "mode": None,
         "only_free": False,
         "discount": None,
         "keyword": None,
@@ -232,23 +235,6 @@ def _api_option_sequence_for_intent(
             )
         )
     if options:
-        options.append(
-            base_options.model_copy(
-                update={
-                    "mode": _mode_for_intent(intent),
-                    "keyword": _search_keyword(
-                        intent,
-                        search_config,
-                        default_resolution,
-                        series_search_mode,
-                    ),
-                    "imdb": None,
-                    "douban": None,
-                    "only_free": False,
-                    "discount": None,
-                }
-            )
-        )
         return options
     return [
         base_options.model_copy(
@@ -275,13 +261,28 @@ def _external_ids(intent: ResourceIntent) -> dict[str, str]:
     for provider in ("douban", "imdb"):
         value = raw.get(provider)
         if value is not None and str(value).strip():
-            ids[provider] = str(value).strip()
+            ids[provider] = _mteam_identifier_url(provider, str(value).strip())
     return ids
+
+
+def _mteam_identifier_url(provider: Literal["douban", "imdb"], value: str) -> str:
+    """Use the URL form M-Team's native identifier filters expect.
+
+    Durable intent aliases intentionally retain compact provider IDs. The API
+    request is the boundary where those IDs become canonical public URLs.
+    """
+    if value.startswith(("http://", "https://")):
+        return value
+    if provider == "douban":
+        return f"https://movie.douban.com/subject/{value.rstrip('/')}/"
+    return f"https://www.imdb.com/title/{value.rstrip('/')}/"
 
 
 def _mode_for_intent(intent: ResourceIntent) -> str:
     media_type = str(intent.metadata.get("media_type") or intent.metadata.get("kind") or "").lower()
-    if intent.kind in {IntentKind.SHOW, IntentKind.EPISODE} or media_type in {"tv", "anime"}:
+    if media_type == "movie":
+        return "movie"
+    if media_type in {"tv", "anime"} or intent.kind in {IntentKind.SHOW, IntentKind.EPISODE}:
         return "tvshow"
     return "movie"
 

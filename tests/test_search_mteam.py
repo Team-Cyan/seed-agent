@@ -116,6 +116,36 @@ async def test_mteam_search_provider_maps_anime_metadata_to_tvshow_mode() -> Non
 
 
 @pytest.mark.asyncio
+async def test_mteam_search_provider_omits_mode_for_anime_identifier_search() -> None:
+    calls: list[dict[str, object]] = []
+
+    async def fake_fetch_candidates(**kwargs):
+        calls.append(kwargs)
+        return []
+
+    provider = MTeamSearchProvider(
+        site="mt",
+        api_key="secret-api-key",
+        search_config=SearchConfig(),
+        fetch_candidates=fake_fetch_candidates,
+    )
+
+    await provider.search(
+        _intent(
+            kind=IntentKind.SHOW,
+            raw_text="葬送的芙莉莲 2023",
+            title="葬送的芙莉莲",
+            year=2023,
+            metadata={"media_type": "anime", "external_ids": {"douban": "36093351"}},
+        )
+    )
+
+    assert calls[0]["options"].douban == "https://movie.douban.com/subject/36093351/"
+    assert calls[0]["options"].mode is None
+    assert len(calls) == 1
+
+
+@pytest.mark.asyncio
 async def test_mteam_search_provider_propagates_rate_limit() -> None:
     calls: list[dict[str, object]] = []
 
@@ -222,7 +252,7 @@ async def test_mteam_search_provider_propagates_unavailable_api_error() -> None:
 
 
 @pytest.mark.asyncio
-async def test_mteam_search_provider_falls_back_after_identifier_business_errors() -> None:
+async def test_mteam_search_provider_does_not_fall_back_after_identifier_business_errors() -> None:
     calls: list[dict[str, object]] = []
 
     async def fake_fetch_candidates(**kwargs):
@@ -234,22 +264,7 @@ async def test_mteam_search_provider_falls_back_after_identifier_business_errors
                 code="1001",
                 message="identifier query rejected",
             )
-        return [
-            TorrentCandidate(
-                site="mt",
-                title="Call Me by Your Name 2017 1080p WEB-DL",
-                source_url="https://kp.m-team.cc/detail/99",
-                download_url="mteam-api://torrent/99",
-                size_bytes=8 * 1024**3,
-                seeders=100,
-                leechers=1,
-                discount=Discount.NORMAL,
-                metadata={
-                    "mteam_torrent_id": "99",
-                    "download_url_source": "mteam_api_deferred",
-                },
-            )
-        ]
+        raise AssertionError("keyword fallback must not run for identified Watch List intents")
 
     provider = MTeamSearchProvider(
         site="mt",
@@ -262,12 +277,11 @@ async def test_mteam_search_provider_falls_back_after_identifier_business_errors
         _intent(metadata={"external_ids": {"douban": "26799731", "imdb": "tt5726616"}})
     )
 
-    assert len(calls) == 3
-    assert [release.discount for release in releases] == [Discount.NORMAL]
+    assert releases == []
+    assert len(calls) == 2
     assert [attempt["status"] for attempt in provider.search_diagnostics[0]["attempts"]] == [
         "api_error",
         "api_error",
-        "ok",
     ]
 
 
@@ -318,17 +332,15 @@ async def test_mteam_search_provider_prefers_douban_identifier_search() -> None:
     )
 
     options = calls[0]["options"]
-    assert options.douban == "26799731"
+    assert options.douban == "https://movie.douban.com/subject/26799731/"
     assert options.imdb is None
     assert options.keyword is None
-    assert options.mode == "movie"
+    assert options.mode is None
     assert options.only_free is False
-    assert len(calls) == 3
+    assert len(calls) == 2
     assert calls[1]["options"].douban is None
-    assert calls[1]["options"].imdb == "tt5726616"
-    assert calls[2]["options"].douban is None
-    assert calls[2]["options"].imdb is None
-    assert calls[2]["options"].keyword == "请以你的名字呼唤我 Call Me by Your Name 2017"
+    assert calls[1]["options"].imdb == "https://www.imdb.com/title/tt5726616/"
+    assert calls[1]["options"].mode is None
     assert [release.title for release in releases] == [
         "Call Me by Your Name 2017 2160p BluRay REMUX AVC DTS-HD MA 5.1",
         "Call Me by Your Name 2017 1080p WEB-DL",
@@ -336,7 +348,7 @@ async def test_mteam_search_provider_prefers_douban_identifier_search() -> None:
 
 
 @pytest.mark.asyncio
-async def test_mteam_search_provider_supplements_douban_with_imdb_and_keyword_results() -> None:
+async def test_mteam_search_provider_supplements_douban_with_imdb_results() -> None:
     calls: list[dict[str, object]] = []
 
     async def fake_fetch_candidates(**kwargs):
@@ -387,14 +399,11 @@ async def test_mteam_search_provider_supplements_douban_with_imdb_and_keyword_re
         _intent(metadata={"external_ids": {"douban": "26799731", "imdb": "tt5726616"}})
     )
 
-    assert len(calls) == 3
-    assert calls[0]["options"].douban == "26799731"
+    assert len(calls) == 2
+    assert calls[0]["options"].douban == "https://movie.douban.com/subject/26799731/"
     assert calls[0]["options"].imdb is None
     assert calls[1]["options"].douban is None
-    assert calls[1]["options"].imdb == "tt5726616"
-    assert calls[2]["options"].douban is None
-    assert calls[2]["options"].imdb is None
-    assert calls[2]["options"].keyword == "请以你的名字呼唤我 Call Me by Your Name 2017"
+    assert calls[1]["options"].imdb == "https://www.imdb.com/title/tt5726616/"
     assert [release.title for release in releases] == [
         "Call Me by Your Name 2017 1080p WEB-DL",
         "Call Me by Your Name 2017 2160p BluRay REMUX AVC DTS-HD MA 5.1",
@@ -418,14 +427,11 @@ async def test_mteam_search_provider_uses_imdb_identifier_when_douban_is_missing
 
     await provider.search(_intent(metadata={"external_ids": {"imdb": "tt5726616"}}))
 
-    assert len(calls) == 2
+    assert len(calls) == 1
     options = calls[0]["options"]
     assert options.douban is None
-    assert options.imdb == "tt5726616"
+    assert options.imdb == "https://www.imdb.com/title/tt5726616/"
     assert options.keyword is None
-    assert calls[1]["options"].douban is None
-    assert calls[1]["options"].imdb is None
-    assert calls[1]["options"].keyword == "请以你的名字呼唤我 Call Me by Your Name 2017"
 
 
 @pytest.mark.asyncio

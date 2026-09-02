@@ -4,6 +4,16 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.23.3 - 2026-09-03
+
+### Fixed
+
+- Search M-Team Want List works by canonical full Douban/IMDb URL without a
+  broad media-mode or title-keyword fallback when an external identifier is
+  available.
+- Classify animated films as movies and animated TV series as anime, and
+  refresh legacy Douban subject metadata before reusing its media classification.
+
 ## 0.23.2 - 2026-08-25
 
 ### Fixed

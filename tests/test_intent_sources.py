@@ -322,6 +322,28 @@ def test_douban_subject_json_ld_enrichment_preserves_animation_type() -> None:
     assert enriched.metadata["media_type"] == "anime"
 
 
+def test_douban_subject_json_ld_enrichment_keeps_animated_movie_as_movie() -> None:
+    event = parse_douban_interest_rss(
+        """
+        <rss version="2.0"><channel><item>
+          <title>想看 小黄人与大怪兽</title>
+          <link>https://movie.douban.com/subject/36962219/</link>
+        </item></channel></rss>
+        """
+    )[0]
+    html = """
+    <script type="application/ld+json">
+      {"@type":"Movie","genre":["Animation","Comedy"]}
+    </script>
+    """
+
+    enriched = enrich_douban_wanted_event(event, fetcher=lambda _url: html)
+
+    assert enriched.metadata["kind"] == "movie"
+    assert enriched.metadata["media_type"] == "movie"
+    assert enriched.metadata["subject_media_classification_version"] == 2
+
+
 def test_douban_wanted_parses_public_wish_html() -> None:
     html = """
     <div class="item comment-item" data-cid="4243074934">
@@ -358,7 +380,7 @@ def test_douban_wanted_infers_anime_and_show_media_types() -> None:
     <div class="item comment-item">
       <div class="info">
         <li class="title"><a href="https://movie.douban.com/subject/35797709/"><em>葬送的芙莉莲</em></a></li>
-        <li class="intro">2023-09-29(日本) / 日本 / 动画 / 奇幻</li>
+        <li class="intro">2023-09-29(日本) / 日本 / 动画 / 奇幻 / 28集</li>
         <li><span class="date">2025-01-02</span></li>
       </div>
     </div>
@@ -373,6 +395,21 @@ def test_douban_wanted_infers_anime_and_show_media_types() -> None:
     events = parse_douban_wish_html(html, user_name="example-user")
 
     assert [event.metadata["media_type"] for event in events] == ["anime", "tv"]
+
+
+def test_douban_wanted_defaults_animation_without_series_evidence_to_movie() -> None:
+    html = """
+    <div class="item comment-item">
+      <div class="info">
+        <li class="title"><a href="https://movie.douban.com/subject/36962219/"><em>小黄人与大怪兽</em></a></li>
+        <li class="intro">2026-07-03(中国大陆) / 美国 / 动画 / 喜剧</li>
+      </div>
+    </div>
+    """
+
+    event = parse_douban_wish_html(html, user_name="example-user")[0]
+
+    assert event.metadata["media_type"] == "movie"
 
 
 def test_douban_wanted_fetches_configured_user_pages() -> None:
@@ -475,6 +512,15 @@ def test_imdb_watchlist_parses_csv_export() -> None:
     assert events[0].metadata["source_label"] == "IMDb-周末清单"
     assert events[0].requested_at == datetime(2025, 1, 3, tzinfo=UTC)
     assert events[1].metadata["media_type"] == "anime"
+
+
+def test_imdb_watchlist_keeps_animated_movie_in_movie_category() -> None:
+    events = parse_imdb_watchlist_csv(
+        "Const,Title,Year,Title Type,Genres\n"
+        "tt2294629,Frozen,2013,movie,Animation Adventure\n"
+    )
+
+    assert events[0].metadata["media_type"] == "movie"
 
 
 def test_imdb_watchlist_parses_public_html_fixture() -> None:

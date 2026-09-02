@@ -17,6 +17,7 @@ from seed_agent.models import IntentSource
 from seed_agent.sources.base import SourceIntentEvent
 
 DOUBAN_WISH_PAGE_SIZE = 15
+DOUBAN_SUBJECT_CLASSIFICATION_VERSION = 2
 SUBJECT_URL_RE = re.compile(
     r"https?://movie\.douban\.com/subject/(?P<id>\d+)/?",
     re.IGNORECASE,
@@ -350,10 +351,11 @@ def _enrich_event_from_subject(event: SourceIntentEvent, fetch: Any) -> SourceIn
             event,
             metadata={
                 **event.metadata,
-                "subject_adapter": "douban_mobile_subject",
-                "subject_mobile_url": build_douban_mobile_subject_url(douban_id),
-                "subject_lookup_status": "success",
-            },
+            "subject_adapter": "douban_mobile_subject",
+            "subject_mobile_url": build_douban_mobile_subject_url(douban_id),
+            "subject_lookup_status": "success",
+            "subject_media_classification_version": DOUBAN_SUBJECT_CLASSIFICATION_VERSION,
+        },
         )
     external_ids = dict(event.metadata.get("external_ids") or {})
     if imdb_id is not None:
@@ -363,6 +365,7 @@ def _enrich_event_from_subject(event: SourceIntentEvent, fetch: Any) -> SourceIn
         "subject_adapter": "douban_mobile_subject",
         "subject_mobile_url": build_douban_mobile_subject_url(douban_id),
         "subject_lookup_status": "success",
+        "subject_media_classification_version": DOUBAN_SUBJECT_CLASSIFICATION_VERSION,
         "external_ids": external_ids,
     }
     if media_type is not None:
@@ -437,10 +440,13 @@ def _json_ld_media_type(item: dict[str, Any]) -> str | None:
     types = {str(value).strip().lower() for value in values if value is not None}
     genres = item.get("genre")
     genre_values = genres if isinstance(genres, list) else [genres]
-    if any("animation" in str(value).lower() for value in genre_values if value is not None):
-        return "anime"
+    is_animation = any(
+        "animation" in str(value).lower() for value in genre_values if value is not None
+    )
     if types.intersection({"tvseries", "tvminiseries", "tvepisode", "tvshow"}):
-        return "tv"
+        return "anime" if is_animation else "tv"
+    if types.intersection({"movie", "film"}):
+        return "movie"
     return None
 
 
@@ -457,8 +463,6 @@ def _media_type_from_subject_html(html: str) -> str | None:
     title = _clean_text(_strip_tags(title_match.group("title")))
     if "电视剧" in title or "剧集" in title:
         return "tv"
-    if "动画" in title or "动漫" in title:
-        return "anime"
     return None
 
 
@@ -523,8 +527,11 @@ def _normalize_media_type(value: str | None) -> str | None:
     normalized = value.strip().lower()
     aliases = {
         "anime": "anime",
-        "animation": "anime",
-        "动画": "anime",
+        # Animation is a genre, not proof that a work is a serial. Explicit
+        # anime metadata remains trusted; generic animation defaults to movie
+        # until subject data establishes a TV series.
+        "animation": "movie",
+        "动画": "movie",
         "movie": "movie",
         "film": "movie",
         "电影": "movie",
@@ -539,12 +546,12 @@ def _normalize_media_type(value: str | None) -> str | None:
 
 def _infer_media_type(*, title: str, intro: str) -> str:
     haystack = f"{title} {intro}"
-    if "动画" in haystack or "anime" in haystack.lower():
-        return "anime"
-    if EPISODE_COUNT_RE.search(haystack) or any(
+    is_animation = "动画" in haystack or "anime" in haystack.lower()
+    is_series = EPISODE_COUNT_RE.search(haystack) or any(
         token in haystack for token in ("电视剧", "剧集", "季")
-    ):
-        return "tv"
+    )
+    if is_series:
+        return "anime" if is_animation else "tv"
     return "movie"
 
 
