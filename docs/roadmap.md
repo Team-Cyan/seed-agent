@@ -503,6 +503,8 @@ by completion period, and unfinished work is ordered by current priority.
   - Per-Want history retains query attempts, classification, and pre/post-filter
     result counts in the existing atomic search transaction. Failed requests
     remain distinguishable from successful searches with zero results.
+  - Runtime serialization errors cannot interrupt business operations; unreadable
+    state/audit sources degrade independently while retained logs remain visible.
 
 - Next P0 - Add scheduler and Web preview integration coverage
   - Add fake downloader/provider fixtures that can run a scheduler cycle without

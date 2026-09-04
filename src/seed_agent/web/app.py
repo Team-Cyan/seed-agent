@@ -2034,27 +2034,54 @@ def _logs_payload(root: Path, limit: int = 200) -> dict[str, Any]:
     """
     bounded_limit = min(max(limit, 1), 500)
     entries: list[dict[str, Any]] = []
+    unavailable_sources: list[str] = []
     state_path = _state_db_path(root)
     if state_path.exists():
-        store = StateStore(state_path, initialize=False, read_only=True)
-        entries.extend(
-            _scheduler_log_entry(row)
-            for row in store.list_scheduler_run_events(limit=bounded_limit)
-        )
-        entries.extend(
-            _tracker_log_entry(row) for row in store.list_tracker_api_events(limit=bounded_limit)
-        )
-        entries.extend(
-            _want_search_log_entry(row) for row in store.list_want_search_runs(limit=bounded_limit)
-        )
-    entries.extend(_audit_log_entry(row) for row in _audit_tail(root, limit=bounded_limit))
-    entries.extend(_runtime_log_entries(root, limit=bounded_limit))
+        try:
+            store = StateStore(state_path, initialize=False, read_only=True)
+            entries.extend(
+                _scheduler_log_entry(row)
+                for row in store.list_scheduler_run_events(limit=bounded_limit)
+            )
+            entries.extend(
+                _tracker_log_entry(row)
+                for row in store.list_tracker_api_events(limit=bounded_limit)
+            )
+            entries.extend(
+                _want_search_log_entry(row)
+                for row in store.list_want_search_runs(limit=bounded_limit)
+            )
+        except (sqlite3.DatabaseError, OSError) as exc:
+            unavailable_sources.append("state")
+            entries.append(_log_source_unavailable("state", exc))
+    try:
+        entries.extend(_audit_log_entry(row) for row in _audit_tail(root, limit=bounded_limit))
+    except OSError as exc:
+        unavailable_sources.append("audit")
+        entries.append(_log_source_unavailable("audit", exc))
+    runtime_entries = _runtime_log_entries(root, limit=bounded_limit)
+    entries.extend(runtime_entries)
+    if any(row.get("title") == "logging.read_unavailable" for row in runtime_entries):
+        unavailable_sources.append("runtime")
     entries.sort(key=lambda row: str(row.get("timestamp") or ""), reverse=True)
     return {
         **_runtime_provenance(root),
         "entries": redact_payload(entries[:bounded_limit]),
         "limit": bounded_limit,
         "sources": ["scheduler", "tracker", "want", "audit", "runtime"],
+        "partial": bool(unavailable_sources),
+        "unavailable_sources": unavailable_sources,
+    }
+
+
+def _log_source_unavailable(source: str, exc: Exception) -> dict[str, Any]:
+    return {
+        "timestamp": datetime.now(UTC).isoformat(),
+        "source": "runtime",
+        "level": "warning",
+        "title": "logging.source_unavailable",
+        "message": f"{source} log source could not be read; showing remaining sources",
+        "details": {"unavailable_source": source, "error_type": type(exc).__name__},
     }
 
 

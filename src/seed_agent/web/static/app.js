@@ -19,6 +19,7 @@ const state = {
   },
   logs: {
     entries: [],
+    unavailableSources: [],
     error: null,
     loading: true,
     autoRefresh: true,
@@ -254,6 +255,7 @@ const copy = {
       logsAutoRefresh: "自动刷新",
       logsEmpty: "当前筛选条件下没有日志。",
       logsFilter: "筛选日志",
+      logsPartial: "部分日志源不可用",
       logDetails: "事件详情",
       logsRefresh: "刷新",
       logsRefreshed: "最近刷新",
@@ -573,6 +575,7 @@ const copy = {
       logsAutoRefresh: "Auto refresh",
       logsEmpty: "No logs match the current filters.",
       logsFilter: "Filter logs",
+      logsPartial: "Some log sources are unavailable",
       logDetails: "Event details",
       logsRefresh: "Refresh",
       logsRefreshed: "Last refreshed",
@@ -1459,6 +1462,7 @@ async function loadLogs() {
     }
     const payload = await response.json();
     state.logs.entries = payload.entries || [];
+    state.logs.unavailableSources = Array.isArray(payload.unavailable_sources) ? payload.unavailable_sources : [];
     state.logs.error = null;
     state.logs.refreshedAt = new Date().toISOString();
   } catch (error) {
@@ -1938,6 +1942,9 @@ function updateLogEntries(panel) {
       .includes(query);
   });
   meta.textContent = `${entries.length} / ${state.logs.entries.length} · ${uiText("logsRefreshed")}: ${formatLogDateTime(state.logs.refreshedAt)}`;
+  if (state.logs.unavailableSources.length) {
+    meta.textContent += ` · ${uiText("logsPartial")}: ${state.logs.unavailableSources.join(", ")}`;
+  }
   if (!entries.length) {
     timeline.innerHTML = `<div class="empty-state">${escapeHtml(uiText("logsEmpty"))}</div>`;
     return;

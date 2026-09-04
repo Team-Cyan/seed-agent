@@ -255,23 +255,23 @@ def _is_compact_season_episode(value: str, season: int) -> bool:
     return len(episode) >= 2 and _is_episode_number(episode)
 
 
-def _is_candidate_eligible(
+def _candidate_rejection_reason(
     intent: ResourceIntent,
     release: ReleaseCandidate,
     intent_config: IntentConfig,
-) -> bool:
+) -> str | None:
     if intent_config.series_search_mode != "season":
-        return True
+        return None
     # Source metadata can be unavailable for a newly added RSS item. Explicit
     # episode markers are never a complete season, so reject them even before
     # the item can be confidently shaped as TV/anime.
     if EPISODE_TOKEN_RE.search(release.title) is not None or _has_numbered_episode_after_season(
         release.title
     ):
-        return False
+        return "episode_release_in_season_mode"
     if not _requires_season_pack(intent, intent_config):
-        return True
-    return _is_season_pack(release.title)
+        return None
+    return None if _is_season_pack(release.title) else "missing_season_pack_marker"
 
 
 def filter_releases(
@@ -281,12 +281,13 @@ def filter_releases(
 ) -> list[ReleaseCandidate]:
     eligible = []
     for release in releases:
-        if _is_candidate_eligible(intent, release, intent_config):
+        reason = _candidate_rejection_reason(intent, release, intent_config)
+        if reason is None:
             eligible.append(release)
         else:
             log_event(logger, logging.DEBUG, "intent.candidate.filtered",
                       intent_id=intent.intent_id, release_id=release.release_id,
-                      reason="not_a_full_season_pack", kind=intent.kind.value,
+                      reason=reason, kind=intent.kind.value,
                       series_search_mode=intent_config.series_search_mode)
     return eligible
 

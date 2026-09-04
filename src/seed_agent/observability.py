@@ -80,7 +80,7 @@ class StderrHandler(logging.Handler):
 
     def emit(self, record: logging.LogRecord) -> None:
         try:
-            sys.stderr.write(self.format(record) + "\n")
+            sys.stderr.write(_format_or_fallback(self, record) + "\n")
             sys.stderr.flush()
         except OSError, ValueError:
             pass  # Logging must not turn a successful operation into a failure.
@@ -101,11 +101,19 @@ class RuntimeFileHandler(logging.Handler):
 
     def emit(self, record: logging.LogRecord) -> None:
         try:
-            line = (self.format(record) + "\n").encode("utf-8")
+            line = (_format_or_fallback(self, record) + "\n").encode(
+                "utf-8", errors="backslashreplace"
+            )
             if len(line) > self.max_bytes:
-                payload = json.loads(line)
-                payload["details"] = {"truncated": True}
-                payload.pop("exception", None)
+                # Event names and exception text can also be oversized. Do not
+                # retain arbitrary fields when enforcing the whole-record cap.
+                payload = {
+                    "timestamp": datetime.now(UTC).isoformat(),
+                    "level": record.levelname.lower(),
+                    "logger": "runtime",
+                    "event": "logging.record_truncated",
+                    "details": {"original_bytes": len(line)},
+                }
                 line = (json.dumps(payload, ensure_ascii=False) + "\n").encode("utf-8")
             self.path.parent.mkdir(parents=True, exist_ok=True)
             lock_path = self.path.with_suffix(self.path.suffix + ".lock")
@@ -142,6 +150,24 @@ class RuntimeFileHandler(logging.Handler):
                     )
                 except OSError, ValueError:
                     pass
+
+
+def _format_or_fallback(handler: logging.Handler, record: logging.LogRecord) -> str:
+    """A malformed diagnostic must never interrupt search or a mutation.
+
+    Do not use logging.handleError: it can print the raw record and its secrets.
+    The fallback deliberately contains no original message, details, or repr.
+    """
+    try:
+        return handler.format(record)
+    except Exception as exc:
+        return json.dumps({
+            "timestamp": datetime.now(UTC).isoformat(),
+            "level": "warning",
+            "logger": "runtime",
+            "event": "logging.serialization_failed",
+            "details": {"error_type": type(exc).__name__},
+        })
 
 
 def configure_logging(level: str | None = None, *, log_path: Path | None = None) -> None:

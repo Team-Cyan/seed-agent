@@ -114,6 +114,11 @@ evidence. Filter by `runtime` and level, search an intent ID or `request_id`,
 and expand event details. `X-Request-ID` in a Web response identifies its nested
 work. Successful reads log only at DEBUG to keep normal polling quiet.
 `/api/logs?limit=500` is the maximum; each source uses bounded tail reads.
+If a SQLite or audit read fails, the endpoint still returns available entries
+with `partial: true` and `unavailable_sources`. The page keeps a source-failure
+notice visible regardless of its filters; `/api/health` still reports database
+failures independently. Invalid diagnostic values produce a payload-free
+`logging.serialization_failed` event instead of interrupting business work.
 Historical events predating this release cannot be reconstructed.
 
 For a missing Want candidate, open that Want's candidate dialog and expand

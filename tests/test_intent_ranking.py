@@ -14,6 +14,23 @@ from seed_agent.models import (
 from seed_agent.policies.intent_ranking import rank_releases
 
 
+@pytest.mark.parametrize("title,reason", [
+    ("Show S02E03 1080p", "episode_release_in_season_mode"),
+    ("Show S02.01-06 1080p", "episode_release_in_season_mode"),
+    ("Show 2026 1080p", "missing_season_pack_marker"),
+])
+def test_filter_log_describes_the_actual_rejection_branch(monkeypatch, title, reason):
+    from seed_agent.policies import intent_ranking
+
+    events = []
+    monkeypatch.setattr(intent_ranking, "log_event",
+                        lambda logger, level, event, **details: events.append((event, details)))
+    assert rank_releases(_intent(kind=IntentKind.SHOW), [_release(title=title)],
+                         _intent_config(series_search_mode="season"), SearchConfig()) == []
+    assert events[0][0] == "intent.candidate.filtered"
+    assert events[0][1]["reason"] == reason
+
+
 def _intent(**overrides: object) -> ResourceIntent:
     data: dict[str, object] = {
         "intent_id": "cli:inception-2010-1080p",

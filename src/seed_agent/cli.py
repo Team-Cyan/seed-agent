@@ -84,7 +84,13 @@ from seed_agent.models import (
     TorrentCandidate,
     safe_url_identity,
 )
-from seed_agent.observability import RUNTIME_LOG_NAME, configure_logging, get_logger, log_event
+from seed_agent.observability import (
+    RUNTIME_LOG_NAME,
+    configure_logging,
+    get_logger,
+    log_event,
+    safe_error_text,
+)
 from seed_agent.policies.category_policy import PoolUsage, usage_by_pool
 from seed_agent.policies.quality import candidate_value_score, torrent_eviction_evidence
 from seed_agent.search.base import SearchProvider
@@ -3826,7 +3832,7 @@ def _runtime_status_payload(
         payload.update(
             {
                 "status": "config_error",
-                "error": str(exc),
+                "error": safe_error_text(exc),
             }
         )
     else:
@@ -5050,7 +5056,7 @@ def _attach_discovery_warnings(payload: dict[str, Any]) -> None:
 
 
 def _runtime_error_summary(exc: Exception) -> str:
-    text = str(exc).replace("\n", " ").strip()
+    text = safe_error_text(exc).replace("\n", " ").strip()
     if not text:
         return type(exc).__name__
     return redact_sensitive_text(text)[:500]

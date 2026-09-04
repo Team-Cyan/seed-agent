@@ -601,6 +601,43 @@ def test_http_logs_merges_durable_events_and_redacts_secrets(tmp_path: Path) -> 
     assert "secret-pass" not in json.dumps(payload)
     assert "<redacted>" in json.dumps(payload)
     assert payload["sources"] == ["scheduler", "tracker", "want", "audit", "runtime"]
+    assert payload["partial"] is False
+
+
+@pytest.mark.parametrize("broken_source", ["state", "audit"])
+def test_http_logs_preserves_runtime_evidence_when_other_source_is_unreadable(
+    tmp_path: Path, monkeypatch, broken_source: str,
+) -> None:
+    import logging
+
+    from seed_agent.observability import RUNTIME_LOG_NAME, JsonLogFormatter, RuntimeFileHandler
+
+    config_path = _write_minimal_config(tmp_path)
+    runtime_root = tmp_path / ".seed-agent"
+    runtime_root.mkdir(exist_ok=True)
+    if broken_source == "state":
+        (runtime_root / "state.db").write_bytes(b"not a sqlite database")
+    else:
+        def fail_audit(*args, **kwargs):
+            raise PermissionError("private-path token=private-token")
+
+        monkeypatch.setattr(web_app, "_audit_tail", fail_audit)
+    handler = RuntimeFileHandler(runtime_root / RUNTIME_LOG_NAME)
+    handler.setFormatter(JsonLogFormatter())
+    handler.handle(logging.LogRecord("seed_agent.test", logging.ERROR, __file__, 1,
+                                     "retained.failure", (), None))
+    with _running_server(config_path) as base_url:
+        payload = _request_json(base_url, "GET", "/api/logs")
+
+    assert payload["partial"] is True
+    assert payload["unavailable_sources"] == [broken_source]
+    assert any(row["title"] == "retained.failure" for row in payload["entries"])
+    warning = next(
+        row for row in payload["entries"] if row["title"] == "logging.source_unavailable"
+    )
+    assert warning["level"] == "warning"
+    assert "private-path" not in json.dumps(payload)
+    assert "private-token" not in json.dumps(payload)
 
 
 @pytest.mark.parametrize("query,expected", [("limit=1", 1), ("limit=90000", 500),

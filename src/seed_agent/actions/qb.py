@@ -7,7 +7,7 @@ from collections.abc import Iterable, Sequence
 from seed_agent.config import CategoryPolicyConfig, CleanupConfig
 from seed_agent.downloaders.base import Downloader
 from seed_agent.models import Decision, ManagedTorrent, ScoreBreakdown, TorrentCandidate
-from seed_agent.observability import get_logger, log_event
+from seed_agent.observability import get_logger, log_event, safe_error_text
 from seed_agent.policies.category_policy import PoolUsage
 from seed_agent.policies.cleanup import CleanupDecision, classify_cleanup
 from seed_agent.policies.eviction import rank_eviction_candidates
@@ -570,7 +570,7 @@ def _pool_usage_state(pool_usage: PoolUsage | None) -> dict[str, object]:
 
 
 def _error_summary(exc: Exception) -> str:
-    message = str(exc).strip()
+    message = safe_error_text(exc).strip()
     if not message:
         return exc.__class__.__name__
     return f"{exc.__class__.__name__}: {message}"

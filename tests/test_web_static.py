@@ -248,6 +248,9 @@ def test_logs_page_reads_filters_and_refreshes_durable_timeline() -> None:
     assert 'data-section="logs"' in html
     assert '<option value="logs">' in html
     assert 'apiFetch("/api/logs")' in script
+    assert "payload.unavailable_sources" in script
+    assert "if (state.logs.unavailableSources.length)" in script
+    assert 'uiText("logsPartial")' in script
     assert "section === \"logs\" && !state.logs.refreshedAt" in script
     assert "Promise.all([loadConfig(), loadOverview(), loadWants()])" in script
     assert "renderLogsPanel" in script

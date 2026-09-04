@@ -25,7 +25,7 @@ from seed_agent.models import (
     ScoreBreakdown,
     TorrentCandidate,
 )
-from seed_agent.observability import get_logger, log_context, log_event
+from seed_agent.observability import get_logger, log_context, log_event, safe_error_text
 from seed_agent.policies.category_policy import PoolUsage
 from seed_agent.policies.intent_ranking import filter_releases, rank_releases
 from seed_agent.search.base import SearchProvider
@@ -635,7 +635,7 @@ async def search_intents_batch(
             intent_id=current_intent_id,
             stage=stage,
             error_type=type(exc).__name__,
-            error=str(exc),
+            error=safe_error_text(exc),
             elapsed_ms=round((time.monotonic() - started) * 1000),
         )
         raise

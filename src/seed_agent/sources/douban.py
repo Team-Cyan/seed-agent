@@ -15,7 +15,7 @@ from xml.etree import ElementTree
 import httpx
 
 from seed_agent.models import IntentSource
-from seed_agent.observability import get_logger, log_event
+from seed_agent.observability import get_logger, log_event, safe_error_text
 from seed_agent.sources.base import SourceIntentEvent
 
 DOUBAN_WISH_PAGE_SIZE = 15
@@ -343,7 +343,7 @@ def _enrich_event_from_subject(event: SourceIntentEvent, fetch: Any) -> SourceIn
         html = fetch(build_douban_mobile_subject_url(douban_id))
     except Exception as exc:
         log_event(logger, logging.WARNING, "douban.subject_lookup.failed",
-                  douban_id=douban_id, error_type=type(exc).__name__, error=str(exc))
+                  douban_id=douban_id, error_type=type(exc).__name__, error=safe_error_text(exc))
         return replace(
             event,
             metadata={**event.metadata, "subject_lookup_status": "failed"},

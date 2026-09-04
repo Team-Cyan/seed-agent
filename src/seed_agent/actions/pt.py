@@ -12,7 +12,7 @@ import httpx
 
 from seed_agent.config import DiscoveryConfig, ScoringConfig, SeedAgentConfig
 from seed_agent.models import Discount, ManagedTorrent, ScoreBreakdown, TorrentCandidate
-from seed_agent.observability import get_logger, log_event
+from seed_agent.observability import get_logger, log_event, safe_error_text
 from seed_agent.policies.scoring import score_candidate
 from seed_agent.sites.mteam import (
     MTeamApiClient,
@@ -124,7 +124,7 @@ async def discover_candidates(config: SeedAgentConfig) -> list[TorrentCandidate]
 
 
 def _runtime_error_summary(exc: Exception) -> str:
-    text = str(exc).replace("\n", " ").strip()
+    text = safe_error_text(exc).replace("\n", " ").strip()
     if not text:
         return type(exc).__name__
     return text[:500]

@@ -4,6 +4,19 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.24.1 - 2026-09-04
+
+### Fixed
+
+- Keep available Run logs visible when SQLite or audit reads fail, and show
+  unavailable-source warnings independently of the active log filters.
+- Isolate runtime logging serialization failures from business operations,
+  retain safe fallback events without raw payloads, and enforce the file size
+  bound even when an event name is oversized.
+- Sanitize validation exceptions before search/source/downloader diagnostics
+  and runtime-status summaries stringify their raw inputs; distinguish episode
+  exclusions from missing season-pack markers in ranking diagnostics.
+
 ## 0.24.0 - 2026-09-04
 
 ### Added

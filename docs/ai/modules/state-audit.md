@@ -78,6 +78,13 @@ Persist local lifecycle knowledge and durable decision evidence.
 - runtime retention is 2 MiB per file with three backups, owner-only (`0600`),
   and bounded read-only tails. Logging file failures warn once until recovery
   and must not break search or downloader operations,
+- isolate malformed/unprintable diagnostic values with a payload-free fallback
+  event; bound the complete file record, not just its details. Runtime tails
+  remain available when another log source fails, with explicit partial-source
+  warnings rather than an empty or failed timeline,
+- sanitize validation exceptions before stringifying them into runtime events,
+  warning summaries, or decisions; generic text redaction cannot reliably remove
+  arbitrary raw input embedded in framework exception reprs,
 - keep state changes explainable and reviewable.
 - renew the mutable scheduler lease in the background during long tracker,
   prune, discovery, and intent phases, and verify ownership at phase boundaries,

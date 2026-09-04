@@ -136,6 +136,54 @@ def test_runtime_file_failure_does_not_break_operation(tmp_path: Path, capsys) -
     assert sum(row["event"] == "still.running" for row in rows) == 2
 
 
+def test_malformed_log_details_never_escape_or_expose_raw_record(tmp_path: Path, capsys) -> None:
+    path = tmp_path / "events.jsonl"
+    configure_logging("INFO", log_path=path)
+    circular = {"api_key": "private-value"}
+    circular["nested"] = circular
+
+    class BrokenValue:
+        def __str__(self):
+            raise RuntimeError("private-value")
+
+    log_event(get_logger("test"), logging.INFO, "circular", payload=circular)
+    log_event(get_logger("test"), logging.INFO, "unprintable", payload=BrokenValue())
+    log_event(get_logger("test"), logging.INFO, "healthy")
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "private-value" not in captured.err
+    assert "private-value" not in path.read_text()
+    for text in (captured.err, path.read_text()):
+        rows = [json.loads(line) for line in text.splitlines()]
+        assert [row["event"] for row in rows] == [
+            "logging.serialization_failed", "logging.serialization_failed", "healthy"
+        ]
+        assert rows[0]["details"]["error_type"] == "ValueError"
+        assert rows[1]["details"]["error_type"] == "RuntimeError"
+
+
+def test_oversized_event_name_cannot_exceed_runtime_file_limit(tmp_path: Path) -> None:
+    path = tmp_path / "events.jsonl"
+    handler = RuntimeFileHandler(path, max_bytes=1024)
+    handler.setFormatter(JsonLogFormatter())
+    record = logging.LogRecord("seed_agent.test", logging.ERROR, __file__, 1, "x" * 8192, (), None)
+    handler.handle(record)
+    assert path.stat().st_size <= 1024
+    row = json.loads(path.read_text())
+    assert row["event"] == "logging.record_truncated"
+    assert row["level"] == "error"
+
+
+def test_runtime_file_can_encode_unpaired_surrogate(tmp_path: Path) -> None:
+    path = tmp_path / "events.jsonl"
+    handler = RuntimeFileHandler(path)
+    handler.setFormatter(JsonLogFormatter())
+    record = logging.LogRecord("seed_agent.test", logging.INFO, __file__, 1, "surrogate", (), None)
+    record.details = {"text": "bad unicode \ud800"}
+    handler.handle(record)
+    assert json.loads(path.read_text())["event"] == "surrogate"
+
+
 def test_runtime_multiple_processes_append_complete_records(tmp_path: Path) -> None:
     path = tmp_path / "events.jsonl"
     code = """
@@ -200,3 +248,61 @@ def test_validation_error_does_not_log_raw_secret_input() -> None:
     assert "bool_type" in text
     assert "private-value" not in text
     assert "api_key_value" not in text
+
+
+@pytest.mark.asyncio
+async def test_search_failure_redacts_validation_input_at_the_first_log_boundary(
+    tmp_path: Path, capsys,
+) -> None:
+    from pydantic import BaseModel, ValidationError
+
+    from seed_agent.actions.intent import add_intent, search_intents_batch
+    from seed_agent.config import IntentConfig, SearchConfig
+    from seed_agent.state import StateStore
+
+    class Response(BaseModel):
+        enabled: bool
+
+    class Provider:
+        async def search(self, intent):
+            Response.model_validate({"enabled": "private-input"})
+
+    path = tmp_path / "events.jsonl"
+    configure_logging("INFO", log_path=path)
+    store = StateStore(tmp_path / "state.db")
+    intent, _ = add_intent("Example 2026", store)
+    with pytest.raises(ValidationError):
+        await search_intents_batch([intent], store, [Provider()], IntentConfig(),
+                                   SearchConfig(), source="web")
+    for text in (path.read_text(), capsys.readouterr().err):
+        assert "private-input" not in text
+        failure = next(json.loads(line) for line in text.splitlines()
+                       if json.loads(line)["event"] == "intent.search_batch.failed")
+        assert "validation failed" in failure["details"]["error"]
+    assert store.list_want_search_runs() == []
+
+
+def test_exception_summaries_and_runtime_status_omit_validation_input(monkeypatch) -> None:
+    from pydantic import BaseModel, ValidationError
+
+    from seed_agent import cli
+    from seed_agent.actions import pt, qb
+
+    class Draft(BaseModel):
+        enabled: bool
+
+    with pytest.raises(ValidationError) as caught:
+        Draft.model_validate({"enabled": "private-input"})
+    for summarize in (cli._runtime_error_summary, pt._runtime_error_summary, qb._error_summary):
+        assert "private-input" not in summarize(caught.value)
+        assert "validation failed" in summarize(caught.value)
+
+    def fail_config(path):
+        raise caught.value
+
+    monkeypatch.setattr(cli, "load_config", fail_config)
+    payload = cli._runtime_status_payload(
+        Path("config.yaml"), heartbeat_file=None, max_staleness_minutes=5
+    )
+    assert payload["status"] == "config_error"
+    assert "private-input" not in json.dumps(payload)
