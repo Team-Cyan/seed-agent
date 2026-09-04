@@ -16,6 +16,9 @@ Expose the operator-facing command surface and safe summaries.
 - config loading,
 - dry-run defaults,
 - safe JSON summaries,
+- centralized redacted JSON logging to stderr with `SEED_AGENT_LOG_LEVEL`
+  (default INFO); never mix diagnostic events into CLI stdout JSON. Web and
+  scheduler additionally persist bounded runtime events beside the state DB,
 - site probe diagnostics,
 - unattended `schedule-run` orchestration for server-side polling,
 - local `web` settings UI server for safe configuration editing,
@@ -28,8 +31,11 @@ Expose the operator-facing command surface and safe summaries.
 - read-only web API endpoints for state summary, configured budget pools, and
   heartbeat health,
 - a read-only Web UI operations log that merges persisted scheduler phase,
-  tracker API, Want List search, and redacted audit events into a filterable
+  tracker API, Want List search, redacted audit, and runtime events into a filterable
   timeline without mounting the Docker socket or depending on container stdout,
+- correlate HTTP request events and nested search/source work with a generated
+  `request_id` and `X-Request-ID` response header; successful reads are DEBUG,
+  writes INFO, client rejections WARNING, and server failures ERROR,
 - web Want List endpoints for listing canonical Douban/IMDb wants, triggering
   search-only dry runs for current filters or a single item, reviewing saved
   release candidates, and enqueueing one reviewed release through the same

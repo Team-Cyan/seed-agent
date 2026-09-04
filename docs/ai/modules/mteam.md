@@ -98,9 +98,12 @@ Current fallback still present in code:
   `release_preferences.quality_tag_scores` rather than inventing M-Team-only Remux/Profile
   switches. Use `want_decision.series_search_mode` for season-pack vs episode behavior.
 - ID-first intent search should not put quality terms such as Remux into the
-  API keyword field. Fetch by Douban/IMDb ID first, supplement with a broad
-  title/year keyword query, then apply generic quality preferences during
+  API keyword field. Send canonical full Douban/IMDb URLs without `mode`, and
+  do not fall back to titles when identifiers exist. Apply generic quality preferences during
   ranking so lower-match candidates remain visible for operator override.
+- DEBUG runtime events expose the safe search endpoint/payload, page row
+  counts, and local filter counts; INFO retains query-path and result summaries.
+  Never log request headers, cookies, API keys, or generated download tokens.
 - Want List search may return NORMAL/non-free releases because it represents a
   requested acquisition. This does not weaken the separate PT upload-farming
   free-only gate.

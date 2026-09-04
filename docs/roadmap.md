@@ -495,6 +495,15 @@ by completion period, and unfinished work is ordered by current priority.
     healthcheck smoke run, matching the container runtime contract so a
     successful `main` CI run can publish the current GHCR image.
 
+- Completed 2026-09 - Correlated runtime and search diagnostics
+  - Structured redacted runtime events cover Web, scheduler, source ingestion,
+    tracker requests, search/ranking, and downloader actions at appropriate levels.
+  - Web and scheduler share bounded process-safe JSONL logs; Run logs exposes
+    runtime events, details, and request IDs without Docker socket access.
+  - Per-Want history retains query attempts, classification, and pre/post-filter
+    result counts in the existing atomic search transaction. Failed requests
+    remain distinguishable from successful searches with zero results.
+
 - Next P0 - Add scheduler and Web preview integration coverage
   - Add fake downloader/provider fixtures that can run a scheduler cycle without
     touching qBittorrent or a tracker.

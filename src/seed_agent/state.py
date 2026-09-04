@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from seed_agent.audit import redact_payload
 from seed_agent.models import (
     IntentState,
     LifecycleState,
@@ -2258,6 +2259,7 @@ class StateStore:
         source: str,
         run_id: str | None = None,
         searched_at: datetime | None = None,
+        history_payloads: dict[str, dict[str, Any]] | None = None,
     ) -> int:
         """Atomically replace candidates, intent states, and history for a search batch."""
         if not results:
@@ -2328,6 +2330,21 @@ class StateStore:
                     ),
                 )
                 best_score = max((item.score for item in ranked), default=None)
+                history_payload = {
+                    "state": effective_intent.state.value,
+                    "title": effective_intent.title,
+                }
+                diagnostics = (history_payloads or {}).get(intent.intent_id)
+                if diagnostics:
+                    history_payload.update(
+                        redact_payload(
+                            {
+                                key: diagnostics[key]
+                                for key in ("provider_diagnostics", "search_summary")
+                                if key in diagnostics
+                            }
+                        )
+                    )
                 history_rows.append(
                     (
                         intent.intent_id,
@@ -2342,12 +2359,7 @@ class StateStore:
                         0,
                         None,
                         None,
-                        _json_dumps(
-                            {
-                                "state": effective_intent.state.value,
-                                "title": effective_intent.title,
-                            }
-                        ),
+                        _json_dumps(history_payload),
                     )
                 )
                 committed += 1

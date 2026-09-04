@@ -128,7 +128,7 @@ def test_scheduler_cycle_uses_local_fakes_and_persists_all_phases(
     )
 
     assert result.exit_code == 0, result.output
-    summary = json.loads(result.output.splitlines()[-1])
+    summary = json.loads(result.stdout.splitlines()[-1])
     run_id = summary["run_id"]
     assert summary["intent_search_enabled"] is True
     assert summary["prune"]["managed_count"] == 1
@@ -173,7 +173,7 @@ def test_scheduler_cli_rejects_second_owner_before_runtime_work(tmp_path: Path) 
     )
 
     assert result.exit_code == 1
-    payload = json.loads(result.output)
+    payload = json.loads(result.stdout)
     assert payload["error"] == "scheduler lease is already held"
     assert payload["scheduler_lease"]["owner_id"] == "already-running"
     assert store.list_scheduler_runs() == []

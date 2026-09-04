@@ -337,7 +337,7 @@ def test_capacity_guard_wait_survives_transient_downloader_failure(monkeypatch) 
 
 
 def _json_output(result) -> dict[str, object]:
-    parsed = json.loads(result.output)
+    parsed = json.loads(result.stdout)
     assert isinstance(parsed, dict)
     return parsed
 
@@ -783,7 +783,7 @@ def test_run_once_skips_previously_enqueued_candidate(tmp_path: Path, monkeypatc
     result = CliRunner().invoke(cli.app, ["run-once", "--config", str(config_path)])
 
     assert result.exit_code == 0
-    payload = json.loads(result.output)
+    payload = json.loads(result.stdout)
     assert payload["accepted"] == 0
     assert payload["skipped_existing"] == 1
     assert payload["enqueued"] == 0

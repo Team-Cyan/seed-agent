@@ -8,6 +8,7 @@ Persist local lifecycle knowledge and durable decision evidence.
 
 - `src/seed_agent/state.py`
 - `src/seed_agent/audit.py`
+- `src/seed_agent/observability.py`
 - `tests/test_state.py`
 - `tests/test_audit.py`
 
@@ -40,6 +41,10 @@ Persist local lifecycle knowledge and durable decision evidence.
 - revive stale `deleted` candidate state when the same hash appears in the qB
   live list again,
 - write append-only redacted audit records.
+- emit structured redacted runtime JSON to stderr and, for Web/scheduler,
+  `.seed-agent/runtime-events.jsonl`; keep runtime retention separate from
+  durable audit/state retention. Use a stable cross-process flock and reopen
+  each append so concurrent Web/scheduler rotations cannot orphan writes.
 
 ## Expectations
 
@@ -66,6 +71,13 @@ Persist local lifecycle knowledge and durable decision evidence.
   and search history in one `BEGIN IMMEDIATE` transaction after network search completes.
   A failed batch write must roll back every intent, and a terminal or selected
   intent observed at commit time must not be overwritten by stale search data,
+- keep per-intent `provider_diagnostics` and `search_summary` inside the same
+  search-history transaction, including kind/media type, series search mode,
+  returned/ranked/filtered/accepted counts. Never add a duplicate standalone
+  successful history insert; failures instead emit separate runtime events,
+- runtime retention is 2 MiB per file with three backups, owner-only (`0600`),
+  and bounded read-only tails. Logging file failures warn once until recovery
+  and must not break search or downloader operations,
 - keep state changes explainable and reviewable.
 - renew the mutable scheduler lease in the background during long tracker,
   prune, discovery, and intent phases, and verify ownership at phase boundaries,
@@ -101,3 +113,4 @@ Persist local lifecycle knowledge and durable decision evidence.
 ## Verification
 
 - `uv run pytest -q tests/test_state.py tests/test_audit.py`
+- `uv run pytest -q tests/test_observability.py tests/test_web_settings.py`

@@ -142,7 +142,7 @@ def _mteam_deferred_ranked(intent_id: str) -> RankedRelease:
 
 
 def _json_output(result) -> dict[str, object]:
-    parsed = json.loads(result.output)
+    parsed = json.loads(result.stdout)
     assert isinstance(parsed, dict)
     return parsed
 

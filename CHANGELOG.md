@@ -4,6 +4,25 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.24.0 - 2026-09-04
+
+### Added
+
+- Add redacted structured runtime logging with configurable DEBUG/INFO/WARNING/
+  ERROR levels across Web requests, scheduler phases, source refresh, M-Team
+  queries, intent search/ranking, and downloader enqueue/cleanup operations.
+- Persist bounded, process-safe runtime log files alongside state and expose
+  them in Run logs with level filters, searchable event details, and request IDs.
+- Show the latest 50 searches for each Want, including provider query attempts,
+  resource classification, and returned/ranked/accepted counts. Search history
+  remains atomic with candidate/state writes; failed requests leave runtime
+  evidence without creating successful search history.
+
+### Fixed
+
+- Honor the bounded `/api/logs?limit=` parameter and preserve warning severity
+  for backoff and scheduler warning events.
+
 ## 0.23.3 - 2026-09-03
 
 ### Fixed

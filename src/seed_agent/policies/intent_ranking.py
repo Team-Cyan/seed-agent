@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import logging
 import re
 
 from seed_agent.config import IntentConfig, SearchConfig
 from seed_agent.models import Discount, IntentKind, RankedRelease, ReleaseCandidate, ResourceIntent
+from seed_agent.observability import get_logger, log_event
 from seed_agent.quality_tags import (
     QUALITY_TAG_GROUPS,
     matching_quality_tag_groups,
@@ -22,6 +24,9 @@ SEASON_TOKEN_WITH_NUMBER_RE = re.compile(
     r"(?<![a-z0-9])s0*(?P<season>\d{1,2})(?!\d)[ ._-]*(?P<number>\d{1,4})(?![a-z0-9])",
     re.IGNORECASE,
 )
+
+
+logger = get_logger("intent.ranking")
 
 
 def rank_releases(
@@ -63,6 +68,12 @@ def rank_releases(
                 "risks": [*ordered[0].risks, "ambiguous top candidates"],
             }
         )
+    for item in ordered:
+        log_event(logger, logging.DEBUG, "intent.candidate.ranked",
+                  intent_id=intent.intent_id, release_id=item.release.release_id,
+                  score=item.score, accepted=item.accepted,
+                  confirmation_required=item.confirmation_required,
+                  reasons=item.reasons, risks=item.risks)
     return ordered
 
 
@@ -268,11 +279,16 @@ def filter_releases(
     releases: list[ReleaseCandidate],
     intent_config: IntentConfig,
 ) -> list[ReleaseCandidate]:
-    return [
-        release
-        for release in releases
-        if _is_candidate_eligible(intent, release, intent_config)
-    ]
+    eligible = []
+    for release in releases:
+        if _is_candidate_eligible(intent, release, intent_config):
+            eligible.append(release)
+        else:
+            log_event(logger, logging.DEBUG, "intent.candidate.filtered",
+                      intent_id=intent.intent_id, release_id=release.release_id,
+                      reason="not_a_full_season_pack", kind=intent.kind.value,
+                      series_search_mode=intent_config.series_search_mode)
+    return eligible
 
 
 def _quality_tag_score_adjustment(

@@ -6,6 +6,7 @@ import base64
 import binascii
 import errno
 import json
+import logging
 import os
 import re
 import signal
@@ -83,6 +84,7 @@ from seed_agent.models import (
     TorrentCandidate,
     safe_url_identity,
 )
+from seed_agent.observability import RUNTIME_LOG_NAME, configure_logging, get_logger, log_event
 from seed_agent.policies.category_policy import PoolUsage, usage_by_pool
 from seed_agent.policies.quality import candidate_value_score, torrent_eviction_evidence
 from seed_agent.search.base import SearchProvider
@@ -147,6 +149,7 @@ CONFIG_RULE_SECTIONS = (
     "scheduler",
     "metrics",
 )
+logger = get_logger("cli")
 
 
 @app.callback(invoke_without_command=True)
@@ -162,6 +165,7 @@ def main(
     ] = False,
 ) -> None:
     """Seed Agent CLI."""
+    configure_logging()
     if version:
         typer.echo(__version__)
         raise typer.Exit()
@@ -173,6 +177,7 @@ def main(
 def discover(
     config: Annotated[Path, typer.Option("--config")] = DEFAULT_CONFIG,
 ) -> None:
+    log_event(logger, logging.INFO, "cli.discover.started", config=str(config))
     loaded = load_config(config)
     candidates = _discover_candidates(loaded)
     payload = {
@@ -182,6 +187,14 @@ def discover(
         "candidates": [_candidate_summary(candidate) for candidate in candidates],
     }
     _attach_discovery_warnings(payload)
+    log_event(
+        logger,
+        logging.INFO,
+        "cli.discover.completed",
+        config=str(config),
+        candidate_count=len(candidates),
+        warning_count=len(payload.get("discovery_warnings", [])),
+    )
     _print_json(payload)
 
 
@@ -193,11 +206,23 @@ def web(
 ) -> None:
     from seed_agent.web.app import serve
 
+    log_event(logger, logging.INFO, "cli.web.start_requested",
+              config=str(config), host=host, port=port)
     typer.echo(f"Serving seed-agent settings UI at http://{host}:{port}")
     try:
         serve(config, host, port)
     except OSError as exc:
         if exc.errno != errno.EADDRINUSE:
+            log_event(
+                logger,
+                logging.ERROR,
+                "cli.web.failed",
+                config=str(config),
+                host=host,
+                port=port,
+                error_type=type(exc).__name__,
+                error=str(exc),
+            )
             raise
         alternate_port = port + 1
         typer.echo(
@@ -207,6 +232,15 @@ def web(
                 f"seed-agent web --config {config} --host {host} --port {alternate_port}"
             ),
             err=True,
+        )
+        log_event(
+            logger,
+            logging.WARNING,
+            "cli.web.port_in_use",
+            config=str(config),
+            host=host,
+            port=port,
+            alternate_port=alternate_port,
         )
         raise typer.Exit(1) from exc
 
@@ -776,12 +810,31 @@ def run_once(
     ] = False,
     prune: Annotated[bool, typer.Option("--prune/--no-prune")] = False,
 ) -> None:
+    log_event(
+        logger,
+        logging.INFO,
+        "cli.run_once.started",
+        config_name=config.name,
+        execute=execute,
+        prune=prune,
+    )
     payload = _run_once_payload(
         config,
         execute=execute,
         min_free_window_minutes=min_free_window_minutes,
         require_known_free_window=require_known_free_window if execute else False,
         prune=prune,
+    )
+    log_event(
+        logger,
+        logging.ERROR if "error" in payload else logging.INFO,
+        "cli.run_once.completed" if "error" not in payload else "cli.run_once.failed",
+        config_name=config.name,
+        execute=execute,
+        discovered=payload.get("discovered"),
+        accepted=payload.get("accepted"),
+        enqueued=payload.get("enqueued"),
+        error=payload.get("error"),
     )
     _print_json(payload)
     if "error" in payload:
@@ -1432,6 +1485,7 @@ def schedule_run(
         raise typer.BadParameter("max_cycles must be >= 1")
 
     initial_config = load_config(config)
+    configure_logging(log_path=_runtime_root(initial_config) / RUNTIME_LOG_NAME)
     initial_scheduler = initial_config.scheduler.with_overrides(scheduler_option_overrides)
     lease_store = StateStore(_state_path(initial_config))
     lease_owner_id = f"schedule-run:{os.getpid()}:{uuid.uuid4().hex}"
@@ -1440,6 +1494,12 @@ def schedule_run(
         ttl_seconds=initial_scheduler.lease_ttl_minutes * 60,
     )
     if not lease["acquired"]:
+        log_event(
+            logger,
+            logging.WARNING,
+            "scheduler.lease_unavailable",
+            config=str(config),
+        )
         _print_json(
             {
                 "command": "schedule-run",
@@ -1455,6 +1515,15 @@ def schedule_run(
         ttl_seconds=initial_scheduler.lease_ttl_minutes * 60,
     )
     lease_heartbeat.start()
+    log_event(
+        logger,
+        logging.INFO,
+        "scheduler.started",
+        config=str(config),
+        execute=execute,
+        max_cycles=max_cycles,
+        cli_overrides=scheduler_cli_overrides,
+    )
     lease_released = False
     previous_sigterm_handler = signal.getsignal(signal.SIGTERM)
 
@@ -1526,6 +1595,17 @@ def schedule_run(
             backoff_active=bool(backoff.get("active")),
             backoff_until=str(backoff.get("until")) if backoff.get("until") else None,
             summary={"cycle": cycle, "manual_trigger": manual_trigger},
+        )
+        log_event(
+            logger,
+            logging.INFO,
+            "scheduler.cycle_started",
+            run_id=run_id,
+            cycle=cycle,
+            execute=execute,
+            backoff_active=bool(backoff.get("active")),
+            intent_enabled=intent,
+            manual_trigger=manual_trigger is not None,
         )
         _record_schedule_phase(
             store_for_run,
@@ -1932,6 +2012,22 @@ def schedule_run(
             status=_schedule_run_status(summary),
             summary=summary,
         )
+        log_event(
+            logger,
+            logging.ERROR if "error" in payload else
+            logging.WARNING if _schedule_run_status(summary) in {
+                "warning", "rate_limited", "skipped_backoff"
+            } else logging.INFO,
+            "scheduler.cycle_failed" if "error" in payload else "scheduler.cycle_completed",
+            run_id=run_id,
+            cycle=cycle,
+            status=_schedule_run_status(summary),
+            discovered=summary.get("discovered"),
+            accepted=summary.get("accepted"),
+            enqueued=summary.get("enqueued"),
+            intent_search_enabled=summary.get("intent_search_enabled"),
+            error=payload.get("error"),
+        )
         _print_json(summary)
 
         if "error" in payload and max_cycles is not None:
@@ -2216,6 +2312,19 @@ def _record_schedule_phase(
         event=event,
         message=message,
         payload=payload,
+    )
+    log_event(
+        logger,
+        logging.ERROR
+        if "fail" in event or "error" in event
+        else logging.WARNING
+        if "warning" in event or "backoff" in event
+        else logging.INFO,
+        "scheduler.phase",
+        run_id=run_id,
+        phase=phase,
+        phase_event=event,
+        message=message,
     )
     _print_json(event_payload)
 
@@ -6221,6 +6330,7 @@ def _fetch_configured_want_list_events(
     cursor_updates: dict[str, str] | None = None,
     source_warnings: list[dict[str, str]] | None = None,
 ) -> list[SourceIntentEvent]:
+    log_event(logger, logging.INFO, "source.refresh.started")
     events: list[SourceIntentEvent] = []
 
     if config.want_sources.telegram.enabled:
@@ -6309,6 +6419,7 @@ def _fetch_configured_want_list_events(
                 )
         except Exception as exc:
             _append_source_warning(source_warnings, "douban_wanted", exc)
+    log_event(logger, logging.INFO, "source.refresh.completed", event_count=len(events))
     return events
 
 
@@ -6317,6 +6428,7 @@ def _enrich_configured_want_list_events(
     *,
     store: StateStore | None,
 ) -> list[SourceIntentEvent]:
+    log_event(logger, logging.DEBUG, "source.enrichment.started", event_count=len(events))
     enriched = list(events)
     douban_event_indexes = [
         index
@@ -6324,6 +6436,7 @@ def _enrich_configured_want_list_events(
         if event.source == IntentSource.DOUBAN_WANTED
     ]
     _enrich_douban_source_events(enriched, douban_event_indexes, store=store)
+    log_event(logger, logging.DEBUG, "source.enrichment.completed", event_count=len(enriched))
     return enriched
 
 
@@ -6349,6 +6462,8 @@ def _append_source_warning(
     source: str,
     exc: Exception,
 ) -> None:
+    log_event(logger, logging.WARNING, "source.refresh.failed", source_id=source,
+              error_type=type(exc).__name__, error=_runtime_error_summary(exc))
     if source_warnings is None:
         return
     source_warnings.append(

@@ -1,16 +1,19 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Iterable, Sequence
 
 from seed_agent.config import CategoryPolicyConfig, CleanupConfig
 from seed_agent.downloaders.base import Downloader
 from seed_agent.models import Decision, ManagedTorrent, ScoreBreakdown, TorrentCandidate
+from seed_agent.observability import get_logger, log_event
 from seed_agent.policies.category_policy import PoolUsage
 from seed_agent.policies.cleanup import CleanupDecision, classify_cleanup
 from seed_agent.policies.eviction import rank_eviction_candidates
 
 ROLLBACK_INSTRUCTION = "Delete torrent from qBittorrent if enqueue was accidental"
+logger = get_logger("qb")
 
 
 class MutationBatchError(RuntimeError):
@@ -29,11 +32,22 @@ async def enqueue_candidates(
     pool_usage: PoolUsage | None = None,
     pause_reasons: Sequence[str] | None = None,
 ) -> list[Decision]:
+    scored_items = list(scored)
     decisions: list[Decision] = []
     tags_list = list(policy.tags)
     pause_reasons_list = list(pause_reasons or [])
 
-    for item in scored:
+    log_event(
+        logger,
+        logging.INFO,
+        "qb.enqueue_batch.started",
+        execute=execute,
+        policy=policy.name,
+        candidate_count=len(scored_items),
+        accepted_count=sum(1 for item in scored_items if item.accepted),
+        paused=paused,
+    )
+    for item in scored_items:
         if not item.accepted:
             continue
 
@@ -90,6 +104,16 @@ async def enqueue_candidates(
                         set(tags_list),
                     )
             except Exception as exc:
+                log_event(
+                    logger,
+                    logging.ERROR,
+                    "qb.enqueue.failed",
+                    execute=execute,
+                    policy=policy.name,
+                    candidate_id=item.candidate_id,
+                    error_type=type(exc).__name__,
+                    error=_error_summary(exc),
+                )
                 decisions.append(
                     Decision(
                         action="qb.enqueue.failed",
@@ -118,6 +142,16 @@ async def enqueue_candidates(
             )
         )
 
+    log_event(
+        logger,
+        logging.INFO,
+        "qb.enqueue_batch.completed",
+        execute=execute,
+        policy=policy.name,
+        decision_count=len(decisions),
+        enqueue_decision_count=sum(1 for item in decisions if item.action == "qb.enqueue"),
+        rejected_count=sum(1 for item in decisions if item.action == "qb.enqueue.rejected"),
+    )
     return decisions
 
 
@@ -186,8 +220,19 @@ async def prune_cold_torrents(
     reclaim_target_bytes: int | None = None,
     capacity_delete_limit: int | None = None,
 ) -> list[Decision]:
+    torrent_list = list(torrents)
+    log_event(
+        logger,
+        logging.INFO,
+        "qb.prune_batch.started",
+        execute=execute,
+        policy=policy.name,
+        torrent_count=len(torrent_list),
+        force_space_reclamation=force_space_reclamation,
+        pool_over_budget=bool(pool_usage and pool_usage.over_budget),
+    )
     if policy.mode != "mutable" or not policy.delete_enabled:
-        return [
+        decisions = [
             Decision(
                 action="qb.cleanup.protect",
                 target_id=torrent.hash,
@@ -203,8 +248,17 @@ async def prune_cold_torrents(
                     **_pool_usage_state(pool_usage),
                 },
             )
-            for torrent in torrents
+            for torrent in torrent_list
         ]
+        log_event(
+            logger,
+            logging.INFO,
+            "qb.prune_batch.protected",
+            execute=execute,
+            policy=policy.name,
+            decision_count=len(decisions),
+        )
+        return decisions
 
     decisions: list[Decision] = []
     tags = set(policy.tags)
@@ -222,14 +276,14 @@ async def prune_cold_torrents(
     reclaimed_bytes = 0
     capacity_delete_count = 0
     effective_capacity_delete_limit = (
-        len(torrents)
+        len(torrent_list)
         if pool_usage is not None and pool_usage.over_budget
         else cleanup.max_capacity_deletes_per_run
         if capacity_delete_limit is None
         else max(int(capacity_delete_limit), 0)
     )
 
-    for torrent in rank_eviction_candidates(list(torrents)):
+    for torrent in rank_eviction_candidates(torrent_list):
         if free_window_min_remaining_minutes is not None:
             metadata = dict(torrent.metadata)
             metadata["free_window_min_remaining_minutes"] = free_window_min_remaining_minutes
@@ -329,6 +383,16 @@ async def prune_cold_torrents(
                 if not await _delete_is_absent(downloader, torrent.hash):
                     raise RuntimeError("delete verification failed: torrent still present")
         except Exception as exc:
+            log_event(
+                logger,
+                logging.ERROR,
+                "qb.prune.failed",
+                execute=execute,
+                policy=policy.name,
+                torrent_hash=torrent.hash,
+                error_type=type(exc).__name__,
+                error=_error_summary(exc),
+            )
             decisions.append(
                 _failed_cleanup_decision(
                     torrent,
@@ -356,6 +420,17 @@ async def prune_cold_torrents(
         if classification.action == "delete" and classification.capacity_reclamation:
             capacity_delete_count += 1
 
+    log_event(
+        logger,
+        logging.INFO,
+        "qb.prune_batch.completed",
+        execute=execute,
+        policy=policy.name,
+        decision_count=len(decisions),
+        delete_decision_count=sum(1 for item in decisions if item.action == "qb.cleanup.delete"),
+        protected_count=sum(1 for item in decisions if item.action == "qb.cleanup.protect"),
+        planned_reclaimed_bytes=reclaimed_bytes,
+    )
     return decisions
 
 

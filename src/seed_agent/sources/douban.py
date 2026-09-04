@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -14,10 +15,12 @@ from xml.etree import ElementTree
 import httpx
 
 from seed_agent.models import IntentSource
+from seed_agent.observability import get_logger, log_event
 from seed_agent.sources.base import SourceIntentEvent
 
 DOUBAN_WISH_PAGE_SIZE = 15
 DOUBAN_SUBJECT_CLASSIFICATION_VERSION = 2
+logger = get_logger("source.douban")
 SUBJECT_URL_RE = re.compile(
     r"https?://movie\.douban\.com/subject/(?P<id>\d+)/?",
     re.IGNORECASE,
@@ -338,12 +341,17 @@ def _enrich_event_from_subject(event: SourceIntentEvent, fetch: Any) -> SourceIn
         return event
     try:
         html = fetch(build_douban_mobile_subject_url(douban_id))
-    except Exception:
+    except Exception as exc:
+        log_event(logger, logging.WARNING, "douban.subject_lookup.failed",
+                  douban_id=douban_id, error_type=type(exc).__name__, error=str(exc))
         return replace(
             event,
             metadata={**event.metadata, "subject_lookup_status": "failed"},
         )
     media_type, year = _subject_metadata_from_html(html)
+    log_event(logger, logging.DEBUG, "douban.subject_lookup.completed",
+              douban_id=douban_id, media_type=media_type, year=year,
+              classification_version=DOUBAN_SUBJECT_CLASSIFICATION_VERSION)
     imdb_id = _imdb_id_from_html(html)
     raw_text = _with_year(event.raw_text, year)
     if media_type is None and imdb_id is None and raw_text == event.raw_text:

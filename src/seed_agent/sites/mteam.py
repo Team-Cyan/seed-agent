@@ -5,6 +5,7 @@ import base64
 import hashlib
 import hmac
 import html
+import logging
 import os
 import re
 import threading
@@ -21,6 +22,7 @@ import httpx
 from pydantic import BaseModel, ConfigDict, Field
 
 from seed_agent.models import Discount, TorrentCandidate
+from seed_agent.observability import get_logger, log_event
 
 DetailFetcher = Callable[[str], Awaitable[dict[str, Any] | None]]
 DiscoverFetcher = Callable[..., Awaitable[list[TorrentCandidate]]]
@@ -44,6 +46,7 @@ MTEAM_MIN_REQUEST_INTERVAL_ENV = "SEED_AGENT_MTEAM_MIN_REQUEST_INTERVAL_SECONDS"
 MTEAM_DEFAULT_MIN_REQUEST_INTERVAL_SECONDS = 5.0
 _MTEAM_REQUEST_LOCK = threading.Lock()
 _MTEAM_LAST_REQUEST_AT = 0.0
+logger = get_logger("sites.mteam")
 
 
 @dataclass(frozen=True)
@@ -98,6 +101,8 @@ def is_mteam_rate_limit_message(message: str) -> bool:
 
 def _raise_for_mteam_http_status(response: httpx.Response, *, endpoint: str) -> None:
     status_code = response.status_code
+    log_event(logger, logging.WARNING if status_code >= 400 else logging.DEBUG,
+              "mteam.api.response", endpoint=endpoint, status_code=status_code)
     if status_code >= 400:
         raise MTeamApiResponseError(
             endpoint=endpoint,
@@ -124,6 +129,9 @@ def _mteam_json_object(response: httpx.Response, *, endpoint: str) -> dict[str, 
             message="expected JSON object response",
             status_code=response.status_code,
         )
+    code = str(payload.get("code"))
+    log_event(logger, logging.DEBUG if code == "0" else logging.WARNING,
+              "mteam.api.result", endpoint=endpoint, code=code)
     return payload
 
 
@@ -222,28 +230,60 @@ class MTeamApiClient:
         options: MTeamApiDiscoveryOptions,
     ) -> list[TorrentCandidate]:
         if not self.api_key:
+            log_event(logger, logging.WARNING, "mteam.api.search_skipped", reason="missing_api_key")
             return []
 
         candidates: list[TorrentCandidate] = []
         seen_ids: set[str] = set()
-        async with httpx.AsyncClient(follow_redirects=True, timeout=self.timeout) as client:
-            for page_number in range(
-                options.page_number,
-                options.page_number + options.max_pages,
-            ):
-                page_options = options.model_copy(update={"page_number": page_number})
-                page_candidates, raw_row_count = await self._discover_torrent_page(
-                    client,
-                    site=site,
-                    options=page_options,
-                )
-                for candidate in page_candidates:
-                    if candidate.stable_id in seen_ids:
-                        continue
-                    candidates.append(candidate)
-                    seen_ids.add(candidate.stable_id)
-                if raw_row_count < options.page_size:
-                    break
+        log_event(
+            logger,
+            logging.DEBUG,
+            "mteam.api.search_started",
+            site=site,
+            query_path=_search_query_path(options),
+            mode_present=options.mode is not None,
+            page_number=options.page_number,
+            max_pages=options.max_pages,
+            page_size=options.page_size,
+        )
+        try:
+            async with httpx.AsyncClient(follow_redirects=True, timeout=self.timeout) as client:
+                for page_number in range(
+                    options.page_number,
+                    options.page_number + options.max_pages,
+                ):
+                    page_options = options.model_copy(update={"page_number": page_number})
+                    page_candidates, raw_row_count = await self._discover_torrent_page(
+                        client,
+                        site=site,
+                        options=page_options,
+                    )
+                    for candidate in page_candidates:
+                        if candidate.stable_id in seen_ids:
+                            continue
+                        candidates.append(candidate)
+                        seen_ids.add(candidate.stable_id)
+                    if raw_row_count < options.page_size:
+                        break
+        except (httpx.HTTPError, MTeamApiResponseError) as exc:
+            log_event(
+                logger,
+                logging.WARNING if isinstance(exc, MTeamApiResponseError) else logging.ERROR,
+                "mteam.api.search_failed",
+                site=site,
+                query_path=_search_query_path(options),
+                error_type=type(exc).__name__,
+                error=str(exc),
+            )
+            raise
+        log_event(
+            logger,
+            logging.DEBUG,
+            "mteam.api.search_completed",
+            site=site,
+            query_path=_search_query_path(options),
+            candidate_count=len(candidates),
+        )
         return candidates
 
     async def _discover_torrent_page(
@@ -255,6 +295,8 @@ class MTeamApiClient:
     ) -> tuple[list[TorrentCandidate], int]:
         candidates: list[TorrentCandidate] = []
         await self._wait_for_request_slot()
+        log_event(logger, logging.DEBUG, "mteam.api.search_request",
+                  endpoint=f"{self.API_BASE_URL}/torrent/search", payload=_search_payload(options))
         response = await client.post(
             f"{self.API_BASE_URL}/torrent/search",
             headers={
@@ -277,6 +319,15 @@ class MTeamApiClient:
             )
 
         rows = _extract_search_rows(payload)
+        log_event(
+            logger,
+            logging.DEBUG,
+            "mteam.api.search_page_received",
+            site=site,
+            query_path=_search_query_path(options),
+            page_number=options.page_number,
+            raw_row_count=len(rows),
+        )
         for row in rows:
             if not _row_meets_thresholds(row, options):
                 continue
@@ -284,6 +335,9 @@ class MTeamApiClient:
             if candidate is None:
                 continue
             candidates.append(candidate)
+        log_event(logger, logging.DEBUG, "mteam.api.search_page_filtered",
+                  site=site, page_number=options.page_number, raw_row_count=len(rows),
+                  candidate_count=len(candidates), filtered_count=len(rows) - len(candidates))
         return candidates, len(rows)
 
     async def fetch_torrent_detail(self, torrent_id: str) -> dict[str, Any] | None:
@@ -955,6 +1009,16 @@ def _search_payload(options: MTeamApiDiscoveryOptions) -> dict[str, Any]:
         discount = "FREE"
     _put_optional(payload, "discount", discount)
     return payload
+
+
+def _search_query_path(options: MTeamApiDiscoveryOptions) -> str:
+    if options.douban:
+        return "douban_id"
+    if options.imdb:
+        return "imdb_id"
+    if options.keyword:
+        return "keyword"
+    return "browse"
 
 
 def _api_sort_field(sort_field: str) -> str:

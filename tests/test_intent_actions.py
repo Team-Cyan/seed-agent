@@ -12,6 +12,7 @@ from seed_agent.actions.intent import (
     rank_intent,
     run_intent_once,
     search_intent,
+    search_intents_batch,
 )
 from seed_agent.config import CategoryPolicyConfig, IntentConfig, SearchConfig
 from seed_agent.models import (
@@ -31,6 +32,46 @@ REQUESTED_AT = datetime(2026, 4, 22, tzinfo=UTC)
 
 class _UnusedDownloader:
     pass
+
+
+@pytest.mark.asyncio
+async def test_search_history_distinguishes_api_results_from_series_filter(tmp_path: Path) -> None:
+    store = StateStore(tmp_path / "state.db")
+    intent, _ = add_intent("Animated Movie 2026", store,
+                           metadata={"media_type": "anime"})
+
+    class Provider:
+        search_diagnostics = []
+
+        async def search(self, searched):
+            self.search_diagnostics.append({
+                "intent_id": searched.intent_id, "site": "mt", "requests_used": 1,
+                "release_count": 1, "attempts": [{"query_path": "douban_id", "status": "ok",
+                                                    "result_count": 1}],
+            })
+            return [ReleaseCandidate(
+                release_id="mt:1", site="mt", title="Animated Movie 2026 BluRay",
+                source_url="https://tracker.example/detail/1",
+                download_url="mteam-api://torrent/1", size_bytes=1000,
+                seeders=10, leechers=1, discount=Discount.NORMAL,
+            )]
+
+    provider = Provider()
+    for _ in range(2):
+        batch = await search_intents_batch([intent], store, [provider],
+                                          IntentConfig(), SearchConfig(), source="web")
+        assert batch.committed == 1
+    runs = store.list_want_search_runs(intent_id=intent.intent_id)
+    assert len(runs) == 2
+    for row in runs:
+        payload = json.loads(row["payload_json"])
+        assert row["results_count"] == 0
+        assert payload["search_summary"] == {
+            "kind": "show", "media_type": "anime", "series_search_mode": "season",
+            "release_count": 1, "ranked_count": 0, "filtered_count": 1, "accepted_count": 0,
+        }
+        assert len(payload["provider_diagnostics"]) == 1  # no previous-search diagnostics
+        assert payload["provider_diagnostics"][0]["attempts"][0]["result_count"] == 1
 
 
 def _policy() -> CategoryPolicyConfig:

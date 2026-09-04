@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
@@ -11,6 +12,7 @@ import httpx
 
 from seed_agent.config import DiscoveryConfig, ScoringConfig, SeedAgentConfig
 from seed_agent.models import Discount, ManagedTorrent, ScoreBreakdown, TorrentCandidate
+from seed_agent.observability import get_logger, log_event
 from seed_agent.policies.scoring import score_candidate
 from seed_agent.sites.mteam import (
     MTeamApiClient,
@@ -41,6 +43,7 @@ class SiteDiscoveryWarning:
 
 
 _LAST_DISCOVERY_WARNINGS: tuple[SiteDiscoveryWarning, ...] = ()
+logger = get_logger("pt")
 
 
 def get_last_discovery_warnings() -> list[dict[str, Any]]:
@@ -54,6 +57,13 @@ def _append_runtime_warning(warning: SiteDiscoveryWarning) -> None:
 
 async def discover_candidates(config: SeedAgentConfig) -> list[TorrentCandidate]:
     global _LAST_DISCOVERY_WARNINGS
+    log_event(
+        logger,
+        logging.INFO,
+        "pt.discovery.started",
+        enabled_site_count=len(config.enabled_sites),
+        sites=[site.name for site in config.enabled_sites],
+    )
     tasks = [
         _discover_site_candidates(site, config.config_dir, config.pt_filters)
         for site in config.enabled_sites
@@ -65,6 +75,13 @@ async def discover_candidates(config: SeedAgentConfig) -> list[TorrentCandidate]
     for site, result in zip(config.enabled_sites, results, strict=False):
         if isinstance(result, SiteDiscoveryConfigError):
             _LAST_DISCOVERY_WARNINGS = tuple(warnings)
+            log_event(
+                logger,
+                logging.ERROR,
+                "pt.discovery.configuration_error",
+                site=site.name,
+                error=str(result),
+            )
             raise result
         if isinstance(result, Exception):
             rate_limited = bool(isinstance(result, MTeamApiResponseError) and result.rate_limited)
@@ -82,10 +99,27 @@ async def discover_candidates(config: SeedAgentConfig) -> list[TorrentCandidate]
                     unavailable=unavailable,
                 )
             )
+            log_event(
+                logger,
+                logging.WARNING,
+                "pt.discovery.site_failed",
+                site=site.name,
+                error_type=type(result).__name__,
+                rate_limited=rate_limited,
+                unavailable=unavailable,
+                error=_runtime_error_summary(result),
+            )
             continue
         candidates.extend(result)
 
     _LAST_DISCOVERY_WARNINGS = tuple(warnings)
+    log_event(
+        logger,
+        logging.WARNING if warnings else logging.INFO,
+        "pt.discovery.completed",
+        candidate_count=len(candidates),
+        warning_count=len(warnings),
+    )
     return candidates
 
 
@@ -115,6 +149,14 @@ async def _discover_site_candidates(
         candidates: list[TorrentCandidate] = []
         seen_ids: set[str] = set()
         for options in _mteam_api_options_list(site.api_discovery, discovery_config):
+            log_event(
+                logger,
+                logging.DEBUG,
+                "pt.discovery.mteam_query",
+                site=site.name,
+                mode=options.mode,
+                page_size=options.page_size,
+            )
             page_candidates = await fetch_mteam_api_candidates(
                 site=site.name,
                 api_key=api_key,

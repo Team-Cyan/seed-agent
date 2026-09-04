@@ -12,7 +12,7 @@ operations.
 | Surface | Primary use | Risk level | Notes |
 | --- | --- | --- | --- |
 | Status and health | Read scheduler heartbeat, next-cycle timing, rate-limit history, state summary, budget-pool config, and Want List state. | Read-only plus explicit scheduler controls | The overview owns runtime status and the deliberate actions to trigger one cycle or clear the current M-Team backoff. Trigger requests are accepted only while the existing scheduler is waiting; clearing backoff uses an inline confirmation. |
-| Run logs | Filter and search scheduler phase, tracker API, Want List search, and redacted audit events. | Read-only | The timeline uses durable application evidence, survives process restarts, and does not require Docker socket access. Raw Docker/Unraid stdout remains available through the host's container log viewer. |
+| Run logs | Filter and search scheduler phase, tracker API, Want List search, audit, and runtime events. | Read-only | Persisted evidence survives process restarts; runtime events use bounded rotation. No Docker socket access is required. Container logs remain available through the host's log viewer. |
 | Settings pages | Edit tracker, downloader, scheduler, discovery, cleanup, acquisition, and Want List source settings. | Preview-first config mutation | The Scheduler page is configuration-only. Non-tracker sections show a before/after diff preview and validate the full config before saving. Secret values stay in local secret files or secret refs. |
 | Tracker actions | Validate a tracker draft, run site probe, or dry-run a tracker-local discovery preview. | Preview/read-only network access | These actions may call tracker APIs or RSS endpoints, but they must not enqueue to qBittorrent or clean up torrents. |
 | Want List refresh | Sync configured Douban/IMDb sources into local intent state. | Local state mutation | It may read public/export source data and update `.seed-agent/state.db`, but it does not contact qBittorrent. |
@@ -86,6 +86,45 @@ Use the CLI when the work is batch-oriented, unattended, or high risk:
 
 When in doubt, start with the Web UI for read-only status and config previews,
 then use the CLI for execution or deeper evidence.
+
+## Runtime Logging
+
+`SEED_AGENT_LOG_LEVEL` controls runtime verbosity (default `INFO`). Set it on
+the Web and scheduler processes, then restart those processes to apply it.
+`DEBUG` is intended for temporary diagnosis, not normal operation:
+
+- `DEBUG`: successful HTTP reads, safe M-Team search payloads and page counts,
+  provider steps, candidate filter/score reasons, subject classification, and
+  downloader request status.
+- `INFO`: lifecycle and phase boundaries, successful Web writes, search result
+  summaries, and enqueue/cleanup decision counts (with an explicit `execute` flag).
+- `WARNING`: rejected requests, configuration conflicts, partial source failure,
+  tracker backoff/API rejection, or unavailable runtime log storage.
+- `ERROR`: failed operations, search/persistence failures, server/database errors,
+  and downloader mutation failures. A zero-result search alone is not an error.
+
+Events are redacted JSON lines on stderr; CLI stdout remains machine-readable.
+Web and scheduler also write `.seed-agent/runtime-events.jsonl`, capped at
+2 MiB with three backups (about 8 MiB total). Files are owner-only and rotate
+safely across both processes. This is a bounded diagnostic timeline, not a
+replacement for durable SQLite history or the decision audit log.
+
+Run logs merges runtime events with existing scheduler/tracker/Want/audit
+evidence. Filter by `runtime` and level, search an intent ID or `request_id`,
+and expand event details. `X-Request-ID` in a Web response identifies its nested
+work. Successful reads log only at DEBUG to keep normal polling quiet.
+`/api/logs?limit=500` is the maximum; each source uses bounded tail reads.
+Historical events predating this release cannot be reconstructed.
+
+For a missing Want candidate, open that Want's candidate dialog and expand
+Search history (latest 50 per item, independent of the global timeline):
+
+1. Check query paths and provider result counts.
+2. Compare returned, ranked, and accepted counts plus `kind`, `media_type`, and
+   `series_search_mode`. Returned > 0 but ranked = 0 points to eligibility
+   filtering; ranked > 0 but accepted = 0 points to ranking thresholds.
+3. Check Run logs for failures/backoff/rejected requests. Failed batches do not
+   create successful search-history rows or partially replace candidates.
 
 ## Want List Workflow
 

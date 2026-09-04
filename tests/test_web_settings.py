@@ -600,7 +600,60 @@ def test_http_logs_merges_durable_events_and_redacts_secrets(tmp_path: Path) -> 
     assert payload["entries"][2]["level"] == "warning"
     assert "secret-pass" not in json.dumps(payload)
     assert "<redacted>" in json.dumps(payload)
-    assert payload["sources"] == ["scheduler", "tracker", "want", "audit"]
+    assert payload["sources"] == ["scheduler", "tracker", "want", "audit", "runtime"]
+
+
+@pytest.mark.parametrize("query,expected", [("limit=1", 1), ("limit=90000", 500),
+                                           ("limit=-3", 1), ("limit=nope", 200)])
+def test_http_log_limit_is_bounded(tmp_path: Path, query: str, expected: int) -> None:
+    config_path = _write_minimal_config(tmp_path)
+    with _running_server(config_path) as base_url:
+        payload = _request_json(base_url, "GET", f"/api/logs?{query}")
+    assert payload["limit"] == expected
+
+
+def test_http_failed_search_has_correlated_redacted_runtime_evidence(tmp_path: Path, monkeypatch):
+    import logging
+
+    from seed_agent.observability import RUNTIME_LOG_NAME, JsonLogFormatter, RuntimeFileHandler
+
+    config_path = _write_minimal_config(tmp_path)
+    store = StateStore(tmp_path / ".seed-agent" / "state.db")
+    from seed_agent.actions.intent import add_intent
+    intent, _ = add_intent("Example Movie 2026", store)
+
+    class BrokenProvider:
+        async def search(self, intent):
+            raise RuntimeError("request failed https://tracker.example/search?token=hidden-key")
+
+    monkeypatch.setattr(web_app, "_build_want_search_providers", lambda config: [BrokenProvider()])
+    logger = logging.getLogger("seed_agent")
+    original_level = logger.level
+    handler = RuntimeFileHandler(tmp_path / ".seed-agent" / RUNTIME_LOG_NAME)
+    handler.setFormatter(JsonLogFormatter())
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
+    try:
+        with _running_server(config_path) as base_url:
+            connection = HTTPConnection(base_url)
+            connection.request("POST", f"/api/wants/{intent.intent_id}/search", body="{}",
+                               headers={"Content-Type": "application/json"})
+            response = connection.getresponse()
+            response.read()
+            assert response.status == 400
+            request_id = response.getheader("X-Request-ID")
+            connection.close()
+            logs = _request_json(base_url, "GET", "/api/logs")
+        runtime = [entry for entry in logs["entries"] if entry["source"] == "runtime"]
+        failure = next(row for row in runtime if row["title"] == "intent.search_batch.failed")
+        assert failure["level"] == "error"
+        assert failure["request_id"] == request_id
+        assert "hidden-key" not in json.dumps(logs)
+        assert store.list_want_search_runs(intent_id=intent.intent_id) == []
+    finally:
+        logger.removeHandler(handler)
+        handler.close()
+        logger.setLevel(original_level)
 
 
 def test_http_scheduler_trigger_rejects_running_cycle_and_queues_waiting_cycle(
@@ -870,6 +923,16 @@ def test_http_wants_search_runs_filtered_search_without_downloader(
     assert len(search_runs) == 1
     assert search_runs[0]["status"] == "searched"
     assert search_runs[0]["results_count"] == 0
+
+    with _running_server(config_path) as base_url:
+        candidates = _request_json(
+            base_url,
+            "GET",
+            f"/api/wants/{intent.intent_id}/candidates",
+        )
+
+    assert candidates["search_history"][0]["source"] == "web"
+    assert candidates["search_history"][0]["results_count"] == 0
 
 
 def test_http_wants_search_records_ranked_release_history_without_downloader(

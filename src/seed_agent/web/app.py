@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import secrets
 import sqlite3
+import time
+import uuid
 from asyncio import run
 from contextlib import contextmanager
 from datetime import UTC, datetime
@@ -11,7 +14,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.parse import unquote, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 from seed_agent.actions.intent import (
     enqueue_intent,
@@ -43,6 +46,15 @@ from seed_agent.models import (
     RankedRelease,
     ReleaseCandidate,
     ResourceIntent,
+)
+from seed_agent.observability import (
+    RUNTIME_LOG_BACKUPS,
+    RUNTIME_LOG_NAME,
+    configure_logging,
+    get_logger,
+    log_context,
+    log_event,
+    safe_error_text,
 )
 from seed_agent.policies.intent_ranking import filter_releases
 from seed_agent.quality_tags import matching_quality_tag_groups
@@ -77,6 +89,7 @@ CANONICAL_ICON_SOURCE = (
 )
 SCHEDULE_BACKOFF_FILE = "schedule-backoff.json"
 MAX_JSON_BODY_BYTES = 1024 * 1024
+logger = get_logger("web")
 
 
 class RequestBodyTooLarge(ValueError):
@@ -94,12 +107,29 @@ def make_handler(config_path: Path) -> type[BaseHTTPRequestHandler]:
     root = _repo_root_for_config(resolved_config_path)
 
     class SeedAgentWebHandler(BaseHTTPRequestHandler):
+        def handle_one_request(self) -> None:
+            self._request_started = time.monotonic()
+            self._request_id = uuid.uuid4().hex
+            with log_context(request_id=self._request_id):
+                try:
+                    super().handle_one_request()
+                except Exception as exc:
+                    log_event(
+                        logger,
+                        logging.ERROR,
+                        "web.request.unhandled_error",
+                        error_type=type(exc).__name__,
+                        error=safe_error_text(exc),
+                    )
+                    raise
+
         def do_GET(self) -> None:
             try:
                 metrics_config = load_config(resolved_config_path).metrics
             except OSError, ValueError:
                 metrics_config = None
-            request_path = urlparse(self.path).path
+            parsed_request = urlparse(self.path)
+            request_path = parsed_request.path
             protected = (request_path.startswith("/api/") and request_path != "/api/health") or (
                 metrics_config is not None and request_path == metrics_config.path
             )
@@ -178,7 +208,7 @@ def make_handler(config_path: Path) -> type[BaseHTTPRequestHandler]:
                 )
                 self._send_json(payload, status=status)
                 return
-            if self.path == "/api/ops":
+            if request_path == "/api/ops":
                 try:
                     self._send_json(_ops_payload(root))
                 except Exception as exc:
@@ -190,9 +220,14 @@ def make_handler(config_path: Path) -> type[BaseHTTPRequestHandler]:
                         status=HTTPStatus.SERVICE_UNAVAILABLE,
                     )
                 return
-            if urlparse(self.path).path == "/api/logs":
+            if request_path == "/api/logs":
                 try:
-                    self._send_json(_logs_payload(root))
+                    self._send_json(
+                        _logs_payload(
+                            root,
+                            limit=_bounded_query_limit(parsed_request.query, default=200),
+                        )
+                    )
                 except sqlite3.DatabaseError as exc:
                     self._send_json(
                         _state_database_error_payload(exc),
@@ -218,11 +253,27 @@ def make_handler(config_path: Path) -> type[BaseHTTPRequestHandler]:
             try:
                 self._do_post()
             except RequestBodyTooLarge as exc:
+                log_event(
+                    logger,
+                    logging.WARNING,
+                    "web.request.rejected",
+                    method="POST",
+                    path=urlparse(self.path).path,
+                    reason="body_too_large",
+                )
                 self._send_json(
                     {"error": str(exc)},
                     status=HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
                 )
             except ConfigRevisionConflict as exc:
+                log_event(
+                    logger,
+                    logging.WARNING,
+                    "web.request.conflict",
+                    method="POST",
+                    path=urlparse(self.path).path,
+                    reason="config_revision",
+                )
                 self._send_json(
                     {
                         "error": "config_conflict",
@@ -232,11 +283,29 @@ def make_handler(config_path: Path) -> type[BaseHTTPRequestHandler]:
                     status=HTTPStatus.CONFLICT,
                 )
             except sqlite3.DatabaseError as exc:
+                log_event(
+                    logger,
+                    logging.ERROR,
+                    "web.request.database_error",
+                    method="POST",
+                    path=urlparse(self.path).path,
+                    error_type=type(exc).__name__,
+                    error=safe_error_text(exc),
+                )
                 self._send_json(
                     _state_database_error_payload(exc),
                     status=HTTPStatus.SERVICE_UNAVAILABLE,
                 )
             except Exception as exc:
+                log_event(
+                    logger,
+                    logging.WARNING if isinstance(exc, ValueError) else logging.ERROR,
+                    "web.request.failed",
+                    method="POST",
+                    path=urlparse(self.path).path,
+                    error_type=type(exc).__name__,
+                    error=safe_error_text(exc),
+                )
                 self._send_json(
                     {"status": [{"level": "warning", "message": _friendly_error(exc)}]},
                     status=HTTPStatus.BAD_REQUEST,
@@ -385,11 +454,42 @@ def make_handler(config_path: Path) -> type[BaseHTTPRequestHandler]:
             self._send_json({"error": "not found"}, status=HTTPStatus.NOT_FOUND)
 
         def log_message(self, format: str, *args: object) -> None:
-            return
+            # BaseHTTPServer messages can include an untrusted raw request line.
+            pass
+
+        def log_request(self, code: int | str = "-", size: int | str = "-") -> None:
+            status = int(code) if str(code).isdigit() else 0
+            method = getattr(self, "command", None)
+            level = (
+                logging.ERROR
+                if status >= 500
+                else logging.WARNING
+                if status >= 400
+                else logging.INFO
+                if method == "POST"
+                else logging.DEBUG
+            )
+            log_event(
+                logger,
+                level,
+                "web.request.completed",
+                method=method,
+                path=urlparse(getattr(self, "path", "")).path,
+                status=status,
+                response_bytes=size,
+                elapsed_ms=round((time.monotonic() - self._request_started) * 1000),
+            )
 
         def _authorize_api_request(self) -> bool:
             if _write_request_authorized(dict(self.headers.items())):
                 return True
+            log_event(
+                logger,
+                logging.WARNING,
+                "web.request.unauthorized",
+                method=self.command,
+                path=urlparse(self.path).path,
+            )
             self._send_json({"error": "unauthorized"}, status=HTTPStatus.UNAUTHORIZED)
             return False
 
@@ -398,6 +498,14 @@ def make_handler(config_path: Path) -> type[BaseHTTPRequestHandler]:
             origin = self.headers.get("Origin", "").strip()
             host = self.headers.get("Host", "").strip()
             if fetch_site == "cross-site" or (origin and not _origin_matches_host(origin, host)):
+                log_event(
+                    logger,
+                    logging.WARNING,
+                    "web.request.rejected",
+                    method=self.command,
+                    path=urlparse(self.path).path,
+                    reason="cross_site",
+                )
                 self._send_json(
                     {"error": "cross-site write request rejected"},
                     status=HTTPStatus.FORBIDDEN,
@@ -405,6 +513,14 @@ def make_handler(config_path: Path) -> type[BaseHTTPRequestHandler]:
                 return False
             content_type = self.headers.get("Content-Type", "").partition(";")[0].strip().lower()
             if content_type != "application/json":
+                log_event(
+                    logger,
+                    logging.WARNING,
+                    "web.request.rejected",
+                    method=self.command,
+                    path=urlparse(self.path).path,
+                    reason="content_type",
+                )
                 self._send_json(
                     {"error": "application/json content type is required"},
                     status=HTTPStatus.UNSUPPORTED_MEDIA_TYPE,
@@ -449,6 +565,7 @@ def make_handler(config_path: Path) -> type[BaseHTTPRequestHandler]:
             self.send_response(status)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(payload)))
+            self.send_header("X-Request-ID", self._request_id)
             if content_type == "application/json":
                 self.send_header("Cache-Control", "no-store")
             elif cache_control is not None:
@@ -515,11 +632,30 @@ def _load_config_snapshot(config_path: Path) -> tuple[SeedAgentConfig, str]:
 
 
 def serve(config_path: Path, host: str, port: int) -> None:
+    configure_logging(
+        log_path=_repo_root_for_config(config_path) / ".seed-agent" / RUNTIME_LOG_NAME
+    )
     server = SeedAgentThreadingHTTPServer((host, port), make_handler(config_path))
+    log_event(
+        logger,
+        logging.INFO,
+        "web.server.started",
+        config=str(config_path),
+        host=host,
+        port=port,
+    )
     try:
         server.serve_forever()
     finally:
         server.server_close()
+        log_event(
+            logger,
+            logging.INFO,
+            "web.server.stopped",
+            config=str(config_path),
+            host=host,
+            port=port,
+        )
 
 
 def _tracker_summary(site: SiteConfig, root: Path) -> dict[str, Any]:
@@ -746,6 +882,13 @@ def _wants_payload(root: Path) -> dict[str, Any]:
 
 
 def _search_wants_payload(body: dict[str, Any], config_path: Path, root: Path) -> dict[str, Any]:
+    log_event(
+        logger,
+        logging.INFO,
+        "web.want_search.started",
+        operation="bulk",
+        filters=_safe_want_filters(body),
+    )
     backoff = _schedule_backoff_status(root)
     if backoff.get("active"):
         skipped = _record_want_search_backoff_skips(
@@ -754,7 +897,7 @@ def _search_wants_payload(body: dict[str, Any], config_path: Path, root: Path) -
             backoff=backoff,
             source="web-bulk",
         )
-        return {
+        payload = {
             "synced": 0,
             "searched": 0,
             "skipped": skipped,
@@ -767,10 +910,21 @@ def _search_wants_payload(body: dict[str, Any], config_path: Path, root: Path) -
                 }
             ],
         }
+        log_event(
+            logger,
+            logging.WARNING,
+            "web.want_search.skipped_backoff",
+            operation="bulk",
+            filters=_safe_want_filters(body),
+            skipped=skipped,
+        )
+        return payload
     sync_payload = _sync_wants_payload(config_path, root)
     state_path = _state_db_path(root)
     if not state_path.exists():
-        return {"searched": 0, "status": [{"level": "ok", "message": "no wants"}]}
+        payload = {"searched": 0, "status": [{"level": "ok", "message": "no wants"}]}
+        log_event(logger, logging.INFO, "web.want_search.completed", operation="bulk", searched=0)
+        return payload
     payload = _wants_payload(root)
     items = _filter_searchable_want_items(_filter_want_items(payload["items"], body))
     config = load_config(config_path)
@@ -785,11 +939,22 @@ def _search_wants_payload(body: dict[str, Any], config_path: Path, root: Path) -
             config.release_preferences,
         )
     )
-    return {
+    result = {
         "synced": sync_payload["ingested"],
         "searched": searched,
         "status": [{"level": "ok", "message": f"searched {searched} wants"}],
     }
+    log_event(
+        logger,
+        logging.INFO,
+        "web.want_search.completed",
+        operation="bulk",
+        filters=_safe_want_filters(body),
+        synced=sync_payload["ingested"],
+        eligible=len(items),
+        searched=searched,
+    )
+    return result
 
 
 def _search_single_want_payload(
@@ -803,7 +968,21 @@ def _search_single_want_payload(
     store = StateStore(state_path)
     row = store.get_intent(intent_id)
     if row is None:
+        log_event(
+            logger,
+            logging.WARNING,
+            "web.want_search.not_found",
+            operation="single",
+            intent_id=intent_id,
+        )
         return {"error": "want not found"}, HTTPStatus.NOT_FOUND
+    log_event(
+        logger,
+        logging.INFO,
+        "web.want_search.started",
+        operation="single",
+        intent_id=intent_id,
+    )
     backoff = _schedule_backoff_status(root)
     if backoff.get("active"):
         _record_single_want_search_skip(
@@ -812,7 +991,7 @@ def _search_single_want_payload(
             backoff=backoff,
             source="web-single",
         )
-        return {
+        payload = {
             "searched": 0,
             "skipped": 1,
             "skipped_by_backoff": True,
@@ -823,18 +1002,34 @@ def _search_single_want_payload(
                     "message": "M-Team backoff active; skipped Want List search",
                 }
             ],
-        }, HTTPStatus.OK
+        }
+        log_event(
+            logger,
+            logging.WARNING,
+            "web.want_search.skipped_backoff",
+            operation="single",
+            intent_id=intent_id,
+        )
+        return payload, HTTPStatus.OK
     item = _want_item(
         row,
         {"release_count": len(store.list_release_candidates(intent_id))},
         store.list_intent_source_evidence(intent_id),
     )
     if not _want_searchable(item):
-        return {
+        payload = {
             "searched": 0,
             "skipped": 1,
             "status": [{"level": "ok", "message": "already queued; skipped search"}],
-        }, HTTPStatus.OK
+        }
+        log_event(
+            logger,
+            logging.INFO,
+            "web.want_search.skipped_terminal",
+            operation="single",
+            intent_id=intent_id,
+        )
+        return payload, HTTPStatus.OK
     config = load_config(config_path)
     searched = run(
         _search_want_items(
@@ -845,14 +1040,24 @@ def _search_single_want_payload(
             config.release_preferences,
         )
     )
-    return {
+    payload = {
         "searched": searched,
         "skipped": 0,
         "status": [{"level": "ok", "message": f"searched {searched} want"}],
-    }, HTTPStatus.OK
+    }
+    log_event(
+        logger,
+        logging.INFO,
+        "web.want_search.completed",
+        operation="single",
+        intent_id=intent_id,
+        searched=searched,
+    )
+    return payload, HTTPStatus.OK
 
 
 def _sync_wants_payload(config_path: Path, root: Path) -> dict[str, Any]:
+    log_event(logger, logging.INFO, "web.want_sync.started", config=str(config_path))
     config = load_config(config_path)
     state_path = _state_db_path(root)
     store = StateStore(state_path)
@@ -879,12 +1084,21 @@ def _sync_wants_payload(config_path: Path, root: Path) -> dict[str, Any]:
         }
         for warning in source_warnings
     )
-    return {
+    result = {
         "ingested": len(ingested),
         "total": payload["total"],
         "source_warnings": source_warnings,
         "status": status,
     }
+    log_event(
+        logger,
+        logging.WARNING if source_warnings else logging.INFO,
+        "web.want_sync.completed",
+        ingested=len(ingested),
+        total=payload["total"],
+        warning_count=len(source_warnings),
+    )
+    return result
 
 
 def _want_subresource_intent_id(path: str, action: str) -> str | None:
@@ -938,6 +1152,10 @@ def _want_candidates_payload(
         ),
         "total": len(candidates),
         "items": candidates,
+        "search_history": [
+            _want_search_history_item(item)
+            for item in store.list_want_search_runs(intent_id=intent_id, limit=50)
+        ],
     }, HTTPStatus.OK
 
 
@@ -1334,6 +1552,11 @@ def _filter_want_items(
     if status != "all":
         filtered = [item for item in filtered if item.get("status") == status]
     return filtered
+
+
+def _safe_want_filters(filters: dict[str, Any]) -> dict[str, str]:
+    """Keep only known, non-sensitive Want List filter values in runtime logs."""
+    return {name: str(filters.get(name) or "all") for name in ("source", "media_type", "status")}
 
 
 def _filter_searchable_want_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -1790,7 +2013,7 @@ def _ops_payload(root: Path) -> dict[str, Any]:
             "scheduler_runs": store.list_scheduler_runs(limit=10),
             "tracker_backoffs": store.list_tracker_backoffs(),
             "tracker_api_events": store.list_tracker_api_events(limit=10),
-            "want_search_runs": store.list_want_search_runs(limit=10),
+            "want_search_runs": store.list_want_search_runs(limit=50),
             "cleanup_events": [
                 row
                 for row in store.list_scheduler_run_events(limit=100)
@@ -1807,9 +2030,7 @@ def _ops_payload(root: Path) -> dict[str, Any]:
 def _logs_payload(root: Path, limit: int = 200) -> dict[str, Any]:
     """Return one redacted, durable operations timeline for the Web UI.
 
-    Container stdout remains owned by Docker/Unraid. This endpoint intentionally
-    uses the application's persisted scheduler, tracker, Want List, and audit
-    evidence instead of requiring access to the Docker socket.
+    Read bounded local runtime and decision evidence, without the Docker socket.
     """
     bounded_limit = min(max(limit, 1), 500)
     entries: list[dict[str, Any]] = []
@@ -1827,18 +2048,100 @@ def _logs_payload(root: Path, limit: int = 200) -> dict[str, Any]:
             _want_search_log_entry(row) for row in store.list_want_search_runs(limit=bounded_limit)
         )
     entries.extend(_audit_log_entry(row) for row in _audit_tail(root, limit=bounded_limit))
+    entries.extend(_runtime_log_entries(root, limit=bounded_limit))
     entries.sort(key=lambda row: str(row.get("timestamp") or ""), reverse=True)
     return {
         **_runtime_provenance(root),
         "entries": redact_payload(entries[:bounded_limit]),
         "limit": bounded_limit,
-        "sources": ["scheduler", "tracker", "want", "audit"],
+        "sources": ["scheduler", "tracker", "want", "audit", "runtime"],
     }
+
+
+def _runtime_log_entries(root: Path, limit: int) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    path = root / ".seed-agent" / RUNTIME_LOG_NAME
+    for index in range(RUNTIME_LOG_BACKUPS + 1):
+        if len(rows) >= limit:
+            break
+        current = path if index == 0 else Path(f"{path}.{index}")
+        try:
+            lines = _tail_text_lines(current, limit - len(rows), max_bytes=256 * 1024)
+        except FileNotFoundError:
+            continue  # An append/rotation may race with this read-only snapshot.
+        except OSError as exc:
+            rows.append({
+                "timestamp": datetime.now(UTC).isoformat(), "source": "runtime",
+                "level": "warning", "title": "logging.read_unavailable",
+                "message": "runtime log could not be read",
+                "details": {"error_type": type(exc).__name__},
+            })
+            break  # Keep the other durable timeline sources available.
+        for line in reversed(lines):
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(row, dict):
+                continue
+            details = row.get("details")
+            details = details if isinstance(details, dict) else {}
+            rows.append(
+                {
+                    "timestamp": row.get("timestamp"),
+                    "source": "runtime",
+                    "level": row.get("level", "info"),
+                    "title": row.get("event"),
+                    "message": details.get("error") or details.get("reason") or "",
+                    "run_id": details.get("run_id"),
+                    "intent_id": details.get("intent_id"),
+                    "request_id": details.get("request_id"),
+                    "details": details,
+                    "logger": row.get("logger"),
+                }
+            )
+    return rows
+
+
+def _bounded_query_limit(query: str, *, default: int) -> int:
+    raw = parse_qs(query).get("limit", [str(default)])[0]
+    try:
+        return min(max(int(raw), 1), 500)
+    except TypeError, ValueError:
+        return default
+
+
+def _want_search_history_item(row: dict[str, Any]) -> dict[str, Any]:
+    try:
+        raw_payload = json.loads(str(row.get("payload_json") or "{}"))
+    except json.JSONDecodeError:
+        raw_payload = {}
+    payload = raw_payload if isinstance(raw_payload, dict) else {}
+    diagnostics = payload.get("provider_diagnostics")
+    return redact_payload(
+        {
+            "searched_at": row.get("searched_at"),
+            "source": row.get("source"),
+            "status": row.get("status"),
+            "results_count": row.get("results_count"),
+            "best_score": row.get("best_score"),
+            "backoff_active": bool(row.get("backoff_active")),
+            "message": row.get("message"),
+            "provider_diagnostics": diagnostics if isinstance(diagnostics, list) else [],
+            "search_summary": payload.get("search_summary", {}),
+        }
+    )
 
 
 def _scheduler_log_entry(row: dict[str, Any]) -> dict[str, Any]:
     event = str(row.get("event") or "event")
-    level = "error" if "fail" in event or "error" in event else "info"
+    level = (
+        "error"
+        if "fail" in event or "error" in event
+        else "warning"
+        if "warning" in event or "backoff" in event
+        else "info"
+    )
     return {
         "timestamp": row.get("created_at"),
         "source": "scheduler",
@@ -1868,7 +2171,13 @@ def _tracker_log_entry(row: dict[str, Any]) -> dict[str, Any]:
 
 def _want_search_log_entry(row: dict[str, Any]) -> dict[str, Any]:
     status = str(row.get("status") or "unknown")
-    level = "error" if status in {"failed", "error"} else "info"
+    level = (
+        "error"
+        if status in {"failed", "error"}
+        else "warning"
+        if bool(row.get("backoff_active")) or status == "warning"
+        else "info"
+    )
     return {
         "timestamp": row.get("searched_at"),
         "source": "want",
@@ -1877,6 +2186,7 @@ def _want_search_log_entry(row: dict[str, Any]) -> dict[str, Any]:
         "message": row.get("message") or f"{row.get('results_count') or 0} results",
         "run_id": row.get("run_id"),
         "intent_id": row.get("intent_id"),
+        "details": _want_search_history_item(row),
     }
 
 

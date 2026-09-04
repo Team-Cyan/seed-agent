@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -12,6 +13,9 @@ import httpx
 
 from seed_agent.downloaders.base import DownloaderStatus
 from seed_agent.models import ManagedTorrent
+from seed_agent.observability import get_logger, log_event
+
+logger = get_logger("downloader.qbittorrent")
 
 
 class QbittorrentError(RuntimeError):
@@ -35,8 +39,13 @@ class QbittorrentClient:
     @asynccontextmanager
     async def _client(self) -> AsyncIterator[httpx.AsyncClient]:
         async with httpx.AsyncClient(base_url=self.base_url, timeout=self.timeout) as client:
-            await self._login(client)
-            yield client
+            try:
+                await self._login(client)
+                yield client
+            except httpx.HTTPError as exc:
+                log_event(logger, logging.WARNING, "qb.connection.failed",
+                          error_type=type(exc).__name__, error=str(exc))
+                raise
 
     async def _login(self, client: httpx.AsyncClient) -> None:
         response = await client.post(
@@ -52,6 +61,13 @@ class QbittorrentClient:
         raise QbittorrentError(f"qBittorrent login failed: unexpected response body: {body!r}")
 
     def _ensure_success(self, response: httpx.Response, action: str) -> None:
+        log_event(
+            logger,
+            logging.DEBUG if 200 <= response.status_code < 300 else logging.WARNING,
+            "qb.request.completed",
+            operation=action,
+            status_code=response.status_code,
+        )
         if 200 <= response.status_code < 300:
             return
         body = response.text.strip()

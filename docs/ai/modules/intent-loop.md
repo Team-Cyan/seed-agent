@@ -31,6 +31,10 @@ Convert human requests into search/rank/reject/enqueue workflows.
   trusted TV/anime source classification as structured `SHOW` intents and parse
   `S03`, `Season 3`, and `第三季` season notation,
 - search sources,
+- preserve each batch's provider query attempts and classification/count
+  summaries in atomic search history; a provider's previous diagnostics must
+  not be copied into a later search. Distinguish provider-returned releases,
+  eligibility-filtered rankings, and accepted rankings,
 - rank release candidates,
 - reject unwanted options,
 - enqueue an explicit release candidate when an ambiguous option is selected,

@@ -254,6 +254,7 @@ const copy = {
       logsAutoRefresh: "自动刷新",
       logsEmpty: "当前筛选条件下没有日志。",
       logsFilter: "筛选日志",
+      logDetails: "事件详情",
       logsRefresh: "刷新",
       logsRefreshed: "最近刷新",
       logsSearchPlaceholder: "搜索标题、消息、run ID…",
@@ -399,6 +400,10 @@ const copy = {
       waitingType: "等待类型",
       wantRoutingHelp: "把想看列表里的电影、电视剧、动漫分别映射到 qB 分类。留空会使用后端默认回退。",
       wantCandidateSubtitle: "符合偏好的候选排在前面；低匹配候选会灰显，但仍可手动强制加入 qB。",
+      wantSearchHistory: "搜索记录",
+      wantSearchCounts: "返回 / 筛选后 / 接受",
+      wantSearchNoHistory: "暂无搜索记录",
+      wantSearchQueryPath: "查询路径",
       wantResources: "想看资源",
       wantSearchRuns: "想看搜索",
       wantsReadFailed: "想看列表读取失败",
@@ -568,6 +573,7 @@ const copy = {
       logsAutoRefresh: "Auto refresh",
       logsEmpty: "No logs match the current filters.",
       logsFilter: "Filter logs",
+      logDetails: "Event details",
       logsRefresh: "Refresh",
       logsRefreshed: "Last refreshed",
       logsSearchPlaceholder: "Search title, message, or run ID…",
@@ -713,6 +719,10 @@ const copy = {
       waitingType: "Waiting for type",
       wantRoutingHelp: "Map movie, TV, and anime wants to qB categories. Empty fields use the backend fallback.",
       wantCandidateSubtitle: "Preferred candidates stay first; lower-match candidates are dimmed but can still be forced into qB.",
+      wantSearchHistory: "Search history",
+      wantSearchCounts: "Returned / ranked / accepted",
+      wantSearchNoHistory: "No search history",
+      wantSearchQueryPath: "Query path",
       wantResources: "Wanted resources",
       wantSearchRuns: "Want searches",
       wantsReadFailed: "Failed to read Want List",
@@ -1838,14 +1848,14 @@ function renderLogsPanel() {
         <span>${escapeHtml(uiText("provider"))}</span>
         <select data-log-filter="source">
           <option value="all">${escapeHtml(uiText("logsAllSources"))}</option>
-          ${["scheduler", "tracker", "want", "audit"].map((source) => `<option value="${source}" ${state.logs.filters.source === source ? "selected" : ""}>${escapeHtml(logSourceLabel(source))}</option>`).join("")}
+          ${["scheduler", "tracker", "want", "audit", "runtime"].map((source) => `<option value="${source}" ${state.logs.filters.source === source ? "selected" : ""}>${escapeHtml(logSourceLabel(source))}</option>`).join("")}
         </select>
       </label>
       <label class="field compact-field">
         <span>${escapeHtml(uiText("status"))}</span>
         <select data-log-filter="level">
           <option value="all">${escapeHtml(uiText("logsAllLevels"))}</option>
-          ${["info", "warning", "error"].map((level) => `<option value="${level}" ${state.logs.filters.level === level ? "selected" : ""}>${escapeHtml(level)}</option>`).join("")}
+          ${["debug", "info", "warning", "error", "critical"].map((level) => `<option value="${level}" ${state.logs.filters.level === level ? "selected" : ""}>${escapeHtml(level)}</option>`).join("")}
         </select>
       </label>
       <label class="field logs-search-field">
@@ -1921,7 +1931,7 @@ function updateLogEntries(panel) {
     if (!query) {
       return true;
     }
-    return [entry.title, entry.message, entry.run_id, entry.intent_id, entry.target_id]
+    return [entry.title, entry.message, entry.run_id, entry.intent_id, entry.target_id, entry.request_id, JSON.stringify(entry.details || {})]
       .filter(Boolean)
       .join(" ")
       .toLocaleLowerCase()
@@ -1936,7 +1946,7 @@ function updateLogEntries(panel) {
 }
 
 function renderLogEntry(entry) {
-  const identifiers = [entry.run_id, entry.intent_id, entry.target_id].filter(Boolean);
+  const identifiers = [entry.run_id, entry.intent_id, entry.target_id, entry.request_id].filter(Boolean);
   const status = entry.status_code ? `HTTP ${entry.status_code}` : "";
   return `
     <article class="log-entry ${escapeAttribute(entry.level || "info")}">
@@ -1950,6 +1960,7 @@ function renderLogEntry(entry) {
           <time datetime="${escapeAttribute(entry.timestamp || "")}">${escapeHtml(formatLogDateTime(entry.timestamp))}</time>
         </div>
         ${entry.message ? `<div class="log-entry-message">${escapeHtml(entry.message)}</div>` : ""}
+        ${entry.details && Object.keys(entry.details).length ? `<details class="candidate-media-info"><summary>${escapeHtml(uiText("logDetails"))}</summary><pre>${escapeHtml(JSON.stringify(entry.details, null, 2))}</pre></details>` : ""}
         ${identifiers.length || status ? `<div class="log-entry-context">${escapeHtml([status, ...identifiers].filter(Boolean).join(" · "))}</div>` : ""}
       </div>
     </article>
@@ -1962,6 +1973,7 @@ function logSourceLabel(source) {
     tracker: uiText("logsSourceTracker"),
     want: uiText("logsSourceWant"),
     audit: uiText("logsSourceAudit"),
+    runtime: state.language === "CN" ? "运行事件" : "Runtime",
   };
   return labels[source] || source || uiText("unknown");
 }
@@ -2406,7 +2418,11 @@ async function openWantCandidates(panel, intentId, statusItem = null) {
       throw new Error(payload.error || `${uiText("requestFailedPrefix")}: ${response.status}`);
     }
     title.textContent = payload.intent?.title || uiText("candidateTorrents");
-    list.innerHTML = renderWantCandidateList(payload.items || [], payload.intent || {});
+    list.innerHTML = renderWantCandidateList(
+      payload.items || [],
+      payload.intent || {},
+      payload.search_history || [],
+    );
   } catch (error) {
     list.innerHTML = `<div class="status-item warning">${escapeHtml(error.message)}</div>`;
   }
@@ -2423,17 +2439,47 @@ function renderWantCandidateStatus(statusItem) {
   return `<div class="status-item ${escapeAttribute(level)}">${escapeHtml(message)}</div>`;
 }
 
-function renderWantCandidateList(items, intent = {}) {
+function renderWantCandidateList(items, intent = {}, searchHistory = []) {
+  const history = renderWantSearchHistory(searchHistory);
   if (items.length === 0) {
-    return `<div class="empty-state">${escapeHtml(uiText("noCandidates"))}</div>`;
+    return `${history}<div class="empty-state">${escapeHtml(uiText("noCandidates"))}</div>`;
   }
   const matching = items.filter((item) => item.matches_requirements);
   const lower = items.filter((item) => !item.matches_requirements);
   return `
+    ${history}
     ${matching.length ? `<div class="candidate-group-title">${escapeHtml(uiText("matchingPreference"))}</div>` : ""}
     ${matching.map((item) => renderWantCandidateCard(item, intent)).join("")}
     ${lower.length ? `<div class="candidate-group-title muted">${escapeHtml(uiText("lowerMatch"))}</div>` : ""}
     ${lower.map((item) => renderWantCandidateCard(item, intent)).join("")}
+  `;
+}
+
+function renderWantSearchHistory(rows) {
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return `<div class="muted-line">${escapeHtml(uiText("wantSearchNoHistory"))}</div>`;
+  }
+  const entries = rows.map((row) => {
+    const providers = Array.isArray(row.provider_diagnostics) ? row.provider_diagnostics : [];
+    const paths = providers.flatMap((provider) => Array.isArray(provider.attempts)
+      ? provider.attempts.map((attempt) => attempt.query_path).filter(Boolean)
+      : []);
+    const resultCount = Number.isFinite(Number(row.results_count)) ? row.results_count : 0;
+    const query = paths.length
+      ? ` · ${escapeHtml(uiText("wantSearchQueryPath"))}: ${escapeHtml([...new Set(paths)].join(", "))}`
+      : "";
+    const message = row.message ? ` · ${escapeHtml(row.message)}` : "";
+    const summary = row.search_summary || {};
+    const counts = summary.release_count !== undefined
+      ? `${escapeHtml(uiText("wantSearchCounts"))}: ${escapeHtml([summary.release_count, summary.ranked_count, summary.accepted_count].join(" / "))} · ${escapeHtml([summary.kind, summary.media_type, summary.series_search_mode].filter(Boolean).join(" / "))}`
+      : escapeHtml(String(resultCount));
+    return `<li>${escapeHtml(formatDateTime(row.searched_at))} · ${escapeHtml(row.source || "unknown")} · ${escapeHtml(row.status || "unknown")} · ${counts}${query}${message}</li>`;
+  }).join("");
+  return `
+    <details class="candidate-media-info">
+      <summary>${escapeHtml(uiText("wantSearchHistory"))} (${rows.length})</summary>
+      <ul class="candidate-reasons">${entries}</ul>
+    </details>
   `;
 }
 

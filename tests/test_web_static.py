@@ -329,7 +329,8 @@ def test_want_list_status_actions_have_a_consistent_layout_group() -> None:
     assert "function wantCanSearch(item)" in script
     assert '!["downloaded", "viewed"].includes(item.status)' in script
     assert "function wantCanEnqueue(intent)" in script
-    assert "renderWantCandidateList(payload.items || [], payload.intent || {})" in script
+    assert "payload.search_history || []" in script
+    assert "function renderWantSearchHistory(rows)" in script
     assert ".want-status-line,\n.want-row-actions" in styles
     assert "grid-template-columns: repeat(3, minmax(0, 1fr));" in styles
 

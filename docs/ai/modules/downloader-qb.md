@@ -65,6 +65,9 @@ support policy.
   do not skip straight from raw qB speed/amount-left fields to aggressive
   automation,
 - avoid leaking downloader credentials in output.
+- log request status at DEBUG, enqueue/cleanup decision summaries at INFO with
+  the explicit `execute` flag, and failed mutations at ERROR. Do not describe
+  a dry-run decision count or projected reclaimed bytes as an executed result.
 - for bulk cleanup, scope by qB category first and only then by age, size,
   state, or score; never use tags alone as a delete boundary,
 - before deleting qB torrents with files, print or persist the exact candidate

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import logging
+import time
 import uuid
 from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass, field
@@ -23,6 +25,7 @@ from seed_agent.models import (
     ScoreBreakdown,
     TorrentCandidate,
 )
+from seed_agent.observability import get_logger, log_context, log_event
 from seed_agent.policies.category_policy import PoolUsage
 from seed_agent.policies.intent_ranking import filter_releases, rank_releases
 from seed_agent.search.base import SearchProvider
@@ -36,6 +39,7 @@ IntentEnqueueContextResolver = Callable[
     [ResourceIntent, CategoryPolicyConfig, ScoreBreakdown],
     tuple[bool, PoolUsage | None, list[str]],
 ]
+logger = get_logger("intent")
 
 
 @dataclass(frozen=True)
@@ -51,6 +55,7 @@ class IntentRunResult:
 class IntentSearchBatchResult:
     results: list[tuple[ResourceIntent, list[RankedRelease]]] = field(default_factory=list)
     committed: int = 0
+    diagnostics: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
 
 
 def add_intent(
@@ -523,18 +528,183 @@ async def search_intents_batch(
     """Search and rank a batch before atomically replacing its persisted state."""
     results: list[tuple[ResourceIntent, list[RankedRelease]]] = []
     provider_list = list(providers)
-    for intent in _dedupe_intents_by_id(intents):
-        releases: list[ReleaseCandidate] = []
-        for provider in provider_list:
-            releases.extend(await provider.search(intent))
-        ranked = rank_releases(intent, releases, intent_config, search_config)
-        results.append((intent, ranked))
-    committed = store.save_want_search_batch(
-        results,
+    unique_intents = _dedupe_intents_by_id(intents)
+    summaries: dict[str, dict[str, Any]] = {}
+    diagnostic_offsets = {
+        id(provider): len(getattr(provider, "search_diagnostics", []))
+        for provider in provider_list
+        if isinstance(getattr(provider, "search_diagnostics", None), list)
+    }
+    started = time.monotonic()
+    current_intent_id: str | None = None
+    stage = "search"
+    log_event(
+        logger,
+        logging.INFO,
+        "intent.search_batch.started",
         source=source,
         run_id=run_id,
+        intent_count=len(unique_intents),
+        provider_count=len(provider_list),
     )
-    return IntentSearchBatchResult(results=results, committed=committed)
+    try:
+        for intent in unique_intents:
+            current_intent_id = intent.intent_id
+            stage = "search"
+            log_event(
+                logger,
+                logging.DEBUG,
+                "intent.search.started",
+                source=source,
+                intent_id=intent.intent_id,
+                kind=intent.kind.value,
+                media_type=intent.metadata.get("media_type"),
+                external_id_providers=sorted(
+                    str(provider)
+                    for provider in _dict_metadata(intent.metadata.get("external_ids"))
+                    if provider in {"douban", "imdb"}
+                ),
+            )
+            releases: list[ReleaseCandidate] = []
+            for provider in provider_list:
+                provider_name = type(provider).__name__
+                log_event(
+                    logger,
+                    logging.DEBUG,
+                    "intent.search.provider_started",
+                    intent_id=intent.intent_id,
+                    provider=provider_name,
+                )
+                with log_context(run_id=run_id, intent_id=intent.intent_id, source=source):
+                    provider_releases = await provider.search(intent)
+                releases.extend(provider_releases)
+                log_event(
+                    logger,
+                    logging.DEBUG,
+                    "intent.search.provider_completed",
+                    intent_id=intent.intent_id,
+                    provider=provider_name,
+                    release_count=len(provider_releases),
+                )
+            stage = "rank"
+            with log_context(run_id=run_id, intent_id=intent.intent_id, source=source):
+                ranked = rank_releases(intent, releases, intent_config, search_config)
+            results.append((intent, ranked))
+            summaries[intent.intent_id] = {
+                "kind": intent.kind.value,
+                "media_type": intent.metadata.get("media_type"),
+                "series_search_mode": intent_config.series_search_mode,
+                "release_count": len(releases),
+                "ranked_count": len(ranked),
+                "filtered_count": len(releases) - len(ranked),
+                "accepted_count": sum(item.accepted for item in ranked),
+            }
+            log_event(
+                logger,
+                logging.INFO,
+                "intent.search.completed",
+                intent_id=intent.intent_id,
+                source=source,
+                run_id=run_id,
+                **summaries[intent.intent_id],
+            )
+        diagnostics = _provider_search_diagnostics(provider_list, diagnostic_offsets)
+        stage = "persist"
+        current_intent_id = None
+        committed = store.save_want_search_batch(
+            results,
+            source=source,
+            run_id=run_id,
+            history_payloads={
+                intent.intent_id: {
+                    "provider_diagnostics": diagnostics.get(intent.intent_id, []),
+                    "search_summary": summaries[intent.intent_id],
+                }
+                for intent, _ in results
+            },
+        )
+    except Exception as exc:
+        log_event(
+            logger,
+            logging.ERROR,
+            "intent.search_batch.failed",
+            source=source,
+            run_id=run_id,
+            completed_intents=len(results),
+            total_intents=len(unique_intents),
+            intent_id=current_intent_id,
+            stage=stage,
+            error_type=type(exc).__name__,
+            error=str(exc),
+            elapsed_ms=round((time.monotonic() - started) * 1000),
+        )
+        raise
+    log_event(
+        logger,
+        logging.INFO,
+        "intent.search_batch.persisted",
+        source=source,
+        run_id=run_id,
+        requested_intents=len(unique_intents),
+        committed_intents=committed,
+        diagnostic_intents=len(diagnostics),
+        elapsed_ms=round((time.monotonic() - started) * 1000),
+    )
+    return IntentSearchBatchResult(
+        results=results,
+        committed=committed,
+        diagnostics=diagnostics,
+    )
+
+
+def _provider_search_diagnostics(
+    providers: list[SearchProvider],
+    offsets: dict[int, int],
+) -> dict[str, list[dict[str, Any]]]:
+    """Return a redaction-safe per-intent diagnostic summary for durable history."""
+    by_intent: dict[str, list[dict[str, Any]]] = {}
+    for provider in providers:
+        rows = getattr(provider, "search_diagnostics", None)
+        if not isinstance(rows, list):
+            continue
+        for row in rows[offsets.get(id(provider), 0) :]:
+            if not isinstance(row, dict):
+                continue
+            intent_id = row.get("intent_id")
+            if not isinstance(intent_id, str) or not intent_id:
+                continue
+            attempts = row.get("attempts")
+            safe_attempts = []
+            if isinstance(attempts, list):
+                for attempt in attempts:
+                    if not isinstance(attempt, dict):
+                        continue
+                    safe_attempts.append(
+                        {
+                            key: attempt[key]
+                            for key in (
+                                "query_path",
+                                "status",
+                                "result_count",
+                                "code",
+                                "rate_limited",
+                                "retriable",
+                                "unavailable",
+                            )
+                            if key in attempt
+                        }
+                    )
+            by_intent.setdefault(intent_id, []).append(
+                {
+                    "provider": type(provider).__name__,
+                    "site": row.get("site"),
+                    "request_budget": row.get("request_budget"),
+                    "requests_used": row.get("requests_used"),
+                    "release_count": row.get("release_count"),
+                    "attempts": safe_attempts,
+                }
+            )
+    return by_intent
 
 
 def _normalized_intents(store: StateStore) -> list[ResourceIntent]:

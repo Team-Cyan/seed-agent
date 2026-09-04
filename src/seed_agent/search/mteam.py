@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Awaitable, Callable
 from typing import Any, Literal
 
@@ -13,6 +14,7 @@ from seed_agent.models import (
     TorrentCandidate,
     safe_url_identity,
 )
+from seed_agent.observability import get_logger, log_event
 from seed_agent.sites.mteam import (
     MTeamApiDiscoveryOptions,
     MTeamApiResponseError,
@@ -21,6 +23,7 @@ from seed_agent.sites.mteam import (
 )
 
 FetchMTeamCandidates = Callable[..., Awaitable[list[TorrentCandidate]]]
+logger = get_logger("search.mteam")
 
 
 class MTeamSearchProvider:
@@ -64,9 +67,33 @@ class MTeamSearchProvider:
             "request_budget": self.search_config.max_api_requests_per_intent,
             "attempts": [],
         }
+        log_event(
+            logger,
+            logging.INFO,
+            "mteam.intent_search.started",
+            site=self.site,
+            intent_id=intent.intent_id,
+            request_budget=self.search_config.max_api_requests_per_intent,
+            query_paths=[_query_path(options) for options in option_sequence],
+        )
         for options in option_sequence:
             attempt = {"query_path": _query_path(options), "status": "started"}
             diagnostic["attempts"].append(attempt)
+            log_event(
+                logger,
+                logging.DEBUG,
+                "mteam.intent_search.request_started",
+                site=self.site,
+                intent_id=intent.intent_id,
+                query_path=attempt["query_path"],
+                mode_present=options.mode is not None,
+                mode=options.mode,
+                douban=options.douban,
+                imdb=options.imdb,
+                identifier_provider=(
+                    "douban" if options.douban else "imdb" if options.imdb else None
+                ),
+            )
             try:
                 candidates = await self.fetch_candidates(
                     site=self.site,
@@ -86,16 +113,64 @@ class MTeamSearchProvider:
                     }
                 )
                 if exc.retriable:
+                    log_event(
+                        logger,
+                        logging.WARNING,
+                        "mteam.intent_search.api_error",
+                        site=self.site,
+                        intent_id=intent.intent_id,
+                        query_path=attempt["query_path"],
+                        code=exc.code,
+                        rate_limited=exc.rate_limited,
+                        retriable=exc.retriable,
+                        unavailable=exc.unavailable,
+                    )
                     self._record_diagnostic(diagnostic, releases)
                     raise
                 if attempt["query_path"] != "title_year":
+                    log_event(
+                        logger,
+                        logging.WARNING,
+                        "mteam.intent_search.identifier_rejected",
+                        site=self.site,
+                        intent_id=intent.intent_id,
+                        query_path=attempt["query_path"],
+                        code=exc.code,
+                    )
                     continue
+                log_event(
+                    logger,
+                    logging.WARNING,
+                    "mteam.intent_search.title_query_rejected",
+                    site=self.site,
+                    intent_id=intent.intent_id,
+                    code=exc.code,
+                )
                 break
-            except httpx.TimeoutException, httpx.NetworkError:
+            except (httpx.TimeoutException, httpx.NetworkError) as exc:
                 attempt["status"] = "network_error"
+                log_event(
+                    logger,
+                    logging.ERROR,
+                    "mteam.intent_search.network_error",
+                    site=self.site,
+                    intent_id=intent.intent_id,
+                    query_path=attempt["query_path"],
+                    error_type=type(exc).__name__,
+                    error=str(exc),
+                )
                 self._record_diagnostic(diagnostic, releases)
                 raise
             attempt.update({"status": "ok", "result_count": len(candidates)})
+            log_event(
+                logger,
+                logging.DEBUG,
+                "mteam.intent_search.request_completed",
+                site=self.site,
+                intent_id=intent.intent_id,
+                query_path=attempt["query_path"],
+                result_count=len(candidates),
+            )
             for candidate in candidates:
                 release = _release_from_candidate(candidate)
                 if release.release_id in seen_release_ids:
@@ -107,6 +182,15 @@ class MTeamSearchProvider:
             if len(releases) >= self.search_config.max_results_per_site:
                 break
         self._record_diagnostic(diagnostic, releases)
+        log_event(
+            logger,
+            logging.INFO,
+            "mteam.intent_search.completed",
+            site=self.site,
+            intent_id=intent.intent_id,
+            requests_used=len(diagnostic["attempts"]),
+            release_count=len(releases),
+        )
         return releases
 
     def _record_diagnostic(
