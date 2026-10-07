@@ -433,3 +433,9 @@ no restrictive effect at `0`; `freshness_zero_score_hours=0` disables age decay.
 - `backoff_until`
 - `message`
 - `payload_json`
+
+Want search history distinguishes successful `searched` rows from `failed`,
+`batch_aborted`, and existing backoff skips. Per-Want progress and next daily
+eligibility are derived from that history; source-refresh timestamps do not
+advance search cadence. Failed searches retain the prior successful candidate
+snapshot. No separate progress table or schema reset is required.

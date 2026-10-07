@@ -130,6 +130,21 @@ Search history (latest 50 per item, independent of the global timeline):
    filtering; ranked > 0 but accepted = 0 points to ranking thresholds.
 3. Check Run logs for failures/backoff/rejected requests. Failed batches do not
    create successful search-history rows or partially replace candidates.
+   They write `failed`/`batch_aborted` history while retaining the previous
+   successful candidate snapshot.
+
+Want rows show the last successful search and the next eligible search or a
+pending scheduled-search label. Never searched, failed, and deferred searches
+are distinct from successful searches with zero results. A found resource can
+still require review because competing releases or other requirements remain
+ambiguous. Matching Douban/IMDb IDs and tracker subtitles provide identity
+evidence even when the Want title is Chinese and the release title is English.
+
+The read-only API adds `last_search_at`, `last_successful_search_at`,
+`search_status`, `search_error`, `next_search_at`, `search_due`, `searchable`,
+and `search_skip_reason` to Want rows, plus `due_count` on the list. Existing
+download-status/filter fields remain compatible. Rejected, viewed, queued,
+selected, or currently enqueueing Wants cannot initiate a new search/add.
 
 ## Want List Workflow
 

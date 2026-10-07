@@ -64,6 +64,28 @@ that predate these template fields and provide neither variable retain their
 legacy container user until the operator adds matching IDs; this avoids making
 mounted SQLite and secret files unreadable during an image-only update.
 
+## Want List Search Cadence
+
+`scheduler.intent_search_mode: daily` searches active Wants after the configured
+`intent_search_hour`, using the runtime timezone. New normalized Wants are due
+immediately. Each Want becomes due again at the first daily boundary after its
+last successful search, even when that search returned zero candidates or left
+the Want requiring confirmation. Source refresh does not reset that clock.
+
+The scheduler processes at most ten due Wants per batch and continues on later
+cycles until the backlog is drained. Oldest search attempts go first; progress
+survives restart through existing `want_search_runs` history. `every_cycle`
+keeps active Wants eligible each cycle while retaining the same batch bound and
+fair ordering. Manual search bypasses cadence, but not tracker backoff or
+terminal/in-flight enqueue protection.
+
+Failed and aborted searches preserve old candidates and record separate failure
+history. They do not count as successful daily refreshes, and retry no sooner
+than 30 minutes after the attempt or the persisted backoff deadline. Source-only
+sync remains independent from tracker/downloader availability. When intent
+execution is explicitly enabled, ready stored candidates blocked by capacity
+can be reconsidered between tracker searches with fresh runtime gates.
+
 ## Free-Window Safety
 
 The main risk with freeleech torrents is not polling frequency by itself. The

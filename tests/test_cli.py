@@ -1471,6 +1471,35 @@ def test_pending_normalized_intent_keeps_scheduled_search_due(tmp_path: Path) ->
     assert cli._pending_intent_search_due(store) is True
 
 
+def test_schedule_run_retries_ready_intents_outside_search_window(tmp_path, monkeypatch):
+    from seed_agent import cli
+
+    config_path = _config_file(tmp_path)
+    monkeypatch.setattr(cli, "_run_once_payload", lambda *a, **k: {
+        "command": "run-once", "discovered": 0, "accepted": 0, "enqueued": 0,
+    })
+    monkeypatch.setattr(cli, "_scheduled_intent_search_due", lambda *a, **k: False)
+    monkeypatch.setattr(cli, "_pending_intent_search_due", lambda *a, **k: False)
+    calls = []
+
+    def retry(*args, **kwargs):
+        calls.append(kwargs)
+        return {"command": "intent-run-once", "execute": True, "searched": 0,
+                "ingested": 0, "ranked": 0, "enqueue_candidates": 0, "decisions": []}
+
+    monkeypatch.setattr(cli, "_intent_run_once_payload", retry)
+    result = CliRunner().invoke(cli.app, ["schedule-run", "--config", str(config_path),
+                                        "--intent-execute", "--no-prune", "--no-tracker-backfill",
+                                        "--max-cycles", "1"])
+    assert result.exit_code == 0, result.output
+    assert len(calls) == 1
+    assert calls[0]["retry_ready"] is True
+    assert calls[0]["search_ingested"] is False
+    assert calls[0]["refresh_sources"] is False
+    events = StateStore(tmp_path / ".seed-agent/state.db").list_scheduler_run_events()
+    assert any(e["phase"] == "intent_enqueue_retry" for e in events)
+
+
 @pytest.mark.parametrize(
     "summary",
     [
@@ -5510,7 +5539,7 @@ want_sources:
     assert cursor_updates == {"telegram:local/secrets/telegram.yaml": "102"}
 
     monkeypatch.setattr(cli, "_build_search_providers", lambda _config: [])
-    payload = cli._intent_run_once_payload(config_path, execute=False)
+    payload = cli._intent_run_once_payload(config_path, execute=False, search_ingested=False)
 
     assert payload["ingested"] == 1
     assert (

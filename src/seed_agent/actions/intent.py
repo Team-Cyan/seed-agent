@@ -27,7 +27,7 @@ from seed_agent.models import (
 )
 from seed_agent.observability import get_logger, log_context, log_event, safe_error_text
 from seed_agent.policies.category_policy import PoolUsage
-from seed_agent.policies.intent_ranking import filter_releases, rank_releases
+from seed_agent.policies.intent_ranking import rank_releases
 from seed_agent.search.base import SearchProvider
 from seed_agent.sources.base import SourceIntentEvent
 from seed_agent.sources.file_inbox import read_file_inbox
@@ -286,17 +286,17 @@ async def search_intent(
     store: StateStore,
     providers: Iterable[SearchProvider],
     intent_config: IntentConfig,
+    search_config: SearchConfig | None = None,
 ) -> tuple[ResourceIntent, list[RankedRelease], Decision]:
     intent = _load_intent(store, intent_id)
-    releases: list[ReleaseCandidate] = []
-    for provider in providers:
-        releases.extend(await provider.search(intent))
-    releases = filter_releases(intent, releases, intent_config)
-    ranked = [_unranked_candidate(intent.intent_id, release) for release in releases]
-    store.save_ranked_releases(ranked, replace_intent_id=intent.intent_id)
-    store.update_intent_state(intent.intent_id, IntentState.SEARCHED)
-    updated_intent = intent.model_copy(update={"state": IntentState.SEARCHED})
-    return updated_intent, ranked, _search_decision(intent, ranked)
+    if not store.intent_searchable(intent_id):
+        raise ValueError("intent is terminal or enqueue is in progress")
+    batch = await search_intents_batch(
+        [intent], store, providers, intent_config, search_config or SearchConfig(), source="cli",
+    )
+    ranked = batch.results[0][1] if batch.results else []
+    updated_intent = _load_intent(store, intent_id)
+    return updated_intent, ranked, _search_decision(intent, ranked, updated_intent.state)
 
 
 def rank_intent(
@@ -306,17 +306,20 @@ def rank_intent(
     search_config: SearchConfig,
 ) -> tuple[ResourceIntent, list[RankedRelease], Decision]:
     intent = _load_intent(store, intent_id)
+    if not store.intent_searchable(intent_id):
+        raise ValueError("intent is terminal or enqueue is in progress")
     releases = _stored_releases(store.list_release_candidates(intent.intent_id))
     ranked = rank_releases(intent, releases, intent_config, search_config)
-    store.save_ranked_releases(ranked, replace_intent_id=intent.intent_id)
-    next_state = _ranked_state(ranked)
-    store.update_intent_state(intent.intent_id, next_state)
-    return intent, ranked, _rank_decision(intent, ranked, next_state)
+    store.save_want_search_batch([(intent, ranked)], source="cli-rank", record_history=False)
+    updated = _load_intent(store, intent_id)
+    return updated, ranked, _rank_decision(intent, ranked, updated.state)
 
 
 def reject_intent(intent_id: str, store: StateStore) -> tuple[ResourceIntent, Decision]:
     intent = _load_intent(store, intent_id)
-    store.update_intent_state(intent.intent_id, IntentState.REJECTED)
+    outcome = store.mark_intent_rejected(intent.intent_id)
+    if outcome not in {"rejected", "already_rejected"}:
+        raise ValueError(f"cannot reject intent: {outcome}")
     updated = intent.model_copy(update={"state": IntentState.REJECTED})
     return updated, _reject_decision(intent)
 
@@ -396,6 +399,10 @@ async def enqueue_intent(
                 selected_policy,
                 score_breakdown,
             )
+        if claim_owner_id is not None and not store.renew_intent_enqueue_claim(
+            intent.intent_id, claim_owner_id,
+        ):
+            raise ValueError("intent enqueue ownership expired or state changed")
         if execute and (
             not paused
             and (release_resolver is not None or _requires_download_resolution(ranked.release))
@@ -406,6 +413,10 @@ async def enqueue_intent(
             if resolved_release is None:
                 raise ValueError("selected release download URL could not be resolved")
             ranked = ranked.model_copy(update={"release": resolved_release})
+            if claim_owner_id is not None and not store.renew_intent_enqueue_claim(
+                intent.intent_id, claim_owner_id,
+            ):
+                raise ValueError("intent enqueue ownership expired or state changed")
             store.save_ranked_releases([ranked])
             score_breakdown = _score_breakdown_from_ranked(ranked)
         decisions = await enqueue_candidates(
@@ -461,14 +472,19 @@ async def run_intent_once(
     search_limit: int | None = None,
     search_source: str = "intent-run-once",
     run_id: str | None = None,
+    search_mode: str = "manual",
+    search_hour: int = 0,
+    search_now: datetime | None = None,
+    retry_ready: bool = False,
 ) -> IntentRunResult:
     ingested_pairs = ingest_inbox(inbox_path, store) if inbox_path is not None else []
     ingested_pairs.extend(ingest_events(source_events, store))
     ingested = [item[0] for item in ingested_pairs]
     decisions = [item[1] for item in ingested_pairs]
-    pending_search = _normalized_intents(store) if search_ingested else []
-    if search_limit is not None:
-        pending_search = pending_search[: max(search_limit, 0)]
+    pending_search = [ResourceIntent.model_validate(json.loads(row["normalized_json"]))
+                      for row in store.list_due_intents(
+                          mode=search_mode, hour=search_hour, now=search_now, limit=search_limit,
+                      )] if search_ingested else []
     searched: list[ResourceIntent] = []
     ranked_releases: list[RankedRelease] = []
     enqueue_selected: list[RankedRelease] = []
@@ -480,16 +496,18 @@ async def run_intent_once(
         search_config,
         source=search_source,
         run_id=run_id,
+        searched_at=search_now,
     )
     for intent, ranked in batch.results:
-        next_state = _ranked_state(ranked)
-        searched_intent = intent.model_copy(update={"state": next_state})
+        searched_intent = _load_intent(store, intent.intent_id)
+        next_state = searched_intent.state
         searched.append(searched_intent)
-        decisions.append(_search_decision(intent, ranked))
+        decisions.append(_search_decision(intent, ranked, next_state))
         ranked_releases.extend(ranked)
         decisions.append(_rank_decision(intent, ranked, next_state))
 
-        if ranked and ranked[0].accepted and not ranked[0].confirmation_required:
+        if (ranked and ranked[0].accepted and not ranked[0].confirmation_required
+                and store.intent_searchable(intent.intent_id)):
             _, selected, enqueue_decisions = await enqueue_intent(
                 searched_intent.intent_id,
                 store,
@@ -501,6 +519,35 @@ async def run_intent_once(
                 pause_reasons=pause_reasons,
                 release_resolver=release_resolver,
                 policy_resolver=policy_resolver,
+                enqueue_context_resolver=enqueue_context_resolver,
+            )
+            enqueue_selected.append(selected)
+            decisions.extend(enqueue_decisions)
+
+    # Capacity can recover between tracker searches. Reuse stored ready rankings
+    # only in execute mode; source-sync/search previews remain non-mutating.
+    if execute and (search_ingested or retry_ready):
+        considered = {intent.intent_id for intent, _ in batch.results}
+        progress = store.want_search_progress()
+        for row in store.list_due_intents(mode="manual"):
+            if row["intent_id"] in considered:
+                continue
+            if progress.get(row["intent_id"], {}).get("last_status") != "searched":
+                continue
+            intent = ResourceIntent.model_validate(json.loads(row["normalized_json"]))
+            ranked = rank_releases(
+                intent, _stored_releases(store.list_release_candidates(row["intent_id"])),
+                intent_config, search_config,
+            )
+            if not ranked or not ranked[0].accepted or ranked[0].confirmation_required:
+                continue
+            if not store.save_want_search_batch([(intent, ranked)], source="retry-ready",
+                                                record_history=False):
+                continue
+            _, selected, enqueue_decisions = await enqueue_intent(
+                row["intent_id"], store, downloader, policy, execute,
+                paused=paused, pool_usage=pool_usage, pause_reasons=pause_reasons,
+                release_resolver=release_resolver, policy_resolver=policy_resolver,
                 enqueue_context_resolver=enqueue_context_resolver,
             )
             enqueue_selected.append(selected)
@@ -524,11 +571,13 @@ async def search_intents_batch(
     *,
     source: str,
     run_id: str | None = None,
+    searched_at: datetime | None = None,
 ) -> IntentSearchBatchResult:
     """Search and rank a batch before atomically replacing its persisted state."""
     results: list[tuple[ResourceIntent, list[RankedRelease]]] = []
     provider_list = list(providers)
-    unique_intents = _dedupe_intents_by_id(intents)
+    unique_intents = [intent for intent in _dedupe_intents_by_id(intents)
+                      if store.intent_searchable(intent.intent_id)]
     summaries: dict[str, dict[str, Any]] = {}
     diagnostic_offsets = {
         id(provider): len(getattr(provider, "search_diagnostics", []))
@@ -548,6 +597,8 @@ async def search_intents_batch(
         provider_count=len(provider_list),
     )
     try:
+        if unique_intents and not provider_list:
+            raise ValueError("no search providers configured")
         for intent in unique_intents:
             current_intent_id = intent.intent_id
             stage = "search"
@@ -611,10 +662,13 @@ async def search_intents_batch(
         diagnostics = _provider_search_diagnostics(provider_list, diagnostic_offsets)
         stage = "persist"
         current_intent_id = None
+        committed_ids: list[str] = []
         committed = store.save_want_search_batch(
             results,
             source=source,
             run_id=run_id,
+            searched_at=searched_at,
+            committed_intent_ids=committed_ids,
             history_payloads={
                 intent.intent_id: {
                     "provider_diagnostics": diagnostics.get(intent.intent_id, []),
@@ -624,6 +678,22 @@ async def search_intents_batch(
             },
         )
     except Exception as exc:
+        diagnostics = _provider_search_diagnostics(provider_list, diagnostic_offsets)
+        try:
+            for intent in unique_intents:
+                store.record_want_search_run(
+                    intent_id=intent.intent_id, source=source, run_id=run_id,
+                    status="failed" if intent.intent_id == current_intent_id
+                    or current_intent_id is None else "batch_aborted",
+                    search_enabled=True, results_count=0,
+                    message=safe_error_text(exc)[:500],
+                    searched_at=searched_at,
+                    payload={"stage": stage,
+                             "provider_diagnostics": diagnostics.get(intent.intent_id, [])},
+                )
+        except Exception as history_error:
+            log_event(logger, logging.ERROR, "intent.search_history.failed",
+                      error=safe_error_text(history_error), run_id=run_id)
         log_event(
             logger,
             logging.ERROR,
@@ -651,7 +721,7 @@ async def search_intents_batch(
         elapsed_ms=round((time.monotonic() - started) * 1000),
     )
     return IntentSearchBatchResult(
-        results=results,
+        results=[result for result in results if result[0].intent_id in committed_ids],
         committed=committed,
         diagnostics=diagnostics,
     )
@@ -705,13 +775,6 @@ def _provider_search_diagnostics(
                 }
             )
     return by_intent
-
-
-def _normalized_intents(store: StateStore) -> list[ResourceIntent]:
-    return [
-        ResourceIntent.model_validate(json.loads(str(row["normalized_json"])))
-        for row in store.list_intents_by_state(IntentState.NORMALIZED)
-    ]
 
 
 def _dedupe_intents_by_id(intents: Iterable[ResourceIntent]) -> list[ResourceIntent]:
@@ -775,19 +838,6 @@ def _load_intent_with_selected(
     intent = ResourceIntent.model_validate(json.loads(str(row["normalized_json"])))
     selected = row["selected_release_id"]
     return intent, str(selected) if selected is not None else None
-
-
-def _unranked_candidate(intent_id: str, release: ReleaseCandidate) -> RankedRelease:
-    return RankedRelease(
-        intent_id=intent_id,
-        release=release,
-        score=0,
-        confidence=0,
-        accepted=False,
-        confirmation_required=True,
-        reasons=["release candidate found"],
-        risks=[],
-    )
 
 
 def _stored_releases(rows: list[dict[str, Any]]) -> list[ReleaseCandidate]:
@@ -894,15 +944,9 @@ def _requires_download_resolution(release: ReleaseCandidate) -> bool:
     )
 
 
-def _ranked_state(ranked: list[RankedRelease]) -> IntentState:
-    if not ranked:
-        return IntentState.CONFIRMATION_REQUIRED
-    if ranked[0].confirmation_required:
-        return IntentState.CONFIRMATION_REQUIRED
-    return IntentState.SEARCHED
-
-
-def _search_decision(intent: ResourceIntent, ranked: list[RankedRelease]) -> Decision:
+def _search_decision(
+    intent: ResourceIntent, ranked: list[RankedRelease], next_state: IntentState,
+) -> Decision:
     return Decision(
         action="intent.search",
         target_id=intent.intent_id,
@@ -910,7 +954,7 @@ def _search_decision(intent: ResourceIntent, ranked: list[RankedRelease]) -> Dec
         reason="release candidates searched",
         old_state={"state": intent.state.value},
         new_state={
-            "state": IntentState.SEARCHED.value,
+            "state": next_state.value,
             "candidate_count": len(ranked),
             "sites": sorted({item.release.site for item in ranked}),
         },

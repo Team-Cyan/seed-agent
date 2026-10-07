@@ -9,6 +9,7 @@ const state = {
   },
   wants: {
     items: [],
+    dueCount: 0,
     error: null,
     loading: true,
     filters: {
@@ -185,6 +186,14 @@ const copy = {
       markViewed: "标记已看",
       markViewedCompleted: "已标记为已看",
       notFound: "未找到资源",
+      wantNeverSearched: "待搜索",
+      wantSearchFailed: "搜索失败，保留上次结果",
+      wantSearchDeferred: "搜索暂缓",
+      wantLastSuccess: "上次成功搜索",
+      wantNextSearch: "下次搜索",
+      wantSearchDue: "等待定时搜索",
+      wantDueCount: "待定时搜索",
+      wantNeedsReview: "找到资源，待确认",
       notDownloaded: "未下载",
       downloaded: "已下载",
       viewed: "已看",
@@ -505,6 +514,14 @@ const copy = {
       markViewed: "Mark viewed",
       markViewedCompleted: "Marked as viewed",
       notFound: "No resource found",
+      wantNeverSearched: "Not searched yet",
+      wantSearchFailed: "Search failed; previous results retained",
+      wantSearchDeferred: "Search deferred",
+      wantLastSuccess: "Last successful search",
+      wantNextSearch: "Next search",
+      wantSearchDue: "Scheduled search pending",
+      wantDueCount: "Due for scheduled search",
+      wantNeedsReview: "Resources found; review required",
       notDownloaded: "Not downloaded",
       downloaded: "Downloaded",
       viewed: "Viewed",
@@ -1439,6 +1456,7 @@ async function loadWants() {
     const payload = await response.json();
     state.wants = {
       items: payload.items || [],
+      dueCount: Number(payload.due_count || 0),
       error: null,
       loading: false,
       filters: state.wants.filters,
@@ -1446,6 +1464,7 @@ async function loadWants() {
   } catch (error) {
     state.wants = {
       items: [],
+      dueCount: 0,
       error: error.message,
       loading: false,
       filters: state.wants.filters,
@@ -2057,7 +2076,7 @@ function renderWantsPanel() {
     <div class="status-list" data-want-status></div>
     ${renderWantConfigModal()}
     ${renderWantCandidateModal()}
-    <div class="section-title">${escapeHtml(uiText("wantResources"))}</div>
+    <div class="section-title">${escapeHtml(uiText("wantResources"))} · ${escapeHtml(uiText("wantDueCount"))}: ${escapeHtml(String(state.wants.dueCount))}</div>
   `;
   panel.querySelector('[data-want-filter="source"]').value = state.wants.filters.source;
   panel.querySelector('[data-want-filter="media_type"]').value = state.wants.filters.media_type;
@@ -2342,11 +2361,44 @@ function wantStatusLabel(status, fallback) {
 }
 
 function wantCanSearch(item) {
+  if (item.searchable !== undefined) return item.searchable;
   return !["downloaded", "viewed"].includes(item.status);
 }
 
 function wantCanEnqueue(intent) {
+  if (intent?.searchable !== undefined) return intent.searchable;
   return !["downloaded", "viewed"].includes(intent?.status);
+}
+
+function wantDisplayStatus(item) {
+  if (item.status === "not_found") {
+    if (item.search_status === "never_searched") return uiText("wantNeverSearched");
+    if (["failed", "batch_aborted"].includes(item.search_status)) {
+      return uiText("wantSearchFailed");
+    }
+    if (item.search_status === "skipped_backoff") return uiText("wantSearchDeferred");
+  }
+  if (item.status === "not_downloaded" && item.state === "confirmation_required") {
+    return uiText("wantNeedsReview");
+  }
+  return wantStatusLabel(item.status, item.status_label || item.state);
+}
+
+function renderWantSearchProgress(item) {
+  const parts = [];
+  if (["failed", "batch_aborted"].includes(item.search_status)) {
+    parts.push(uiText("wantSearchFailed"));
+  } else if (item.search_status === "skipped_backoff") {
+    parts.push(uiText("wantSearchDeferred"));
+  }
+  if (item.last_successful_search_at) {
+    parts.push(`${uiText("wantLastSuccess")}: ${formatDateTime(item.last_successful_search_at)}`);
+  }
+  if (item.next_search_at) {
+    parts.push(item.search_due ? uiText("wantSearchDue")
+      : `${uiText("wantNextSearch")}: ${formatDateTime(item.next_search_at)}`);
+  }
+  return parts.length ? `<div class="muted-line" title="${escapeAttribute(item.search_error || item.search_skip_reason || "")}">${escapeHtml(parts.join(" · "))}</div>` : "";
 }
 
 function renderWantRow(item) {
@@ -2362,9 +2414,10 @@ function renderWantRow(item) {
       <td>${escapeHtml(formatDate(item.added_at))}</td>
       <td class="want-status-cell">
         <div class="want-status-line">
-          <span class="badge ${wantStatusBadgeClass(item.status)}">${escapeHtml(wantStatusLabel(item.status, item.status_label || item.state))}</span>
+          <span class="badge ${wantStatusBadgeClass(item.status)}">${escapeHtml(wantDisplayStatus(item))}</span>
           ${bestScore ? `<span class="want-score-pill">${escapeHtml(bestScore)}</span>` : ""}
         </div>
+        ${renderWantSearchProgress(item)}
         <div class="want-row-actions">
           ${wantCanSearch(item) ? `<button class="secondary-button compact-button" type="button" data-want-action="search-one" data-want-id="${escapeAttribute(item.intent_id)}">${escapeHtml(uiText("searchOneWant"))}</button>` : ""}
           ${item.status !== "viewed" ? `<button class="secondary-button compact-button" type="button" data-want-action="mark-viewed" data-want-id="${escapeAttribute(item.intent_id)}">${escapeHtml(uiText("markViewed"))}</button>` : ""}
@@ -2382,11 +2435,12 @@ function renderWantCard(item) {
       <div class="want-card-header">
         <strong>${escapeHtml(item.title || item.raw_text)}</strong>
         <div class="want-card-status">
-          <span class="badge ${wantStatusBadgeClass(item.status)}">${escapeHtml(wantStatusLabel(item.status, item.status_label || item.state))}</span>
+          <span class="badge ${wantStatusBadgeClass(item.status)}">${escapeHtml(wantDisplayStatus(item))}</span>
           ${bestScore ? `<span class="want-score-pill">${escapeHtml(bestScore)}</span>` : ""}
         </div>
       </div>
       <div class="muted-line">${escapeHtml(item.raw_text || "")}</div>
+      ${renderWantSearchProgress(item)}
       <div class="want-card-meta">
         <span>${escapeHtml(formatMediaType(item.media_type))}</span>
         <span>${escapeHtml(item.source_label || item.source)}</span>
@@ -2587,6 +2641,8 @@ const candidateNoteTranslations = {
   "ambiguous top candidates": "最高分候选接近",
   "title tokens matched": "标题匹配",
   "weak title match": "标题匹配较弱",
+  "external work identifier matched": "豆瓣或 IMDb 作品 ID 匹配",
+  "external work identifier conflict": "豆瓣或 IMDb 作品 ID 冲突",
   "year matched": "年份匹配",
   "year missing": "缺少年份",
   "resolution matched": "分辨率匹配",

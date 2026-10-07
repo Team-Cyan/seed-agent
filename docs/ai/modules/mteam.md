@@ -101,6 +101,10 @@ Current fallback still present in code:
   API keyword field. Send canonical full Douban/IMDb URLs without `mode`, and
   do not fall back to titles when identifiers exist. Apply generic quality preferences during
   ranking so lower-match candidates remain visible for operator override.
+- Preserve per-release identifier-query provenance across deduplication for
+  ranking. Returned IDs and query evidence never establish canonical Want
+  aliases. A rejected query, including a failed identifier supplement, must
+  propagate an error instead of becoming an authoritative empty/partial result.
 - DEBUG runtime events expose the safe search endpoint/payload, page row
   counts, and local filter counts; INFO retains query-path and result summaries.
   Never log request headers, cookies, API keys, or generated download tokens.

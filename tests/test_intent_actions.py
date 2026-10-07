@@ -649,7 +649,7 @@ async def test_search_intent_does_not_merge_from_candidate_external_ids(
 
     assert searched.intent_id == newer.intent_id
     assert ranked[0].intent_id == newer.intent_id
-    assert store.get_intent(newer.intent_id)["state"] == IntentState.SEARCHED.value
+    assert store.get_intent(newer.intent_id)["state"] == searched.state.value
     assert store.get_intent(older.intent_id)["state"] == IntentState.RECEIVED.value
     assert store.list_release_candidates(older.intent_id) == []
     assert [row["intent_id"] for row in store.list_release_candidates(newer.intent_id)] == [
@@ -796,8 +796,8 @@ async def test_run_intent_once_does_not_persist_partial_search_batch(
     assert store.get_intent(second.intent_id)["state"] == IntentState.NORMALIZED.value
     assert store.list_release_candidates(first.intent_id) == []
     assert store.list_release_candidates(second.intent_id) == []
-    assert store.list_want_search_runs(intent_id=first.intent_id) == []
-    assert store.list_want_search_runs(intent_id=second.intent_id) == []
+    assert store.list_want_search_runs(intent_id=first.intent_id)[0]["status"] == "batch_aborted"
+    assert store.list_want_search_runs(intent_id=second.intent_id)[0]["status"] == "failed"
 
 
 @pytest.mark.asyncio

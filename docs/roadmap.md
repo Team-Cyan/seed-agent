@@ -5,6 +5,17 @@ by completion period, and unfinished work is ordered by current priority.
 
 ## Timeline And Priority List
 
+- Completed locally 2026-10 - Want List workflow repair (live rollout pending)
+  - Active Wants re-enter daily search from existing per-item history; bounded
+    batches drain fairly across cycles and restart, including zero results.
+  - Failed/aborted searches retain candidate snapshots and durable diagnostics;
+    Web/CLI/scheduler share terminal and active-enqueue protections.
+  - Matching external IDs, query provenance, and tracker subtitles inform
+    ranking; fresh successful results can clear nonterminal review state.
+  - The Want List UI exposes search freshness and next eligibility. Explicit
+    intent execution can retry ready capacity-blocked candidates locally.
+  - Follow the deployment boundary in the repair plan before live recovery.
+
 - Completed 2026-04 - Foundation
   - Python package bootstrap with `uv`, Typer CLI, tests, and linting.
   - Config-first project structure.

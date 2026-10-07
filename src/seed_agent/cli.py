@@ -74,7 +74,6 @@ from seed_agent.models import (
     Decision,
     IntentKind,
     IntentSource,
-    IntentState,
     LifecycleState,
     ManagedTorrent,
     RankedRelease,
@@ -488,7 +487,8 @@ def intent_search(
     providers = _build_search_providers(loaded)
     try:
         intent, ranked, decision = _run(
-            search_intent(intent_id, store, providers, loaded.want_decision)
+            search_intent(intent_id, store, providers, loaded.want_decision,
+                          loaded.release_preferences)
         )
     except ValueError as exc:
         raise typer.BadParameter(str(exc)) from exc
@@ -1925,16 +1925,24 @@ def schedule_run(
                 hour=scheduler.intent_search_hour,
                 last_search_at=_latest_scheduled_intent_search_at(store_for_run),
             )
-            intent_search = intent_search or _pending_intent_search_due(store_for_run)
+            intent_search = intent_search or _pending_intent_search_due(
+                store_for_run, mode=scheduler.intent_search_mode, hour=scheduler.intent_search_hour,
+            )
             active_backoff = payload.get("schedule_backoff", {}).get("active") is True
             if active_backoff:
                 intent_search = False
-            run_intent_cycle = intent_refresh or intent_search
+            run_intent_cycle = intent_refresh or intent_search or (
+                intent_execute and not active_backoff
+            )
             payload["intent_refresh_enabled"] = intent_refresh
             payload["intent_search_enabled"] = intent_search
             if run_intent_cycle:
                 lease_heartbeat.ensure_owned()
                 phase = "intent_search" if intent_search else "intent_source_sync"
+                retry_options = {}
+                if intent_execute and not intent_search and not active_backoff:
+                    retry_options["retry_ready"] = True
+                    phase = "intent_enqueue_retry"
                 _record_schedule_phase(
                     store_for_run,
                     run_id=run_id,
@@ -1954,6 +1962,7 @@ def schedule_run(
                         refresh_sources=intent_refresh,
                         search_limit=SCHEDULED_INTENT_SEARCH_BATCH_SIZE,
                         run_id=run_id,
+                        **retry_options,
                     )
                 except Exception as exc:
                     intent_payload, failure_backoff = _scheduled_intent_failure_payload(
@@ -2220,9 +2229,11 @@ def _scheduled_intent_search_due(
     return previous.astimezone(current.tzinfo) < scheduled_at
 
 
-def _pending_intent_search_due(store: StateStore) -> bool:
-    """Keep scheduled search active until all normalized intents are drained."""
-    return bool(store.list_intents_by_state(IntentState.NORMALIZED))
+def _pending_intent_search_due(
+    store: StateStore, *, mode: str = "daily", hour: int = 0,
+) -> bool:
+    """A daily batch success must not strand the rest of the due backlog."""
+    return bool(store.list_due_intents(mode=mode, hour=hour, limit=1))
 
 
 def _latest_scheduled_intent_search_at(store: StateStore) -> datetime | None:
@@ -3254,17 +3265,22 @@ def _intent_run_once_payload(
     refresh_sources: bool = True,
     search_limit: int | None = None,
     run_id: str | None = None,
+    retry_ready: bool = False,
 ) -> dict[str, Any]:
     loaded = load_config(config_path)
     store = StateStore(_state_path(loaded))
     providers = _build_search_providers(loaded) if search_ingested else []
+    retry_ready = (retry_ready and execute and not store.has_active_tracker_backoff()
+                   and any(any(row["accepted"] and not row["confirmation_required"]
+                               for row in store.list_release_candidates(intent["intent_id"]))
+                           for intent in store.list_due_intents(mode="manual")))
     inbox_path = _resolve_path(loaded.want_decision.inbox_ref, loaded.config_dir)
     default_policy = _default_category_policy(loaded)
 
     def policy_resolver(intent: ResourceIntent) -> CategoryPolicyConfig:
         return _intent_category_policy(loaded, intent)
 
-    if search_ingested:
+    if search_ingested or retry_ready:
         (
             downloader,
             live_torrents,
@@ -3293,7 +3309,7 @@ def _intent_run_once_payload(
             live_torrents,
             downloader_status,
         )
-        if search_ingested
+        if search_ingested or retry_ready
         else None
     )
     source_warnings: list[dict[str, str]] = []
@@ -3328,7 +3344,9 @@ def _intent_run_once_payload(
                 }
             )
     try:
-        release_resolver = _build_release_download_resolver(loaded) if search_ingested else None
+        release_resolver = (
+            _build_release_download_resolver(loaded) if search_ingested or retry_ready else None
+        )
         result = _run(
             run_intent_once(
                 inbox_path=inbox_path,
@@ -3350,6 +3368,9 @@ def _intent_run_once_payload(
                 search_limit=search_limit,
                 search_source="intent-run-once",
                 run_id=run_id,
+                search_mode=loaded.scheduler.intent_search_mode if run_id else "manual",
+                search_hour=loaded.scheduler.intent_search_hour,
+                retry_ready=retry_ready,
             )
         )
         for source, cursor in pending_source_cursors.items():

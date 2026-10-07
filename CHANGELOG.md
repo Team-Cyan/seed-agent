@@ -4,6 +4,24 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.24.2 - 2026-10-08
+
+### Fixed
+
+- Re-search active Want List entries at their configured daily boundary and
+  drain the backlog in fair ten-item batches, including previous zero results.
+- Preserve successful candidate snapshots when providers are unavailable or
+  identifier queries fail; persist distinct failure and aborted-batch history.
+- Protect rejection, candidate replacement, and enqueue ownership consistently
+  across Web, CLI, and scheduled acquisition; retry capacity-blocked ready
+  candidates only when intent execution is enabled.
+- Discard searches whose work-matching inputs changed while providers were
+  running, and exclude uncommitted results from automatic acquisition.
+- Use matching Douban/IMDb IDs, identifier-query provenance, and tracker
+  subtitles in release identity scoring without weakening other requirements.
+- Let improved results clear nonterminal review state, and show search
+  freshness, failure/defer status, and next search eligibility in Want List UI.
+
 ## 0.24.1 - 2026-09-04
 
 ### Fixed

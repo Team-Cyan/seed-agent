@@ -48,6 +48,20 @@ Persist local lifecycle knowledge and durable decision evidence.
 
 ## Expectations
 
+- Derive per-Want last attempt/outcome and last successful search from
+  `want_search_runs`, including legacy history. `failed` and `batch_aborted`
+  attempts do not advance the successful cadence; failed attempts have a
+  30-minute local retry floor and respect any persisted tracker backoff.
+- Candidate replacement and review-state recomputation share the atomic search
+  boundary. Terminal/selected Wants and active enqueue claims cannot be replaced.
+  Recheck the work-matching inputs at commit time; source bookkeeping and
+  equivalent compact/canonical external IDs do not invalidate a search. Return
+  only committed results to automatic acquisition.
+  CLI reranking uses that boundary without recording a new tracker search.
+- Rejection checks active enqueue ownership transactionally; acquisition and
+  renewal reject protected states. Verify/renew ownership around deferred URL
+  resolution before adding a torrent.
+
 - do not treat local state as disposable,
 - keep the primary SQLite database, its access lock, and existing WAL/SHM/
   journal sidecars owner-only (`0600`) because release evidence may contain
@@ -74,7 +88,8 @@ Persist local lifecycle knowledge and durable decision evidence.
 - keep per-intent `provider_diagnostics` and `search_summary` inside the same
   search-history transaction, including kind/media type, series search mode,
   returned/ranked/filtered/accepted counts. Never add a duplicate standalone
-  successful history insert; failures instead emit separate runtime events,
+  successful history insert; failures emit separate runtime events and failed
+  or aborted-batch history without replacing the last successful snapshot,
 - runtime retention is 2 MiB per file with three backups, owner-only (`0600`),
   and bounded read-only tails. Logging file failures warn once until recovery
   and must not break search or downloader operations,

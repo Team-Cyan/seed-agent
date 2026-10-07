@@ -686,7 +686,9 @@ def test_http_failed_search_has_correlated_redacted_runtime_evidence(tmp_path: P
         assert failure["level"] == "error"
         assert failure["request_id"] == request_id
         assert "hidden-key" not in json.dumps(logs)
-        assert store.list_want_search_runs(intent_id=intent.intent_id) == []
+        history = store.list_want_search_runs(intent_id=intent.intent_id)
+        assert history[0]["status"] == "failed"
+        assert "hidden-key" not in json.dumps(history)
     finally:
         logger.removeHandler(handler)
         handler.close()

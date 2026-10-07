@@ -7,6 +7,7 @@ from typing import Any, Literal
 import httpx
 
 from seed_agent.config import SearchConfig
+from seed_agent.intent.workflow import normalize_external_id
 from seed_agent.models import (
     IntentKind,
     ReleaseCandidate,
@@ -61,6 +62,7 @@ class MTeamSearchProvider:
         )[: self.search_config.max_api_requests_per_intent]
         releases: list[ReleaseCandidate] = []
         seen_release_ids: set[str] = set()
+        query_errors: list[MTeamApiResponseError] = []
         diagnostic: dict[str, Any] = {
             "site": self.site,
             "intent_id": intent.intent_id,
@@ -137,6 +139,7 @@ class MTeamSearchProvider:
                         query_path=attempt["query_path"],
                         code=exc.code,
                     )
+                    query_errors.append(exc)
                     continue
                 log_event(
                     logger,
@@ -146,6 +149,7 @@ class MTeamSearchProvider:
                     intent_id=intent.intent_id,
                     code=exc.code,
                 )
+                query_errors.append(exc)
                 break
             except (httpx.TimeoutException, httpx.NetworkError) as exc:
                 attempt["status"] = "network_error"
@@ -173,7 +177,24 @@ class MTeamSearchProvider:
             )
             for candidate in candidates:
                 release = _release_from_candidate(candidate)
+                provider = "douban" if options.douban else "imdb" if options.imdb else None
+                if provider:
+                    identifier = normalize_external_id(provider, getattr(options, provider))
+                    release = release.model_copy(update={"metadata": {
+                        **release.metadata,
+                        "search_identity_queries": [{"provider": provider, "id": identifier}],
+                    }})
                 if release.release_id in seen_release_ids:
+                    for index, previous in enumerate(releases):
+                        if previous.release_id == release.release_id:
+                            queries = previous.metadata.get("search_identity_queries", [])
+                            for query in release.metadata.get("search_identity_queries", []):
+                                if query not in queries:
+                                    queries = [*queries, query]
+                            releases[index] = previous.model_copy(update={"metadata": {
+                                **previous.metadata, "search_identity_queries": queries,
+                            }})
+                            break
                     continue
                 releases.append(release)
                 seen_release_ids.add(release.release_id)
@@ -182,6 +203,8 @@ class MTeamSearchProvider:
             if len(releases) >= self.search_config.max_results_per_site:
                 break
         self._record_diagnostic(diagnostic, releases)
+        if query_errors:
+            raise query_errors[-1]
         log_event(
             logger,
             logging.INFO,

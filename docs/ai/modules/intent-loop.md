@@ -42,6 +42,23 @@ Convert human requests into search/rank/reject/enqueue workflows.
 
 ## Expectations
 
+- Schedule `normalized`, `searched`, and `confirmation_required` Wants from
+  their durable search history, not source-refresh `updated_at`. Daily batches
+  continue until the due backlog is drained, including previous zero results;
+  source-only refresh remains independent from providers and downloader context.
+- Keep failed/aborted searches separate from successful empty results. Missing
+  providers or partially failed queries preserve the last successful snapshot
+  and write redacted failure history without advancing successful cadence.
+- Protect selected/terminal Wants and active enqueue claims at selection and
+  commit. Rejecting an in-flight enqueue reports a conflict. Nonterminal review
+  state may return to `searched` when fresh rankings no longer need review.
+- With intent execution enabled, reconsider stored ready candidates after a
+  capacity block between tracker searches; rerank against current preferences
+  and apply fresh runtime gates without updating tracker-search freshness.
+- Use normalized external-ID equality, ID-query provenance, and subtitle/title
+  aliases as work-identity evidence. Explicit ID conflicts remain a risk; work
+  identity does not change canonical source aliases or bypass other gates.
+
 - preserve deterministic local state transitions,
 - keep source metadata on `ResourceIntent.metadata` when it is useful for UI or
   later search behavior,
@@ -110,6 +127,8 @@ Convert human requests into search/rank/reject/enqueue workflows.
   evidence; viewed Wants must not be searched or enqueued again.
 
 ## Verification
+
+- `uv run pytest -q tests/test_want_workflow.py`
 
 - `uv run pytest -q tests/test_intent_actions.py tests/test_intent_cli.py tests/test_intent_ranking.py tests/test_intent_run_once.py`
 - `uv run pytest -q tests/test_search_contracts.py tests/test_search_torznab.py tests/test_intent_sources.py`

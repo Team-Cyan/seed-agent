@@ -4,6 +4,7 @@ import logging
 import re
 
 from seed_agent.config import IntentConfig, SearchConfig
+from seed_agent.intent.workflow import normalize_external_id
 from seed_agent.models import Discount, IntentKind, RankedRelease, ReleaseCandidate, ResourceIntent
 from seed_agent.observability import get_logger, log_event
 from seed_agent.quality_tags import (
@@ -87,11 +88,22 @@ def _rank_one(
     reasons: list[str] = []
     risks: list[str] = []
 
-    title_score = _title_score(intent.title, release.title)
+    aliases = intent.metadata.get("title_aliases", [])
+    titles = [intent.title, *(aliases if isinstance(aliases, list) else [])]
+    texts = [release.title, str(release.metadata.get("mteam_subtitle") or "")]
+    title_score = max(_title_score(title, text)
+                      for title in titles if isinstance(title, str) for text in texts)
+    title_matched = title_score >= 30
+    identity_match, identity_conflict = _work_identity(intent, release)
+    if identity_match and not identity_conflict:
+        title_score = 45
+        reasons.append("external work identifier matched")
+    if identity_conflict:
+        risks.append("external work identifier conflict")
     score += title_score
-    if title_score >= 30:
+    if title_matched:
         reasons.append("title tokens matched")
-    else:
+    elif not identity_match or identity_conflict:
         risks.append("weak title match")
 
     if intent.year is not None:
@@ -165,6 +177,29 @@ def _rank_one(
         reasons=reasons,
         risks=risks,
     )
+
+
+def _work_identity(intent: ResourceIntent, release: ReleaseCandidate) -> tuple[bool, bool]:
+    wanted = intent.metadata.get("external_ids", {})
+    returned = release.metadata.get("external_ids", {})
+    if not isinstance(wanted, dict) or not isinstance(returned, dict):
+        return False, False
+    matched, conflict = False, False
+    for provider in ("douban", "imdb"):
+        want_id = normalize_external_id(provider, wanted.get(provider))
+        candidate_id = normalize_external_id(provider, returned.get(provider))
+        if want_id and candidate_id:
+            matched = matched or want_id == candidate_id
+            conflict = conflict or want_id != candidate_id
+    queries = release.metadata.get("search_identity_queries", [])
+    if isinstance(queries, list):
+        for query in queries:
+            if isinstance(query, dict) and query.get("provider") in {"douban", "imdb"}:
+                provider = query["provider"]
+                want_id = normalize_external_id(provider, wanted.get(provider))
+                if want_id and want_id == normalize_external_id(provider, query.get("id")):
+                    matched = True
+    return matched, conflict
 
 
 def _title_score(intent_title: str, release_title: str) -> int:

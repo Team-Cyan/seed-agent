@@ -7,11 +7,17 @@ import re
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 from seed_agent.audit import redact_payload
+from seed_agent.intent.workflow import (
+    next_search_at,
+    parse_search_time,
+    search_basis,
+    want_searchable,
+)
 from seed_agent.models import (
     IntentState,
     LifecycleState,
@@ -807,6 +813,68 @@ class StateStore:
         with self._connect(row_factory=sqlite3.Row) as conn:
             rows = conn.execute(query, params).fetchall()
         return [dict(row) for row in rows]
+
+    def want_search_progress(self) -> dict[str, dict[str, Any]]:
+        """Derive durable progress from existing history, including legacy rows."""
+        with self._connect(row_factory=sqlite3.Row) as conn:
+            rows = conn.execute("""
+                SELECT h.intent_id, h.searched_at AS last_attempt_at,
+                       h.status AS last_status, h.message AS last_error,
+                       h.backoff_until, s.searched_at AS last_success_at
+                FROM want_search_runs h
+                JOIN (
+                    SELECT intent_id, MAX(id) AS latest_id,
+                           MAX(CASE WHEN status = 'searched' THEN id END) AS success_id
+                    FROM want_search_runs GROUP BY intent_id
+                ) p ON h.id = p.latest_id
+                LEFT JOIN want_search_runs s ON s.id = p.success_id
+            """).fetchall()
+        return {str(row["intent_id"]): dict(row) for row in rows}
+
+    def intent_searchable(self, intent_id: str) -> bool:
+        with self._connect(row_factory=sqlite3.Row) as conn:
+            row = conn.execute(
+                "SELECT state, selected_release_id FROM intents WHERE intent_id = ?",
+                (intent_id,),
+            ).fetchone()
+            return bool(row is not None and want_searchable(
+                row["state"], row["selected_release_id"],
+            ) and not _active_enqueue_claim(conn, intent_id))
+
+    def active_intent_enqueue_claims(self) -> set[str]:
+        with self._connect(row_factory=sqlite3.Row) as conn:
+            rows = conn.execute(
+                "SELECT intent_id, expires_at FROM intent_enqueue_claims",
+            ).fetchall()
+        now = _utc_now_datetime()
+        return {str(row["intent_id"]) for row in rows
+                if (_parse_datetime(row["expires_at"]) or now) > now}
+
+    def list_due_intents(
+        self, *, mode: str = "manual", hour: int = 0,
+        now: datetime | None = None, limit: int | None = None,
+    ) -> list[dict[str, Any]]:
+        current = now or datetime.now().astimezone()
+        if current.tzinfo is None:
+            current = current.astimezone()
+        progress = self.want_search_progress()
+        with self._connect(row_factory=sqlite3.Row) as conn:
+            rows = conn.execute("""
+                SELECT * FROM intents WHERE state IN
+                    ('normalized', 'searched', 'confirmation_required')
+                    AND selected_release_id IS NULL
+            """).fetchall()
+            eligible = [dict(row) for row in rows
+                        if not _active_enqueue_claim(conn, row["intent_id"])]
+        due = [row for row in eligible if next_search_at(
+            progress.get(row["intent_id"], {}), now=current, mode=mode, hour=hour,
+        ) <= current]
+        due.sort(key=lambda row: (
+            parse_search_time(progress.get(row["intent_id"], {}).get("last_attempt_at"))
+            or datetime.min.replace(tzinfo=UTC),
+            row["created_at"], row["intent_id"],
+        ))
+        return due if limit is None else due[:max(limit, 0)]
 
     def site_history_scores(
         self,
@@ -1797,6 +1865,27 @@ class StateStore:
             )
         return "viewed"
 
+    def mark_intent_rejected(self, intent_id: str) -> str:
+        with self._connect(row_factory=sqlite3.Row) as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute("SELECT * FROM intents WHERE intent_id = ?",
+                               (intent_id,)).fetchone()
+            if row is None:
+                return "missing"
+            if _active_enqueue_claim(conn, intent_id):
+                return "enqueue_in_progress"
+            if row["state"] == IntentState.REJECTED.value:
+                return "already_rejected"
+            if not want_searchable(row["state"], row["selected_release_id"]):
+                return "terminal"
+            normalized = json.loads(row["normalized_json"])
+            normalized["state"] = IntentState.REJECTED.value
+            conn.execute("UPDATE intents SET state = ?, normalized_json = ?, updated_at = ? "
+                         "WHERE intent_id = ?",
+                         (IntentState.REJECTED.value, _json_dumps(normalized),
+                          _utc_now(), intent_id))
+        return "rejected"
+
     def acquire_intent_enqueue_claim(
         self,
         intent_id: str,
@@ -1824,6 +1913,8 @@ class StateStore:
                     "status": "already_enqueued",
                     "selected_release_id": intent["selected_release_id"],
                 }
+            if not want_searchable(intent["state"], intent["selected_release_id"]):
+                return {"acquired": False, "status": "terminal"}
             claim = conn.execute(
                 "SELECT * FROM intent_enqueue_claims WHERE intent_id = ?",
                 (intent_id,),
@@ -1863,6 +1954,24 @@ class StateStore:
             "owner_id": owner_id,
             "expires_at": expires_at.isoformat(),
         }
+
+    def renew_intent_enqueue_claim(
+        self, intent_id: str, owner_id: str, *, ttl_seconds: int = 3600,
+    ) -> bool:
+        with self._connect(row_factory=sqlite3.Row) as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute("SELECT state, selected_release_id FROM intents "
+                               "WHERE intent_id = ?", (intent_id,)).fetchone()
+            claim = conn.execute("SELECT * FROM intent_enqueue_claims WHERE intent_id = ?",
+                                 (intent_id,)).fetchone()
+            now = _utc_now_datetime()
+            if (row is None or not want_searchable(row["state"], row["selected_release_id"])
+                    or claim is None or claim["owner_id"] != owner_id
+                    or (_parse_datetime(claim["expires_at"]) or now) <= now):
+                return False
+            conn.execute("UPDATE intent_enqueue_claims SET expires_at = ? WHERE intent_id = ?",
+                         ((now + timedelta(seconds=ttl_seconds)).isoformat(), intent_id))
+        return True
 
     def complete_intent_enqueue_claim(
         self,
@@ -1907,6 +2016,8 @@ class StateStore:
                     (intent_id, owner_id),
                 )
                 return True
+            if not want_searchable(row["state"]):
+                return False
             normalized = json.loads(str(row["normalized_json"]))
             normalized["state"] = IntentState.ENQUEUED.value
             ResourceIntent.model_validate(normalized)
@@ -2260,6 +2371,8 @@ class StateStore:
         run_id: str | None = None,
         searched_at: datetime | None = None,
         history_payloads: dict[str, dict[str, Any]] | None = None,
+        record_history: bool = True,
+        committed_intent_ids: list[str] | None = None,
     ) -> int:
         """Atomically replace candidates, intent states, and history for a search batch."""
         if not results:
@@ -2278,6 +2391,7 @@ class StateStore:
             for intent, ranked in results
         }
         committed = 0
+        written_ids: list[str] = []
         history_rows: list[tuple[object, ...]] = []
         with self._connect(row_factory=sqlite3.Row) as conn:
             conn.execute("BEGIN IMMEDIATE")
@@ -2292,22 +2406,12 @@ class StateStore:
                 current_intent = ResourceIntent.model_validate(
                     json.loads(str(current["normalized_json"]))
                 )
-                if (
-                    current_intent.state
-                    in {
-                        IntentState.ENQUEUED,
-                        IntentState.REJECTED,
-                        IntentState.FAILED,
-                        IntentState.VIEWED,
-                    }
-                    or current.get("selected_release_id") is not None
-                ):
+                if (not want_searchable(current_intent.state, current.get("selected_release_id"))
+                        or _active_enqueue_claim(conn, intent.intent_id)
+                        or search_basis(current_intent) != search_basis(intent)):
                     continue
                 next_state = _want_search_state(ranked)
-                effective_intent = _monotonic_intent(
-                    current,
-                    current_intent.model_copy(update={"state": next_state}),
-                )
+                effective_intent = current_intent.model_copy(update={"state": next_state})
                 conn.execute(
                     "DELETE FROM release_candidates WHERE intent_id = ?",
                     (intent.intent_id,),
@@ -2363,7 +2467,11 @@ class StateStore:
                     )
                 )
                 committed += 1
-            conn.executemany(_WANT_SEARCH_RUN_INSERT_SQL, history_rows)
+                written_ids.append(intent.intent_id)
+            if record_history:
+                conn.executemany(_WANT_SEARCH_RUN_INSERT_SQL, history_rows)
+        if committed_intent_ids is not None:
+            committed_intent_ids.extend(written_ids)
         return committed
 
     def list_release_candidates(self, intent_id: str) -> list[dict[str, Any]]:
@@ -3093,6 +3201,13 @@ def _want_search_state(ranked: list[RankedRelease]) -> IntentState:
     if not ranked or ranked[0].confirmation_required:
         return IntentState.CONFIRMATION_REQUIRED
     return IntentState.SEARCHED
+
+
+def _active_enqueue_claim(conn: sqlite3.Connection, intent_id: str) -> bool:
+    row = conn.execute("SELECT expires_at FROM intent_enqueue_claims WHERE intent_id = ?",
+                       (intent_id,)).fetchone()
+    expires = _parse_datetime(row[0]) if row is not None else None
+    return expires is not None and expires > _utc_now_datetime()
 
 
 def _sqlite_access_lock_path(path: Path) -> Path:

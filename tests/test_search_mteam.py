@@ -273,11 +273,10 @@ async def test_mteam_search_provider_does_not_fall_back_after_identifier_busines
         fetch_candidates=fake_fetch_candidates,
     )
 
-    releases = await provider.search(
-        _intent(metadata={"external_ids": {"douban": "26799731", "imdb": "tt5726616"}})
-    )
-
-    assert releases == []
+    with pytest.raises(MTeamApiResponseError, match="identifier query rejected"):
+        await provider.search(
+            _intent(metadata={"external_ids": {"douban": "26799731", "imdb": "tt5726616"}})
+        )
     assert len(calls) == 2
     assert [attempt["status"] for attempt in provider.search_diagnostics[0]["attempts"]] == [
         "api_error",

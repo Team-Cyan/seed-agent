@@ -279,7 +279,9 @@ async def test_search_failure_redacts_validation_input_at_the_first_log_boundary
         failure = next(json.loads(line) for line in text.splitlines()
                        if json.loads(line)["event"] == "intent.search_batch.failed")
         assert "validation failed" in failure["details"]["error"]
-    assert store.list_want_search_runs() == []
+    history = store.list_want_search_runs()
+    assert history[0]["status"] == "failed"
+    assert "private-input" not in json.dumps(history)
 
 
 def test_exception_summaries_and_runtime_status_omit_validation_input(monkeypatch) -> None:

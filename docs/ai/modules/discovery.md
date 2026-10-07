@@ -32,6 +32,8 @@ Turn external site-specific list sources into `TorrentCandidate` objects.
 - keep discovery adapters additive when possible.
 - preserve explicit numeric zero values from tracker APIs instead of treating
   them as missing enrichment data,
+- preserve successful intent-search snapshots on failed or unconfigured
+  providers; only a successful authoritative empty search can clear candidates,
 - propagate rate-limit and network failures from optional RSS enrichment so the
   scheduler can activate its existing backoff controls,
 - route anime intent searches through M-Team's TV search mode.

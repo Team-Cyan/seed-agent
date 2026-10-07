@@ -38,6 +38,7 @@ from seed_agent.config import (
     load_config,
     resolve_runtime_secret_path,
 )
+from seed_agent.intent.workflow import next_search_at, want_searchable
 from seed_agent.metrics import render_prometheus_metrics
 from seed_agent.models import (
     Decision,
@@ -192,7 +193,7 @@ def make_handler(config_path: Path) -> type[BaseHTTPRequestHandler]:
                 return
             if self.path == "/api/wants":
                 try:
-                    self._send_json(_wants_payload(root))
+                    self._send_json(_wants_payload(root, config_path=resolved_config_path))
                 except sqlite3.DatabaseError as exc:
                     self._send_json(
                         _state_database_error_payload(exc),
@@ -827,7 +828,7 @@ def _pools_payload(config_path: Path) -> dict[str, Any]:
     }
 
 
-def _wants_payload(root: Path) -> dict[str, Any]:
+def _wants_payload(root: Path, *, config_path: Path | None = None) -> dict[str, Any]:
     state_path = _state_db_path(root)
     payload: dict[str, Any] = {
         "state_path": str(state_path),
@@ -864,6 +865,13 @@ def _wants_payload(root: Path) -> dict[str, Any]:
             conn,
             [str(row["intent_id"]) for row in rows],
         )
+    store = StateStore(state_path, initialize=False, read_only=True)
+    progress = store.want_search_progress()
+    active_claims = store.active_intent_enqueue_claims()
+    backoff = _schedule_backoff_status(root)
+    config = load_config(config_path) if config_path is not None else None
+    mode = config.scheduler.intent_search_mode if config is not None else "daily"
+    hour = config.scheduler.intent_search_hour if config is not None else 0
     items = []
     for row in rows:
         if str(row["source"]) == IntentSource.MANUAL.value:
@@ -871,13 +879,19 @@ def _wants_payload(root: Path) -> dict[str, Any]:
         intent_id = str(row["intent_id"])
         items.append(
             _want_item(
-                dict(row),
+                {**dict(row), "enqueue_in_progress": intent_id in active_claims},
                 release_counts.get(intent_id, {}),
                 evidence_by_intent.get(intent_id, []),
+                search_progress=progress.get(intent_id, {}),
+                search_mode=mode, search_hour=hour,
+                search_backoff=backoff,
             )
         )
     payload["total"] = len(items)
     payload["items"] = items
+    payload["due_count"] = 0 if backoff.get("active") else len(
+        store.list_due_intents(mode=mode, hour=hour),
+    )
     return payload
 
 
@@ -925,7 +939,7 @@ def _search_wants_payload(body: dict[str, Any], config_path: Path, root: Path) -
         payload = {"searched": 0, "status": [{"level": "ok", "message": "no wants"}]}
         log_event(logger, logging.INFO, "web.want_search.completed", operation="bulk", searched=0)
         return payload
-    payload = _wants_payload(root)
+    payload = _wants_payload(root, config_path=config_path)
     items = _filter_searchable_want_items(_filter_want_items(payload["items"], body))
     config = load_config(config_path)
     store = StateStore(state_path)
@@ -1012,7 +1026,7 @@ def _search_single_want_payload(
         )
         return payload, HTTPStatus.OK
     item = _want_item(
-        row,
+        {**row, "enqueue_in_progress": intent_id in store.active_intent_enqueue_claims()},
         {"release_count": len(store.list_release_candidates(intent_id))},
         store.list_intent_source_evidence(intent_id),
     )
@@ -1020,7 +1034,8 @@ def _search_single_want_payload(
         payload = {
             "searched": 0,
             "skipped": 1,
-            "status": [{"level": "ok", "message": "already queued; skipped search"}],
+            "status": [{"level": "ok",
+                        "message": "terminal or enqueue in progress; skipped search"}],
         }
         log_event(
             logger,
@@ -1126,13 +1141,14 @@ def _want_candidates_payload(
     if row is None:
         return {"error": "want not found"}, HTTPStatus.NOT_FOUND
     intent = ResourceIntent.model_validate(json.loads(str(row["normalized_json"])))
+    config = load_config(config_path)
     ranked = [_ranked_release_from_row(item) for item in store.list_release_candidates(intent_id)]
     allowed_release_ids = {
         release.release_id
         for release in filter_releases(
             intent,
             [item.release for item in ranked],
-            load_config(config_path).want_decision,
+            config.want_decision,
         )
     }
     ranked = [item for item in ranked if item.release.release_id in allowed_release_ids]
@@ -1146,9 +1162,13 @@ def _want_candidates_payload(
     )
     return {
         "intent": _want_item(
-            row,
+            {**row, "enqueue_in_progress": intent_id in store.active_intent_enqueue_claims()},
             {"release_count": len(candidates)},
             store.list_intent_source_evidence(intent_id),
+            search_progress=store.want_search_progress().get(intent_id, {}),
+            search_mode=config.scheduler.intent_search_mode,
+            search_hour=config.scheduler.intent_search_hour,
+            search_backoff=_schedule_backoff_status(root),
         ),
         "total": len(candidates),
         "items": candidates,
@@ -1564,12 +1584,9 @@ def _filter_searchable_want_items(items: list[dict[str, Any]]) -> list[dict[str,
 
 
 def _want_searchable(item: dict[str, Any]) -> bool:
-    state = str(item.get("state") or "")
-    if state in {IntentState.ENQUEUED.value, IntentState.VIEWED.value}:
+    if item.get("searchable") is False:
         return False
-    if item.get("selected_release_id"):
-        return False
-    return True
+    return want_searchable(str(item.get("state") or ""), item.get("selected_release_id"))
 
 
 def _intent_source_evidence_by_intent(
@@ -1647,6 +1664,9 @@ def _want_item(
     row: dict[str, Any],
     release_count: dict[str, Any],
     evidence: list[dict[str, Any]] | None = None,
+    *, search_progress: dict[str, Any] | None = None,
+    search_mode: str = "daily", search_hour: int = 0,
+    search_backoff: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     normalized = _want_normalized_json(row.get("normalized_json"))
     metadata = normalized.get("metadata") if isinstance(normalized.get("metadata"), dict) else {}
@@ -1659,6 +1679,13 @@ def _want_item(
         metadata,
         evidence or [],
     )
+    progress = search_progress or {}
+    now = datetime.now().astimezone()
+    eligible = want_searchable(state, selected_release_id) and not row.get("enqueue_in_progress")
+    deferred = eligible and bool((search_backoff or {}).get("active"))
+    if deferred:
+        progress = {**progress, "backoff_until": search_backoff.get("until")}
+    due = next_search_at(progress, now=now, mode=search_mode, hour=search_hour)
     return {
         "intent_id": row.get("intent_id") or normalized.get("intent_id"),
         "title": redact_sensitive_text(
@@ -1686,6 +1713,18 @@ def _want_item(
         "selected_release_id": selected_release_id,
         "release_count": releases,
         "updated_at": row.get("updated_at"),
+        "last_search_at": progress.get("last_attempt_at"),
+        "last_successful_search_at": progress.get("last_success_at"),
+        "search_status": "skipped_backoff" if deferred
+        else progress.get("last_status") or "never_searched",
+        "search_error": redact_sensitive_text(str(progress["last_error"]))
+        if progress.get("last_error") else None,
+        "next_search_at": max(due, now).isoformat() if eligible else None,
+        "search_due": eligible and due <= now,
+        "searchable": eligible,
+        "search_skip_reason": "enqueue_in_progress" if row.get("enqueue_in_progress")
+        else "terminal" if not want_searchable(state, selected_release_id)
+        else "tracker_backoff" if deferred else None,
     }
 
 
@@ -1746,6 +1785,7 @@ def _want_candidate_item(
 
 def _candidate_matches_requirements(ranked: RankedRelease) -> bool:
     requirement_risk_prefixes = (
+        "external work identifier conflict",
         "resolution missing",
         "season missing",
         "episode missing",
