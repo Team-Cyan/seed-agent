@@ -3,6 +3,26 @@
 This document is the durable architecture snapshot for the current project shape.
 It focuses on shipped or wired behavior, not future aspirations.
 
+## Current Local Integration And Refinement Boundary
+
+The acquisition and PT loops below remain the existing foundation. The reviewed
+local media integration adds directory inventory, metadata/review, hardlink import,
+subtitles and owned-output reconciliation under `media_import/`. Independent media
+SQLite, worker scheduling and bounded Web/CLI commands have passed local checkpoint
+review, as has mixed-source routing with historical target authority. Final role,
+provider and poster integration passed independent local review. The deployed seed version must not
+be assumed to include these local changes. Local regression is not production acceptance.
+
+The architecture refinement decision is documented in
+[Execution And State Boundaries](specs/2026-10-23-execution-and-state-boundaries.md),
+with sequencing in the
+[Refinement Plan](plans/2026-10-23-architecture-refinement.md).
+Delivery target: one image/UI, independent media runtime/state/resources, and a shared
+safe downloader action boundary for acquisition/seed. Current scope and acceptance are
+consolidated in [Product Delivery Plan](plans/2026-10-24-media-product-delivery.md).
+Production rollout is authorized after final integration/review; it has not occurred.
+Existing media behavior/receipts and seed protections must be preserved.
+
 ## High-Level Architecture
 
 ```mermaid
@@ -97,7 +117,9 @@ flowchart TB
 - `src/seed_agent/sources/telegram.py`: Telegram polling ingestion.
 - `src/seed_agent/web/app.py`: local Web UI API.
 - `src/seed_agent/web/static/*`: local Web UI.
-- `src/seed_agent/state.py`: SQLite state model.
+- `src/seed_agent/state.py`: current shared SQLite state model.
+- `src/seed_agent/media_import/`: local media workflow, publication/cleanup receipts
+  and subtitle jobs with independent execution/storage.
 
 ## Design Rules
 
@@ -115,6 +137,10 @@ flowchart TB
 - Want List deduplication uses reliable external ID aliases only; title-only
   fuzzy matching must not auto-merge works.
 - Release-quality preferences are composable tag-group score knobs, not hardcoded profiles.
+
+Media command writes and filesystem authority are documented separately in
+[Media Import](ai/modules/media-import.md); its explicit policies govern library
+artifacts, not downloader cleanup authority.
 
 Operator workflow details live in
 [`docs/operations/web-ui-operator-guide.md`](operations/web-ui-operator-guide.md).

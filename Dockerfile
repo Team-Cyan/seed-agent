@@ -3,7 +3,7 @@
 ARG AGENT_PYTHON_UV_BASE=ghcr.io/astral-sh/uv:python3.14-trixie@sha256:fc2acf3556b55b4474fef2d41d267f8f819c8c393fe20ea35e764e2282427de4
 FROM ${AGENT_PYTHON_UV_BASE}
 
-ARG VERSION=0.24.2
+ARG VERSION=0.25.0
 ARG REVISION=unknown
 ARG BUILD_DATE=unknown
 
@@ -21,6 +21,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     UV_LINK_MODE=copy \
     UV_PROJECT_ENVIRONMENT=/usr/local \
     HOME=/tmp/seed-agent
+
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg libmediainfo0v5 \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 

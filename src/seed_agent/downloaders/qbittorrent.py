@@ -30,11 +30,13 @@ class QbittorrentClient:
         password: str,
         *,
         timeout: float = 30.0,
+        enqueue_paths: dict | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.username = username
         self.password = password
         self.timeout = timeout
+        self.enqueue_paths = enqueue_paths or {}
 
     @asynccontextmanager
     async def _client(self) -> AsyncIterator[httpx.AsyncClient]:
@@ -43,8 +45,13 @@ class QbittorrentClient:
                 await self._login(client)
                 yield client
             except httpx.HTTPError as exc:
-                log_event(logger, logging.WARNING, "qb.connection.failed",
-                          error_type=type(exc).__name__, error=str(exc))
+                log_event(
+                    logger,
+                    logging.WARNING,
+                    "qb.connection.failed",
+                    error_type=type(exc).__name__,
+                    error=str(exc),
+                )
                 raise
 
     async def _login(self, client: httpx.AsyncClient) -> None:
@@ -89,6 +96,16 @@ class QbittorrentClient:
         paused: bool = False,
     ) -> str | None:
         async with self._client() as client:
+            policy = self.enqueue_path_policy(category)
+            if policy:
+                version = await client.get("/api/v2/app/webapiVersion")
+                self._ensure_success(version, "qB path capability")
+                try:
+                    parts = tuple(int(x) for x in version.text.strip().split("."))
+                except ValueError:
+                    raise QbittorrentError("unrecognized qB Web API version") from None
+                if parts < (2, 8, 4):
+                    raise QbittorrentError("qB per-task paths require Web API >= 2.8.4")
             response = await self._post_form(
                 client,
                 "/api/v2/torrents/add",
@@ -97,9 +114,61 @@ class QbittorrentClient:
                     "category": category,
                     "tags": ",".join(tags),
                     "stopped": "true" if paused else "false",
+                    **(
+                        {
+                            "savepath": policy["completed"],
+                            "downloadPath": policy["incomplete"],
+                            "useDownloadPath": "true",
+                            "autoTMM": "false",
+                        }
+                        if policy
+                        else {}
+                    ),
                 },
             )
             return _extract_add_hash(response)
+
+    def enqueue_path_policy(self, category: str) -> dict | None:
+        policy = self.enqueue_paths.get(category)
+        return policy.model_dump() if hasattr(policy, "model_dump") else policy
+
+    async def verify_enqueue_paths(self, torrent_hash: str, category: str) -> dict:
+        policy = self.enqueue_path_policy(category)
+        if not policy:
+            return {"status": "not_configured"}
+        if not torrent_hash:
+            raise QbittorrentError(
+                "task added but hash/path verification pending; do not re-enqueue"
+            )
+        async with self._client() as client:
+            response = await client.get("/api/v2/torrents/info", params={"hashes": torrent_hash})
+            self._ensure_success(response, "qB accepted task paths")
+            matches = [
+                r for r in response.json() if str(r.get("hash", "")).lower() == torrent_hash.lower()
+            ]
+            if len(matches) != 1:
+                raise QbittorrentError(
+                    "task path verification pending; metadata/listing unavailable"
+                )
+            task = matches[0]
+            if (
+                str(PurePosixPath(task.get("save_path", "")))
+                != str(PurePosixPath(policy["completed"]))
+                or str(PurePosixPath(task.get("download_path", "")))
+                != str(PurePosixPath(policy["incomplete"]))
+                or task.get("auto_tmm") is not False
+            ):
+                raise QbittorrentError(
+                    "task added with conflicting paths/AutoTMM; operator review required"
+                )
+            return {
+                "status": "verified",
+                "hash": torrent_hash,
+                "policy": policy,
+                "state": task.get("state"),
+                "completion_proven": task.get("amount_left") == 0
+                and task.get("state") not in {"moving", "checkingDL", "checkingUP", "metaDL"},
+            }
 
     async def list_torrents(
         self, category: str | None = None, tags: set[str] | None = None
@@ -156,8 +225,7 @@ def _extract_add_hash(response: httpx.Response) -> str | None:
     if json_result is not _UNRECOGNIZED_ADD_RESULT:
         return json_result
     raise QbittorrentError(
-        "qBittorrent add torrent failed: "
-        f"unexpected response body: {_safe_response_excerpt(body)}"
+        f"qBittorrent add torrent failed: unexpected response body: {_safe_response_excerpt(body)}"
     )
 
 
@@ -197,7 +265,7 @@ def _optional_int(value: object) -> int | None:
 def _optional_int_value(value: object) -> int | None:
     try:
         return int(value)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
 
 

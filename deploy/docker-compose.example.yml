@@ -1,17 +1,22 @@
 services:
   seed-agent:
-    image: ${SEED_AGENT_IMAGE:-ghcr.io/team-cyan/seed-agent:latest}
+    image: ${SEED_AGENT_IMAGE:?Set one immutable image reference for both roles}
     # For local source deployments, uncomment:
     # build:
     #   context: ..
     container_name: seed-agent
-    restart: unless-stopped
+    restart: "on-failure:5"
+    cpus: "0.75"
+    mem_limit: 512m
+    pids_limit: 128
     read_only: true
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=64m
     labels:
       org.opencontainers.image.icon: https://raw.githubusercontent.com/Team-Cyan/seed-agent/main/docs/assets/icon.png
     environment:
+      SEED_AGENT_ROLE: seed
+      SEED_AGENT_IMAGE_DIGEST: ${SEED_AGENT_IMAGE_DIGEST:?Set the deployed image digest}
       SEED_AGENT_MODE: schedule-run
       SEED_AGENT_CONFIG: /app/config/config.yaml
       SEED_AGENT_EXECUTE: "true"
@@ -30,6 +35,8 @@ services:
       - ../config:/app/config
       - ../local:/app/local
       - ../.seed-agent:/app/.seed-agent
+      # Web queues media commands; it does not run the worker.
+      - ../.media-import:/app/.media-import
       - ../state:/state
     healthcheck:
       test:
@@ -41,3 +48,46 @@ services:
       timeout: 20s
       retries: 3
       start_period: 4m
+
+  media-worker:
+    image: ${SEED_AGENT_IMAGE:?Set one immutable image reference for both roles}
+    restart: "on-failure:5"
+    cpus: "1.0"
+    mem_limit: 1024m
+    pids_limit: 128
+    read_only: true
+    stop_grace_period: 45s
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=128m
+    environment:
+      SEED_AGENT_ROLE: media
+      SEED_AGENT_MODE: media-worker
+      SEED_AGENT_CONFIG: /app/config/config.yaml
+      SEED_AGENT_IMAGE_DIGEST: ${SEED_AGENT_IMAGE_DIGEST:?Set the deployed image digest}
+      SEED_AGENT_STARTUP_STATUS: "true"
+      SEED_AGENT_WEB_ENABLED: "false"
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-100}
+    volumes:
+      # Directory bind preserves visibility of atomic config file replacement.
+      - ../config:/app/config:ro
+      - ../.media-import:/app/.media-import:rw
+      # ONE common parent mount for source and library. Separate binds, even on
+      # the same backing filesystem, can cause link(2) EXDEV. No nested overlays.
+      # Source preservation is enforced by the application; this RW parent does
+      # not provide kernel-enforced source read-only protection.
+      - ${MEDIA_PARENT_DIR:?Set the common source and library parent}:/media:rw
+      # Mount only enabled media providers' credential references, never the
+      # whole local/secrets directory or downloader credentials. Remove unused.
+      - ../local/secrets/tmdb.json:/app/local/secrets/tmdb.json:ro
+      - ../local/secrets/opensubtitles.json:/app/local/secrets/opensubtitles.json:ro
+      - ../local/secrets/assrt.json:/app/local/secrets/assrt.json:ro
+      - ../local/secrets/subdl.json:/app/local/secrets/subdl.json:ro
+    healthcheck:
+      test: ["CMD", "seed-agent", "healthcheck", "--role", "media", "--config", "/app/config/config.yaml"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 1m

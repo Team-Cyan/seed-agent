@@ -148,6 +148,52 @@ def make_handler(config_path: Path) -> type[BaseHTTPRequestHandler]:
                     content_type="text/plain; version=0.0.4; charset=utf-8",
                 )
                 return
+            if request_path == "/api/media/commands":
+                from urllib.parse import parse_qs
+
+                from seed_agent.media_import.commands import status as media_command_status
+
+                query = parse_qs(urlparse(self.path).query)
+                try:
+                    self._send_json(
+                        media_command_status(resolved_config_path, query.get("id", [None])[0])
+                    )
+                except OSError, ValueError, sqlite3.Error:
+                    self._send_json(
+                        {"error": "media command state unavailable"},
+                        status=HTTPStatus.SERVICE_UNAVAILABLE,
+                    )
+                return
+            if request_path == "/api/media":
+                from seed_agent.media_import.runtime import build_engine
+
+                try:
+                    engine, _ = build_engine(resolved_config_path, read_only=True)
+                    from urllib.parse import parse_qs
+
+                    from seed_agent.media_import.commands import status as media_command_status
+
+                    query = parse_qs(urlparse(self.path).query)
+                    snapshot = engine.snapshot(limit=100, offset=int(query.get("offset", [0])[0]))
+                    snapshot["commands"] = media_command_status(resolved_config_path)
+                    snapshot["applied"] = engine.store.applied_status()
+                    self._send_json(snapshot)
+                except FileNotFoundError:
+                    self._send_json(
+                        {
+                            "sources": [],
+                            "scans": [],
+                            "artifacts": [],
+                            "subtitles": [],
+                            "cleanup": [],
+                            "events": [],
+                        }
+                    )
+                except (OSError, ValueError, sqlite3.DatabaseError) as exc:
+                    self._send_json(
+                        {"error": safe_error_text(exc)}, status=HTTPStatus.SERVICE_UNAVAILABLE
+                    )
+                return
             want_candidates_id = _want_subresource_intent_id(self.path, "candidates")
             if want_candidates_id is not None:
                 try:
@@ -313,6 +359,26 @@ def make_handler(config_path: Path) -> type[BaseHTTPRequestHandler]:
                 )
 
         def _do_post(self) -> None:
+            if self.path in {
+                "/api/media/scan",
+                "/api/media/review",
+                "/api/media/subtitles",
+                "/api/media/subtitle-select",
+                "/api/media/series-preview",
+                "/api/media/series-review",
+            }:
+                from seed_agent.media_import.commands import submit
+
+                body = self._read_json()
+                execute = body.pop("execute", False)
+                if not isinstance(execute, bool):
+                    raise ValueError("execute must be boolean")
+                action = self.path.rsplit("/", 1)[-1]
+                self._send_json(
+                    submit(resolved_config_path, action, body, execute=execute),
+                    status=HTTPStatus.ACCEPTED,
+                )
+                return
             if self.path == "/api/trackers/validate":
                 draft = TrackerDraft.model_validate(self._read_json())
                 self._send_json({"status": build_tracker_status(draft, root)})
@@ -801,6 +867,8 @@ def _apply_site_history_feedback(candidates: list[Any], root: Path) -> list[Any]
 
 def _pools_payload(config_path: Path) -> dict[str, Any]:
     config = load_config(config_path)
+    if config.download_client is None:
+        return {"budget_pools": [], "default_category": None, "runtime": {"available": False}}
     policies_by_pool: dict[str, list[dict[str, Any]]] = {}
     for policy in config.download_client.category_policies:
         policies_by_pool.setdefault(policy.budget_pool, []).append(
@@ -889,8 +957,12 @@ def _wants_payload(root: Path, *, config_path: Path | None = None) -> dict[str, 
         )
     payload["total"] = len(items)
     payload["items"] = items
-    payload["due_count"] = 0 if backoff.get("active") else len(
-        store.list_due_intents(mode=mode, hour=hour),
+    payload["due_count"] = (
+        0
+        if backoff.get("active")
+        else len(
+            store.list_due_intents(mode=mode, hour=hour),
+        )
     )
     return payload
 

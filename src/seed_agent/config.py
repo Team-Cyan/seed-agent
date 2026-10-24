@@ -8,6 +8,8 @@ from typing import Any, ClassVar, Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 
+from seed_agent.config_views import DeploymentConfig
+from seed_agent.media_import.config import MediaImportConfig
 from seed_agent.models import Discount
 from seed_agent.quality_tags import quality_tag_group_keys
 
@@ -294,6 +296,21 @@ class ScoringConfig(BaseModel):
         return self
 
 
+class EnqueuePaths(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    completed: str
+    incomplete: str
+
+    @model_validator(mode="after")
+    def disjoint(self):
+        a, b = PurePosixPath(self.completed), PurePosixPath(self.incomplete)
+        if not a.is_absolute() or not b.is_absolute() or ".." in a.parts or ".." in b.parts:
+            raise ValueError("qB task paths must be absolute paths in qB namespace")
+        if a == b or a in b.parents or b in a.parents:
+            raise ValueError("qB completed and incomplete roots must be disjoint")
+        return self
+
+
 class DownloaderConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
@@ -305,6 +322,7 @@ class DownloaderConfig(BaseModel):
     category_policies: list[CategoryPolicyConfig] = Field(default_factory=list)
     budget_pools: list[BudgetPoolConfig] = Field(default_factory=list)
     media_category_map: dict[str, str] = Field(default_factory=dict)
+    enqueue_paths: dict[str, EnqueuePaths] = Field(default_factory=dict)
     secret_ref: str | None = None
 
     @field_validator("media_category_map", mode="before")
@@ -336,6 +354,10 @@ class DownloaderConfig(BaseModel):
         if self.default_category not in set(policy_names):
             raise ValueError("default_category must match a configured category policy")
         known_policies = set(policy_names)
+        if self.enqueue_paths and self.type != "qbittorrent":
+            raise ValueError("per-task completed/incomplete paths require qB capability")
+        if set(self.enqueue_paths) - known_policies:
+            raise ValueError("enqueue_paths references unknown category")
         for media_type, category in self.media_category_map.items():
             if category not in known_policies:
                 raise ValueError(
@@ -648,10 +670,11 @@ class SeedAgentConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     mode: Literal["balanced"]
+    deployment: DeploymentConfig | None = None
     tracker_sites: list[SiteConfig]
     pt_filters: DiscoveryConfig
     pt_scoring: ScoringConfig
-    download_client: DownloaderConfig
+    download_client: DownloaderConfig | None = None
     seed_cleanup: CleanupConfig
     want_decision: IntentConfig = Field(default_factory=IntentConfig)
     release_preferences: SearchConfig = Field(default_factory=SearchConfig)
@@ -660,7 +683,14 @@ class SeedAgentConfig(BaseModel):
     local_state: StateConfig = Field(default_factory=StateConfig)
     scheduler: SchedulerConfig = Field(default_factory=SchedulerConfig)
     metrics: MetricsConfig = Field(default_factory=MetricsConfig)
+    media_import: MediaImportConfig = Field(default_factory=MediaImportConfig)
     _config_dir: Path | None = PrivateAttr(default=None)
+    _media_configured: bool = PrivateAttr(default=False)
+    _media_document: dict[str, Any] = PrivateAttr(default_factory=dict)
+
+    @property
+    def media_configured(self) -> bool:
+        return self._media_configured
 
     @property
     def enabled_sites(self) -> list[SiteConfig]:
@@ -762,7 +792,12 @@ def _runtime_root_for_config(path: Path) -> Path:
 
 def _validate_config_secret_refs(config: SeedAgentConfig, config_path: Path) -> None:
     runtime_root = _runtime_root_for_config(config_path)
-    refs = [config.download_client.secret_ref]
+    refs = [
+        config.download_client.secret_ref if config.download_client else None,
+        config.media_import.tmdb_secret_ref,
+        config.media_import.opensubtitles_secret_ref,
+    ]
+    refs.extend(provider.secret_ref for provider in config.media_import.subtitle_providers)
     refs.extend(site.cookie_ref for site in config.tracker_sites)
     refs.extend(site.api_key_ref for site in config.tracker_sites)
     refs.extend(
@@ -818,8 +853,6 @@ def write_config_mapping(path: Path, data: dict[str, Any]) -> SeedAgentConfig:
 
 
 def load_config(path: Path) -> SeedAgentConfig:
-    data = load_config_mapping(path)
-    config = SeedAgentConfig.model_validate(data)
-    _validate_config_secret_refs(config, path)
-    config._config_dir = path.resolve().parent
-    return config
+    from seed_agent.config_views import load_view
+
+    return load_view(path, "seed").config

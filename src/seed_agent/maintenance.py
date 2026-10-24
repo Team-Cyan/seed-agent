@@ -169,6 +169,16 @@ def _runtime_schema_status(conn: sqlite3.Connection) -> tuple[str, str | None]:
     expected = _expected_runtime_schema()
     if source == expected:
         return "current", None
+    # Earlier installations colocated media tables. Preserve those exact legacy
+    # tables in backups/restores without initializing or executing the media lane.
+    legacy = _legacy_media_schema()
+    extras = set(source["tables"]) - set(expected["tables"])
+    if extras == set(legacy["tables"]) and all(
+        source["tables"][name] == table for name, table in legacy["tables"].items()
+    ):
+        source = {"tables": {k: v for k, v in source["tables"].items() if k not in extras}}
+    if source == expected:
+        return "current", None
     if "candidates" not in source["tables"]:
         return "incompatible", "missing candidates schema anchor"
     unsupported = sorted(
@@ -190,6 +200,17 @@ def _runtime_schema_status(conn: sqlite3.Connection) -> tuple[str, str | None]:
     if migrated != expected:
         return "incompatible", _schema_difference(expected, migrated)
     return "migratable", None
+
+
+@lru_cache(maxsize=1)
+def _legacy_media_schema():
+    from contextlib import closing
+
+    from seed_agent.media_import.schema import SCHEMA
+
+    with closing(sqlite3.connect(":memory:")) as conn:
+        conn.executescript(SCHEMA)
+        return _schema_signature(conn)
 
 
 def _migrated_schema_signature(source: sqlite3.Connection) -> dict[str, Any]:

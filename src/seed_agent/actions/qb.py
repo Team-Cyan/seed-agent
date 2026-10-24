@@ -87,6 +87,13 @@ async def enqueue_candidates(
             )
             continue
 
+        path_policy = (
+            downloader.enqueue_path_policy(policy.name)
+            if hasattr(downloader, "enqueue_path_policy")
+            else None
+        )
+        if path_policy:
+            new_state["enqueue_path_policy"] = path_policy
         torrent_hash = None
         if execute:
             try:
@@ -130,6 +137,18 @@ async def enqueue_candidates(
                 raise MutationBatchError("qBittorrent enqueue batch failed", decisions) from exc
             if torrent_hash is not None:
                 new_state["torrent_hash"] = torrent_hash
+            if path_policy:
+                # Persist successful enqueue evidence even if acceptance is delayed/misconfigured.
+                # Repeating add_url is not a path-repair mechanism.
+                try:
+                    new_state["enqueue_path_verification"] = await downloader.verify_enqueue_paths(
+                        torrent_hash, policy.name
+                    )
+                except Exception as exc:
+                    new_state["enqueue_path_verification"] = {
+                        "status": "review_required",
+                        "error": _error_summary(exc),
+                    }
 
         decisions.append(
             Decision(

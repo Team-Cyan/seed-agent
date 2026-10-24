@@ -153,6 +153,7 @@ CONFIG_RULE_SECTIONS = (
     "local_state",
     "scheduler",
     "metrics",
+    "media_import",
 )
 logger = get_logger("cli")
 
@@ -850,12 +851,25 @@ def run_once(
 @app.command()
 def healthcheck(
     config: Annotated[Path, typer.Option("--config")] = DEFAULT_CONFIG,
+    role: Annotated[str, typer.Option("--role")] = "seed",
     heartbeat_file: Annotated[Path | None, typer.Option("--heartbeat-file")] = None,
-    max_staleness_minutes: Annotated[int, typer.Option("--max-staleness-minutes")] = 90,
+    max_staleness_minutes: Annotated[int | None, typer.Option("--max-staleness-minutes")] = None,
     web_health_url: Annotated[str | None, typer.Option("--web-health-url")] = None,
 ) -> None:
+    if max_staleness_minutes is None:
+        max_staleness_minutes = 1 if role == "media" else 90
     if max_staleness_minutes < 1:
         raise typer.BadParameter("max_staleness_minutes must be >= 1")
+    if role not in {"seed", "media"}:
+        raise typer.BadParameter("role must be seed or media")
+    if role == "media":
+        from seed_agent.media_import.role_health import media_role_status
+
+        payload = media_role_status(config, max_staleness_seconds=max_staleness_minutes * 60)
+        _print_json({"command": "healthcheck", **payload})
+        if not payload["healthy"]:
+            raise typer.Exit(code=1)
+        return
     loaded = load_config(config)
     state_health = _state_database_health(_state_path(loaded))
     payload: dict[str, Any] = {
@@ -877,11 +891,26 @@ def healthcheck(
 @app.command(name="runtime-status")
 def runtime_status(
     config: Annotated[Path, typer.Option("--config")] = DEFAULT_CONFIG,
+    role: Annotated[str, typer.Option("--role")] = "seed",
     heartbeat_file: Annotated[Path | None, typer.Option("--heartbeat-file")] = None,
-    max_staleness_minutes: Annotated[int, typer.Option("--max-staleness-minutes")] = 90,
+    max_staleness_minutes: Annotated[int | None, typer.Option("--max-staleness-minutes")] = None,
 ) -> None:
+    if max_staleness_minutes is None:
+        max_staleness_minutes = 1 if role == "media" else 90
     if max_staleness_minutes < 1:
         raise typer.BadParameter("max_staleness_minutes must be >= 1")
+    if role not in {"seed", "media"}:
+        raise typer.BadParameter("role must be seed or media")
+    if role == "media":
+        from seed_agent.media_import.role_health import media_role_status
+
+        _print_json(
+            {
+                "command": "runtime-status",
+                **media_role_status(config, max_staleness_seconds=max_staleness_minutes * 60),
+            }
+        )
+        return
     payload = _runtime_status_payload(
         config,
         heartbeat_file=heartbeat_file,
@@ -1582,10 +1611,12 @@ def schedule_run(
             configured_minutes=scheduler.min_free_window_minutes,
         )
         require_known_free_window = scheduler.require_known_free_window
-        prune = scheduler.prune_enabled
-        tracker_backfill = scheduler.tracker_backfill_enabled
+        prune = scheduler.prune_enabled and loaded_for_run.download_client is not None
+        tracker_backfill = (
+            scheduler.tracker_backfill_enabled and loaded_for_run.download_client is not None
+        )
         tracker_backfill_category = scheduler.tracker_backfill_category
-        intent = scheduler.intent_enabled
+        intent = scheduler.intent_enabled and loaded_for_run.download_client is not None
         intent_execute = scheduler.intent_execute
         store_for_run = StateStore(_state_path(loaded_for_run))
         backoff = _schedule_backoff_status(config)
@@ -1636,6 +1667,10 @@ def schedule_run(
                     "skipped_by_backoff": bool(backoff.get("active")),
                 },
             )
+        media_payload = None
+        if loaded_for_run.media_configured:
+            media_payload={"status":"worker_required","message":"media runs in an independent role"}
+
         if backoff.get("active"):
             _record_schedule_phase(
                 store_for_run,
@@ -1817,7 +1852,11 @@ def schedule_run(
                 else:
                     payload.setdefault("prune", prune_payload)
 
-            if "error" not in payload and "schedule_backoff" not in payload:
+            if (
+                "error" not in payload
+                and "schedule_backoff" not in payload
+                and loaded_for_run.download_client is not None
+            ):
                 lease_heartbeat.ensure_owned()
                 _record_schedule_phase(
                     store_for_run,
@@ -1893,6 +1932,9 @@ def schedule_run(
                         payload={"schedule_backoff": payload["schedule_backoff"]},
                     )
 
+        if media_payload is not None:
+            payload["media_import"] = media_payload
+
         payload["command"] = "schedule-run"
         payload["run_id"] = run_id
         payload["cycle"] = cycle
@@ -1931,8 +1973,8 @@ def schedule_run(
             active_backoff = payload.get("schedule_backoff", {}).get("active") is True
             if active_backoff:
                 intent_search = False
-            run_intent_cycle = intent_refresh or intent_search or (
-                intent_execute and not active_backoff
+            run_intent_cycle = (
+                intent_refresh or intent_search or (intent_execute and not active_backoff)
             )
             payload["intent_refresh_enabled"] = intent_refresh
             payload["intent_search_enabled"] = intent_search
@@ -3860,7 +3902,7 @@ def _runtime_status_payload(
         runtime_root = _runtime_root(loaded)
         credential_path = (
             _resolve_path(loaded.download_client.secret_ref, loaded.config_dir)
-            if loaded.download_client.secret_ref
+            if loaded.download_client and loaded.download_client.secret_ref
             else None
         )
         payload.update(
@@ -3902,6 +3944,12 @@ def _runtime_status_payload(
                         }
                         for policy in loaded.download_client.category_policies
                     ],
+                }
+                if loaded.download_client
+                else None,
+                "media_import": {
+                    "enabled": loaded.media_import.enabled,
+                    "profiles": [p.name for p in loaded.media_import.profiles],
                 },
                 "pt_filters": {
                     "min_leechers": loaded.pt_filters.min_leechers,
@@ -3980,7 +4028,10 @@ def _config_status_payload(config_path: Path) -> dict[str, Any]:
                 policy.model_dump(mode="json")
                 for policy in loaded.download_client.category_policies
             ],
-        },
+        }
+        if loaded.download_client
+        else None,
+        "media_import": loaded.media_import.model_dump(mode="json"),
     }
 
 
@@ -5094,6 +5145,7 @@ def _print_error_payload(payload: dict[str, Any]) -> int:
 
 def _schedule_log_summary(payload: dict[str, Any]) -> dict[str, Any]:
     summary_keys = [
+        "media_import",
         "command",
         "run_id",
         "config",
@@ -6273,7 +6325,7 @@ def _runtime_activity_summary(torrents: list[ManagedTorrent]) -> dict[str, float
 
 
 def _maybe_build_downloader(config: SeedAgentConfig) -> Downloader | None:
-    secret_ref = config.download_client.secret_ref
+    secret_ref = config.download_client.secret_ref if config.download_client else None
     if not secret_ref:
         return None
     secret_path = _resolve_path(secret_ref, config.config_dir)
@@ -6293,11 +6345,20 @@ def _maybe_build_downloader(config: SeedAgentConfig) -> Downloader | None:
     password = secret.get("password")
     if not username or not password:
         return None
-    return QbittorrentClient(base_url=base_url, username=username, password=password)
+    return QbittorrentClient(
+        base_url=base_url,
+        username=username,
+        password=password,
+        **(
+            {"enqueue_paths": config.download_client.enqueue_paths}
+            if config.download_client.enqueue_paths
+            else {}
+        ),
+    )
 
 
 def build_downloader(config: SeedAgentConfig) -> Downloader:
-    secret_ref = config.download_client.secret_ref
+    secret_ref = config.download_client.secret_ref if config.download_client else None
     if not secret_ref:
         raise typer.BadParameter("missing downloader secret")
     secret_path = _resolve_path(secret_ref, config.config_dir)
@@ -6489,8 +6550,14 @@ def _append_source_warning(
     source: str,
     exc: Exception,
 ) -> None:
-    log_event(logger, logging.WARNING, "source.refresh.failed", source_id=source,
-              error_type=type(exc).__name__, error=_runtime_error_summary(exc))
+    log_event(
+        logger,
+        logging.WARNING,
+        "source.refresh.failed",
+        source_id=source,
+        error_type=type(exc).__name__,
+        error=_runtime_error_summary(exc),
+    )
     if source_warnings is None:
         return
     source_warnings.append(
@@ -6557,9 +6624,8 @@ def _cached_douban_subject_event(
     has_legacy_subject_metadata = metadata.get("subject_adapter") == "douban_mobile_subject"
     classification_version = metadata.get("subject_media_classification_version")
     if (
-        (status not in {"success", "imdb_fallback"} and not has_legacy_subject_metadata)
-        or classification_version != DOUBAN_SUBJECT_CLASSIFICATION_VERSION
-    ):
+        status not in {"success", "imdb_fallback"} and not has_legacy_subject_metadata
+    ) or classification_version != DOUBAN_SUBJECT_CLASSIFICATION_VERSION:
         return None
     return _apply_douban_detail_metadata(event, metadata)
 
@@ -6914,3 +6980,152 @@ def _resolve_path(path_value: str, config_dir: Path | None) -> Path | None:
 
 
 _build_downloader = build_downloader
+
+
+@app.command(name="media-scan")
+def media_scan(
+    config: Annotated[Path, typer.Option("--config")] = Path("config/example.yaml"),
+    profile: str | None = typer.Option(None, "--profile"),
+    refresh_subtitles: bool = typer.Option(False, "--refresh-subtitles"),
+    execute: bool = typer.Option(False, "--execute"),
+) -> None:
+    """Inventory and plan media; writes follow three explicit media config policies."""
+    from seed_agent.media_import.commands import submit
+
+    _print_json(
+        submit(
+            config,
+            "subtitles" if refresh_subtitles else "scan",
+            {"profile": profile},
+            execute=execute,
+        )
+    )
+
+
+@app.command(name="media-status")
+def media_status(
+    config: Annotated[Path, typer.Option("--config")] = Path("config/example.yaml"),
+) -> None:
+    """Read-only media evidence, including exact cleanup manifests."""
+    from seed_agent.media_import.runtime import build_engine
+
+    engine, _ = build_engine(config, read_only=True)
+    typer.echo(json.dumps(engine.snapshot(limit=100), ensure_ascii=False))
+
+
+@app.command(name="media-state-init")
+def media_state_init(config: Annotated[Path, typer.Option("--config")]) -> None:
+    """Explicitly create independent media state; never reads provider secrets or seed DB."""
+    from seed_agent.config_views import load_view
+    from seed_agent.media_import.runtime import media_state_path
+    from seed_agent.media_import.store import MediaStore
+
+    view = load_view(config, "media")
+    store = MediaStore(media_state_path(view))
+    _print_json(
+        {"status": "initialized", "schema_version": store.schema_version, "epoch": store.epoch()}
+    )
+
+
+@app.command(name="media-state-export")
+def media_state_export(
+    config: Annotated[Path, typer.Option("--config")],
+    source: Annotated[Path, typer.Option("--source")],
+    output: Annotated[Path, typer.Option("--output")],
+    execute: Annotated[bool, typer.Option("--execute")] = False,
+) -> None:
+    """Preview an explicit legacy snapshot export; --execute writes only the export file."""
+    from seed_agent.config_views import load_view
+    from seed_agent.media_import.migration import export_snapshot
+
+    view = load_view(config, "media")
+    if view.config.media_import.sources:
+        raise typer.BadParameter(
+            "Legacy-only migration command: mixed-source stores use media-state-backup/"
+            "media-state-restore. Export/import with the stopped legacy profile configuration."
+        )
+    _print_json(
+        export_snapshot(
+            source, view.config.media_import.profiles, output=output if execute else None
+        )
+    )
+
+
+@app.command(name="media-state-import")
+def media_state_import(
+    config: Annotated[Path, typer.Option("--config")],
+    source: Annotated[Path, typer.Option("--source")],
+    execute: Annotated[bool, typer.Option("--execute")] = False,
+) -> None:
+    """Preview-first bounded snapshot import; never touches source downloads/library bytes."""
+    from seed_agent.config_views import load_view
+    from seed_agent.media_import.migration import import_snapshot
+    from seed_agent.media_import.runtime import media_state_path
+
+    view = load_view(config, "media")
+    if view.config.media_import.sources:
+        raise typer.BadParameter(
+            "Legacy-only migration command: mixed-source stores use media-state-backup/"
+            "media-state-restore. Export/import with the stopped legacy profile configuration."
+        )
+    _print_json(
+        import_snapshot(
+            source, media_state_path(view), view.config.media_import.profiles, execute=execute
+        )
+    )
+
+
+@app.command(name="media-state-backup")
+def media_state_backup(
+    config: Annotated[Path, typer.Option("--config")],
+    output: Annotated[Path, typer.Option("--output")],
+) -> None:
+    from seed_agent.config_views import load_view
+    from seed_agent.media_import.maintenance import backup_media_database
+    from seed_agent.media_import.runtime import media_state_path
+
+    _print_json(backup_media_database(media_state_path(load_view(config, "media")), output))
+
+
+@app.command(name="media-state-restore")
+def media_state_restore(
+    config: Annotated[Path, typer.Option("--config")],
+    source: Annotated[Path, typer.Option("--source")],
+    execute: Annotated[bool, typer.Option("--execute")] = False,
+) -> None:
+    from seed_agent.config_views import load_view
+    from seed_agent.media_import.maintenance import restore_media_database
+    from seed_agent.media_import.runtime import media_state_path
+
+    _print_json(
+        restore_media_database(
+            media_state_path(load_view(config, "media")), source, execute=execute
+        )
+    )
+
+
+@app.command(name="media-worker")
+def media_worker(
+    config: Annotated[Path, typer.Option("--config")],
+    max_cycles: int | None = typer.Option(None, "--max-cycles", min=1),
+) -> None:
+    """Run the independent media clock; no downloader initialization."""
+    import signal
+    import threading
+
+    from seed_agent.media_import.worker import serve
+
+    stop = threading.Event()
+    signal.signal(signal.SIGTERM, lambda *_: stop.set())
+    signal.signal(signal.SIGINT, lambda *_: stop.set())
+    serve(config, max_cycles=max_cycles, stop=stop)
+
+
+@app.command(name="media-command-status")
+def media_command_status(
+    config: Annotated[Path, typer.Option("--config")],
+    command_id: str | None = typer.Option(None, "--command-id"),
+) -> None:
+    from seed_agent.media_import.commands import status
+
+    _print_json(status(config, command_id))

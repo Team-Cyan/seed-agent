@@ -4,6 +4,38 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.25.0 - 2026-10-24
+
+### Added
+
+- Add an independent media worker and SQLite store, with bounded persisted CLI/Web
+  commands, role-specific configuration and liveness/progress health checks.
+- Scan completed or explicitly confirmed source folders, identify movie/TV and
+  animation metadata, and publish verified hardlinks to Movie, TV and Animation.
+  Animated films share Movie by default; Library and historical outputs stay excluded.
+- Add Chinese identity/review workflows, stale-safe route repair and receipt-scoped
+  output reconciliation after complete healthy scans and a removal grace period.
+- Schedule official TMDB posters with shared-show ownership and durable retry status.
+- Integrate OpenSubtitles.com, ASSRT and SubDL with independent credentials, pacing,
+  quota/reset evidence, Chinese script policy and cross-provider content deduplication.
+  Limit each file to one new remote subtitle payload attempt per cycle.
+- Add separate deployment-role examples with bounded resources, least-scope media
+  credentials and a common-parent mount required for Linux hardlinks.
+
+### Safety And Compatibility
+
+- Preserve original source files and unknown/manual library assets; never fall back
+  to copying video across incompatible filesystems or infer completed downloads from
+  file size stability. Writer policies default to preview.
+- Preserve acquisition/seed downloader category and capacity protections. Optional
+  per-task completed/incomplete paths require verified qBittorrent capability.
+- Fence late publications and command/provider results against source, plan,
+  configuration and restore changes. Keep provider waits distinct from completion.
+
+Local automated and known-title provider checks are complete. Deployed full-library,
+actual NAS hardlink, provider coverage and Plex/client acceptance remain deployment
+checks and are not implied by this release's local validation.
+
 ## 0.24.2 - 2026-10-08
 
 ### Fixed

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "seed-agent"
-version = "0.24.2"
+version = "0.25.0"
 description = "Docker-first PT automation for NAS and homelab downloader operations"
 readme = "README.md"
 requires-python = ">=3.14"
@@ -16,6 +16,7 @@ dependencies = [
   "pydantic>=2.7,<3.0",
   "pyyaml>=6.0,<7.0",
   "rich>=13.7,<14.0",
+  "subliminal>=2.8,<3",
   "typer>=0.12,<1.0",
 ]
 

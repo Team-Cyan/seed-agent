@@ -40,13 +40,19 @@ def test_web_token_stays_in_memory_while_ui_preferences_are_persisted() -> None:
 
 
 def test_compose_keeps_read_only_root_but_mounts_web_config_paths_writable() -> None:
-    compose = Path("deploy/docker-compose.example.yml").read_text(encoding="utf-8")
+    import yaml
 
-    assert "read_only: true" in compose
-    assert "../config:/app/config:ro" not in compose
-    assert "../local:/app/local:ro" not in compose
-    assert "../config:/app/config" in compose
-    assert "../local:/app/local" in compose
+    compose = yaml.safe_load(Path("deploy/docker-compose.example.yml").read_text(encoding="utf-8"))
+    seed = compose["services"]["seed-agent"]
+    media = compose["services"]["media-worker"]
+    assert seed["read_only"] is True
+    assert media["read_only"] is True
+    assert "../config:/app/config" in seed["volumes"]
+    assert "../local:/app/local" in seed["volumes"]
+    assert "../config:/app/config:ro" not in seed["volumes"]
+    assert "../local:/app/local:ro" not in seed["volumes"]
+    assert "../config:/app/config:ro" in media["volumes"]
+    assert all(not volume.startswith("../local:/app/local") for volume in media["volumes"])
 
 
 def test_index_contains_tracker_first_ui_anchors() -> None:

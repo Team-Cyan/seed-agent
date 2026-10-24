@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Container version="2">
+  <Name>seed-agent-media-worker</Name>
+  <Repository>ghcr.io/team-cyan/seed-agent@sha256:REPLACE_WITH_VERIFIED_DIGEST</Repository>
+  <Registry>https://github.com/Team-Cyan/seed-agent/pkgs/container/seed-agent</Registry>
+  <Network>bridge</Network>
+  <Shell>sh</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/Team-Cyan/seed-agent/issues</Support>
+  <Project>https://github.com/Team-Cyan/seed-agent</Project>
+  <Overview>Independent media worker. Before deployment replace Repository with the same verified immutable image as seed, set its digest below, and align the one shared config directory and media state. No Web or downloader access. Mount source and library under ONE common RW parent; application source preservation is not kernel-enforced RO. See deploy/media-worker.md.</Overview>
+  <Category>Tools:Utilities</Category>
+  <ExtraParams>--read-only --restart=on-failure:5 --cpus=1.0 --memory=1g --pids-limit=128 --stop-timeout=45 --security-opt=no-new-privileges:true --tmpfs=/tmp:rw,noexec,nosuid,size=128m --health-cmd='seed-agent healthcheck --role media --config /workspace/runtime/config/config.yaml' --health-interval=30s --health-timeout=10s --health-retries=3 --health-start-period=1m</ExtraParams>
+  <Config Name="Shared Config Directory" Target="/workspace/runtime/config" Default="" Mode="ro" Description="Existing shared config DIRECTORY; atomic replacements must remain visible. No independent config copy." Type="Path" Display="always" Required="true" Mask="false"></Config>
+  <Config Name="Independent Media State" Target="/workspace/runtime/.media-import" Default="" Mode="rw" Description="Existing explicitly initialized media state shared with seed/Web command control; never point to seed state." Type="Path" Display="always" Required="true" Mask="false"></Config>
+  <Config Name="Common Media Parent" Target="/media" Default="" Mode="rw" Description="ONE parent containing source and library on compatible filesystem. No nested/RO overlays or separate source and target mounts: link(2) may return EXDEV. Source bytes/names/permissions preserved by application." Type="Path" Display="always" Required="true" Mask="false"></Config>
+  <Config Name="TMDB Credential" Target="/workspace/runtime/local/secrets/tmdb.json" Default="" Mode="ro" Description="Only this enabled provider credential file. Remove mount if unused." Type="Path" Display="always" Required="false" Mask="false"></Config>
+  <Config Name="OpenSubtitles Credential" Target="/workspace/runtime/local/secrets/opensubtitles.json" Default="" Mode="ro" Description="Only this enabled provider credential file. Remove mount if unused." Type="Path" Display="always" Required="false" Mask="false"></Config>
+  <Config Name="ASSRT Credential" Target="/workspace/runtime/local/secrets/assrt.json" Default="" Mode="ro" Description="Only this enabled provider credential file. Remove mount if unused." Type="Path" Display="always" Required="false" Mask="false"></Config>
+  <Config Name="SubDL Credential" Target="/workspace/runtime/local/secrets/subdl.json" Default="" Mode="ro" Description="Only this enabled provider credential file. Remove mount if unused." Type="Path" Display="always" Required="false" Mask="false"></Config>
+  <Config Name="Mode" Target="SEED_AGENT_MODE" Default="media-worker" Mode="" Type="Variable" Display="always" Required="true" Mask="false">media-worker</Config>
+  <Config Name="Role" Target="SEED_AGENT_ROLE" Default="media" Mode="" Type="Variable" Display="advanced" Required="true" Mask="false">media</Config>
+  <Config Name="Config Path" Target="SEED_AGENT_CONFIG" Default="/workspace/runtime/config/config.yaml" Mode="" Type="Variable" Display="advanced" Required="true" Mask="false">/workspace/runtime/config/config.yaml</Config>
+  <Config Name="Verified Image Digest" Target="SEED_AGENT_IMAGE_DIGEST" Default="" Mode="" Description="Set the verified digest of Repository. Health displays configured and worker-applied identity; runtime inspect still verifies the actual image." Type="Variable" Display="always" Required="true" Mask="false"></Config>
+  <Config Name="Web Disabled" Target="SEED_AGENT_WEB_ENABLED" Default="false" Mode="" Type="Variable" Display="advanced" Required="true" Mask="false">false</Config>
+  <Config Name="Runtime UID" Target="PUID" Default="1000" Mode="" Type="Variable" Display="advanced" Required="true" Mask="false">1000</Config>
+  <Config Name="Runtime GID" Target="PGID" Default="100" Mode="" Type="Variable" Display="advanced" Required="true" Mask="false">100</Config>
+</Container>

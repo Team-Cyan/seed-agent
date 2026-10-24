@@ -1,3 +1,8 @@
+let mediaSnapshot = null;
+let mediaOffset = 0;
+let mediaFilter = "all";
+let mediaLoading = false;
+
 const state = {
   trackers: [],
   overview: {
@@ -126,6 +131,7 @@ const copy = {
       metrics: "监控指标",
       want_decision: "想看决策",
       wants: "想看列表",
+      media: "媒体整理",
       release_preferences: "资源匹配",
       config_file: "配置文件",
     },
@@ -454,6 +460,7 @@ const copy = {
       metrics: "Metrics",
       want_decision: "Want Decisions",
       wants: "Want List",
+      media: "媒体整理",
       release_preferences: "Release Matching",
       config_file: "Config File",
     },
@@ -1170,6 +1177,7 @@ const navigationSections = [
   "overview",
   "logs",
   "wants",
+  "media",
   "tracker",
   "download_client",
   "pt_filters",
@@ -1187,6 +1195,7 @@ const sectionGroupBySection = {
   overview: "operations",
   logs: "operations",
   wants: "operations",
+  media: "operations",
   tracker: "automation",
   download_client: "automation",
   pt_filters: "acquisition",
@@ -1517,6 +1526,13 @@ function renderSection() {
     subtitle.textContent = copy[state.language].logsSubtitle;
     addTrackerButton.hidden = true;
     trackerList.replaceChildren(renderLogsPanel());
+    return;
+  }
+  if (state.currentSection === "media") {
+    title.textContent = "媒体整理";
+    subtitle.textContent = "来源清单、识别修复、硬链接、字幕与同步清理";
+    addTrackerButton.hidden = true;
+    trackerList.replaceChildren(renderMediaPanel());
     return;
   }
   if (state.currentSection === "wants") {
@@ -4303,4 +4319,205 @@ async function saveSettingsPanel(page, section) {
       <div class="status-item warning">${escapeHtml(error.message)}</div>
     `;
   }
+}
+
+// Media Library uses persisted evidence; no HTML from releases or providers is trusted.
+function mediaElement(tag, text, attrs = {}) {
+  const node = document.createElement(tag);
+  if (text !== null) node.textContent = text;
+  Object.entries(attrs).forEach(([key, value]) => node.setAttribute(key, value));
+  return node;
+}
+async function mediaRequest(path, body) {
+  const response = await apiFetch(path, body === undefined ? {} : {
+    method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body),
+  });
+  const payload = await response.json();
+  if (!response.ok) throw new Error(payload.error || JSON.stringify(payload.status));
+  if (payload.command_id) {
+    for (let attempt = 0; attempt < 15; attempt++) {
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      const commands = await mediaRequest(`/api/media/commands?id=${encodeURIComponent(payload.command_id)}`);
+      const command = commands[0];
+      if (command?.status === "complete") return command.result;
+      if (["failed", "interrupted", "superseded"].includes(command?.status)) {
+        throw new Error(`媒体任务 ${command.status}：${command.result?.error || "请刷新清单核对后重试"}`);
+      }
+    }
+    throw new Error(`任务已排队：${payload.command_id}。请查看任务状态；未运行 worker 时不会执行。`);
+  }
+  return payload;
+}
+async function loadMedia() {
+  if (mediaLoading) return;
+  mediaLoading = true;
+  try { mediaSnapshot = await mediaRequest(`/api/media?offset=${mediaOffset}`); }
+  catch (error) { mediaSnapshot = {error: String(error), sources: []}; }
+  finally { mediaLoading = false; if (state.currentSection === "media") renderSection(); }
+}
+function renderMediaPanel() {
+  const panel = mediaElement("div", null, {class: "settings-panel media-library"});
+  const note = mediaElement("p", "扫描与下载器独立；导入、字幕、清理分别遵循配置中的 preview / execute 策略。来源文件不会被整理器删除。");
+  panel.append(note);
+  const toolbar = mediaElement("div", null, {class: "panel-actions"});
+  for (const [label, route] of [["刷新状态", null], ["扫描并按策略执行", "/api/media/scan"], ["刷新字幕候选", "/api/media/subtitles"]]) {
+    const button = mediaElement("button", label, {type: "button", class: "secondary-button"});
+    button.addEventListener("click", async () => {
+      button.disabled = true;
+      try { if (route) await mediaRequest(route, {execute: true}); await loadMedia(); }
+      catch (error) { note.textContent = String(error); }
+      finally { button.disabled = false; }
+    });
+    toolbar.append(button);
+  }
+  const filter = mediaElement("select", null, {"aria-label": "整理状态筛选"});
+  for (const [value, label] of [["all", "全部"], ["pending", "待处理"], ["review", "待识别确认"], ["imported", "已入库"], ["conflict", "冲突"]]) {
+    const option = mediaElement("option", label, {value});
+    option.selected = value === mediaFilter;
+    filter.append(option);
+  }
+  filter.addEventListener("change", () => {mediaFilter = filter.value; renderSection();});
+  toolbar.append(filter);
+  panel.append(toolbar);
+  for (const health of (mediaSnapshot?.domain_health || []).filter(h => h.status !== "healthy")) {
+    if (health.provider) {
+      panel.append(mediaElement("p", `字幕来源 ${health.provider} · ${health.status}${health.quota_per_minute ? " · 每分钟请求额度 " + health.quota_per_minute : ""}`));
+      for (const [kind, quota] of Object.entries(health.account_quota || {})) panel.append(mediaElement("p", `${kind === "downloads" ? "下载" : "搜索"}剩余 ${quota.remaining ?? "未知"} / ${quota.limit ?? "未知"} · 重置 ${quota.reset_at ? new Date(quota.reset_at).toLocaleString("zh-CN") : "未知"}`));
+    } else {
+      panel.append(mediaElement("p", `挂载/归属检查：${health.root || health.path || health.source_id} · ${health.status} · ${health.reason || "请检查挂载，现有产物已保留"}`));
+    }
+  }
+  for (const poster of (mediaSnapshot?.posters || [])) {
+    panel.append(mediaElement("p", `海报：${poster.path || poster.id} · ${poster.status}${poster.next_attempt ? " · 下次检查 " + new Date(poster.next_attempt * 1000).toLocaleString("zh-CN") : ""}`));
+  }
+  if (mediaSnapshot?.pagination) {
+    const page = mediaSnapshot.pagination;
+    panel.append(mediaElement("p", `媒体总数 ${page.total} · 当前 ${page.offset + 1}–${Math.min(page.offset + page.limit, page.total)}`));
+    for (const [label, offset] of [["上一页", Math.max(0, mediaOffset - 100)], ["下一页", mediaOffset + 100]]) {
+      const button = mediaElement("button", label, {type:"button"});
+      button.disabled = offset === mediaOffset || offset >= page.total;
+      button.addEventListener("click", () => {mediaOffset = offset; loadMedia();});
+      toolbar.append(button);
+    }
+    for (const command of (mediaSnapshot.commands || []).slice(0, 5)) {
+      panel.append(mediaElement("p", `任务 ${command.action} · ${command.status} · ${command.id}`));
+    }
+  }
+  if (!mediaSnapshot) {
+    panel.append(mediaElement("p", "读取媒体清单中…"));
+    queueMicrotask(loadMedia);
+    return panel;
+  }
+  if (mediaSnapshot.error) panel.append(mediaElement("p", mediaSnapshot.error, {role: "alert"}));
+  for (const scan of (mediaSnapshot.scans || []).slice(0, 10)) {
+    panel.append(mediaElement("p", `${scan.profile} · 扫描 ${scan.status} · ${scan.count ?? "—"} 个文件${scan.error ? " · " + scan.error : ""}`));
+  }
+  const labels = {stabilizing: "等待文件稳定", ready: "可入库", completion_unverified: "完成状态未确认", imported: "视频已入库", review_required: "需要识别确认", planned: "待执行", conflict: "冲突", target_missing: "媒体库文件缺失，可修复", missing_pending: "源消失，等待宽限期", removed: "已同步移除", changed: "源文件已替换"};
+  for (const source of mediaSnapshot.sources || []) {
+    const status = source.missing_count || source.status === "removed" ? source.status : (source.readiness === "completion_unverified" ? "completion_unverified" : (source.import_status || source.status));
+    if (mediaFilter === "imported" && status !== "imported") continue;
+    if (mediaFilter === "conflict" && !["conflict", "changed", "target_missing"].includes(status)) continue;
+    if (mediaFilter === "review" && !["review_required", "completion_unverified"].includes(source.readiness === "completion_unverified" ? source.readiness : status)) continue;
+    if (mediaFilter === "pending" && ["imported", "removed"].includes(status)) continue;
+    const details = mediaElement("details", null, {class: "media-source"});
+    details.append(mediaElement("summary", `${source.original_release} · ${labels[status] || status}`));
+    details.append(mediaElement("p", `来源 ${source.profile} / ${source.path} · 内容 ${source.content_type || "待确认"} · 动画 ${source.animation === true ? "是" : source.animation === false ? "否" : "待确认"} · 路由 ${source.route || "待确认"}`));
+    if (source.classification_evidence) details.append(mediaElement("p", `分类依据：${source.classification_evidence}`));
+    if (source.review_error) details.append(mediaElement("p", source.review_error));
+    let mapping = source.review_mapping_json ? JSON.parse(source.review_mapping_json) : (source.mapping_json ? JSON.parse(source.mapping_json) : {});
+    const profile = (mediaSnapshot.profiles || []).find(p => p.name === source.profile);
+    const evidence = {"源路径": profile ? `${profile.source_root}/${source.path}` : source.path, "代次": source.generation, "完成依据": source.readiness,
+      "原始片名": mapping.original_title, "中文片名": mapping.localized_title,
+      "TMDB": mapping.tmdb_id, "年份": mapping.year, "季": mapping.season,
+      "集": mapping.episodes, "版本": mapping.edition || "未声明",
+      "实测时长（秒）": source.probe_json ? JSON.parse(source.probe_json).duration : null,
+      "当前目标路径": source.target, "已保存的修正目标":source.review_target, "首次消失时间": source.missing_since ? new Date(source.missing_since * 1000).toLocaleString("zh-CN") : null,
+      "清理到期时间": source.missing_since && profile ? new Date((source.missing_since + profile.grace_seconds) * 1000).toLocaleString("zh-CN") : null,
+      "健康缺失观察次数": source.missing_count, "错误": source.error};
+    const dl = mediaElement("dl", null);
+    Object.entries(evidence).forEach(([key, value]) => {dl.append(mediaElement("dt", key), mediaElement("dd", Array.isArray(value) ? value.join(", ") : String(value ?? "—")));});
+    details.append(dl);
+    const form = mediaElement("form", null);
+    const fields = {};
+    for (const [key,label,kind] of [["tmdb_id","TMDB ID","number"],["original_title","元数据原始片名","text"],["localized_title","中文显示片名","text"],["year","年份","number"],["media_type","内容类型（movie / tv）","text"],["animation","动画分类（true / false，未知留空）","text"],["season","季（电影留空）","number"],["episodes","集号（逗号分隔）","text"],["edition","明确版本证据或人工确认（可留空）","text"]]) {
+      const wrapper = mediaElement("label", label);
+      const input = mediaElement("input", null, {type: kind, name: key});
+      input.value = Array.isArray(mapping[key]) ? mapping[key].join(",") : (mapping[key] ?? "");
+      if (["tmdb_id", "original_title", "year", "media_type"].includes(key)) input.required = true;
+      wrapper.append(input); form.append(wrapper); fields[key] = input;
+    }
+    const seriesLabel = mediaElement("label", "整剧修正（保留各文件季集，先预览准确清单）");
+    const series = mediaElement("input", null, {type: "checkbox"});
+    seriesLabel.prepend(series); form.append(seriesLabel);
+    const applySeries = mediaElement("button", "保存这份整剧修正清单", {type: "button", hidden: ""});
+    let seriesPreview = null;
+    applySeries.addEventListener("click", async () => {
+      applySeries.disabled = true;
+      try {
+        await mediaRequest("/api/media/series-review", {preview_id: seriesPreview.preview_id, execute: true});
+        feedback.textContent = "整剧修正已保存；下一次扫描按导入策略应用。";
+        applySeries.hidden = true;
+      } catch (error) {feedback.textContent = String(error);}
+      finally {applySeries.disabled = false;}
+    });
+    const readyLabel = mediaElement("label", "我已确认此源文件下载完成且没有继续写入");
+    const ready = mediaElement("input", null, {type: "checkbox"});
+    ready.checked = source.review_ready === 1;
+    readyLabel.prepend(ready); form.append(readyLabel);
+    const save = mediaElement("button", "保存修正并预览新旧路径", {type: "submit"});
+    const feedback = mediaElement("pre", "", {role: "status"});
+    form.append(save, applySeries, feedback);
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault(); save.disabled = true;
+      try {
+        const chosen = {...mapping};
+        Object.entries(fields).forEach(([key,input]) => {chosen[key] = input.value || null;});
+        chosen.tmdb_id = Number(chosen.tmdb_id); chosen.year = Number(chosen.year);
+        if (![null, "true", "false"].includes(chosen.animation)) throw new Error("动画分类请填 true 或 false，未知可留空");
+        chosen.animation = chosen.animation === null ? null : chosen.animation === "true";
+        if (chosen.animation !== null) chosen.classification_evidence = "operator";
+        chosen.season = chosen.season === null ? null : Number(chosen.season);
+        chosen.episodes = (fields.episodes.value || "").split(",").filter(Boolean).map(Number);
+        if (series.checked) {
+          seriesPreview = await mediaRequest("/api/media/series-preview", {source_id: source.id, mapping: chosen});
+          feedback.textContent = seriesPreview.manifest.map(item => `${item.old_target}\n→ ${item.new_target}`).join("\n\n");
+          applySeries.hidden = false;
+          return;
+        }
+        const plan = await mediaRequest("/api/media/review", {source_id: source.id, fingerprint: source.fingerprint, mapping: chosen, ready: ready.checked, repair: true, execute: true});
+        feedback.textContent = `原路径：${plan.old_target || "—"}\n新路径：${plan.new_target}\n已保存；下一次扫描按导入策略应用。`;
+      } catch (error) {feedback.textContent = String(error);}
+      finally {save.disabled = false;}
+    });
+    details.append(form);
+    for (const job of (mediaSnapshot.subtitles || []).filter(j => j.source_id === source.id)) {
+      const payload = JSON.parse(job.payload_json);
+      details.append(mediaElement("h4", `字幕 ${job.requirement} · ${{daily_quota:"每日额度等待",rate_limited:"请求限速等待"}[job.status] || job.status}`));
+      for (const c of payload.candidates || []) {
+        details.append(mediaElement("p", `${c.language === "zh" ? "中文（字形未标注）" : c.language} · ${c.provider || payload.provider || "未知来源"} · ${c.release} · ${c.match_basis} · 评分 ${c.rating ?? "未知"} / 下载 ${c.downloads ?? "未知"} · ${c.kind} · ${c.format}`));
+        if (c.match_basis === "needs_preview") {
+          const selectCandidate = mediaElement("button", "确认此版本字幕候选", {type:"button"});
+          selectCandidate.addEventListener("click", async () => {
+            selectCandidate.disabled = true;
+            try {await mediaRequest("/api/media/subtitle-select", {job_id:job.id, candidate_id:c.id, execute: true}); selectCandidate.textContent = "已确认；按字幕策略执行";}
+            catch (error) {selectCandidate.textContent = String(error); selectCandidate.disabled = false;}
+          });
+          details.append(selectCandidate);
+        }
+      }
+      for (const c of payload.unverified_candidates || []) details.append(mediaElement("p", `未确认身份：${c.provider || "未知来源"} · ${c.language === "zh" ? "中文（字形未标注）" : c.language} · ${c.release}；未开放自动发布`));
+      for (const c of payload.coverage || []) details.append(mediaElement("p", `现有覆盖：${c.language === "zh" ? "中文（字形未标注）" : c.language} · ${c.kind} · ${c.source}`));
+      if (job.error) details.append(mediaElement("p", job.error));
+    }
+    for (const cleanup of (mediaSnapshot.cleanup || []).filter(a => a.source_id === source.id)) details.append(mediaElement("pre", `清理 ${cleanup.status}\n${cleanup.manifest_json}\n${cleanup.result_json || ""}`));
+    const artifactIds = new Set((mediaSnapshot.artifact_sources || []).filter(r => r.source_id === source.id).map(r => r.artifact_id));
+    for (const artifact of (mediaSnapshot.artifacts || []).filter(a => artifactIds.has(a.id))) {
+      details.append(mediaElement("p", `库文件 ${artifact.kind} · ${artifact.status} · ${artifact.owned ? "程序拥有" : "已有文件，禁止清理"} · ${artifact.path}`));
+    }
+    for (const publication of (mediaSnapshot.publications || []).filter(p => p.source_id === source.id && p.status === "conflict")) {
+      details.append(mediaElement("pre", `发布恢复冲突（需检查）：\n${publication.temporary}\n→ ${publication.target}`));
+    }
+    panel.append(details);
+  }
+  return panel;
 }

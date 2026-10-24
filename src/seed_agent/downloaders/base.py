@@ -34,3 +34,9 @@ class Downloader(Protocol):
 @runtime_checkable
 class DownloaderStatusProvider(Protocol):
     async def get_status(self) -> DownloaderStatus: ...
+
+
+@runtime_checkable
+class EnqueuePathVerifier(Protocol):
+    def enqueue_path_policy(self, category: str) -> dict | None: ...
+    async def verify_enqueue_paths(self, torrent_hash: str, category: str) -> dict: ...

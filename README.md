@@ -4,7 +4,12 @@
 
 # seed-agent
 
-`seed-agent` is a Docker-first self-hosted PT automation app for NAS and homelab deployments.
+`seed-agent` is a Docker-first self-hosted automation app for NAS and homelab deployments,
+spanning resource acquisition, PT seed strategy and media-library organization.
+Acquisition and seed are the shipped foundation; media integration has passed local
+independent review, with deployed library/client acceptance tracked separately. See the
+[current product delivery plan](docs/plans/2026-10-24-media-product-delivery.md)
+for scope and remaining work. Product and package naming changes are deferred.
 
 It is designed to run as a long-lived container, keep its state on mounted
 storage, and manage PT discovery plus downloader actions through versioned
@@ -363,3 +368,9 @@ references, but it does not aim to copy their full product shape.
 - [`ani-rss`](https://github.com/walse0/ani-rss)
 - [`bgmi`](https://github.com/BGmi/BGmi)
 - [`mteam-active-top-rss`](https://hub.docker.com/r/xiaohaigreen/mteam-active-top-rss)
+
+### Media Library
+
+Directory-based media import, review, subtitles and owned-output reconciliation share the
+existing CLI/Web and runs in an independent worker. See [operator configuration and acceptance](docs/operations/media-import.md).
+All three writer policies default to preview; downloader connectivity is optional.

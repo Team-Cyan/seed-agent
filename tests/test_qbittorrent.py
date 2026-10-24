@@ -403,3 +403,46 @@ async def test_login_failure_raises_clear_exception() -> None:
             category="pt-auto",
             tags=[],
         )
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_configured_media_paths_are_per_task_and_verified():
+    respx.post('https://qb.example/api/v2/auth/login').respond(200,text='Ok.')
+    respx.get('https://qb.example/api/v2/app/webapiVersion').respond(200,text='2.11.4')
+    add=respx.post('https://qb.example/api/v2/torrents/add').respond(200,text='Ok.')
+    client=QbittorrentClient('https://qb.example','alice','secret',enqueue_paths={
+        'tv': {'completed':'/data/completed/tv','incomplete':'/data/incomplete/tv'}})
+    await client.add_url('magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567','tv',[])
+    payload=parse_qs(add.calls[0].request.content.decode())
+    assert payload['savepath']==['/data/completed/tv']
+    assert payload['downloadPath']==['/data/incomplete/tv']
+    assert payload['useDownloadPath']==['true'] and payload['autoTMM']==['false']
+    respx.get('https://qb.example/api/v2/torrents/info').respond(200,json=[{
+        'hash':'abc','save_path':'/data/completed/tv','download_path':'/data/incomplete/tv',
+        'auto_tmm':False,'state':'moving','amount_left':0}])
+    result=await client.verify_enqueue_paths('abc','tv')
+    assert result['status']=='verified' and not result['completion_proven']
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_unsupported_qb_path_capability_blocks_add():
+    respx.post('https://qb.example/api/v2/auth/login').respond(200,text='Ok.')
+    respx.get('https://qb.example/api/v2/app/webapiVersion').respond(200,text='2.8.3')
+    client=QbittorrentClient('https://qb.example','alice','secret',enqueue_paths={
+        'tv': {'completed':'/done','incomplete':'/incomplete'}})
+    with pytest.raises(QbittorrentError,match='2.8.4'):
+        await client.add_url('https://tracker.example/file','tv',[])
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_accepted_qb_paths_mismatch_is_visible():
+    respx.post('https://qb.example/api/v2/auth/login').respond(200,text='Ok.')
+    respx.get('https://qb.example/api/v2/torrents/info').respond(200,json=[{
+        'hash':'abc','save_path':'/wrong','download_path':'/incomplete','auto_tmm':True}])
+    client=QbittorrentClient('https://qb.example','alice','secret',enqueue_paths={
+        'tv': {'completed':'/done','incomplete':'/incomplete'}})
+    with pytest.raises(QbittorrentError,match='conflicting'):
+        await client.verify_enqueue_paths('abc','tv')

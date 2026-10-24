@@ -38,21 +38,25 @@ mkdir -p "${HOME:-/tmp/seed-agent}"
 
 if [ "${1:-}" = "seed-agent" ]; then
   shift
-  exec seed-agent "$@"
+  if [ "${SEED_AGENT_ROLE:-seed}" != "media" ] && [ "${1:-}" != "media-worker" ]; then
+    exec seed-agent "$@"
+  fi
 fi
 
 case "${1:-}" in
   "")
     MODE="${SEED_AGENT_MODE:-schedule-run}"
-    EXTRA_ARGS=""
     ;;
   -*)
+    if [ "${SEED_AGENT_ROLE:-seed}" = "media" ]; then
+      echo "media role requires an explicit media command" >&2
+      exit 2
+    fi
     exec seed-agent "$@"
     ;;
   *)
     MODE="$1"
     shift
-    EXTRA_ARGS="$*"
     ;;
 esac
 
@@ -72,96 +76,127 @@ WEB_ENABLED="${SEED_AGENT_WEB_ENABLED:-false}"
 WEB_HOST="${SEED_AGENT_WEB_HOST:-0.0.0.0}"
 WEB_PORT="${SEED_AGENT_WEB_PORT:-8765}"
 
-set -- seed-agent "$MODE" --config "$CONFIG_PATH"
+ROLE="${SEED_AGENT_ROLE:-seed}"
+if [ "$MODE" = "media-worker" ]; then
+  ROLE=media
+fi
+case "$ROLE" in
+  seed|media) ;;
+  *) echo "SEED_AGENT_ROLE must be seed or media" >&2; exit 2 ;;
+esac
+if [ "$ROLE" = "media" ]; then
+  case "$MODE" in
+    media-worker|healthcheck|runtime-status) ;;
+    *) echo "media role requires media-worker, healthcheck or runtime-status" >&2; exit 2 ;;
+  esac
+  EXPECT_ROLE=false
+  for ARG in "$@"; do
+    if [ "$EXPECT_ROLE" = "true" ]; then
+      if [ "$ARG" != "media" ]; then
+        echo "media deployment cannot select seed role diagnostics" >&2; exit 2
+      fi
+      EXPECT_ROLE=false
+    fi
+    case "$ARG" in
+      --role) EXPECT_ROLE=true ;;
+      --role=media) ;;
+      --role=*) echo "media deployment cannot select seed role diagnostics" >&2; exit 2 ;;
+    esac
+  done
+fi
+
+# Prepend defaults, preserving the exact original argument boundaries.
+if [ "$MODE" = "healthcheck" ] || [ "$MODE" = "runtime-status" ]; then
+  set -- --role "$ROLE" "$@"
+fi
 
 case "$MODE" in
   run-once|enqueue|schedule-run)
     if [ "$EXECUTE" = "true" ]; then
-      set -- "$@" --execute
+      set -- --execute "$@"
     fi
     if [ -n "$MIN_FREE_WINDOW_MINUTES" ]; then
-      set -- "$@" --min-free-window-minutes "$MIN_FREE_WINDOW_MINUTES"
+      set -- --min-free-window-minutes "$MIN_FREE_WINDOW_MINUTES" "$@"
     fi
     if [ -n "$REQUIRE_KNOWN_FREE_WINDOW" ]; then
       if [ "$REQUIRE_KNOWN_FREE_WINDOW" = "true" ]; then
-        set -- "$@" --require-known-free-window
+        set -- --require-known-free-window "$@"
       else
-        set -- "$@" --allow-unknown-free-window
+        set -- --allow-unknown-free-window "$@"
       fi
     fi
     ;;
 esac
 
+if [ "$MODE" = "media-worker" ] && [ -n "$MAX_CYCLES" ]; then
+  set -- --max-cycles "$MAX_CYCLES" "$@"
+fi
+
 if [ "$MODE" = "schedule-run" ]; then
   if [ -n "$HEARTBEAT_FILE" ]; then
-    set -- "$@" --heartbeat-file "$HEARTBEAT_FILE"
+    set -- --heartbeat-file "$HEARTBEAT_FILE" "$@"
   fi
   if [ -n "$INTERVAL_MINUTES" ]; then
-    set -- "$@" --interval-minutes "$INTERVAL_MINUTES"
+    set -- --interval-minutes "$INTERVAL_MINUTES" "$@"
   fi
   if [ -n "$MAX_CYCLES" ]; then
-    set -- "$@" --max-cycles "$MAX_CYCLES"
+    set -- --max-cycles "$MAX_CYCLES" "$@"
   fi
   if [ -n "$PRUNE" ]; then
     if [ "$PRUNE" = "true" ]; then
-      set -- "$@" --prune
+      set -- --prune "$@"
     else
-      set -- "$@" --no-prune
+      set -- --no-prune "$@"
     fi
   fi
   if [ -n "$INTENT" ]; then
     if [ "$INTENT" = "true" ]; then
-      set -- "$@" --intent
+      set -- --intent "$@"
     else
-      set -- "$@" --no-intent
+      set -- --no-intent "$@"
     fi
   fi
   if [ -n "$INTENT_EXECUTE" ]; then
     if [ "$INTENT_EXECUTE" = "true" ]; then
-      set -- "$@" --intent-execute
+      set -- --intent-execute "$@"
     else
-      set -- "$@" --intent-dry-run
+      set -- --intent-dry-run "$@"
     fi
   fi
 fi
 
-if [ "$MODE" = "healthcheck" ]; then
+if [ "$MODE" = "healthcheck" ] && [ "$ROLE" = "seed" ]; then
   if [ -n "$HEARTBEAT_FILE" ]; then
-    set -- "$@" --heartbeat-file "$HEARTBEAT_FILE"
+    set -- --heartbeat-file "$HEARTBEAT_FILE" "$@"
   fi
   if [ -n "$MAX_STALENESS_MINUTES" ]; then
-    set -- "$@" --max-staleness-minutes "$MAX_STALENESS_MINUTES"
+    set -- --max-staleness-minutes "$MAX_STALENESS_MINUTES" "$@"
   fi
 fi
 
 if [ "$MODE" = "web" ]; then
-  set -- "$@" --host "$WEB_HOST" --port "$WEB_PORT"
+  set -- --host "$WEB_HOST" "$@" --port "$WEB_PORT"
 fi
+
+startup_status() {
+  set -- runtime-status --config "$CONFIG_PATH" --role "$ROLE"
+  if [ "$ROLE" = "seed" ] && [ -n "$HEARTBEAT_FILE" ]; then
+    set -- "$@" --heartbeat-file "$HEARTBEAT_FILE"
+  fi
+  if [ "$ROLE" = "seed" ] && [ -n "$MAX_STALENESS_MINUTES" ]; then
+    set -- "$@" --max-staleness-minutes "$MAX_STALENESS_MINUTES"
+  fi
+  seed-agent "$@" || true
+}
 
 if [ "$STARTUP_STATUS" = "true" ] && [ "$MODE" != "healthcheck" ]; then
-  STATUS_ARGS="runtime-status --config $CONFIG_PATH"
-  if [ -n "$HEARTBEAT_FILE" ]; then
-    STATUS_ARGS="$STATUS_ARGS --heartbeat-file $HEARTBEAT_FILE"
-  fi
-  if [ -n "$MAX_STALENESS_MINUTES" ]; then
-    STATUS_ARGS="$STATUS_ARGS --max-staleness-minutes $MAX_STALENESS_MINUTES"
-  fi
-  # Keep startup diagnostics best-effort so a broken config still reaches the
-  # real command and produces its normal failure/log behavior.
-  # shellcheck disable=SC2086
-  seed-agent $STATUS_ARGS || true
+  # Best effort: the primary command reports its own normal failure if invalid.
+  startup_status
 fi
 
-if [ "$WEB_ENABLED" = "true" ] && [ "$MODE" != "web" ] && [ "$MODE" != "healthcheck" ]; then
+if [ "$ROLE" = "seed" ] && [ "$WEB_ENABLED" = "true" ] && [ "$MODE" != "web" ] && [ "$MODE" != "healthcheck" ]; then
   echo "Starting seed-agent web UI at http://$WEB_HOST:$WEB_PORT"
   seed-agent web --config "$CONFIG_PATH" --host "$WEB_HOST" --port "$WEB_PORT" &
 fi
 
-# Allow explicit `docker run seed-agent:local <mode> <extra args>` overrides for
-# one-off debugging while preserving env-driven Compose defaults.
-if [ -n "$EXTRA_ARGS" ]; then
-  # shellcheck disable=SC2086
-  set -- "$@" $EXTRA_ARGS
-fi
-
-exec "$@"
+exec seed-agent "$MODE" --config "$CONFIG_PATH" "$@"

@@ -34,6 +34,7 @@ CONFIG_SECTION_NAMES = {
     "scheduler",
     "metrics",
     "want_sources",
+    "media_import",
 }
 ConfigSectionName = Literal[
     "download_client",
@@ -45,6 +46,7 @@ ConfigSectionName = Literal[
     "scheduler",
     "metrics",
     "want_sources",
+    "media_import",
 ]
 _CONFIG_WRITE_LOCK = RLock()
 
@@ -93,20 +95,31 @@ class ConfigSectionYamlDraft(BaseModel):
 
 
 def config_sections_payload(config: SeedAgentConfig) -> dict[str, Any]:
-    return {
+    sections = {
         name: _redact_config_value(getattr(config, name).model_dump(mode="json"))
+        if getattr(config, name) is not None
+        else {}
         for name in sorted(CONFIG_SECTION_NAMES)
     }
+    if config.media_configured or config._media_document:
+        sections["media_import"] = config._media_document
+    return sections
 
 
 def config_section_yamls_payload(config: SeedAgentConfig) -> dict[str, str]:
-    return {
+    sections = {
         name: config_section_yaml_fragment(
             name,
             _redact_config_value(model_dump_preserving_explicit_nulls(getattr(config, name))),
         )
         for name in sorted(CONFIG_SECTION_NAMES)
+        if getattr(config, name) is not None
     }
+    if config.media_configured or config._media_document:
+        sections["media_import"] = config_section_yaml_fragment(
+            "media_import", config._media_document
+        )
+    return sections
 
 
 def normalized_config_yaml(config: SeedAgentConfig) -> str:
@@ -537,8 +550,11 @@ def _section_data_from_yaml(draft: ConfigSectionYamlDraft) -> dict[str, Any]:
 
 
 def _normalized_config_yaml(config: SeedAgentConfig) -> str:
+    values = model_dump_preserving_explicit_nulls(config)
+    if config.media_configured or config._media_document:
+        values["media_import"] = config._media_document
     return yaml.safe_dump(
-        _redact_config_value(model_dump_preserving_explicit_nulls(config)),
+        _redact_config_value(values),
         sort_keys=False,
         allow_unicode=True,
     )

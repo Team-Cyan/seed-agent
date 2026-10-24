@@ -250,3 +250,15 @@ want_sources:
   subscription:
     enabled: false
     rules_ref: config/subscriptions.yaml
+
+# Independent directory-based media lane; see docs/operations/media-import.md.
+media_import:
+  enabled: false
+  state_path: .media-import/state.db
+  import_policy: preview
+  subtitle_policy: preview
+  reconcile_policy: preview
+  profiles: []  # Legacy fixed-type profiles; do not combine with mixed sources.
+  sources: []
+  destinations: null
+  subtitle_providers: []  # Ordered opensubtitlescom / assrt / subdl secret references.

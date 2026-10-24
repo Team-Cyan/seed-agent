@@ -517,6 +517,20 @@ by completion period, and unfinished work is ordered by current priority.
   - Runtime serialization errors cannot interrupt business operations; unreadable
     state/audit sources degrade independently while retained logs remain visible.
 
+- Next P0 - Complete integrated media delivery and production acceptance
+  - Current scope/status: `docs/plans/2026-10-24-media-product-delivery.md`.
+  - Independent media config/store/worker and mixed-source routing checkpoints passed
+    local independent review; final integrated checkpoint also passed independent review.
+    Deployed full-library and client acceptance remain pending.
+  - Preserve shared downloader admission and category/budget authority for acquisition
+    and seed; do not parallelize their mutations before reservation/race tests.
+  - One codebase/image/UI; independently resource-limited runtime roles where needed.
+  - Scoped release/push/image publication and Unraid full-library acceptance are
+    authorized. Poster, ASSRT/SubDL orchestration and runtime roles passed local
+    integration review; perform controlled rollout with backups/rollback and existing seed protection.
+  - See `docs/specs/2026-10-23-execution-and-state-boundaries.md` and
+    `docs/plans/2026-10-23-architecture-refinement.md`.
+
 - Next P0 - Add scheduler and Web preview integration coverage
   - Add fake downloader/provider fixtures that can run a scheduler cycle without
     touching qBittorrent or a tracker.
@@ -543,6 +557,21 @@ by completion period, and unfinished work is ordered by current priority.
   - Verify season-pack vs episode behavior on real TV/anime examples.
   - Keep scheduled and CLI qB enqueue dry-run unless explicitly executing; the
     Web candidate button itself is the explicit execute action.
+
+- Implemented locally P1 - Integrated media import and subtitles (local integration reviewed; production acceptance pending)
+  - Phase 1: scheduled folder scans with SQLite inventory, hardlink import and
+    server-compatible season directories (Plex default `Season 01`), automatic
+    subtitle discovery with multiple compatible choices, and managed
+    artifact cleanup after confirmed source removal; no downloader dependency.
+  - Reuse focused Sonarr/MoviePilot workflow ideas and Bazarr/Subliminal subtitle
+    contracts; keep subtitle retries independent from successful video import.
+  - Phase 1 now includes mixed source routing, Movie/TV/Animation output, TMDB posters
+    and OpenSubtitles/ASSRT/SubDL with independent provider quotas and cross-site dedup.
+    Credentials and known-title payloads are locally validated; real corpus and
+    production acceptance remain.
+  - Phase 2 retains further providers, numbering/archive/sync improvements and
+    evidence-led UX work. See the consolidated product plan and reference list;
+    local checkpoint review does not establish production completion/playback.
 
 - Next P1 - Web UI polish
   - Extend before/after diff preview to tracker edits.
@@ -571,3 +600,32 @@ Reference:
 - `docs/specs/2026-04-25-qb-category-policy-budgeting.md`
 - `docs/specs/2026-07-06-provider-kernel-roadmap.md`
 - `docs/plans/2026-07-06-deep-research-review-followups.md`
+
+
+### Media Execution Boundary Progress (2026-10-24)
+
+New Phase 1 requirement: mixed source libraries with metadata-based movie/TV and
+animation routing, independent configurable targets and persisted manual correction.
+See `docs/specs/2026-10-24-media-source-routing.md`. This passed independent local integration review;
+retain all existing deployment/acceptance gates.
+
+Additional Chinese subtitle providers also move into Phase 1: ASSRT and SubDL APIs,
+separate provider quotas/fallback and shared dedup/coverage priorities; traditional
+Shooter remains subject to real hash-match/download evidence. See
+`docs/specs/2026-10-24-phase1-subtitle-providers.md`. Credentials and actual corpus
+acceptance are required before claiming a new provider works in production.
+
+Production default is now one Media source and an excluded Library output parent:
+all movies (including animated films) route to Movie, live-action series to TV,
+animated series to Animation. Keep optional multiple sources and separate animated
+movie destinations. See the latest-default section of the mixed-source contract;
+do not present separate animation/movie physical output as a Plex requirement.
+
+R0.1/R1 independent configuration/state checkpoint passed independent review. R2
+worker/queued CLI+Web, pinned policies/config/source-plan/restore epoch, bounded
+inventory/enrichment and paginated read models passed independent milestone review,
+including quota-fairness corrections. Mixed-source routing and its target-health
+fix passed independent review. New provider orchestration, poster runtime integration,
+three-destination defaults and R3 role supervision passed final local integration review.
+Release/production mount, full-library and client acceptance remain outstanding. See the consolidated product plan for current status;
+no production completion is claimed by local tests.
