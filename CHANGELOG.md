@@ -4,6 +4,15 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.25.1 - 2026-10-25
+
+### Fixed
+
+- Keep exact legacy output paths in the shared media configuration and exclude them
+  before traversal, including after independent media state restore or rebuild.
+  Preserve legitimate source folders with the same nested directory names and fence
+  configuration changes against stale worker publications.
+
 ## 0.25.0 - 2026-10-24
 
 ### Added

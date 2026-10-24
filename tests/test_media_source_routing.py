@@ -699,3 +699,71 @@ def test_confirmed_tv_specials_keep_season_zero_despite_ova_movie_tokens(tmp_pat
     assert mapping.media_type == "tv"
     assert mapping.animation is True
     assert mapping.season == 0 and mapping.episodes == [1]
+
+
+def test_config_legacy_outputs_excluded_before_walk_without_basename_collision(tmp_path):
+    engine, source, targets, _ = mixed_engine(tmp_path)
+    root = Path(source.root)
+    legacy = root / "Movies"
+    source.legacy_output_roots = [str(legacy), str(root / "TV"), str(root / "Anime")]
+    for path in source.legacy_output_roots:
+        output = Path(path)
+        output.mkdir()
+        (output / "old.mkv").write_bytes(b"old")
+        # Walking or recognition beneath an output would fail; exclusion precedes both.
+        (output / "unsafe-child").symlink_to(tmp_path, target_is_directory=True)
+    legal = root / "movie/Collection/Movies"
+    legal.mkdir(parents=True)
+    (legal / "real.mkv").write_bytes(b"source")
+    profile = engine.profiles()[0]
+    assert (
+        engine.profile_config(source.id)["source"]["legacy_output_roots"]
+        == source.legacy_output_roots
+    )
+    assert set(engine.inventory(profile)) == {"movie/Collection/Movies/real.mkv"}
+    with engine.store._connect() as conn:
+        persisted = {r[0] for r in conn.execute("SELECT path FROM media_output_exclusions")}
+    assert set(source.legacy_output_roots) <= persisted
+
+
+def test_config_exclusions_survive_empty_restored_state_and_later_output_creation(tmp_path):
+    from seed_agent.media_import.engine import Engine
+    from seed_agent.media_import.maintenance import backup_media_database, restore_media_database
+    from seed_agent.media_import.store import MediaStore
+
+    engine, source, _, _ = mixed_engine(tmp_path)
+    backup = tmp_path / "before-exclusions.db"
+    assert backup_media_database(engine.store.path, backup)["valid"]
+    root = Path(source.root)
+    old = root / "TV"
+    source.legacy_output_roots = [str(old)]
+    profile = engine.profiles()[0]
+    assert engine.inventory(profile) == {}  # Old output is not present yet.
+    # Restore/rebuild a store with no historical exclusions: config still excludes it.
+    restored = Engine(MediaStore(tmp_path / "restored.db"), engine.config)
+    old.mkdir()
+    (old / "must-not-identify.mkv").write_bytes(b"old output")
+    assert restored.inventory(restored.profiles()[0]) == {}
+    with restored.store._connect() as conn:
+        assert conn.execute(
+            "SELECT 1 FROM media_output_exclusions WHERE path=?", (str(old),)
+        ).fetchone()
+    # An actual restore removes the DB record, but the current config restores the fence.
+    assert restore_media_database(restored.store.path, backup, execute=True)["status"] == "restored"
+    with restored.store._connect() as conn:
+        assert not conn.execute("SELECT path FROM media_output_exclusions").fetchall()
+    assert restored.inventory(restored.profiles()[0]) == {}
+    # Removing the configured path later cannot erase already observed output history.
+    source.legacy_output_roots = []
+    assert restored.inventory(restored.profiles()[0]) == {}
+
+
+def test_legacy_exclusions_validate_and_normalize_exact_absolute_paths(tmp_path):
+    source, _ = fixture(tmp_path)
+    data = source.model_dump()
+    for bad in ["relative/TV", str(tmp_path), source.root, "/"]:
+        with pytest.raises(ValueError, match="absolute|contain source"):
+            Source.model_validate({**data, "legacy_output_roots": [bad]})
+    path = str(Path(source.root) / "old/../TV")
+    normalized = Source.model_validate({**data, "legacy_output_roots": [path, path]})
+    assert normalized.legacy_output_roots == [str(Path(source.root) / "TV")]

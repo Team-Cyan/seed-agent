@@ -77,8 +77,13 @@ class Engine:
         return self.config.profiles or [source_adapter(s) for s in self.config.sources]
 
     def profile_config(self, name):
+        source = self.profile(name).model_dump(mode="json")
+        if self.config.sources:
+            source["legacy_output_roots"] = next(
+                s.legacy_output_roots for s in self.config.sources if s.id == name
+            )
         return {
-            "source": self.profile(name).model_dump(mode="json"),
+            "source": source,
             "destinations": self.config.destinations.model_dump(mode="json")
             if self.config.destinations
             else None,
@@ -310,7 +315,11 @@ class Engine:
             validate_sources(self.config.sources, self.config.destinations)
             source = next(s for s in self.config.sources if s.id == p.name)
             current = [
-                str(Path(value).resolve()) for value in self.config.destinations.exclusion_roots()
+                str(Path(value).resolve())
+                for value in [
+                    *self.config.destinations.exclusion_roots(),
+                    *(p for s in self.config.sources for p in s.legacy_output_roots),
+                ]
             ]
             with self.store._connect() as conn:
                 history.extend(
@@ -332,7 +341,7 @@ class Engine:
             return inventory(
                 source,
                 self.config.destinations,
-                historical_targets=history,
+                historical_targets=[*history, *current],
                 max_files=self.config.max_inventory_files,
                 timeout=self.config.inventory_timeout_seconds,
             )

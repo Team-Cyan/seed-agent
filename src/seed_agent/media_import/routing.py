@@ -1,5 +1,6 @@
 """Mixed-source configuration and explicit metadata-to-destination resolution."""
 
+import os
 from pathlib import Path
 from typing import Literal
 
@@ -16,6 +17,7 @@ class Source(BaseModel):
     completed_contract_acknowledged: bool = False
     min_age_seconds: int = Field(default=60, ge=0)
     exclude_dirs: list[str] = Field(default_factory=lambda: ["incomplete"])
+    legacy_output_roots: list[str] = Field(default_factory=list, max_length=64)
     languages: list[list[str]] = Field(default_factory=lambda: [["zh-Hans", "zh-Hant"]])
     subtitle_kind: Literal["full", "forced", "sdh"] = "full"
     max_subtitles: int = Field(default=3, ge=1, le=10)
@@ -31,6 +33,18 @@ class Source(BaseModel):
         for value in [self.marker, *self.exclude_dirs]:
             if Path(value).name != value or value in {"", ".", ".."}:
                 raise ValueError("marker/exclusions must be single names")
+        normalized = []
+        for value in self.legacy_output_roots:
+            path = Path(value)
+            if not path.is_absolute():
+                raise ValueError("excluded output roots must be absolute")
+            if (
+                path.resolve() == Path(self.root).resolve()
+                or path.resolve() in Path(self.root).resolve().parents
+            ):
+                raise ValueError("excluded output cannot contain source")
+            normalized.append(os.path.normpath(value))
+        self.legacy_output_roots = sorted(set(normalized))
         if not self.marker_value:
             raise ValueError("source marker cannot be empty")
         if self.readiness == "completed_folder" and not self.completed_contract_acknowledged:
@@ -145,7 +159,10 @@ def validate_sources(sources, targets):
             b = Path(other.root).resolve()
             if a == b or a in b.parents or b in a.parents:
                 raise ValueError("source roots overlap")
-        for root in targets.exclusion_roots():
+        for root in [
+            *targets.exclusion_roots(),
+            *(p for s in sources for p in s.legacy_output_roots),
+        ]:
             b = Path(root).resolve()
             if a == b or b in a.parents:
                 raise ValueError("destination cannot equal or contain a source")
@@ -154,7 +171,7 @@ def validate_sources(sources, targets):
 def source_adapter(source):
     from seed_agent.media_import.config import Profile
 
-    fields = source.model_dump(exclude={"id", "root"})
+    fields = source.model_dump(exclude={"id", "root", "legacy_output_roots"})
     result = Profile.model_construct(
         name=source.id, source_root=source.root, target_root="", target_marker_value="", **fields
     )

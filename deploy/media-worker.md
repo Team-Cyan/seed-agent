@@ -23,6 +23,14 @@ mounts; remove credentials for disabled providers. The four listed files are onl
 examples for the four enabled Phase 1 providers, not a requirement to enable them.
 Do not bind a whole downloader-containing secrets directory into the worker.
 
+For an existing media parent, declare every known legacy output as a source's
+`legacy_output_roots` using exact absolute container paths (including currently
+absent outputs). These configured paths exclude whole subtrees before traversal;
+matching basenames deeper in legitimate source directories remain eligible. This
+configuration remains authoritative after media DB restore/rebuild and is united
+with stored historical outputs. Verify host-to-container path mapping before
+starting the worker. Never infer these exclusions from directory names alone.
+
 Set the host `MEDIA_PARENT_DIR` to one existing common parent containing all source
 and library paths, and configure container paths under `/media`. The default
 production layout uses `/media/Media` as source and `/media/Library/{Movie,TV,Animation}`

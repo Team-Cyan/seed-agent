@@ -18,7 +18,14 @@ and tracker/RSS workflows remain separate.
 `sources` and `destinations`; legacy profiles remain an explicit compatibility adapter.
 One source can route confirmed movie/TV and animation/non-animation work independently.
 Animation base destinations render separate Movies and TV subtrees. All configured and
-historically recorded output roots are excluded before source traversal. Overlapping
+historically recorded output roots are excluded before source traversal. Each mixed
+source may also declare `legacy_output_roots`, a bounded list of exact absolute
+legacy output paths in the same container coordinates as `root`. These are excluded
+before descent even when absent, without excluding nested directories with matching
+basenames. They remain config authority across fresh/restored MediaStore state and
+are persisted into historical output exclusions on scan. The effective config
+revision fences changes just like source/destination changes; a configured exclusion
+equal to or above its source is rejected. Overlapping
 sources and destinations equal to/above a source are rejected. A historical output
 ancestor of a new source blocks observation rather than publishing an empty scan.
 

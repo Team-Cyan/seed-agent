@@ -10,7 +10,10 @@ from seed_agent.media_import import filesystem as fs
 def inventory(source, destinations, *, historical_targets=(), max_files=20000, timeout=60):
     root = Path(source.root)
     observed = fs.root_health(root, source.marker, source.marker_value)
-    outputs = [Path(p).resolve() for p in [*destinations.exclusion_roots(), *historical_targets]]
+    outputs = [
+        Path(p).resolve()
+        for p in [*destinations.exclusion_roots(), *source.legacy_output_roots, *historical_targets]
+    ]
     if any(root.resolve() == p or p in root.resolve().parents for p in outputs):
         raise ValueError(
             "historical destination contains source; explicit migration review required"

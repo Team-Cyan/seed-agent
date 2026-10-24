@@ -265,3 +265,48 @@ def test_applied_media_observation_contains_revision_and_restore_epoch(tmp_path)
     assert status["applied_revision"] == view.effective_revision
     assert status["state_epoch"] == store.epoch()
     assert status["role"] == "media"
+
+
+def test_legacy_output_config_roundtrips_web_and_fences_worker_writes(tmp_path):
+    from test_media_source_routing import mixed_engine
+
+    from seed_agent.web.settings import (
+        ConfigSectionDraft,
+        config_revision,
+        config_sections_payload,
+        save_config_section,
+    )
+
+    engine, source, _, _ = mixed_engine(tmp_path)
+    legacy = str(Path(source.root) / "Movies")
+    source.legacy_output_roots = [legacy]
+    config = tmp_path / "config.yaml"
+    from test_web_settings import _write_minimal_config
+
+    raw = yaml.safe_load(_write_minimal_config(tmp_path).read_text())
+    raw.update(deployment={"source_id": "Media"}, media_import=engine.config.model_dump())
+    config.write_text(yaml.safe_dump(raw))
+    before = load_view(config, "media", require_identity=True)
+    from seed_agent.media_import.runtime import build_engine
+
+    with pytest.raises(FileNotFoundError):
+        build_engine(config)
+    assert not (tmp_path / ".media-import/state.db").exists()
+    guard = MediaConfigGuard(before)
+    section = config_sections_payload(load_config(config))["media_import"]
+    assert section["sources"][0]["legacy_output_roots"] == [legacy]
+    saved = save_config_section(
+        config,
+        ConfigSectionDraft(section="media_import", data=section, revision=config_revision(config)),
+    )
+    assert saved["sources"][0]["legacy_output_roots"] == [legacy]
+    assert load_view(config, "media").effective_revision == before.effective_revision
+    guard.check("import")
+    section["sources"][0]["legacy_output_roots"].append(str(Path(source.root) / "TV"))
+    save_config_section(
+        config,
+        ConfigSectionDraft(section="media_import", data=section, revision=config_revision(config)),
+    )
+    assert load_view(config, "media").effective_revision != before.effective_revision
+    with pytest.raises(ValueError, match="rejected"):
+        guard.check("import")
