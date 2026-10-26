@@ -5,7 +5,13 @@
 `src/seed_agent/media_import/` owns directory-authoritative library synchronization.
 It shares Web, CLI and the image with acquisition. MediaStore owns a separate SQLite
 database; seed initialization never installs media tables or takes media locks. Media
-operations do not construct a downloader to scan, identify, import or reconcile files.
+connections never open and close extra database or SHM descriptors, which would
+release process-wide POSIX locks held by another SQLite connection. Initialization
+uses the exclusive access fence and exclusive first creation; existing files use
+no-follow metadata operations. Sidecar disappearance alone is tolerated. Failed
+worker observations retain optional SQLite extended error codes without messages.
+
+Media operations do not construct a downloader to scan, identify, import or reconcile files.
 `media-scan` and `/api/media*` submit persistent commands; `media-worker` alone
 executes scans/providers on its independent clock. `media-status` reads paginated state. The Web Media Library page uses Chinese UI labels;
 filenames default to metadata original titles. Existing torrent cleanup authority

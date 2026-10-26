@@ -210,21 +210,32 @@ class MediaWorkerLifecycle:
             {"progress": _counter(completed, total), "last_progress_at": self.clock()}
         )
 
-    def _finish(self, status, error_type=None):
+    def _finish(self, status, error_type=None, *, sqlite_error=None):
         self._stop.set()
         if self._thread is not None:
             self._thread.join(timeout=1)
         now = self.clock()
-        return self._write(
-            {"status": status, "finished_at": now, "heartbeat_at": now, "error_type": error_type}
-        )
+        changes = {
+            "status": status,
+            "finished_at": now,
+            "heartbeat_at": now,
+            "error_type": error_type,
+        }
+        if isinstance(sqlite_error, sqlite3.Error):
+            changes.update(
+                sqlite_errorcode=getattr(sqlite_error, "sqlite_errorcode", None),
+                sqlite_errorname=getattr(sqlite_error, "sqlite_errorname", None),
+            )
+        return self._write(changes)
 
     def stopped(self):
         return self._finish("stopped")
 
     def failed(self, exc):
         name = type(exc).__name__
-        return self._finish("failed", name if _NAME.fullmatch(name) else "Exception")
+        return self._finish(
+            "failed", name if _NAME.fullmatch(name) else "Exception", sqlite_error=exc
+        )
 
     def __enter__(self):
         return self.start()

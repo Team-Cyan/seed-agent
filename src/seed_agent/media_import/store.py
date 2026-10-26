@@ -6,6 +6,7 @@ import fcntl
 import json
 import os
 import sqlite3
+import stat
 import time
 import uuid
 from contextlib import closing, contextmanager
@@ -94,6 +95,18 @@ def bounded_lock(path: Path, *, exclusive=False, timeout=0.25):
         os.close(fd)
 
 
+def _restrict_sidecar(path: Path):
+    # Closing an extra DB/SHM descriptor drops this process's SQLite POSIX
+    # locks. Use no-follow path operations, never open these files ourselves.
+    try:
+        if not stat.S_ISREG(path.lstat().st_mode):
+            raise ValueError("media sidecar must be a regular file")
+        os.chmod(path, 0o600, follow_symlinks=False)
+    except FileNotFoundError:
+        # SQLite removes sidecars when the last connection closes.
+        return
+
+
 class MediaStore:
     schema_version = 4
 
@@ -142,15 +155,28 @@ class MediaStore:
 
     @contextmanager
     def _connect(self, *, row_factory=None):
-        with bounded_lock(Path(str(self.path) + ".access.lock"), timeout=self.timeout):
+        with bounded_lock(
+            Path(str(self.path) + ".access.lock"),
+            exclusive=self._initializing,
+            timeout=self.timeout,
+        ):
             if not self.read_only:
-                fd = os.open(
-                    self.path,
-                    (os.O_CREAT if self._initializing else 0) | os.O_RDWR | os.O_NOFOLLOW,
-                    0o600,
-                )
-                os.close(fd)
-                os.chmod(self.path, 0o600)
+                if self._initializing:
+                    try:
+                        fd = os.open(
+                            self.path,
+                            os.O_CREAT | os.O_EXCL | os.O_RDWR | os.O_NOFOLLOW,
+                            0o600,
+                        )
+                    except FileExistsError:
+                        pass
+                    else:
+                        os.close(fd)
+                if not stat.S_ISREG(self.path.lstat().st_mode):
+                    raise ValueError("media state must be a regular file")
+                os.chmod(self.path, 0o600, follow_symlinks=False)
+            elif not stat.S_ISREG(self.path.lstat().st_mode):
+                raise ValueError("media state must be a regular file")
             conn = sqlite3.connect(
                 f"file:{self.path.absolute()}?mode=ro&cache=private"
                 if self.read_only
@@ -176,8 +202,7 @@ class MediaStore:
                 if not self.read_only:
                     for suffix in ["-wal", "-shm", "-journal"]:
                         sidecar = Path(str(self.path) + suffix)
-                        if sidecar.exists() and not sidecar.is_symlink():
-                            os.chmod(sidecar, 0o600)
+                        _restrict_sidecar(sidecar)
 
     def epoch(self):
         with self._connect() as conn:

@@ -60,6 +60,22 @@ def test_stale_worker_and_failure_are_visible_without_exception_text(lifecycle_f
     assert report["restart_budget"] == "unavailable"
 
 
+def test_sqlite_failure_retains_extended_code_without_private_message(lifecycle_fixture):
+    import sqlite3
+
+    config, view, store = lifecycle_fixture
+    exc = sqlite3.OperationalError("private database path")
+    exc.sqlite_errorcode = 1550
+    exc.sqlite_errorname = "SQLITE_CANTOPEN_SYMLINK"
+    with pytest.raises(sqlite3.OperationalError):
+        with MediaWorkerLifecycle(store, view, clock=lambda: 1000):
+            raise exc
+    report = media_role_status(config, now=1001)
+    assert report["worker"]["sqlite_errorcode"] == 1550
+    assert report["worker"]["sqlite_errorname"] == "SQLITE_CANTOPEN_SYMLINK"
+    assert "private database path" not in json.dumps(report)
+
+
 def test_old_instance_and_restore_epoch_cannot_overwrite_new_status(lifecycle_fixture):
     config, view, store = lifecycle_fixture
     old = MediaWorkerLifecycle(store, view).start()

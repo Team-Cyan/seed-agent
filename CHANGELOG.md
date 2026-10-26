@@ -4,6 +4,16 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.25.2 - 2026-10-26
+
+### Fixed
+
+- Preserve SQLite process locks when opening media state and restricting WAL/SHM
+  permissions. Tolerate sidecars removed by SQLite without following symlinks or
+  hiding permission and I/O failures; serialize first database creation.
+- Include SQLite extended error codes in failed media-worker observations without
+  exposing exception messages or runtime credentials.
+
 ## 0.25.1 - 2026-10-25
 
 ### Fixed
