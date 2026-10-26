@@ -76,15 +76,36 @@ def execute_command(path, command, *, lifecycle=None):
             scan=action == "scan",
             refresh=action == "subtitles",
             lifecycle=lifecycle,
+            enrichment=action != "scan",
+            enrichment_limit=1,
         )
     if action == "review":
-        return engine.review(
+        result = engine.review(
             payload["source_id"],
             payload["mapping"],
             fingerprint=payload["fingerprint"],
             ready=payload.get("ready", False),
             repair=payload.get("repair", False),
         )
+        if (
+            payload.get("ready")
+            and not payload.get("repair")
+            and engine.config.import_policy == "execute"
+        ):
+            with engine.lease():
+                with engine.store._connect(row_factory=sqlite3.Row) as conn:
+                    source = dict(
+                        conn.execute(
+                            "SELECT * FROM media_source_files WHERE id=?", (payload["source_id"],)
+                        ).fetchone()
+                    )
+                engine.process_source(engine.profile(source["profile"]), source)
+                with engine.store._connect() as conn:
+                    job = conn.execute(
+                        "SELECT status FROM media_import_jobs WHERE source_id=?", (source["id"],)
+                    ).fetchone()
+                result["import_status"] = job[0] if job else "pending"
+        return result
     if action == "subtitle-select":
         return SubtitleJobs(engine).select(payload["job_id"], payload["candidate_id"])
     if action == "series-preview":
@@ -157,9 +178,15 @@ def serve(path, *, max_cycles=None, poll_seconds=2, stop=None):
                     lifecycle.phase("command", deadline_seconds=deadline)
                     process_one(path, lifecycle=lifecycle)
                     lifecycle.progress(completed=1, total=1)
-                    if time.monotonic() >= next_scan:
+                    with store._connect() as conn:
+                        queued = conn.execute(
+                            "SELECT 1 FROM media_commands WHERE status='queued' LIMIT 1"
+                        ).fetchone()
+                    if not queued and time.monotonic() >= next_scan:
                         lifecycle.phase("scan-enrichment", deadline_seconds=deadline)
-                        run_engine(engine, path, lifecycle=lifecycle)
+                        # Drain reviewed video work before provider waiting; idle
+                        # cycles spend at most one subtitle/poster job's budget.
+                        run_engine(engine, path, lifecycle=lifecycle, enrichment_limit=1)
                         lifecycle.progress(completed=1, total=1)
                         next_scan = time.monotonic() + min(30, engine.config.interval_seconds)
                 cycles += 1

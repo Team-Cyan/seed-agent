@@ -4379,6 +4379,35 @@ function renderMediaPanel() {
   filter.addEventListener("change", () => {mediaFilter = filter.value; renderSection();});
   toolbar.append(filter);
   panel.append(toolbar);
+  for (const profile of mediaSnapshot?.profiles || []) {
+    if (!Number.isInteger(profile.max_subtitles)) continue;
+    const settings = mediaElement("div", null, {class: "panel-actions"});
+    const label = mediaElement("label", `${profile.name} · 每个视频字幕上限 `);
+    const limit = mediaElement("input", null, {type: "number", min: "1", max: "10", step: "1", value: String(profile.max_subtitles), "aria-label": `${profile.name} 每个视频字幕上限`});
+    const save = mediaElement("button", "保存字幕上限", {type: "button", class: "secondary-button"});
+    label.append(limit);
+    save.addEventListener("click", async () => {
+      const value = Number(limit.value);
+      if (!Number.isInteger(value) || value < 1 || value > 10) {
+        note.textContent = "字幕上限必须是 1–10 的整数。";
+        return;
+      }
+      save.disabled = true;
+      try {
+        const current = await mediaRequest("/api/config");
+        const data = structuredClone(current.sections.media_import || {});
+        const authority = (data.sources || []).find(s => s.id === profile.name) || (data.profiles || []).find(p => p.name === profile.name);
+        if (!authority) throw new Error("来源配置已改变，请刷新后再保存。");
+        authority.max_subtitles = value;
+        await mediaRequest("/api/config/sections", {section: "media_import", data, revision: current.revision});
+        note.textContent = "已保存；所有语言和来源的自动外部字幕合计受此上限限制。不会因降低上限删除已有或手工字幕。";
+        await loadMedia();
+      } catch (error) { note.textContent = String(error); }
+      finally { save.disabled = false; }
+    });
+    settings.append(label, save);
+    panel.append(settings);
+  }
   for (const health of (mediaSnapshot?.domain_health || []).filter(h => h.status !== "healthy")) {
     if (health.provider) {
       panel.append(mediaElement("p", `字幕来源 ${health.provider} · ${health.status}${health.quota_per_minute ? " · 每分钟请求额度 " + health.quota_per_minute : ""}`));

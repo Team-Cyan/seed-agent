@@ -301,7 +301,7 @@ class SubtitleJobs:
             time.sleep(delay)
         raise ProviderError("retrying", e.config.provider_interval_seconds, payload_attempted=False)
 
-    def reuse_local(self, job, coverage, data):
+    def reuse_local(self, job, coverage, data, all_digests):
         e = self.engine
         if e.config.subtitle_policy != "execute":
             return
@@ -309,19 +309,42 @@ class SubtitleJobs:
         data.setdefault("digests", [])
         duration = json.loads(job["probe_json"])["duration"]
         source_video = Path(e.profile(job["profile"]).source_root) / job["path"]
-        for c in coverage:
-            if c.get("source") != "sidecar" or c.get("language") == "unknown":
+        profile = e.profile(job["profile"])
+        maximum = profile.max_subtitles
+        preferred = list(dict.fromkeys(lang for group in profile.languages for lang in group))
+        ordered = sorted(
+            coverage,
+            key=lambda c: (
+                preferred.index(c.get("language"))
+                if c.get("language") in preferred
+                else len(preferred)
+            ),
+        )
+        for c in ordered:
+            if (
+                c.get("source") != "sidecar"
+                or c.get("kind") != profile.subtitle_kind
+                or not any(
+                    language_matches(c.get("language"), group) for group in profile.languages
+                )
+            ):
                 continue
             path = Path(c["path"])
             if path.parent != source_video.parent:
                 continue
+            if len(all_digests) >= maximum:
+                break
             payload, fmt = validate(path.read_bytes(), duration=duration)
-            key = str(path) + ":" + hashlib.sha256(payload).hexdigest()
+            digest = hashlib.sha256(payload).hexdigest()
+            key = str(path) + ":" + digest
             if key in data["local_published"]:
+                continue
+            if digest in all_digests:
                 continue
             candidate = Candidate(id=key, language=c["language"], kind=c["kind"])
             self.publish(job, candidate, payload, fmt, provider_name="local")
-            data["digests"].append(hashlib.sha256(payload).hexdigest())
+            data["digests"].append(digest)
+            all_digests.add(digest)
             data["local_published"].append(key)
         for ext in [".jpg", ".png"]:
             path = source_video.with_suffix(ext)
@@ -425,8 +448,13 @@ class SubtitleJobs:
                 planned
             )  # verify source + historical destination before any paid/provider work
             e.target_health(planned._historical_descriptor, "healthy")
-            self.reuse_local(job, coverage, data)
+            self.reuse_local(job, coverage, data, all_digests)
             all_digests.update(data["digests"])
+            if len(all_digests) >= p.max_subtitles:
+                data["choice_limit_reached"] = True
+                status = "satisfied" if satisfied else "limit_reached"
+                self.finish(job, status, data, e.config.subtitle_refresh_seconds)
+                return {"id": job["id"], "status": status, "coverage_satisfied": satisfied}
             if job["source_id"] in getattr(self, "payload_attempted_sources", set()):
                 self.finish(job, "satisfied" if satisfied else "cycle_deferred", data, 60)
                 return {
@@ -588,6 +616,10 @@ class SubtitleJobs:
                 status = "terminal_failure"
         if getattr(self.provider, "managed", False):
             data["providers"] = self.provider.statuses
+        if status == "satisfied":
+            # A partial provider outage must not turn already-covered alternatives
+            # into a seconds-long search loop for every healthy provider.
+            delay = max(delay, e.config.subtitle_refresh_seconds)
         self.finish(job, status, data, delay, error)
         return {"id": job["id"], "status": status, "coverage_satisfied": satisfied}
 

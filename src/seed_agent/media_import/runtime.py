@@ -66,6 +66,8 @@ def run_engine(
     refresh=False,
     scan=True,
     lifecycle=None,
+    enrichment=True,
+    enrichment_limit=None,
 ):
     root = engine.config_view.workspace
     if not engine.config.enabled:
@@ -94,20 +96,31 @@ def run_engine(
                     engine.process_pending(p)
         if lifecycle:
             lifecycle.progress(completed=index + 1, total=len(profiles))
+    if not enrichment:
+        return {
+            "status": "complete",
+            "scans": scans,
+            "posters": [],
+            "subtitles": [],
+            "enrichment_deferred": True,
+        }
+    limit = engine.config.work_batch_size
+    if enrichment_limit is not None:
+        limit = min(limit, max(0, enrichment_limit))
     from seed_agent.media_import.artwork import PosterJobs, TmdbPosters
 
     token = getattr(engine.metadata, "token", None)
     if lifecycle:
-        lifecycle.phase("poster-batch", deadline_seconds=engine.config.work_batch_size * 180 + 60)
+        lifecycle.phase("poster-batch", deadline_seconds=limit * 180 + 60)
     poster_results = PosterJobs(engine, TmdbPosters(token) if token else None).run(
-        profile=profile, limit=engine.config.work_batch_size
+        profile=profile, limit=limit
     )
     provider = build_subtitle_provider(engine.config, root) if subtitles else None
     subtitle_results = (
         SubtitleJobs(engine, provider).run(
             refresh=refresh,
             profile=profile,
-            limit=engine.config.work_batch_size,
+            limit=limit,
             on_job=(lambda: lifecycle.phase("subtitle-file", deadline_seconds=900))
             if lifecycle
             else None,

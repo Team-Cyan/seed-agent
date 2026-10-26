@@ -4,6 +4,7 @@ import json
 import re
 import subprocess
 import time
+import unicodedata
 from pathlib import Path
 
 import httpx
@@ -106,36 +107,102 @@ def render(mapping: Mapping, profile, suffix: str) -> Path:
     )
 
 
+def identity_normalize(value):
+    """Comparable provider titles, without transliteration or fuzzy similarity."""
+    result = []
+    for character in unicodedata.normalize("NFKC", str(value)).casefold():
+        parts = unicodedata.normalize("NFD", character)
+        latin = unicodedata.name(parts[0], "").startswith("LATIN")
+        result.extend(
+            c
+            for c in parts
+            if c.isalnum() or (unicodedata.category(c).startswith("M") and not latin)
+        )
+    return "".join(result)
+
+
+def identity_hints(path, source_root):
+    """Keep bilingual and parent titles separate; title numbers are not release years."""
+    episode = re.search(r"(?i)S(\d{1,2})E(\d{1,3})(?:[-.]?E(\d{1,3}))?", path.stem)
+    queries, year = [], None
+    current = path
+    for depth in range(3):
+        if depth and (current == Path(source_root) or current == current.parent):
+            break
+        value = unicodedata.normalize("NFKC", path.stem if depth == 0 else current.name)
+        technical = re.search(
+            r"(?i)(?:^|[ ._\[(-])(?:\d{3,4}p|Blu[ ._-]?Ray|BDRip|WEB[ ._-]?(?:DL|Rip)|"
+            r"REMUX|HEVC|H[ .]?26[45]|x26[45])(?:$|[ ._\])-])",
+            value,
+        )
+        head = value[: technical.start()] if technical else value
+        years = list(re.finditer(r"(?<!\d)(?:19|20)\d{2}(?!\d)", head))
+        release_year = years[-1] if years else None
+        year = year or (release_year.group() if release_year else None)
+        season = re.search(r"(?i)(?<![A-Za-z0-9])S\d{1,2}(?:E\d{1,3})?", head)
+        end = min([m.start() for m in [release_year, season] if m] or [len(head)])
+        title = head[:end].strip(" ._-()")
+        labels = re.findall(r"\[([^\]]+)\]", title)
+        unbracketed = re.sub(r"\[[^\]]+\]", " ", title)
+        choices = [unbracketed, *labels]
+        for choice in list(choices):
+            latin = re.search(r"[A-Za-z]", choice)
+            if latin and re.search(r"[\u3400-\u9fff]", choice[: latin.start()]):
+                choices.extend([choice[: latin.start()], choice[latin.start() :]])
+        for choice in choices:
+            choice = re.sub(r"[._]", " ", choice)
+            choice = re.sub(r"第[零一二三四五六七八九十百\d]+季", " ", choice)
+            choice = re.sub(
+                r"\d+分(?:钟)?(?:未删减)?|导演剪辑版|未删减版?|加长版", " ", choice
+            ).strip(" -()[]：:")
+            variants = re.split(r"(?i)\s+aka\s+", choice)
+            # A mixed-script string is only a search hint; its separated aliases
+            # must also be independently confirmed by the provider.
+            for query in variants:
+                query = " ".join(query.split())
+                if not query or re.fullmatch(r"(?i)(?:(?:episode|season|s)\s*)?\d+", query):
+                    continue
+                if query.casefold() in {"movie", "movies", "tv", "anime", "animation"}:
+                    continue
+                if not re.search(r"[^\W\d_]", query):
+                    continue
+                if identity_normalize(query) not in {identity_normalize(q) for q in queries}:
+                    queries.append(query)
+        current = current.parent
+    return queries[:4], year, episode
+
+
+def ancillary_identity(path, source_root):
+    """Extras are visible review cases, never primary films or guessed specials."""
+    value = unicodedata.normalize("NFKC", path.stem)
+    if re.search(r"(?i)(?:^|[ ._-])extras[ ._-]*\d{1,3}(?!\d)", value):
+        return True
+    years = list(re.finditer(r"(?<!\d)(?:19|20)\d{2}(?!\d)", value))
+    tail = value[years[-1].end() :] if years else ""
+    if re.search(r"(?i)(?:^|[ ._-])(?:extras|featurette|trailer|sample)(?:$|[ ._-])", tail):
+        return True
+    current = path.parent
+    for _ in range(2):
+        if current == Path(source_root) or current == current.parent:
+            break
+        if current.name.casefold() in {"extras", "featurettes", "trailers", "samples", "花絮"}:
+            return True
+        current = current.parent
+    return False
+
+
 class Tmdb:
     def __init__(self, token: str):
         self.token = token
+        self._identity_cache = {}
 
     def identify_mixed(self, path, profile):
-        episode = re.search(r"(?i)S(\d{1,2})E(\d{1,3})(?:[-.]?E(\d{1,3}))?", path.stem)
-
-        def hints(value):
-            year = re.search(r"(?:19|20)\d{2}", value)
-            ep = re.search(r"(?i)S\d{1,2}E\d{1,3}", value)
-            split = min([m.start() for m in [year, ep] if m] or [len(value)])
-            title = re.sub(r"[._]", " ", value[:split]).strip(" -()[]")
-            return title, year.group() if year else None
-
-        query, year = hints(path.stem)
-        if not query or re.fullmatch(r"(?i)(?:episode\s*)?\d+", query):
-            current = path.parent
-            for _ in range(2):
-                if current == Path(profile.source_root) or current == current.parent:
-                    break
-                query, parent_year = hints(current.name)
-                year = year or parent_year
-                if query and not re.fullmatch(r"(?i)(?:season|s)\s*\d+", query):
-                    break
-                current = current.parent
-        if not query or not re.search(r"[^\W\d_]", query):
+        if ancillary_identity(path, profile.source_root):
+            return None, [{"reason": "ancillary media requires explicit identity and placement"}]
+        queries, year, episode = identity_hints(path, profile.source_root)
+        if not queries:
             return None, [{"reason": "work title unresolved"}]
-
-        def norm(value):
-            return re.sub(r"[\W_]", "", str(value)).casefold()
+        normalized = {identity_normalize(q) for q in queries}
 
         with httpx.Client(
             base_url="https://api.themoviedb.org/3",
@@ -143,11 +210,20 @@ class Tmdb:
             headers={"Authorization": "Bearer " + self.token},
         ) as client:
             deadline = time.monotonic() + 120
+            requests = 0
 
             def get(endpoint, **kwargs):
+                nonlocal requests
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     raise httpx.ReadTimeout("metadata time budget exceeded")
+                key = (endpoint, json.dumps(kwargs.get("params", {}), sort_keys=True))
+                cached = self._identity_cache.get(key)
+                if cached and time.monotonic() - cached[0] < 300:
+                    return cached[1]
+                if requests >= 32:
+                    raise ValueError("metadata request budget exceeded")
+                requests += 1
                 payload = bytearray()
                 with client.stream(
                     "GET", endpoint, timeout=min(20, remaining), **kwargs
@@ -159,13 +235,25 @@ class Tmdb:
                             raise ValueError("metadata response exceeds limit")
                         if time.monotonic() >= deadline:
                             raise httpx.ReadTimeout("metadata time budget exceeded")
-                return json.loads(payload)
+                result = json.loads(payload)
+                if len(payload) <= 131072:
+                    if len(self._identity_cache) >= 128:
+                        self._identity_cache.pop(next(iter(self._identity_cache)))
+                    self._identity_cache[key] = (time.monotonic(), result)
+                return result
 
             candidates = []
-            for kind in ["movie", "tv"]:
-                for item in get(
-                    "/search/" + kind, params={"query": query, "language": profile.locale}
-                ).get("results", [])[:10]:
+            seen = set()
+            for query, kind in [(q, k) for q in queries for k in ["movie", "tv"]]:
+                params = {"query": query, "language": profile.locale}
+                if kind == "movie" and year:
+                    # A known release year keeps common movie titles from losing
+                    # the correct result beyond the bounded first search page.
+                    params["primary_release_year"] = year
+                for item in get("/search/" + kind, params=params).get("results", [])[:10]:
+                    if (kind, item["id"]) in seen:
+                        continue
+                    seen.add((kind, item["id"]))
                     original = item.get("original_title") or item.get("original_name") or ""
                     local = item.get("title") or item.get("name") or ""
                     date = item.get("release_date") or item.get("first_air_date") or ""
@@ -176,11 +264,119 @@ class Tmdb:
                             "original_title": original,
                             "localized_title": local,
                             "year": date[:4],
-                            "exact": norm(query) in {norm(original), norm(local)}
+                            "exact": bool(
+                                normalized
+                                & {identity_normalize(original), identity_normalize(local)}
+                            )
                             and (not year or date[:4] == year),
                         }
                     )
-            exact = [c for c in candidates if c["exact"] and c["year"]]
+            # Explicit SxxEyy plus provider-confirmed episode metadata establishes
+            # TV identity; a namesake movie is not a competing episode candidate.
+            usable = [c for c in candidates if not episode or c["content_type"] == "tv"]
+
+            def provider_names(candidate, *, translations=False):
+                kind, identity = candidate["content_type"], candidate["tmdb_id"]
+                names = {
+                    identity_normalize(candidate["original_title"]),
+                    identity_normalize(candidate["localized_title"]),
+                }
+                for endpoint in ["alternative_titles", *(["translations"] if translations else [])]:
+                    try:
+                        payload = get(f"/{kind}/{identity}/{endpoint}")
+                    except httpx.HTTPStatusError as exc:
+                        if exc.response.status_code != 404:
+                            raise
+                        continue
+                    if endpoint == "translations":
+                        entries = [t.get("data", {}) for t in payload.get("translations", [])]
+                        names.update(
+                            identity_normalize(t.get("title") or t.get("name") or "")
+                            for t in entries
+                        )
+                    else:
+                        names.update(
+                            identity_normalize(t.get("title", ""))
+                            for t in payload.get("titles", payload.get("results", []))
+                        )
+                return names - {""}
+
+            exact = [c for c in usable if c["exact"] and c["year"]]
+            if not exact:
+                possible = []
+                for candidate in usable:
+                    title_match = bool(
+                        normalized
+                        & {
+                            identity_normalize(candidate["original_title"]),
+                            identity_normalize(candidate["localized_title"]),
+                        }
+                    )
+                    year_match = not year or candidate["year"] == year
+                    if not year_match and candidate["content_type"] == "tv" and episode:
+                        if not title_match:
+                            continue
+                        try:
+                            season = get(f"/tv/{candidate['tmdb_id']}/season/{int(episode[1])}")
+                        except httpx.HTTPStatusError as exc:
+                            if exc.response.status_code != 404:
+                                raise
+                            continue  # A namesake without this season is not a provider outage.
+                        year_match = str(season.get("air_date") or "")[:4] == year
+                        if year_match:
+                            candidate["year_basis"] = "provider_season_air_date"
+                    if year_match and candidate["year"]:
+                        possible.append((candidate, title_match))
+                aliases_needed = [(c, match) for c, match in possible if not match]
+                if len(aliases_needed) > 8:
+                    return None, [*candidates, {"reason": "provider alias budget exceeded"}]
+                for candidate, title_match in possible:
+                    if not title_match:
+                        title_match = bool(normalized & provider_names(candidate))
+                        if not title_match:
+                            title_match = bool(
+                                normalized & provider_names(candidate, translations=True)
+                            )
+                        if title_match:
+                            candidate["match_basis"] = "provider_alternative_title"
+                    if title_match:
+                        candidate["exact"] = True
+                        exact.append(candidate)
+            if 1 < len(exact) <= 8 and len(normalized) > 1:
+                # Bilingual hints can disambiguate a generic English namesake
+                # only when official titles independently corroborate both names.
+                support = [
+                    (len(normalized & provider_names(c, translations=True)), c) for c in exact
+                ]
+                best = max(n for n, _ in support)
+                corroborated = [c for n, c in support if n == best]
+                if best >= 2 and len(corroborated) == 1:
+                    exact = corroborated
+                    exact[0]["match_basis"] = "provider_multilingual_title_consensus"
+            if 1 < len(exact) <= 4 and episode:
+                # A specific provider-confirmed episode can distinguish namesake
+                # shows; two shows containing that episode remain ambiguous.
+                confirmed = []
+                for candidate in exact:
+                    if candidate["content_type"] != "tv":
+                        continue
+                    try:
+                        detail = get(
+                            f"/tv/{candidate['tmdb_id']}/season/{int(episode[1])}"
+                            f"/episode/{int(episode[2])}"
+                        )
+                    except httpx.HTTPStatusError as exc:
+                        if exc.response.status_code != 404:
+                            raise
+                        continue
+                    if (detail.get("season_number"), detail.get("episode_number")) == (
+                        int(episode[1]),
+                        int(episode[2]),
+                    ):
+                        confirmed.append(candidate)
+                if len(confirmed) == 1:
+                    exact = confirmed
+                    exact[0]["match_basis"] = "provider_episode_identity"
             if len(exact) != 1:
                 return None, candidates
             choice = exact[0]
@@ -214,9 +410,14 @@ class Tmdb:
             if kind == "tv":
                 verified = []
                 for number in numbers:
-                    detail = get(
-                        f"/tv/{choice['tmdb_id']}/season/{int(episode[1])}/episode/{number}"
-                    )
+                    try:
+                        detail = get(
+                            f"/tv/{choice['tmdb_id']}/season/{int(episode[1])}/episode/{number}"
+                        )
+                    except httpx.HTTPStatusError as exc:
+                        if exc.response.status_code != 404:
+                            raise
+                        return None, [*candidates, {"reason": "episode metadata unavailable"}]
                     if (
                         detail.get("season_number") != int(episode[1])
                         or detail.get("episode_number") != number

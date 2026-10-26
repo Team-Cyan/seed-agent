@@ -11,6 +11,7 @@ policy/exhaustion is outside this observation.
 from __future__ import annotations
 
 import json
+import logging
 import math
 import re
 import sqlite3
@@ -233,9 +234,19 @@ class MediaWorkerLifecycle:
 
     def failed(self, exc):
         name = type(exc).__name__
-        return self._finish(
-            "failed", name if _NAME.fullmatch(name) else "Exception", sqlite_error=exc
-        )
+        name = name if _NAME.fullmatch(name) else "Exception"
+        observation = {"error_type": name}
+        if isinstance(exc, sqlite3.Error):
+            code = getattr(exc, "sqlite_errorcode", None)
+            error_name = getattr(exc, "sqlite_errorname", None)
+            if type(code) is int:
+                observation["sqlite_errorcode"] = code
+            if isinstance(error_name, str) and re.fullmatch(r"SQLITE_[A-Z0-9_]{1,64}", error_name):
+                observation["sqlite_errorname"] = error_name
+        # Database status can fail too or be replaced by the next process startup.
+        # Retain safe extended codes in container logs without exception text.
+        logging.getLogger(__name__).error("media_worker_failure %s", json.dumps(observation))
+        return self._finish("failed", name, sqlite_error=exc)
 
     def __enter__(self):
         return self.start()

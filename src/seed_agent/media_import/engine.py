@@ -284,18 +284,21 @@ class Engine:
                     (p.name, self.config.work_batch_size),
                 )
         for source in sources:
-            try:
-                self.plan_import(p, source)
-            except httpx.HTTPError:
-                self.job_error(source, "metadata provider unavailable", status="retrying")
-            except (OSError, ValueError, RuntimeError) as exc:
-                self.job_error(source, str(exc))
+            self.process_source(p, source)
             with self.store._connect() as conn:
                 conn.execute(
                     "INSERT INTO media_work_cursor VALUES(?,?) ON CONFLICT(profile) "
                     "DO UPDATE SET source_id=excluded.source_id",
                     (p.name, source["id"]),
                 )
+
+    def process_source(self, p, source):
+        try:
+            self.plan_import(p, source)
+        except httpx.HTTPError:
+            self.job_error(source, "metadata provider unavailable", status="retrying")
+        except (OSError, ValueError, RuntimeError) as exc:
+            self.job_error(source, str(exc))
 
     def inventory(self, p):
         if p._mixed:
@@ -1531,6 +1534,7 @@ class Engine:
                         "import_policy": self.config.import_policy,
                         "subtitle_policy": self.config.subtitle_policy,
                         "reconcile_policy": self.config.reconcile_policy,
+                        "max_subtitles": p.max_subtitles,
                     }
                     for p in self.profiles()
                 ],

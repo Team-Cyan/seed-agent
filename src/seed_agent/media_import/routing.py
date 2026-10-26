@@ -20,7 +20,7 @@ class Source(BaseModel):
     legacy_output_roots: list[str] = Field(default_factory=list, max_length=64)
     languages: list[list[str]] = Field(default_factory=lambda: [["zh-Hans", "zh-Hant"]])
     subtitle_kind: Literal["full", "forced", "sdh"] = "full"
-    max_subtitles: int = Field(default=3, ge=1, le=10)
+    max_subtitles: int = Field(default=5, ge=1, le=10)
     missing_scans: int = Field(default=2, ge=2)
     grace_seconds: int = Field(default=86400, ge=0)
     max_cleanup_batch: int = Field(default=10, ge=1)

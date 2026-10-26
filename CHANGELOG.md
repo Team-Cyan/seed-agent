@@ -4,6 +4,23 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.25.3 - 2026-10-27
+
+### Fixed
+
+- Recognize bilingual and accented release names, numeric titles and official TMDB
+  aliases; resolve TV identities with season-year and episode evidence while keeping
+  conflicting identities, years and ancillary extras in review.
+- Process reviewed ready videos before subtitle enrichment; defer scan-command
+  enrichment and bound idle provider work to one media file per cycle.
+- Default the existing configurable subtitle choice limit to five, share it across
+  providers, languages and local sidecars, and expose its revision-checked edit in
+  the Chinese media panel without removing existing or manual files.
+- Retain safe SQLite extended failure codes in worker logs across restarts, even
+  when media-state status writes fail.
+- Keep covered subtitle jobs on their refresh interval during partial provider
+  failures instead of repeatedly searching healthy providers.
+
 ## 0.25.2 - 2026-10-26
 
 ### Fixed

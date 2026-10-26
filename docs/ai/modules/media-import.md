@@ -52,9 +52,19 @@ Missing targets require explicit repair instead of an automatic recreation loop.
 
 ## Identity And Publication
 
-Mixed-source TMDB matching searches both movie/TV identities from filename/folder
-hints; absent episode syntax does not establish a film. One exact identity and
-resolved TV episode metadata are required; animation uses explicit genre evidence
+Mixed-source TMDB matching searches both movie/TV identities using bounded separate
+filename, parent, Chinese and English hints. Title numbers remain part of the name;
+year extraction precedes technical release fields. Latin accent/punctuation
+normalization does not erase non-Latin marks. Official alternative titles and
+translations can confirm an alias; conflicting bilingual candidates require unique
+provider corroboration of multiple hints, never fuzzy similarity. Explicit `SxxEyy`
+excludes movie candidates but still requires exact provider season/episode evidence.
+Season-year fallback requires the provider's season air date and retains the series
+premiere year for its library root. Absent episode syntax does not establish a film.
+Numbered extras and explicit ancillary paths remain review-only, not primary films
+or inferred specials. Matching has a 120-second/32-request per-file budget and a
+bounded five-minute response cache; see the identity repair research note.
+One exact identity and resolved TV episode metadata are required; animation uses explicit genre evidence
 (including non-Japanese animation), never language/country. Missing genre/type/numbering
 or cross-type ambiguity remains review-required. Manual animation classification is
 persisted separately from completion confirmation. Legacy exact title/year matching
@@ -234,3 +244,19 @@ preflight source and historical target before provider work, retry typed tempora
 mount blocks automatically, and preserve generation/version/receipt rejection.
 Legacy export/import explicitly rejects mixed-source config; mixed stores use the
 full independent backup/restore boundary.
+
+## Video Priority And Subtitle Choice Budget
+
+Queued ready decisions in execute mode process their exact source immediately through
+the existing import checks, without advancing the inventory work cursor or waiting
+for subtitle search. Scan commands defer enrichment. The worker drains queued
+commands before automatic enrichment; idle cycles budget one poster and one subtitle
+job. An already-running provider request remains bounded by its existing timeout.
+
+The existing source/profile `max_subtitles` field is the sole choice limit, defaults
+to five, and accepts 1--10. The Chinese media panel edits that field through the
+existing config revision CAS. Unique managed external payloads share the cap across
+languages, providers and copied local sidecars; embedded Chinese still permits
+compatible alternatives. Lowering the cap preserves existing and manual files.
+Covered subtitle jobs retain the configured refresh interval even when one provider
+reports a shorter retry time, avoiding repeated healthy-provider searches.
