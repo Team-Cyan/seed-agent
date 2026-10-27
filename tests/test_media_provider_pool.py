@@ -209,3 +209,25 @@ def test_real_error_survives_persistent_gate_after_reconstruction(media):
             ).fetchone()[0]
             == prior_gate
         )
+
+
+def test_large_first_provider_cannot_exclude_later_provider(media):
+    import_three(media)
+    engine = media[0]
+
+    class Many(FakeProvider):
+        def search(self, *args):
+            base = super().search(*args)[0]
+            return [replace(base, id=str(i)) for i in range(100)]
+
+    first = Many()
+    first.name = "first"
+    second = FakeProvider()
+    second.name = "second"
+    pool = ProviderPool([first, second])
+    pool.bind(engine)
+    source = engine.snapshot()["sources"][0]
+    mapping = __import__("json").loads(source["mapping_json"])
+    candidates = pool.search(mapping, source, ["zh-Hans"])
+    assert len(candidates) == 100 and first.calls == second.calls == 1
+    assert {candidate.provider for candidate in candidates} == {"first", "second"}

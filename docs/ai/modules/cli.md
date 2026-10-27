@@ -216,3 +216,18 @@ Expose the operator-facing command surface and safe summaries.
 - `uv run seed-agent web --help`
 - `uv run seed-agent intent-run-once --config <config>`
 - `uv run seed-agent tracker-source-backfill --config <config> --category seed --limit 1 --max-api-requests 2`
+
+
+## Read-only media duration and targeted subtitle discovery
+
+`media-probe PATH [--json]` and `uv run python scripts/probe_media.py PATH [--json]`
+use the same offline bounded ffprobe implementation as media inventory. No config,
+provider or database is opened; invalid measurements return status unknown and a
+nonzero exit instead of guessed zero. Human output includes HH:MM:SS, seconds,
+container and FPS. AVI/MP4/MKV and extensionless files are inspected by content.
+
+`media-subtitle-search --source-id ID --generation N --fingerprint JSON --config FILE`
+queues a single exact imported source through the persistent worker; default preview
+cannot download. `--execute` remains limited by existing subtitle policy, provider
+retry/allowance and source/plan/config/epoch fences. It never scans, confirms
+readiness, repairs a video or refreshes unrelated subtitle jobs.

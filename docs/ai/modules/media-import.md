@@ -274,8 +274,9 @@ to five, and accepts 1--10. The Chinese media panel edits that field through the
 existing config revision CAS. Unique managed external payloads share the cap across
 languages, providers and copied local sidecars; embedded Chinese still permits
 compatible alternatives. Lowering the cap preserves existing and manual files.
-Covered subtitle jobs retain the configured refresh interval even when one provider
-reports a shorter retry time, avoiding repeated healthy-provider searches.
+Per-source provider search histories retain completed results until their refresh
+interval. Incomplete providers resume at their own next eligible time without
+repeating healthy providers. Embedded coverage is separate from external acquisition.
 
 
 ### Bounded Idle Enrichment And Provider Evidence
@@ -305,3 +306,52 @@ Exact-release comparison removes only one recognized media/subtitle extension,
 normalizes Unicode formatting and separators, and retains year, episode, edition,
 source, encode and release-group tokens, including extensionless groups. This does
 not authorize work-ID/FPS-only or fuzzy automatic subtitle publication.
+
+
+### External Discovery State And Single-Source Commands
+
+Subtitle payloads separately persist coverage state, managed external count/state,
+logical search attempt/completion time, search outcome, adapter-returned candidate
+reason counts and each provider's last completed search/next eligible check. The
+legacy aggregate job status remains backward compatible; `satisfied` alone never
+establishes an external download, search completion, quality or synchronization.
+Gate-only observations do not advance completed-search time. Missing old timestamps
+remain unknown. Reason counts cover adapter-returned candidates, not discarded raw
+provider responses. Existing hash/release identity/version/episode gates remain.
+
+Provider histories/cache are source/job-specific and fenced by the existing source,
+plan, configuration and epoch path. Automatic retries visit only due providers;
+completed empty/review results are cached. At most three providers contribute at
+most100 each into a deterministic fair100-result output. Remaining compatible
+alternatives consume the same fenced candidate cache in bounded 60-second download
+turns, one actual payload attempt per source per cycle, until the shared configured
+external cap. They do not shorten the provider's search refresh. OpenSubtitles file
+IDs remain download locators; ASSRT fetches fresh official details under its quota.
+SubDL reconstructs only API-proven canonical unsigned locators (a boolean plus its
+existing opaque ID, no URL). Signed or unknown cached locators request a fresh bounded
+search before a later download turn; uncertain paid links are never replayed. A
+SubDL gate failure before any payload attempt does not make an account read a
+post-download observation and cannot refund an exhausted reservation. Explicit single-source search
+may revisit cached results but never clears real provider gates or download budgets.
+
+`subtitle-search` commands require exact source ID/generation/fingerprint and pin
+source/plan/review/config/epoch/modes through the durable command queue. They scan
+nothing, enrich no other source and never mark readiness or choose a candidate.
+Preview searches cannot gain payload authority. The Chinese source panel and
+`media-subtitle-search` CLI submit this command through the same boundary.
+
+A one-time, schema-free payload-version upgrade admits at most the coverage lookahead
+of old imported jobs per quantum. It records an event, retains old evidence/unknown
+times, makes only those legacy jobs due and never alters provider quota/retry rows.
+Running/cancelled/stale-generation/obsolete-language jobs are protected. New jobs
+start with the current discovery version, so the backfill is finite and restart-safe.
+
+`probe.py` is the shared offline ffprobe implementation used by inventory, the
+`media-probe` CLI and `scripts/probe_media.py`. It holds a no-follow regular-file
+read descriptor, checks fstat/path identity before/after, enforces20seconds and
+streaming stdout1MB/stderr64KB limits, permits only file/pipe protocols and detects
+containers by content rather than suffix. Missing/invalid/nonfinite/zero duration,
+no real video (including attached-picture-only audio), source replacement and
+process failures are explicit unknown errors. Stored measured duration and TMDB
+reference duration remain distinct; a >600second difference is a UI warning,
+never an automatic edition name or subtitle synchronization proof.

@@ -128,60 +128,118 @@ class ProviderPool:
                 )
 
     def search(self, mapping, source, languages):
-        output = []
-        seen = set()
-        failures = []
-        healthy = False
+        from itertools import zip_longest
+
         self.next_retry = None
+        self.search_performed = False
+        names = {p.name for p in self.providers}
+        self.search_history = {
+            name: history
+            for name, history in (source.get("_provider_search") or {}).items()
+            if name in names
+        }
+        cached = source.get("_subtitle_candidates") or []
+        groups, failures = [], []
+        healthy = False
+        now = self.engine.clock()
         for p in self.providers:
             component = self.components[p.name]
-            try:
-                # Download allowance does not prohibit search. Child adapters
-                # retain their own search quota/pacing; downloads still reserve
-                # allowance before requesting any link or payload.
-                if not hasattr(p, "request_pacer"):
-                    component.pace()
-                values = p.search(mapping, source, languages)[:100]
-                healthy = True
-                self.record(p, "available" if values else "no_result")
-                for value in values:
+            history = self.search_history.get(p.name, {})
+            values = []
+            if (
+                history.get("next_search_at", 0) > now
+                and not source.get("_force_search")
+                and not history.get("refresh_required")
+            ):
+                remaining = history["next_search_at"] - now
+                self.next_retry = min(self.next_retry or remaining, remaining)
+                self.statuses[p.name] = {
+                    **history.get("summary", {}),
+                    "provider": p.name,
+                    "status": history.get("status", "retrying"),
+                    "search_cached": True,
+                }
+                healthy |= history.get("status") in {"available", "no_result"}
+                for item in cached[:200]:
                     if (
-                        not isinstance(value, Candidate)
-                        or not isinstance(value.id, str)
-                        or len(value.id) > 200
+                        history.get("status") in {"available", "no_result"}
+                        and item.get("provider") == p.name
                     ):
-                        continue
-                    key = (p.name, value.id, value.language, value.release)
-                    if key in seen:
-                        continue
-                    seen.add(key)
-                    output.append(
-                        replace(
-                            value, provider=p.name, origin_id=value.id, id=p.name + ":" + value.id
+                        values.append(
+                            Candidate(
+                                **{
+                                    k: v
+                                    for k, v in item.items()
+                                    if k in Candidate.__dataclass_fields__
+                                }
+                            )
+                        )
+            else:
+                try:
+                    if not hasattr(p, "request_pacer"):
+                        component.pace()
+                    values = p.search(mapping, source, languages)[:100]
+                    healthy = True
+                    self.search_performed = True
+                    self.record(p, "available" if values else "no_result")
+                    self.search_history[p.name] = {
+                        "last_search_at": now,
+                        "last_attempt_at": now,
+                        "status": "available" if values else "no_result",
+                        "last_search_status": "available" if values else "no_result",
+                        "candidate_count": len(values),
+                        "next_search_at": now + self.engine.config.subtitle_refresh_seconds,
+                        "summary": self.statuses[p.name],
+                    }
+                except Exception as error:
+                    exc = (
+                        error
+                        if isinstance(error, ProviderError)
+                        else ProviderError(
+                            "retrying",
+                            60,
+                            payload_attempted=False,
+                            evidence={
+                                "origin": "adapter_failure",
+                                "stage": "search",
+                                "exception_type": type(error).__name__,
+                            },
                         )
                     )
-                    if len(output) >= 100:
-                        return output
-            except ProviderError as exc:
-                failures.append(exc)
-                self.failed(p, exc)
-            except Exception as error:
-                exc = ProviderError(
-                    "retrying",
-                    60,
-                    payload_attempted=False,
-                    evidence={
-                        "origin": "adapter_failure",
-                        "stage": "search",
-                        "exception_type": type(error).__name__,
-                    },
+                    failures.append(exc)
+                    self.failed(p, exc)
+                    self.search_history[p.name] = {
+                        **history,
+                        "last_attempt_at": now,
+                        "status": exc.status,
+                        "next_search_at": now + exc.retry_after,
+                        "summary": self.statuses[p.name],
+                        "refresh_required": False,
+                    }
+            group, seen = [], set()
+            for value in values[:100]:
+                if not isinstance(value, Candidate) or not isinstance(value.id, str):
+                    continue
+                origin = value.origin_id or value.id.removeprefix(p.name + ":")
+                if not isinstance(origin, str) or len(origin) > 200:
+                    continue
+                key = (origin, value.language, value.release)
+                if key in seen:
+                    continue
+                seen.add(key)
+                group.append(
+                    replace(value, provider=p.name, origin_id=origin, id=p.name + ":" + origin)
                 )
-                failures.append(exc)
-                self.failed(p, exc)
-        if not output and failures and not healthy:
-            raise ProviderError(
-                "providers_wait", min(e.retry_after for e in failures), payload_attempted=False
-            )
+            groups.append(group)
+        # All configured providers retain a finite share, including after a large
+        # first response. At most3*100 inspected candidates and100 returned.
+        output = [value for row in zip_longest(*groups) for value in row if value is not None][:100]
+        if not output and not healthy:
+            delays = [
+                max(1, v.get("next_search_at", now + 60) - now)
+                for v in self.search_history.values()
+            ]
+            raise ProviderError("providers_wait", min(delays or [60]), payload_attempted=False)
         return output
 
     def download(self, candidate):
@@ -192,9 +250,18 @@ class ProviderPool:
         try:
             if not hasattr(p, "request_pacer"):
                 component.pace(wait=True)
-            result = p.download(replace(candidate, id=candidate.origin_id or candidate.id))
+            original = replace(candidate, id=candidate.origin_id or candidate.id)
+            if hasattr(p, "restore_candidate"):
+                p.restore_candidate(original)
+            result = p.download(original)
             self.record(p, "available")
             return result
         except ProviderError as exc:
+            if exc.status == "candidate_refresh_required" and hasattr(self, "search_history"):
+                self.search_history[p.name] = {
+                    **self.search_history.get(p.name, {}),
+                    "refresh_required": True,
+                    "next_search_at": self.engine.clock() + 60,
+                }
             self.failed(p, exc)
             raise

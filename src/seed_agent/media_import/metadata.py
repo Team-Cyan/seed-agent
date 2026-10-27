@@ -2,13 +2,14 @@
 
 import json
 import re
-import subprocess
 import time
 import unicodedata
 from pathlib import Path
 
 import httpx
 from pydantic import BaseModel, Field
+
+from seed_agent.media_import.probe import probe as probe
 
 
 class Mapping(BaseModel):
@@ -27,38 +28,6 @@ class Mapping(BaseModel):
     evidence: str = "operator"
     animation: bool | None = None
     classification_evidence: str | None = None
-
-
-def probe(path: Path) -> dict:
-    result = subprocess.run(
-        [
-            "ffprobe",
-            "-v",
-            "error",
-            "-show_entries",
-            "format=duration:stream=codec_type,avg_frame_rate:stream_tags=language:"
-            "stream_disposition=forced,hearing_impaired",
-            "-of",
-            "json",
-            str(path),
-        ],
-        capture_output=True,
-        timeout=20,
-        check=True,
-    )
-    if len(result.stdout) > 1_000_000:
-        raise ValueError("probe output too large")
-    data = json.loads(result.stdout)
-    duration = float(data.get("format", {}).get("duration", 0))
-    if duration <= 0 or not any(s.get("codec_type") == "video" for s in data.get("streams", [])):
-        raise ValueError("media probe found no playable video")
-    fps = None
-    for stream in data.get("streams", []):
-        if stream.get("codec_type") == "video":
-            a, _, b = stream.get("avg_frame_rate", "0/1").partition("/")
-            fps = float(a) / float(b or 1) if float(b or 1) else None
-            break
-    return {"duration": duration, "fps": fps, "streams": data.get("streams", [])}
 
 
 def component(value: str) -> str:

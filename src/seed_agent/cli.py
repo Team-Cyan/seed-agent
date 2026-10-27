@@ -7002,6 +7002,46 @@ def media_scan(
     )
 
 
+@app.command(name="media-probe")
+def media_probe(path: Path, as_json: bool = typer.Option(False, "--json")) -> None:
+    """Measure a local media file offline; no config, state or source writes."""
+    from seed_agent.media_import.probe import ProbeError, describe
+
+    try:
+        value = describe(path)
+    except ProbeError as exc:
+        _print_json({"status": "unknown", "error": str(exc)})
+        raise typer.Exit(1) from None
+    if as_json:
+        _print_json(value)
+    else:
+        typer.echo(
+            f"时长 {value['duration_hms']} ({value['duration_seconds']} 秒) · "
+            f"格式 {value['container'] or '未知'} · FPS {value['fps'] or '未知'}"
+        )
+
+
+@app.command(name="media-subtitle-search")
+def media_subtitle_search(
+    source_id: str = typer.Option(..., "--source-id"),
+    generation: int = typer.Option(..., "--generation"),
+    fingerprint: str = typer.Option(..., "--fingerprint"),
+    config: Annotated[Path, typer.Option("--config")] = Path("config/example.yaml"),
+    execute: bool = typer.Option(False, "--execute"),
+) -> None:
+    """Queue normal subtitle discovery for one exact imported source; retain provider gates."""
+    from seed_agent.media_import.commands import submit
+
+    _print_json(
+        submit(
+            config,
+            "subtitle-search",
+            {"source_id": source_id, "generation": generation, "fingerprint": fingerprint},
+            execute=execute,
+        )
+    )
+
+
 @app.command(name="media-status")
 def media_status(
     config: Annotated[Path, typer.Option("--config")] = Path("config/example.yaml"),

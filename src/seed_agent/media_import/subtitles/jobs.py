@@ -5,6 +5,7 @@ import json
 import os
 import time
 import uuid
+from collections import Counter
 from pathlib import Path
 
 from seed_agent.media_import import filesystem as fs
@@ -20,7 +21,7 @@ from seed_agent.media_import.subtitles.languages import (
     priority as language_priority,
 )
 from seed_agent.media_import.subtitles.provider import Candidate, ProviderError
-from seed_agent.media_import.subtitles.validation import compatible, validate
+from seed_agent.media_import.subtitles.validation import compatibility, validate
 
 
 class SubtitleJobs:
@@ -93,7 +94,7 @@ class SubtitleJobs:
                 )
         return coverage
 
-    def run(self, *, refresh=False, limit=10, profile=None, on_job=None):
+    def run(self, *, refresh=False, limit=10, profile=None, source_id=None, on_job=None):
         e, now = self.engine, self.engine.clock()
         self.payload_attempted_sources = set()
         names = [p.name for p in e.profiles() if profile is None or p.name == profile]
@@ -115,8 +116,8 @@ class SubtitleJobs:
                 "SELECT s.*,j.mapping_json,j.target FROM media_source_files s "
                 "JOIN media_import_jobs j ON j.source_id=s.id WHERE s.missing_count=0 "
                 "AND s.status='imported' AND j.status='imported' "
-                f"AND s.profile IN ({names_sql})",
-                names,
+                f"AND s.profile IN ({names_sql}) AND (? IS NULL OR s.id=?)",
+                (*names, source_id, source_id),
             )
             sources = [s for s in sources if profile is None or s["profile"] == profile]
             existing = {
@@ -146,7 +147,15 @@ class SubtitleJobs:
                                 "missing",
                                 now,
                                 now,
-                                encode({"downloaded": [], "digests": []}),
+                                encode(
+                                    {
+                                        "downloaded": [],
+                                        "digests": [],
+                                        "discovery_version": 1,
+                                        "search_state": "not_searched",
+                                        "external_state": "missing",
+                                    }
+                                ),
                             ),
                         )
                     if refresh:
@@ -155,6 +164,50 @@ class SubtitleJobs:
                             "WHERE id=? AND status!='cancelled' AND (status!='running' OR "
                             "next_attempt<=?)",
                             (now, jid, now),
+                        )
+            if limit > 0:
+                legacy = rows(
+                    conn,
+                    "SELECT j.id,j.source_id,j.generation,j.payload_json,j.next_attempt "
+                    "FROM media_subtitle_jobs j "
+                    "JOIN media_source_files s ON s.id=j.source_id "
+                    "JOIN media_import_jobs i ON i.source_id=s.id "
+                    "WHERE s.missing_count=0 AND s.status='imported' AND i.status='imported' "
+                    "AND j.generation=s.generation "
+                    "AND j.status NOT IN ('running','cancelled','terminal_failure') "
+                    "AND json_extract(j.payload_json,'$.discovery_version') IS NULL "
+                    f"AND s.profile IN ({names_sql}) AND (? IS NULL OR s.id=?) "
+                    f"AND ({active_requirements}) "
+                    "ORDER BY j.id LIMIT ?",
+                    (*names, source_id, source_id, *requirements_args, lookahead),
+                )
+                for old in legacy:
+                    upgraded = json.loads(old["payload_json"])
+                    upgraded.update(
+                        discovery_version=1,
+                        search_state="legacy_unknown",
+                        coverage_state="present"
+                        if upgraded.get("coverage_satisfied")
+                        else "missing",
+                    )
+                    changed = conn.execute(
+                        "UPDATE media_subtitle_jobs SET payload_json=?,"
+                        "next_attempt=MIN(next_attempt,?) "
+                        "WHERE id=? AND payload_json=? "
+                        "AND status NOT IN ('running','cancelled','terminal_failure')",
+                        (encode(upgraded), now, old["id"], old["payload_json"]),
+                    ).rowcount
+                    if changed:
+                        e.event(
+                            conn,
+                            old["source_id"],
+                            "subtitle_discovery_state_upgraded",
+                            {
+                                "job_id": old["id"],
+                                "generation": old["generation"],
+                                "previous_next_attempt": old["next_attempt"],
+                                "upgraded_at": now,
+                            },
                         )
             due = rows(
                 conn,
@@ -166,11 +219,21 @@ class SubtitleJobs:
                 "AND i.status='imported' AND j.status NOT IN "
                 "('cancelled','terminal_failure') AND j.next_attempt<=? "
                 "AND (? IS NULL OR s.profile=?) "
-                f"AND s.profile IN ({names_sql}) AND ({active_requirements}) "
+                f"AND s.profile IN ({names_sql}) AND (? IS NULL OR s.id=?) "
+                f"AND ({active_requirements}) "
                 "ORDER BY CASE WHEN j.attempts=0 THEN 0 ELSE 1 END,"
                 "COALESCE(json_extract(j.payload_json,'$.coverage_observed'),0),"
                 "CASE WHEN j.status='satisfied' THEN 1 ELSE 0 END,j.next_attempt,j.id LIMIT ?",
-                (now, profile, profile, *names, *requirements_args, lookahead),
+                (
+                    now,
+                    profile,
+                    profile,
+                    *names,
+                    source_id,
+                    source_id,
+                    *requirements_args,
+                    lookahead,
+                ),
             )
         due = [
             job
@@ -191,6 +254,7 @@ class SubtitleJobs:
                     return [
                         {"status": "coverage_pending", "error": "coverage time budget exceeded"}
                     ]
+                job["refresh_search"] = refresh
                 job["target"] = job.pop("planned_target")
                 job["plan_revision"] = job.pop("planned_revision")
                 data = json.loads(job["payload_json"])
@@ -415,6 +479,12 @@ class SubtitleJobs:
         )
         data["coverage"] = coverage
         data["coverage_satisfied"] = satisfied
+        data["coverage_state"] = "present" if satisfied else "missing"
+        data.setdefault("discovery_version", 1)
+        data.setdefault(
+            "search_state",
+            "legacy_unknown" if data.get("providers") or "candidates" in data else "not_searched",
+        )
         data.setdefault("seen", list(data.get("downloaded", [])))
         data["provider"] = getattr(self.provider, "name", None)
         with e.store._connect() as conn:
@@ -441,7 +511,7 @@ class SubtitleJobs:
             or live_claim[0]["claim_token"] != job["claim_token"]
             or live_claim[0]["next_attempt"] <= e.clock()
         ):
-            return {"id": job["id"], "status": "superseded", "coverage_satisfied": satisfied}
+            return self.result(job, "superseded", data)
         active = {a["id"]: a for a in artifacts}
         all_digests = {json.loads(a["receipt_json"]).get("digest") for a in artifacts} - {None}
         # Old versions counted candidate IDs (including duplicate content) as
@@ -475,31 +545,52 @@ class SubtitleJobs:
                 planned
             )  # verify source + historical destination before any paid/provider work
             e.target_health(planned._historical_descriptor, "healthy")
+            if fs.fingerprint(Path(source["absolute_path"])) != source["fingerprint"]:
+                raise ValueError("subtitle source fingerprint changed")
             self.reuse_local(job, coverage, data, all_digests)
             all_digests.update(data["digests"])
+            data["external_count"] = len(all_digests)
+            data["external_state"] = "published" if all_digests else "missing"
             if len(all_digests) >= p.max_subtitles:
                 data["choice_limit_reached"] = True
                 status = "satisfied" if satisfied else "limit_reached"
                 self.finish(job, status, data, e.config.subtitle_refresh_seconds)
-                return {"id": job["id"], "status": status, "coverage_satisfied": satisfied}
+                return self.result(job, status, data)
             if job["source_id"] in getattr(self, "payload_attempted_sources", set()):
                 self.finish(job, "satisfied" if satisfied else "cycle_deferred", data, 60)
-                return {
-                    "id": job["id"],
-                    "status": "satisfied" if satisfied else "cycle_deferred",
-                    "coverage_satisfied": satisfied,
-                }
+                return self.result(job, "satisfied" if satisfied else "cycle_deferred", data)
             if self.provider is None:
                 raise ProviderError("credentials_required")
             if hasattr(self, "budget"):
                 self.budget.check()
             if not hasattr(self.provider, "request_pacer"):
                 self.pace()
+            data["last_search_attempt_at"] = e.clock()
+            source["_provider_search"] = data.get("provider_search", {})
+            source["_force_search"] = job.get("refresh_search", False)
+            source["_subtitle_candidates"] = data.get("candidates", []) + data.get(
+                "unverified_candidates", []
+            )
             candidates = self.provider.search(mapping, source, requirement)[:100]
+            if getattr(self.provider, "search_performed", True):
+                data["last_search_at"] = e.clock()
+            provider_states = getattr(self.provider, "statuses", {})
+            data["search_state"] = (
+                "partial"
+                if any(
+                    v.get("status") not in {"available", "no_result"}
+                    for v in provider_states.values()
+                )
+                else "complete"
+            )
             ranked = []
+            reasons = Counter()
             data["unverified_candidates"] = []
             for candidate in candidates:
-                score = compatible(candidate, mapping, source, p)
+                score, reason = compatibility(candidate, mapping, source, p)
+                if score is not None and not language_matches(candidate.language, requirement):
+                    reason = "language_mismatch"
+                reasons[reason] += 1
                 if score is not None and language_matches(candidate.language, requirement):
                     if candidate.id in data.get("operator_selected", []):
                         candidate.match_basis = "operator_confirmed"
@@ -519,9 +610,25 @@ class SubtitleJobs:
                 reverse=True,
             )
             data["candidates"] = [{**c.payload(), "score": list(score)} for score, c in ranked]
+            data["candidate_reason_counts"] = dict(reasons)
+            data["candidate_reason_scope"] = "adapter_returned_candidates"
+            data["search_outcome"] = (
+                "no_result"
+                if not candidates
+                else "no_compatible"
+                if not ranked
+                else "version_review"
+                if all(c.match_basis == "needs_preview" for _, c in ranked)
+                else "candidates_available"
+            )
             data.setdefault("downloaded", [])
             data.setdefault("digests", [])
             failed_providers = set()
+            data["download_retry_at"] = {
+                name: stamp
+                for name, stamp in data.get("download_retry_at", {}).items()
+                if stamp > e.clock()
+            }
             data["candidate_failures"] = {
                 k: v
                 for k, v in data.get("candidate_failures", {}).items()
@@ -539,6 +646,12 @@ class SubtitleJobs:
                     or candidate.provider in failed_providers
                 ):
                     continue
+                if (
+                    data["download_retry_at"].get(candidate.provider or self.provider.name, 0)
+                    > e.clock()
+                ):
+                    failed_providers.add(candidate.provider)
+                    continue
                 if not hasattr(self.provider, "request_pacer"):
                     self.pace(wait=True)
                 self.payload_attempted_sources = getattr(self, "payload_attempted_sources", set())
@@ -550,8 +663,15 @@ class SubtitleJobs:
                         self.payload_attempted_sources.discard(job["source_id"])
                         if getattr(self.provider, "managed", False):
                             failed_providers.add(candidate.provider)
+                            data["download_retry_at"][candidate.provider or self.provider.name] = (
+                                e.clock() + exc.retry_after
+                            )
                             delay = min(delay, exc.retry_after)
                             error = exc.status
+                            if exc.status == "candidate_refresh_required" and not data.get(
+                                "external_count"
+                            ):
+                                data["external_state"] = "candidate_refresh_required"
                             continue
                     raise
                 try:
@@ -574,11 +694,48 @@ class SubtitleJobs:
                 data["downloaded"].append(key)
                 data["digests"].append(digest)
                 all_digests.add(digest)
+                data["external_count"] = len(all_digests)
+                data["external_state"] = "published"
+                data["coverage_satisfied"] = True
+                data["coverage_state"] = "present"
                 satisfied = True
                 # Save per-payload receipts, not just at the end of a provider batch.
                 self.finish(job, "satisfied", data, delay)
                 # First cover each file once; alternatives use subsequent cycles.
                 break
+            data["pending_compatible_count"] = sum(
+                candidate.match_basis != "needs_preview"
+                and self.candidate_key(candidate.provider or self.provider.name, candidate.id)
+                not in data["seen"]
+                and self.candidate_key(candidate.provider or self.provider.name, candidate.id)
+                not in data["downloaded"]
+                and self.candidate_key(candidate.provider or self.provider.name, candidate.id)
+                not in data["candidate_failures"]
+                and candidate.provider not in failed_providers
+                for _, candidate in ranked
+            )
+            data["pending_download_retry_at"] = min(
+                (
+                    data["download_retry_at"][candidate.provider or self.provider.name]
+                    for _, candidate in ranked
+                    if candidate.match_basis != "needs_preview"
+                    and self.candidate_key(candidate.provider or self.provider.name, candidate.id)
+                    not in data["seen"]
+                    and self.candidate_key(candidate.provider or self.provider.name, candidate.id)
+                    not in data["downloaded"]
+                    and self.candidate_key(candidate.provider or self.provider.name, candidate.id)
+                    not in data["candidate_failures"]
+                    and (candidate.provider or self.provider.name) in data["download_retry_at"]
+                ),
+                default=None,
+            )
+            if hasattr(self.provider, "search_history"):
+                data["provider_search"] = self.provider.search_history
+                retry = min(
+                    (h["next_search_at"] for h in data["provider_search"].values()),
+                    default=e.clock() + delay,
+                )
+                delay = max(60, retry - e.clock())
             if getattr(self.provider, "managed", False):
                 data["providers"] = self.provider.statuses
                 if self.provider.next_retry is not None:
@@ -619,6 +776,12 @@ class SubtitleJobs:
         except ProviderError as exc:
             status, error, delay = exc.status, exc.status, exc.retry_after
             if (
+                data.get("last_search_attempt_at")
+                and data.get("last_search_at", 0) < data["last_search_attempt_at"]
+            ):
+                data["search_state"] = "waiting"
+                data["search_outcome"] = exc.status
+            if (
                 self.provider
                 and not getattr(self.provider, "managed", False)
                 and status in {"quota", "rate_limited", "daily_quota"}
@@ -643,12 +806,67 @@ class SubtitleJobs:
                 status = "terminal_failure"
         if getattr(self.provider, "managed", False):
             data["providers"] = self.provider.statuses
+            if hasattr(self.provider, "search_history"):
+                data["provider_search"] = self.provider.search_history
         if status == "satisfied":
-            # A partial provider outage must not turn already-covered alternatives
-            # into a seconds-long search loop for every healthy provider.
-            delay = max(delay, e.config.subtitle_refresh_seconds)
+            if (
+                data.get("pending_compatible_count", 0)
+                and data.get("external_count", 0) < p.max_subtitles
+            ):
+                delay = 60
+            elif (
+                data.get("pending_download_retry_at")
+                and data.get("external_count", 0) < p.max_subtitles
+            ):
+                delay = max(60, data["pending_download_retry_at"] - e.clock())
+            elif any(h.get("refresh_required") for h in data.get("provider_search", {}).values()):
+                delay = max(
+                    60,
+                    min(
+                        h["next_search_at"]
+                        for h in data["provider_search"].values()
+                        if h.get("refresh_required")
+                    )
+                    - e.clock(),
+                )
+            elif data.get("search_state") == "complete" or (
+                data.get("external_count", 0) > 0 and not hasattr(self.provider, "search_history")
+            ):
+                delay = max(delay, e.config.subtitle_refresh_seconds)
+            else:
+                # Embedded coverage is not external acquisition. Resume incomplete
+                # discovery under the real provider gate, with a bounded anti-spin floor.
+                delay = max(60, delay)
         self.finish(job, status, data, delay, error)
-        return {"id": job["id"], "status": status, "coverage_satisfied": satisfied}
+        return self.result(job, status, data)
+
+    @staticmethod
+    def result(job, status, data):
+        return {
+            "id": job["id"],
+            "status": status,
+            "coverage_satisfied": data.get("coverage_satisfied", False),
+            "external_state": data.get("external_state", "unknown"),
+            "external_count": data.get("external_count"),
+            "downloaded_count": len(data.get("downloaded", [])),
+            "local_published_count": len(data.get("local_published", [])),
+            "search_state": data.get("search_state", "not_searched"),
+            "search_outcome": data.get("search_outcome"),
+            "last_search_at": data.get("last_search_at"),
+            "candidate_reason_counts": data.get("candidate_reason_counts", {}),
+            "providers": {
+                name: {
+                    "status": value.get("status"),
+                    "last_search_at": data.get("provider_search", {})
+                    .get(name, {})
+                    .get("last_search_at"),
+                    "next_search_at": data.get("provider_search", {})
+                    .get(name, {})
+                    .get("next_search_at"),
+                }
+                for name, value in data.get("providers", {}).items()
+            },
+        }
 
     def select(self, job_id, candidate_id):
         e = self.engine
@@ -680,6 +898,7 @@ class SubtitleJobs:
             data.setdefault("operator_selected", [])
             if candidate_id not in data["operator_selected"]:
                 data["operator_selected"].append(candidate_id)
+            data.get("provider_search", {}).pop(candidate_id.split(":", 1)[0], None)
             conn.execute(
                 "UPDATE media_subtitle_jobs SET payload_json=?,status='missing',next_attempt=?,"
                 "claim_token=NULL WHERE id=?",

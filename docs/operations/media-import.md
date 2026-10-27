@@ -287,3 +287,23 @@ provider list is configured. Explicit production Chinese requirements are
 `languages: [[zh-Hans, zh-Hant, zh]]`; generic `zh` does not satisfy script-only
 requirements. Local known-title download evidence is separate from deployed source
 matching, subtitle coverage and client playback acceptance.
+
+
+### Inspect actual media duration offline
+
+Run `uv run python scripts/probe_media.py /absolute/path/video.mkv` or
+`uv run seed-agent media-probe /absolute/path/video.avi --json`. ffprobe is required
+and included in the published image. MP4/MKV/AVI and extensionless local files share
+the same content-based inspection; the script reports measured HH:MM:SS/seconds,
+container, FPS and basic streams. It reads no configuration/database/provider and
+writes no media/state. Unknown duration, timeout, invalid/no video or a replaced
+source returns an explicit error and nonzero exit. A runtime difference from TMDB
+can flag a version for review but cannot establish a named edition or sync.
+
+The source panel displays coverage independently from external search/downloads.
+Embedded tracks may be unusable and do not complete external discovery. For one
+imported file, use its “为此文件搜索额外字幕” button, or the fenced
+`media-subtitle-search` command, rather than a whole-profile refresh. Existing
+provider cooldowns and paid-link reservations remain authoritative. Cached healthy
+sources are not re-requested on automatic retries for another provider. Legacy
+job-state backfill is finite/bounded; old missing timestamps stay unknown.

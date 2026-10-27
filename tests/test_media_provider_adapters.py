@@ -1,3 +1,5 @@
+from test_media_import import media as media
+
 from seed_agent.media_import.subtitles.assrt import Assrt
 from seed_agent.media_import.subtitles.subdl import Subdl
 
@@ -126,3 +128,60 @@ def test_subdl_search_quota_zero_does_not_contact_search(monkeypatch):
     assert error.value.evidence["origin"] == "persistent_gate"
     assert error.value.evidence["stage"] == "search"
     assert not calls
+
+
+def test_cached_provider_locator_restoration_never_persists_signed_urls():
+    import pytest
+
+    from seed_agent.media_import.subtitles.provider import Candidate, ProviderError
+
+    provider = Subdl({"api_key": "fixture"})
+    candidate = Candidate(id="123.zip", language="zh", cache_downloadable=True)
+    provider.restore_candidate(candidate)
+    assert provider.available["123.zip"] == "https://dl.subdl.com/subtitle/123.zip"
+    assert "https" not in str(candidate.payload())
+    with pytest.raises(ProviderError, match="candidate_refresh_required"):
+        provider.restore_candidate(Candidate(id="456.zip", language="zh"))
+    with pytest.raises(ProviderError, match="candidate_refresh_required"):
+        provider.restore_candidate(
+            Candidate(id="../456.zip", language="zh", cache_downloadable=True)
+        )
+    assrt = Assrt({"token": "fixture"})
+    quota = []
+    assrt.check_quota = lambda: quota.append(True)
+    assrt.restore_candidate(Candidate(id="123456", language="zh"))
+    assert assrt.available["123456"] and quota == [True]
+
+
+def test_subdl_pre_payload_budget_failure_never_becomes_a_download_observation(media):
+    import json
+
+    import pytest
+
+    from seed_agent.media_import.subtitles.jobs import SubtitleJobs
+    from seed_agent.media_import.subtitles.provider import Candidate, ProviderError
+
+    provider = Subdl({"api_key": "fixture"})
+    jobs = SubtitleJobs(media[0], provider)
+    jobs.budget.sync({"remaining": 0, "reset_time": "01:00:00"})
+    candidate = Candidate(id="123.zip", language="zh", cache_downloadable=True)
+    provider.restore_candidate(candidate)
+    observed = []
+    provider.account = lambda **kw: observed.append(kw)
+
+    def payload(url, **kwargs):
+        kwargs["before_request"]()
+
+    provider.http.payload = payload
+    with media[0].store._connect() as conn:
+        before = conn.execute(
+            "SELECT status FROM media_provider_state WHERE provider=?", (jobs.budget.key,)
+        ).fetchone()[0]
+    with pytest.raises(ProviderError, match="daily_quota"):
+        provider.download(candidate)
+    assert not observed
+    with media[0].store._connect() as conn:
+        after = conn.execute(
+            "SELECT status FROM media_provider_state WHERE provider=?", (jobs.budget.key,)
+        ).fetchone()[0]
+    assert before == after and json.loads(after)["remaining"] == 0

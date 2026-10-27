@@ -79,6 +79,29 @@ def execute_command(path, command, *, lifecycle=None):
             enrichment=action != "scan",
             enrichment_limit=1,
         )
+    if action == "subtitle-search":
+        from seed_agent.media_import.runtime import build_subtitle_provider
+
+        with engine.store._connect(row_factory=sqlite3.Row) as conn:
+            source = conn.execute(
+                "SELECT * FROM media_source_files WHERE id=?", (payload["source_id"],)
+            ).fetchone()
+        if (
+            not source
+            or source["missing_count"]
+            or source["status"] != "imported"
+            or source["generation"] != payload["generation"]
+            or source["fingerprint"] != payload["fingerprint"]
+        ):
+            raise ValueError("subtitle source baseline changed")
+        jobs = SubtitleJobs(engine, build_subtitle_provider(engine.config, view.workspace))
+        return {
+            "subtitles": jobs.run(
+                refresh=True,
+                source_id=payload["source_id"],
+                limit=1,
+            )
+        }
     if action == "review":
         result = engine.review(
             payload["source_id"],

@@ -4459,13 +4459,18 @@ function renderMediaPanel() {
       "原始片名": mapping.original_title, "中文片名": mapping.localized_title,
       "TMDB": mapping.tmdb_id, "年份": mapping.year, "季": mapping.season,
       "集": mapping.episodes, "版本": mapping.edition || "未声明",
-      "实测时长（秒）": source.probe_json ? JSON.parse(source.probe_json).duration : null,
+      "实测时长（秒，ffprobe）": source.probe_json ? JSON.parse(source.probe_json).duration : null,
+      "资料库参考时长（秒）": mapping.reference_duration || null,
       "当前目标路径": source.target, "已保存的修正目标":source.review_target, "首次消失时间": source.missing_since ? new Date(source.missing_since * 1000).toLocaleString("zh-CN") : null,
       "清理到期时间": source.missing_since && profile ? new Date((source.missing_since + profile.grace_seconds) * 1000).toLocaleString("zh-CN") : null,
       "健康缺失观察次数": source.missing_count, "错误": source.error};
     const dl = mediaElement("dl", null);
     Object.entries(evidence).forEach(([key, value]) => {dl.append(mediaElement("dt", key), mediaElement("dd", Array.isArray(value) ? value.join(", ") : String(value ?? "—")));});
     details.append(dl);
+    const measuredDuration = source.probe_json ? JSON.parse(source.probe_json).duration : null;
+    if (Number.isFinite(measuredDuration) && mapping.reference_duration && Math.abs(measuredDuration - mapping.reference_duration) > 600) {
+      details.append(mediaElement("p", `实测 ${Math.round(measuredDuration / 60 * 100) / 100} 分钟，与资料库参考相差 ${Math.round(Math.abs(measuredDuration - mapping.reference_duration) / 60 * 100) / 100} 分钟；需核验字幕版本，时长差不自动证明剪辑版。`, {role: "status"}));
+    }
     const form = mediaElement("form", null);
     const fields = {};
     for (const [key,label,kind] of [["tmdb_id","TMDB ID","number"],["original_title","元数据原始片名","text"],["localized_title","中文显示片名","text"],["year","年份","number"],["media_type","内容类型（movie / tv）","text"],["animation","动画分类（true / false，未知留空）","text"],["season","季（电影留空）","number"],["episodes","集号（逗号分隔）","text"],["edition","明确版本证据或人工确认（可留空）","text"]]) {
@@ -4519,9 +4524,31 @@ function renderMediaPanel() {
       finally {save.disabled = false;}
     });
     details.append(form);
+    if (status === "imported") {
+      const searchOne = mediaElement("button", "为此文件搜索额外字幕", {type:"button"});
+      searchOne.addEventListener("click", async () => {
+        searchOne.disabled = true;
+        try {
+          await mediaRequest("/api/media/subtitle-search", {source_id:source.id, generation:source.generation, fingerprint:source.fingerprint, execute:true});
+          searchOne.textContent = "已提交；按现有额度和版本要求处理";
+        } catch (error) {searchOne.textContent = String(error); searchOne.disabled = false;}
+      });
+      details.append(searchOne);
+    }
     for (const job of (mediaSnapshot.subtitles || []).filter(j => j.source_id === source.id)) {
       const payload = JSON.parse(job.payload_json);
-      details.append(mediaElement("h4", `字幕 ${job.requirement} · ${{daily_quota:"每日额度等待",rate_limited:"请求限速等待"}[job.status] || job.status}`));
+      details.append(mediaElement("h4", `字幕 ${job.requirement}`));
+      const searchLabels = {not_searched:"尚未搜索",legacy_unknown:"旧记录未保留独立搜索状态",complete:"搜索周期已完成",partial:"部分供应商等待",waiting:"供应商等待"};
+      const outcomeLabels = {no_result:"未找到候选",no_compatible:"候选不符合身份或版本要求",version_review:"候选版本待核验",candidates_available:"有兼容候选"};
+      details.append(mediaElement("p", `现有覆盖：${payload.coverage_satisfied ? "有内嵌或旁挂轨，质量与同步未核验" : "未发现匹配轨"}；外部字幕 ${payload.external_count ?? "待核验"} 份（该语言任务网站下载 ${(payload.downloaded || []).length} 份）。内嵌覆盖仍会搜索额外字幕。`));
+      details.append(mediaElement("p", `外部搜索：${searchLabels[payload.search_state] || "旧记录未保留独立搜索状态"} · ${outcomeLabels[payload.search_outcome] || payload.search_outcome || "结果未知"}；最近搜索 ${payload.last_search_at ? new Date(payload.last_search_at * 1000).toLocaleString("zh-CN") : "旧记录未保留时间"}；下次处理 ${new Date(job.next_attempt * 1000).toLocaleString("zh-CN")}`));
+      if (payload.candidate_reason_counts) details.append(mediaElement("p", `适配器返回候选的匹配结果：${Object.entries(payload.candidate_reason_counts).map(([key,count]) => `${{work_id_conflict:"影片身份冲突",missing_work_identity:"缺少身份依据",episode_conflict:"季集冲突",kind_conflict:"字幕类型不同",edition_conflict:"版本冲突",edition_unproven:"版本未证实",fps_conflict:"帧率冲突",version_unproven:"缺少此片源的版本依据",language_mismatch:"语言不符",hash_matched:"片源哈希匹配",release_matched:"片源版本名称匹配"}[key] || "其他"} ${count}`).join("；") || "无候选"}`));
+      for (const [provider, info] of Object.entries(payload.providers || {})) {
+        const history = (payload.provider_search || {})[provider] || {};
+        const providerLabel = {opensubtitlescom:"OpenSubtitles", assrt:"ASSRT（射手网·伪）", subdl:"SubDL"}[provider] || provider;
+        details.append(mediaElement("p", `${providerLabel}：${{no_result:"未找到候选",available:"已有搜索结果",rate_limited:"请求限速",daily_quota:"额度等待",retrying:"重试等待"}[info.status] || info.status}${info.search_cached ? "（沿用本文件结果）" : ""}；最近完成搜索 ${history.last_search_at ? new Date(history.last_search_at * 1000).toLocaleString("zh-CN") : "未知"}（${history.last_search_status === "no_result" ? "无候选" : history.candidate_count !== undefined ? `${history.candidate_count} 个候选` : "结果未记录"}）；本任务再次检查 ${history.next_search_at ? new Date(history.next_search_at * 1000).toLocaleString("zh-CN") : "未知"}`));
+      }
+      if ((payload.providers || {}).assrt) details.append(mediaElement("a", "字幕服务由 ASSRT 提供", {href:"https://assrt.net/", target:"_blank", rel:"noopener noreferrer"}));
       for (const c of payload.candidates || []) {
         details.append(mediaElement("p", `${c.language === "zh" ? "中文（字形未标注）" : c.language} · ${c.provider || payload.provider || "未知来源"} · ${c.release} · ${c.match_basis} · 评分 ${c.rating ?? "未知"} / 下载 ${c.downloads ?? "未知"} · ${c.kind} · ${c.format}`));
         if (c.match_basis === "needs_preview") {

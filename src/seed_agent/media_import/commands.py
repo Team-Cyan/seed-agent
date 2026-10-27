@@ -11,7 +11,15 @@ from seed_agent.config_views import load_view
 from seed_agent.media_import.runtime import media_state_path
 from seed_agent.media_import.store import MediaStore
 
-ACTIONS = {"scan", "subtitles", "review", "subtitle-select", "series-preview", "series-review"}
+ACTIONS = {
+    "scan",
+    "subtitles",
+    "subtitle-search",
+    "review",
+    "subtitle-select",
+    "series-preview",
+    "series-review",
+}
 MAX_PENDING = 100
 MAX_PAYLOAD = 32_000
 
@@ -48,7 +56,21 @@ def baseline(store, action, payload):
                 "SELECT revision,target,status FROM media_import_jobs WHERE source_id=?",
                 "SELECT revision,fingerprint FROM media_review_decisions WHERE source_id=?",
             ]:
-                evidence.append(conn.execute(sql, (source_id,)).fetchone())
+                record = conn.execute(sql, (source_id,)).fetchone()
+                if action == "subtitle-search":
+                    if sql.startswith("SELECT fingerprint") and (
+                        not record
+                        or record[0] != payload["fingerprint"]
+                        or record[1] != payload["generation"]
+                        or record[2]
+                        or record[3] != "imported"
+                    ):
+                        raise ValueError("subtitle source baseline changed")
+                    if sql.startswith("SELECT revision,target") and (
+                        not record or record[2] != "imported"
+                    ):
+                        raise ValueError("subtitle source is not imported")
+                evidence.append(record)
         return hashlib.sha256(json.dumps(evidence, sort_keys=True).encode()).hexdigest()
 
 
@@ -70,6 +92,16 @@ def submit(path: Path, action, payload=None, *, execute=False):
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     if len(encoded.encode()) > MAX_PAYLOAD:
         raise ValueError("media command body exceeds limit")
+    if action == "subtitle-search":
+        if set(payload) != {"source_id", "generation", "fingerprint"}:
+            raise ValueError("subtitle search requires exact source ID/generation/fingerprint")
+        if (
+            not isinstance(payload["source_id"], str)
+            or type(payload["generation"]) is not int
+            or payload["generation"] < 1
+            or not isinstance(payload["fingerprint"], str)
+        ):
+            raise ValueError("invalid subtitle source fence")
     view, store = command_store(path)
     if not view.config.media_import.enabled:
         raise ValueError("media is disabled")

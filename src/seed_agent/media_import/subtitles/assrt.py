@@ -158,6 +158,19 @@ class Assrt:
                 )
         return output
 
+    def restore_candidate(self, candidate):
+        # IDs/release proof were retained in the fenced per-source job. Fetch fresh
+        # official details (never a persisted signed URL) under the real minute quota.
+        if not re.fullmatch(r"\d{1,12}", candidate.id):
+            raise ProviderError(
+                "candidate_refresh_required",
+                60,
+                payload_attempted=False,
+                evidence={"origin": "validation", "stage": "download_link"},
+            )
+        self.check_quota()
+        self.available[candidate.id] = True
+
     def download(self, candidate):
         if candidate.id not in self.available:
             raise ProviderError("retrying", payload_attempted=False)

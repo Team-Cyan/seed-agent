@@ -4,6 +4,27 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.26.0 - 2026-10-27
+
+### Added
+
+- Measure local media duration with a standalone offline `media-probe` command and
+  script, sharing the inventory ffprobe implementation across AVI, MP4, MKV and
+  content-detected extensionless files, with file-identity/time/output fences.
+- Queue fenced subtitle discovery for one imported file from the CLI or Chinese
+  source panel without scanning or refreshing unrelated media.
+- Persist and display subtitle coverage, external choices, completed searches,
+  candidate compatibility reasons and provider retry times independently. Compare
+  actual duration with metadata reference duration without inferring an edition.
+
+### Fixed
+
+- Continue external subtitle discovery despite embedded coverage; backfill old job
+  state in finite bounded turns without clearing provider gates or allowances.
+- Cache completed per-file provider results while retrying only due providers;
+  collect bounded fair provider results and continue compatible alternatives in
+  separate turns up to the shared choice limit, preserving payload deduplication.
+
 ## 0.25.5 - 2026-10-27
 
 ### Fixed

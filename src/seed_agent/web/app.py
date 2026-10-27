@@ -363,6 +363,7 @@ def make_handler(config_path: Path) -> type[BaseHTTPRequestHandler]:
                 "/api/media/scan",
                 "/api/media/review",
                 "/api/media/subtitles",
+                "/api/media/subtitle-search",
                 "/api/media/subtitle-select",
                 "/api/media/series-preview",
                 "/api/media/series-review",

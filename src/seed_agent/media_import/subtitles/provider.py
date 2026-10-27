@@ -47,6 +47,7 @@ class Candidate:
     provider: str | None = None
     identity_basis: str = "provider_ids"
     origin_id: str | None = None
+    cache_downloadable: bool = False
 
     def payload(self):
         return asdict(self)

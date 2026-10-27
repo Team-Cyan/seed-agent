@@ -171,20 +171,50 @@ class Subdl:
                         release=str(release)[:512],
                         fps=fps,
                         kind="sdh" if item.get("hi") else "full",
+                        cache_downloadable=bool(
+                            not parsed.query
+                            and not parsed.fragment
+                            and re.fullmatch(r"[A-Za-z0-9_-]+\.zip", sid)
+                        ),
                     )
                 )
         return output
+
+    def restore_candidate(self, candidate):
+        if candidate.id in self.available:
+            return
+        # Only canonical unsigned locators can be reconstructed. Signed/unknown
+        # links require a fresh bounded search; no URL or credential is persisted.
+        if not candidate.cache_downloadable or not re.fullmatch(
+            r"[A-Za-z0-9_-]+\.zip", candidate.id
+        ):
+            raise ProviderError(
+                "candidate_refresh_required",
+                60,
+                payload_attempted=False,
+                evidence={"origin": "validation", "stage": "download_link"},
+            )
+        self.available[candidate.id] = "https://dl.subdl.com/subtitle/" + candidate.id
 
     def download(self, candidate):
         url = self.available.get(candidate.id)
         if not url:
             raise ProviderError("retrying", payload_attempted=False)
+        attempted = False
+
+        def reserve():
+            nonlocal attempted
+            if self.download_gate:
+                self.download_gate()
+            attempted = True
+
         try:
-            return self.http.payload(url, authenticate=True, before_request=self.download_gate)
+            return self.http.payload(url, authenticate=True, before_request=reserve)
         finally:
             # Download-link/payload failure is not a refund. Missing account evidence
             # retains the conservative reservation instead of retrying blindly.
-            try:
-                self.account(after_download=True)
-            except ProviderError:
-                pass
+            if attempted:
+                try:
+                    self.account(after_download=True)
+                except ProviderError:
+                    pass

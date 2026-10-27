@@ -78,24 +78,24 @@ def validate(payload: bytes, *, duration: float) -> tuple[bytes, str]:
     return text.replace("\r\n", "\n").encode("utf-8"), fmt
 
 
-def compatible(candidate, mapping, source, profile):
+def compatibility(candidate, mapping, source, profile):
     """Return evidence ordered before language/popularity; explicit mismatch always rejects."""
     if candidate.tmdb_id is not None and candidate.tmdb_id != mapping["tmdb_id"]:
-        return None
+        return None, "work_id_conflict"
     if candidate.imdb_id and mapping.get("imdb_id") and candidate.imdb_id != mapping["imdb_id"]:
-        return None
+        return None, "work_id_conflict"
     exact = candidate.tmdb_id == mapping["tmdb_id"] or (
         candidate.imdb_id and candidate.imdb_id == mapping.get("imdb_id")
     )
     if not exact:
-        return None
+        return None, "missing_work_identity"
     if mapping["media_type"] != "movie" and (
         candidate.season != mapping.get("season")
         or tuple(candidate.episodes) != tuple(mapping.get("episodes", []))
     ):
-        return None
+        return None, "episode_conflict"
     if candidate.kind != profile.subtitle_kind:
-        return None
+        return None, "kind_conflict"
     edition = mapping.get("edition")
     release = candidate.release.casefold()
     explicit = candidate.edition
@@ -108,12 +108,12 @@ def compatible(candidate, mapping, source, profile):
             if token in release:
                 explicit = label
     if explicit and explicit != edition:
-        return None
+        return None, "edition_conflict"
     if edition and explicit != edition and not candidate.hash_match:
-        return None
+        return None, "edition_unproven"
     probe = source.get("probe", {})
     if candidate.fps and probe.get("fps") and abs(candidate.fps - probe["fps"]) > 0.1:
-        return None
+        return None, "fps_conflict"
 
     release_match = bool(
         candidate.release
@@ -122,7 +122,7 @@ def compatible(candidate, mapping, source, profile):
     # Work-only matches need operator preview; never auto-publish a random version.
     if not candidate.hash_match and not release_match:
         candidate.match_basis = "needs_preview"
-        return (0, 0, candidate.rating or 0, candidate.downloads or 0)
+        return (0, 0, candidate.rating or 0, candidate.downloads or 0), "version_unproven"
     candidate.match_basis = "hash_matched" if candidate.hash_match else "release_matched"
     return (
         int(candidate.hash_match),
@@ -131,4 +131,8 @@ def compatible(candidate, mapping, source, profile):
         int(candidate.trusted),
         candidate.rating or 0,
         candidate.downloads or 0,
-    )
+    ), candidate.match_basis
+
+
+def compatible(candidate, mapping, source, profile):
+    return compatibility(candidate, mapping, source, profile)[0]

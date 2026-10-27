@@ -31,9 +31,12 @@ def test_idle_coverage_bound_and_94_new_jobs_progress_after_restart(media, monke
     for index in range(4, 98):
         (source / f"Episode{index}.mkv").write_bytes(b"fixture" + bytes([index]))
         (source / f"Episode{index}.zh-Hans.srt").write_bytes(PAYLOAD)
-    engine.scan("tv", force=True)
-    engine.scan("tv", force=True)
-    engine.scan("tv", force=True)
+    # The pre-existing persistent work cursor may start mid-inventory. Drain a
+    # finite number of scan quanta rather than assuming three always cover it.
+    for _ in range(6):
+        engine.scan("tv", force=True)
+        if sum(s["import_status"] == "imported" for s in engine.snapshot()["sources"]) == 97:
+            break
     assert sum(s["import_status"] == "imported" for s in engine.snapshot()["sources"]) == 97
     SubtitleJobs(engine).run(limit=0)  # seed only
     statements, reads, searched = [], [], []
