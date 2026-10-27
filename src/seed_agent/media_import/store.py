@@ -13,6 +13,7 @@ from contextlib import closing, contextmanager
 from functools import lru_cache
 from pathlib import Path
 
+from seed_agent.media_import import sqlite_io
 from seed_agent.media_import.schema import SCHEMA
 
 CONTROL_SCHEMA = """
@@ -177,28 +178,52 @@ class MediaStore:
                 os.chmod(self.path, 0o600, follow_symlinks=False)
             elif not stat.S_ISREG(self.path.lstat().st_mode):
                 raise ValueError("media state must be a regular file")
-            conn = sqlite3.connect(
-                f"file:{self.path.absolute()}?mode=ro&cache=private"
-                if self.read_only
-                else self.path,
-                uri=self.read_only,
-                timeout=self.timeout,
-            )
+            token = sqlite_io.begin(self.path)
+            try:
+                conn = sqlite3.connect(
+                    f"file:{self.path.absolute()}?mode=ro&cache=private"
+                    if self.read_only
+                    else self.path,
+                    uri=self.read_only,
+                    timeout=self.timeout,
+                )
+            except BaseException as exc:
+                sqlite_io.failure(token, "connect", exc)
+                raise
+            phase = "busy-timeout"
+            token = sqlite_io.begin(self.path)
             try:
                 conn.execute(f"PRAGMA busy_timeout={int(self.timeout * 1000)}")
                 if self.read_only:
+                    phase = "query-only"
+                    token = sqlite_io.begin(self.path)
                     conn.execute("PRAGMA query_only=ON")
                 if row_factory:
                     conn.row_factory = row_factory
+                phase = "body"
+                token = sqlite_io.begin(self.path)
                 yield conn
                 if not self.read_only:
+                    phase = "commit"
+                    token = sqlite_io.begin(self.path)
                     conn.commit()
-            except BaseException:
+            except BaseException as exc:
+                sqlite_io.failure(token, phase, exc)
                 if not self.read_only:
-                    conn.rollback()
+                    rollback_token = sqlite_io.begin(self.path)
+                    try:
+                        conn.rollback()
+                    except BaseException as rollback_exc:
+                        sqlite_io.failure(rollback_token, "rollback", rollback_exc)
+                        raise
                 raise
             finally:
-                conn.close()
+                close_token = sqlite_io.begin(self.path)
+                try:
+                    conn.close()
+                except BaseException as close_exc:
+                    sqlite_io.failure(close_token, "close", close_exc)
+                    raise
                 if not self.read_only:
                     for suffix in ["-wal", "-shm", "-journal"]:
                         sidecar = Path(str(self.path) + suffix)

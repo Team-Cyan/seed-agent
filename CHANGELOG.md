@@ -4,6 +4,16 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.25.4 - 2026-10-27
+
+### Fixed
+
+- Add an explicitly enabled worker SQLite I/O diagnostic for recurrent database
+  open failures. Capture bounded numeric OS evidence with thread, phase and
+  process correlation, preserving business errors and cleanup behavior. Unsupported
+  diagnostics disable safely; database modes, permissions and retry policy stay
+  unchanged. Build and exercise the native capture shim for both image architectures.
+
 ## 0.25.3 - 2026-10-27
 
 ### Fixed

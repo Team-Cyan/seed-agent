@@ -11,6 +11,22 @@ uses the exclusive access fence and exclusive first creation; existing files use
 no-follow metadata operations. Sidecar disappearance alone is tolerated. Failed
 worker observations retain optional SQLite extended error codes without messages.
 
+The dedicated CLI worker may explicitly opt into `--sqlite-io-diagnostics` to
+capture rare SQLite I/O failures. This audited single-threaded startup owns the
+process-wide LOG slot; SQLite has no public getter to discover an existing owner.
+Other/embedded entrypoints must not enable it. The optional native shim is built
+and scratch-tested as UID 1000 for both image architectures, with no added runtime
+compiler dependency. ABI/provider/source/atomic/platform/startup failures disable
+diagnostics without preventing business startup. Registered native/provider references
+remain pinned until process exit; no online reconfiguration/unload/shutdown occurs.
+The callback saves only bounded numeric fields and exact configured target classes,
+never raw SQLite messages, paths or SQL. Existing connection boundaries record fixed
+phases, process session, native thread and sequence windows without extra database
+connections or file descriptors. One bounded consumer retains other-thread events;
+drops, evictions, read failures, conflicting errno or unknown targets prevent causal
+association. Diagnostic failures preserve original commit/rollback/close behavior
+and exceptions. Capturing an errno is evidence, not a repair or readiness decision.
+
 Media operations do not construct a downloader to scan, identify, import or reconcile files.
 `media-scan` and `/api/media*` submit persistent commands; `media-worker` alone
 executes scans/providers on its independent clock. `media-status` reads paginated state. The Web Media Library page uses Chinese UI labels;

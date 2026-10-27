@@ -7108,12 +7108,22 @@ def media_state_restore(
 def media_worker(
     config: Annotated[Path, typer.Option("--config")],
     max_cycles: int | None = typer.Option(None, "--max-cycles", min=1),
+    sqlite_io_diagnostics: bool = typer.Option(False, "--sqlite-io-diagnostics"),
 ) -> None:
     """Run the independent media clock; no downloader initialization."""
     import signal
     import threading
 
     from seed_agent.media_import.worker import serve
+
+    if sqlite_io_diagnostics:
+        # This dedicated entrypoint exclusively owns the optional process LOG slot.
+        # Audit imports before adding a logger or starting SQLite-using threads.
+        from seed_agent.config_views import load_view
+        from seed_agent.media_import.runtime import media_state_path
+        from seed_agent.media_import.sqlite_io import startup
+
+        startup(media_state_path(load_view(config, "media")), exclusive_worker_owner=True)
 
     stop = threading.Event()
     signal.signal(signal.SIGTERM, lambda *_: stop.set())
