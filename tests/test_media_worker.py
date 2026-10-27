@@ -292,3 +292,40 @@ def test_media_role_cli_never_loads_seed_config(tmp_path, monkeypatch):
     health = runner.invoke(cli.app, ["healthcheck", "--role", "media", "--config", str(config)])
     assert health.exit_code == 1
     assert json.loads(health.output)["healthy"] is False
+
+
+def test_idle_enrichment_clock_preserves_scan_deadline_and_command_priority(tmp_path, monkeypatch):
+    from seed_agent.media_import import worker
+
+    config, _, _ = media_config(tmp_path)
+    raw = yaml.safe_load(config.read_text())
+    raw["deployment"] = {"source_id": "independent-clock-fixture"}
+    config.write_text(yaml.safe_dump(raw))
+    ticks, runs = [0], []
+    monkeypatch.setattr(worker.time, "monotonic", lambda: ticks[0])
+    monkeypatch.setattr(
+        worker.time, "sleep", lambda seconds: ticks.__setitem__(0, ticks[0] + seconds)
+    )
+    monkeypatch.setattr(
+        worker,
+        "run_engine",
+        lambda *a, **kw: runs.append((ticks[0], kw["scan"], kw["enrichment_limit"])),
+    )
+    commands = []
+
+    def command(*args, **kwargs):
+        commands.append(ticks[0])
+        # Simulate a command arriving while the current command is executing.
+        if ticks[0] == 2:
+            submit(config, "scan")
+        elif ticks[0] == 4:
+            with worker.command_store(config)[1]._connect() as conn:
+                conn.execute("UPDATE media_commands SET status='complete' WHERE status='queued'")
+
+    monkeypatch.setattr(worker, "process_one", command)
+    worker.serve(config, max_cycles=18, poll_seconds=2)
+    assert commands == list(range(0, 36, 2))
+    assert [t for t, scan, _ in runs if scan] == [0, 30]
+    assert 2 not in [t for t, _, _ in runs]
+    assert (4, False, 1) in runs and (28, False, 1) in runs
+    assert all(limit == 1 for _, _, limit in runs)

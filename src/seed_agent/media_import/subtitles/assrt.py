@@ -6,6 +6,7 @@ import time
 from pathlib import Path
 from urllib.parse import urlparse, urlunparse
 
+from seed_agent.media_import.subtitles.evidence import safe_evidence
 from seed_agent.media_import.subtitles.http import Transport
 from seed_agent.media_import.subtitles.languages import matches as language_matches
 from seed_agent.media_import.subtitles.provider import Candidate, ProviderError
@@ -88,15 +89,18 @@ class Assrt:
     def api(self, path, params=None):
         body = self.http.get(path, params)
         code = body.get("status")
+        evidence = safe_evidence(
+            {**self.http.last_response_evidence, "origin": "provider_api", "api_code": code}
+        )
         if code == 0:
             return body
         if code in {1, 20001}:
-            raise ProviderError("credentials_required", payload_attempted=False)
+            raise ProviderError("credentials_required", payload_attempted=False, evidence=evidence)
         if code == 30900:
-            raise ProviderError("rate_limited", 60, payload_attempted=False)
+            raise ProviderError("rate_limited", 60, payload_attempted=False, evidence=evidence)
         if code == 20900:
             return {"sub": {"subs": []}}
-        raise ProviderError("retrying", 60, payload_attempted=False)
+        raise ProviderError("retrying", 60, payload_attempted=False, evidence=evidence)
 
     def check_quota(self):
         if self.checked and time.monotonic() - self.checked < 60:

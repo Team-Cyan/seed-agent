@@ -8,14 +8,21 @@ from urllib.parse import urljoin, urlparse
 
 import httpx
 
+from seed_agent.media_import.subtitles.evidence import response_evidence, safe_evidence
+
 _CACHE_LOCK = Lock()
 
 
 class ProviderError(RuntimeError):
-    def __init__(self, status="retrying", retry_after=3600, *, payload_attempted=True):
+    def __init__(
+        self, status="retrying", retry_after=3600, *, payload_attempted=True, evidence=None
+    ):
         super().__init__(status)
         self.status, self.retry_after = status, retry_after
         self.payload_attempted = payload_attempted
+        self.evidence = safe_evidence(evidence)
+        if self.evidence:
+            self.evidence.setdefault("observed_at", time.time())
 
 
 @dataclass
@@ -89,6 +96,7 @@ class OpenSubtitles:
         self.request_pacer = None
         self.download_gate = None
         self.download_observer = None
+        self.last_response_evidence = {}
 
     def initialize(self):
         self.adapter.initialize()
@@ -96,6 +104,13 @@ class OpenSubtitles:
 
         def bounded_request(method, url, **kwargs):
             deadline = time.monotonic() + 60
+            segment = urlparse(url).path.rstrip("/").rsplit("/", 1)[-1]
+            stage = {
+                "login": "login",
+                "subtitles": "search",
+                "download": "download_link",
+                "user": "account",
+            }.get(segment, "api")
             kwargs["stream"] = True
             kwargs["allow_redirects"] = False
             for hop in range(4):
@@ -103,7 +118,19 @@ class OpenSubtitles:
                     raise ProviderError("retrying")
                 if self.request_pacer:
                     self.request_pacer()
-                response = request(method, url, **kwargs)
+                try:
+                    response = request(method, url, **kwargs)
+                except Exception as exc:
+                    raise ProviderError(
+                        evidence={
+                            "origin": "transport_failure",
+                            "stage": stage,
+                            "exception_type": type(exc).__name__,
+                        }
+                    ) from None
+                self.last_response_evidence = response_evidence(
+                    response.status_code, response.headers, stage
+                )
                 if response.status_code not in {301, 302, 303, 307, 308}:
                     break
                 redirect = urljoin(url, response.headers.get("Location", ""))
@@ -129,7 +156,9 @@ class OpenSubtitles:
             if response.status_code == 429:
                 response.close()
                 raise ProviderError(
-                    "rate_limited", retry_seconds(response.headers.get("Retry-After"))
+                    "rate_limited",
+                    retry_seconds(response.headers.get("Retry-After")),
+                    evidence=self.last_response_evidence,
                 )
             content = bytearray()
             try:
@@ -139,6 +168,16 @@ class OpenSubtitles:
                         raise ProviderError("terminal_failure")
                 response._content = bytes(content)
                 response._content_consumed = True
+            except ProviderError:
+                raise
+            except Exception as exc:
+                raise ProviderError(
+                    evidence={
+                        "origin": "transport_failure",
+                        "stage": stage,
+                        "exception_type": type(exc).__name__,
+                    }
+                ) from None
             finally:
                 response.close()
             try:
@@ -170,9 +209,11 @@ class OpenSubtitles:
                 delay = quota_evidence(details, time.time())["reset_at"] - time.time()
                 import math
 
-                raise ProviderError("daily_quota", max(1, math.ceil(delay)))
+                raise ProviderError(
+                    "daily_quota", max(1, math.ceil(delay)), evidence=self.last_response_evidence
+                )
             if response.status_code in {401, 403}:
-                raise ProviderError("credentials_required")
+                raise ProviderError("credentials_required", evidence=self.last_response_evidence)
             return response
 
         self.adapter.session.request = bounded_request
@@ -189,6 +230,7 @@ class OpenSubtitles:
             Language.fromietf({"zh-Hans": "zh-CN", "zh-Hant": "zh-TW"}.get(x, x))
             for x in requested_languages
         }
+        self.last_response_evidence = {}
         try:
             self.initialize()
             tv = mapping["media_type"] != "movie"
@@ -239,23 +281,37 @@ class OpenSubtitles:
             raise
         except Exception as exc:
             name = type(exc).__name__.lower()
+            evidence = {
+                "origin": "adapter_failure",
+                "stage": "search",
+                "exception_type": type(exc).__name__,
+            }
             if "auth" in name or "unauthorized" in name or "config" in name:
-                raise ProviderError("credentials_required") from None
+                raise ProviderError("credentials_required", evidence=evidence) from None
             if "limit" in name or "throttl" in name:
-                raise ProviderError("quota", 86400) from None
-            raise ProviderError() from None
+                raise ProviderError("quota", 86400, evidence=evidence) from None
+            raise ProviderError(
+                evidence={
+                    "origin": "adapter_failure",
+                    "stage": "search",
+                    "exception_type": type(exc).__name__,
+                }
+            ) from None
         finally:
             self.adapter.terminate()
 
     def download(self, candidate):
         # Keep payload download streaming and bounded rather than using requests.content.
         link_attempted = False
+        stage = "login"
+        self.last_response_evidence = {}
         try:
             self.initialize()
             self.adapter.login()
             if self.download_gate:
                 self.download_gate()
             link_attempted = True
+            stage = "download_link"
             data = self.adapter.api_post(
                 "download", {"file_id": candidate.file_id, "sub_format": "srt"}
             )
@@ -275,11 +331,17 @@ class OpenSubtitles:
             if self.request_pacer:
                 self.request_pacer()
             deadline = time.monotonic() + 60
+            stage = "payload"
             with httpx.Client(timeout=30, follow_redirects=False) as client:
                 with client.stream("GET", url) as response:
+                    self.last_response_evidence = response_evidence(
+                        response.status_code, response.headers, stage
+                    )
                     if response.status_code == 429:
                         raise ProviderError(
-                            "rate_limited", retry_seconds(response.headers.get("retry-after"))
+                            "rate_limited",
+                            retry_seconds(response.headers.get("retry-after")),
+                            evidence=self.last_response_evidence,
                         )
                     response.raise_for_status()
                     payload = bytearray()
@@ -291,14 +353,28 @@ class OpenSubtitles:
         except ProviderError as exc:
             if not link_attempted:
                 exc.payload_attempted = False
+            elif not exc.payload_attempted:
+                # A reserved/attempted link is never retried as a free pre-payload failure.
+                exc.payload_attempted = True
             raise
         except Exception as exc:
             name = type(exc).__name__.lower()
+            evidence = {
+                "origin": "transport_failure"
+                if isinstance(exc, httpx.HTTPError)
+                else "adapter_failure",
+                "stage": stage,
+                "exception_type": type(exc).__name__,
+            }
             if "auth" in name or "unauthorized" in name:
-                raise ProviderError("credentials_required") from None
+                raise ProviderError(
+                    "credentials_required", payload_attempted=link_attempted, evidence=evidence
+                ) from None
             if "limit" in name or "throttl" in name:
-                raise ProviderError("quota", 86400) from None
-            raise ProviderError() from None
+                raise ProviderError(
+                    "quota", 86400, payload_attempted=link_attempted, evidence=evidence
+                ) from None
+            raise ProviderError(payload_attempted=link_attempted, evidence=evidence) from None
         finally:
             self.adapter.terminate()
 

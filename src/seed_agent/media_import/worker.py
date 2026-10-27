@@ -182,13 +182,18 @@ def serve(path, *, max_cycles=None, poll_seconds=2, stop=None):
                         queued = conn.execute(
                             "SELECT 1 FROM media_commands WHERE status='queued' LIMIT 1"
                         ).fetchone()
-                    if not queued and time.monotonic() >= next_scan:
+                    if not queued:
                         lifecycle.phase("scan-enrichment", deadline_seconds=deadline)
-                        # Drain reviewed video work before provider waiting; idle
-                        # cycles spend at most one subtitle/poster job's budget.
-                        run_engine(engine, path, lifecycle=lifecycle, enrichment_limit=1)
+                        # Inventory and enrichment have independent clocks. Drain
+                        # video commands first; every idle quantum admits at most
+                        # one poster/subtitle job under its existing provider gates.
+                        scan_due = time.monotonic() >= next_scan
+                        run_engine(
+                            engine, path, lifecycle=lifecycle, scan=scan_due, enrichment_limit=1
+                        )
                         lifecycle.progress(completed=1, total=1)
-                        next_scan = time.monotonic() + min(30, engine.config.interval_seconds)
+                        if scan_due:
+                            next_scan = time.monotonic() + min(30, engine.config.interval_seconds)
                 cycles += 1
                 if max_cycles is not None and cycles >= max_cycles:
                     return

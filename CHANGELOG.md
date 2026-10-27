@@ -4,6 +4,20 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.25.5 - 2026-10-27
+
+### Fixed
+
+- Advance idle subtitle enrichment between inventory deadlines with a bounded,
+  persistent coverage lookahead; prioritize never-attempted jobs and drain queued
+  video work before enrichment.
+- Keep download allowance separate from subtitle search quotas and request pacing,
+  preserving uncertain-link reservations and shared subtitle choice limits.
+- Retain safe request/response origins, HTTP/API codes and retry evidence across
+  worker reconstruction without replacing real failures with gate observations.
+- Compare exact release formatting consistently while retaining edition, episode,
+  source, encode and extensionless release-group differences.
+
 ## 0.25.4 - 2026-10-27
 
 ### Fixed

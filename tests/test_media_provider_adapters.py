@@ -108,3 +108,21 @@ def test_assrt_live_empty_collection_shape():
     from seed_agent.media_import.subtitles.assrt import subtitles
 
     assert subtitles({"sub": {"subs": {}}}) == []
+
+
+def test_subdl_search_quota_zero_does_not_contact_search(monkeypatch):
+    import pytest
+
+    from seed_agent.media_import.subtitles.provider import ProviderError
+
+    provider = Subdl({"api_key": "fixture"})
+    provider.checked = float("inf")
+    provider.account_summary = {"search": {"remaining": 0}, "downloads": {"remaining": 50}}
+    calls = []
+    monkeypatch.setattr(provider.http, "get", lambda *a, **k: calls.append(a))
+    with pytest.raises(ProviderError) as error:
+        provider.search({"media_type": "movie", "tmdb_id": 603}, {}, ["zh"])
+    assert error.value.status == "daily_quota"
+    assert error.value.evidence["origin"] == "persistent_gate"
+    assert error.value.evidence["stage"] == "search"
+    assert not calls

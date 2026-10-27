@@ -6,6 +6,7 @@ from urllib.parse import urljoin, urlparse
 
 import httpx
 
+from seed_agent.media_import.subtitles.evidence import response_evidence
 from seed_agent.media_import.subtitles.provider import ProviderError, retry_seconds
 
 
@@ -15,6 +16,7 @@ class Transport:
         self.payload_hosts = set(payload_hosts)
         self.pacer = None
         self.last_headers = {}
+        self.last_response_evidence = {}
 
     def request(
         self,
@@ -25,6 +27,7 @@ class Transport:
         limit=2_000_000,
         download_auth=False,
         before_request=None,
+        stage="payload",
     ):
         deadline = time.monotonic() + 60
         payload_attempted = False
@@ -55,6 +58,9 @@ class Transport:
                         before_request()
                     payload_attempted = True
                 with client.stream("GET", url, params=params, headers=headers) as response:
+                    self.last_response_evidence = response_evidence(
+                        response.status_code, response.headers, stage
+                    )
                     self.last_headers = {
                         k.lower(): v
                         for k, v in response.headers.items()
@@ -114,31 +120,71 @@ class Transport:
                                 )
                             except TypeError, ValueError, OverflowError:
                                 delay = 86400
-                            raise ProviderError("daily_quota", delay, payload_attempted=not api)
+                            raise ProviderError(
+                                "daily_quota",
+                                delay,
+                                payload_attempted=not api,
+                                evidence=self.last_response_evidence,
+                            )
                         if response.status_code == 429:
                             raise ProviderError(
                                 "rate_limited",
                                 retry_seconds(response.headers.get("retry-after")),
                                 payload_attempted=not api,
+                                evidence=self.last_response_evidence,
                             )
                         if response.status_code in {401, 403}:
-                            raise ProviderError("credentials_required", payload_attempted=not api)
-                        raise ProviderError("retrying", payload_attempted=not api)
+                            raise ProviderError(
+                                "credentials_required",
+                                payload_attempted=not api,
+                                evidence=self.last_response_evidence,
+                            )
+                        raise ProviderError(
+                            "retrying",
+                            payload_attempted=not api,
+                            evidence=self.last_response_evidence,
+                        )
                     return bytes(result)
         raise ProviderError("retrying")
 
     def get(self, path, params=None):
+        stage = {
+            "/user/quota": "account",
+            "/api/v2/me": "account",
+            "/sub/search": "search",
+            "/api/v2/subtitles/search": "search",
+            "/sub/detail": "details",
+        }.get(path, "api")
         try:
-            return json.loads(self.request(self.origin + path, params=params, api=True))
+            return json.loads(
+                self.request(self.origin + path, params=params, api=True, stage=stage)
+            )
         except ProviderError:
             raise
-        except httpx.HTTPError, ValueError:
-            raise ProviderError("retrying", payload_attempted=False) from None
+        except (httpx.HTTPError, ValueError) as exc:
+            raise ProviderError(
+                "retrying",
+                payload_attempted=False,
+                evidence={
+                    "origin": "transport_failure"
+                    if isinstance(exc, httpx.HTTPError)
+                    else "adapter_failure",
+                    "stage": stage,
+                    "exception_type": type(exc).__name__,
+                },
+            ) from None
 
     def payload(self, url, *, authenticate=False, before_request=None):
         try:
             return self.request(url, download_auth=authenticate, before_request=before_request)
         except ProviderError:
             raise
-        except httpx.HTTPError:
-            raise ProviderError("retrying") from None
+        except httpx.HTTPError as exc:
+            raise ProviderError(
+                "retrying",
+                evidence={
+                    "origin": "transport_failure",
+                    "stage": "payload",
+                    "exception_type": type(exc).__name__,
+                },
+            ) from None

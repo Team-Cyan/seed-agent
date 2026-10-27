@@ -136,3 +136,76 @@ def test_removed_language_requirement_is_not_dispatched_after_config_change(medi
     result = jobs.run(refresh=True)
     assert len(result) == 3
     assert provider.calls - before == 3
+
+
+def test_download_budget_zero_allows_search_but_no_link_or_payload(media):
+    import_three(media)
+    engine = media[0]
+    engine.config.subtitle_policy = "execute"
+
+    class BudgetProvider(FakeProvider):
+        download_gate = None
+        download_observer = None
+
+        def download(self, candidate):
+            self.download_gate()
+            self.downloads += 1
+            return PAYLOAD
+
+    provider = BudgetProvider()
+    pool = ProviderPool([provider])
+    jobs = SubtitleJobs(engine, pool)
+    pool.components[provider.name].budget.sync({"remaining": 0, "reset_time": "23:59:59"})
+    result = jobs.run()
+    assert all(r["status"] == "providers_wait" for r in result), (result, pool.statuses)
+    assert provider.calls == 3 and provider.downloads == 0
+    jobs.run(refresh=True)
+    assert provider.calls == 6 and provider.downloads == 0
+    with engine.store._connect() as conn:
+        row = conn.execute(
+            "SELECT status FROM media_provider_state WHERE provider=?", (provider.name,)
+        ).fetchone()
+    assert row[0] == "available"  # download exhaustion never becomes a search gate
+
+
+def test_real_error_survives_persistent_gate_after_reconstruction(media):
+    import json
+
+    import_three(media)
+    engine = media[0]
+    response = {"origin": "http_response", "stage": "search", "http_status": 503, "observed_at": 10}
+    provider = FakeProvider()
+    provider.last_response_evidence = response
+    provider.error = ProviderError(
+        evidence={
+            "origin": "adapter_failure",
+            "stage": "search",
+            "exception_type": "HTTPError",
+            "url": "secret-url",
+            "message": "secret-message",
+        }
+    )
+    pool = ProviderPool([provider])
+    SubtitleJobs(engine, pool).run(limit=1)
+    assert provider.calls == 1
+    # A fresh provider/pool in the next worker quantum hits the persistent gate.
+    with engine.store._connect() as conn:
+        prior_gate = conn.execute(
+            "SELECT next_request FROM media_provider_state WHERE provider=?", (provider.name,)
+        ).fetchone()[0]
+    fresh = FakeProvider()
+    pool = ProviderPool([fresh])
+    SubtitleJobs(engine, pool).run(refresh=True, limit=1)
+    summary = pool.statuses[fresh.name]
+    assert fresh.calls == 0
+    assert summary["observation"]["origin"] == "persistent_gate"
+    assert summary["last_request"]["origin"] == "adapter_failure"
+    assert summary["last_response"] == response
+    assert "secret" not in json.dumps(summary)
+    with engine.store._connect() as conn:
+        assert (
+            conn.execute(
+                "SELECT next_request FROM media_provider_state WHERE provider=?", (fresh.name,)
+            ).fetchone()[0]
+            == prior_gate
+        )

@@ -90,7 +90,16 @@ class Subdl:
                 )["reset_at"]
                 - time.time()
             )
-            raise ProviderError("daily_quota", max(1, int(delay)), payload_attempted=False)
+            raise ProviderError(
+                "daily_quota",
+                max(1, int(delay)),
+                payload_attempted=False,
+                evidence={
+                    "origin": "persistent_gate",
+                    "stage": "search",
+                    "retry_delay_seconds": max(1, int(delay)),
+                },
+            )
         if mapping["media_type"] != "movie" and len(mapping.get("episodes", [])) != 1:
             return []
         params = {

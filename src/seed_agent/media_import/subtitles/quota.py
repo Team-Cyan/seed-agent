@@ -79,7 +79,10 @@ class DownloadBudget:
             remaining = json.loads(row[1]).get("remaining")
             if remaining is None or remaining <= 0:
                 raise ProviderError(
-                    "daily_quota", max(1, math.ceil(row[0] - self.clock())), payload_attempted=False
+                    "daily_quota",
+                    max(1, math.ceil(row[0] - self.clock())),
+                    payload_attempted=False,
+                    evidence={"origin": "download_budget", "stage": "quota"},
                 )
 
     def reserve(self):
@@ -99,7 +102,10 @@ class DownloadBudget:
                 remaining = state.get("remaining")
                 if remaining is None or remaining <= 0:
                     raise ProviderError(
-                        "daily_quota", max(1, math.ceil(row[0] - now)), payload_attempted=False
+                        "daily_quota",
+                        max(1, math.ceil(row[0] - now)),
+                        payload_attempted=False,
+                        evidence={"origin": "download_budget", "stage": "quota"},
                     )
                 state["remaining"] = remaining - 1
                 resume = row[0]

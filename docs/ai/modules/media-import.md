@@ -276,3 +276,32 @@ languages, providers and copied local sidecars; embedded Chinese still permits
 compatible alternatives. Lowering the cap preserves existing and manual files.
 Covered subtitle jobs retain the configured refresh interval even when one provider
 reports a shorter retry time, avoiding repeated healthy-provider searches.
+
+
+### Bounded Idle Enrichment And Provider Evidence
+
+Idle enrichment runs independently from the inventory deadline and admits one poster
+and one subtitle job per quantum after queued commands drain. Subtitle coverage has
+its own finite lookahead: `min(max_inventory_files, 50, 4 * limit)`. Never-attempted
+jobs advance first; persisted `coverage_observed` rotates the window across worker
+reconstruction. Within the window, never-attempted jobs and missing coverage receive
+priority. The claimed job rechecks current coverage before publication. This is
+bounded window priority, not a global per-cycle coverage sort. Existing jobs are not
+reinserted on every idle poll; obsolete language requirements cannot fill the window.
+
+Download allowance does not gate pool search. Provider-specific search quotas and
+per-request pacing still apply. Download-budget failures and daily download-only
+responses do not become provider-wide search cooldowns; link reservations, uncertain
+outcomes, shared choice caps and payload validation remain unchanged.
+
+Provider health separately persists the current observation, last request failure or
+response, and last HTTP response. A later persistent gate observation cannot erase
+the real failure origin or response status. Fixed allowlisted stage, numeric HTTP/API
+code, exception class, Retry-After and numeric reset-header evidence exclude raw
+messages, bodies, headers, URLs and credentials. Numeric reset headers retain their
+original value without assuming a unit. Absent evidence remains unknown.
+
+Exact-release comparison removes only one recognized media/subtitle extension,
+normalizes Unicode formatting and separators, and retains year, episode, edition,
+source, encode and release-group tokens, including extensionless groups. This does
+not authorize work-ID/FPS-only or fuzzy automatic subtitle publication.

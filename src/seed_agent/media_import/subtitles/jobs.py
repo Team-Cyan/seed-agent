@@ -99,7 +99,16 @@ class SubtitleJobs:
         names = [p.name for p in e.profiles() if profile is None or p.name == profile]
         if not names:
             return []
+        lookahead = min(e.config.max_inventory_files, 50, max(1, limit) * 4)
         names_sql = ",".join("?" for _ in names)
+        requirements_sql, requirements_args = [], []
+        for name in names:
+            groups = e.profile(name).languages
+            requirements_sql.append(
+                "(s.profile=? AND j.requirement IN (" + ",".join("?" for _ in groups) + "))"
+            )
+            requirements_args.extend([name, *(encode(group) for group in groups)])
+        active_requirements = " OR ".join(requirements_sql)
         with e.lease(), e.store._connect() as conn:
             sources = rows(
                 conn,
@@ -110,26 +119,36 @@ class SubtitleJobs:
                 names,
             )
             sources = [s for s in sources if profile is None or s["profile"] == profile]
+            existing = {
+                r[0]
+                for r in conn.execute(
+                    "SELECT j.id FROM media_subtitle_jobs j JOIN media_source_files s "
+                    "ON s.id=j.source_id WHERE s.status='imported' AND s.missing_count=0 "
+                    f"AND s.profile IN ({names_sql})",
+                    names,
+                )
+            }
             for source in sources:
                 p = e.profile(source["profile"])
                 for requirement in p.languages:
                     jid = uuid.uuid5(uuid.NAMESPACE_URL, source["id"] + encode(requirement)).hex
-                    conn.execute(
-                        "INSERT OR IGNORE INTO media_subtitle_jobs "
-                        "(id,source_id,generation,requirement,status,attempts,"
-                        "next_attempt,first_attempt,payload_json,error) "
-                        "VALUES(?,?,?,?,?,0,?,?,?,NULL)",
-                        (
-                            jid,
-                            source["id"],
-                            source["generation"],
-                            encode(requirement),
-                            "missing",
-                            now,
-                            now,
-                            encode({"downloaded": [], "digests": []}),
-                        ),
-                    )
+                    if jid not in existing:
+                        conn.execute(
+                            "INSERT OR IGNORE INTO media_subtitle_jobs "
+                            "(id,source_id,generation,requirement,status,attempts,"
+                            "next_attempt,first_attempt,payload_json,error) "
+                            "VALUES(?,?,?,?,?,0,?,?,?,NULL)",
+                            (
+                                jid,
+                                source["id"],
+                                source["generation"],
+                                encode(requirement),
+                                "missing",
+                                now,
+                                now,
+                                encode({"downloaded": [], "digests": []}),
+                            ),
+                        )
                     if refresh:
                         conn.execute(
                             "UPDATE media_subtitle_jobs SET next_attempt=?,status='missing' "
@@ -147,9 +166,11 @@ class SubtitleJobs:
                 "AND i.status='imported' AND j.status NOT IN "
                 "('cancelled','terminal_failure') AND j.next_attempt<=? "
                 "AND (? IS NULL OR s.profile=?) "
-                f"AND s.profile IN ({names_sql}) "
-                "ORDER BY CASE WHEN j.status='satisfied' THEN 1 ELSE 0 END,j.next_attempt LIMIT ?",
-                (now, profile, profile, *names, e.config.max_inventory_files + 1),
+                f"AND s.profile IN ({names_sql}) AND ({active_requirements}) "
+                "ORDER BY CASE WHEN j.attempts=0 THEN 0 ELSE 1 END,"
+                "COALESCE(json_extract(j.payload_json,'$.coverage_observed'),0),"
+                "CASE WHEN j.status='satisfied' THEN 1 ELSE 0 END,j.next_attempt,j.id LIMIT ?",
+                (now, profile, profile, *names, *requirements_args, lookahead),
             )
         due = [
             job
@@ -158,10 +179,10 @@ class SubtitleJobs:
         ]
         if limit <= 0:
             return []
-        if len(due) > e.config.max_inventory_files:
-            return [{"status": "coverage_pending", "error": "coverage job budget exceeded"}]
-        # Coverage is independent from provider retry state. Inspect files outside
-        # SQLite transactions before spending scarce links, including after restart.
+        # Bound directory reads/writes separately from provider claims. Persisted
+        # observation age rotates the lookahead across restarts; unseen/never-tried
+        # jobs advance first. Missing coverage wins inside each finite window.
+        # Never hold a SQLite transaction while inspecting sidecars.
         deadline = time.monotonic() + e.config.inventory_timeout_seconds
         classified = []
         with e.lease():
@@ -201,6 +222,7 @@ class SubtitleJobs:
                     classified.append(job)
             classified.sort(
                 key=lambda j: (
+                    j["attempts"] > 0,
                     json.loads(j["payload_json"])["coverage_satisfied"],
                     e.profile(j["profile"]).languages.index(json.loads(j["requirement"])),
                     j["next_attempt"],
@@ -281,6 +303,11 @@ class SubtitleJobs:
                             else "retrying",
                             max(1, int(delay) + 1),
                             payload_attempted=False,
+                            evidence={
+                                "origin": "persistent_gate",
+                                "stage": "request",
+                                "retry_delay_seconds": max(1, int(delay) + 1),
+                            },
                         )
                 else:
                     conn.execute(

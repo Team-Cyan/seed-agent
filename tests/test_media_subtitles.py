@@ -733,3 +733,62 @@ def test_duplicate_candidates_do_not_fill_independent_choice_cap(media):
         len(json.loads(j["payload_json"])["downloaded"]) == 2
         for j in engine.snapshot()["subtitles"]
     )
+
+
+@pytest.mark.parametrize(
+    "release",
+    [
+        "Movie_2024_1080p_WEB-DL-GROUP.srt",
+        "Movie.2024.1080p.WEB-DL-GROUP",
+        "Ｍｏｖｉｅ ２０２４ １０８０ｐ WEB-DL-GROUP.mkv",
+    ],
+)
+def test_release_normalization_formats_only(release):
+    from seed_agent.media_import.subtitles.validation import normalized_release
+
+    assert normalized_release(release) == normalized_release("Movie.2024.1080p.WEB-DL-GROUP.mkv")
+
+
+@pytest.mark.parametrize(
+    "other",
+    [
+        "Movie.2025.1080p.WEB-DL-GROUP",
+        "Movie.2024.2160p.WEB-DL-GROUP",
+        "Movie.2024.1080p.BluRay-GROUP",
+        "Movie.2024.1080p.WEB-DL-OTHER",
+        "Movie.2024.Extended.1080p.WEB-DL-GROUP",
+        "Movie.2024.S01E02.1080p.WEB-DL-GROUP",
+    ],
+)
+def test_release_normalization_preserves_version_tokens_and_extensionless_group(other):
+    from seed_agent.media_import.subtitles.validation import normalized_release
+
+    assert normalized_release(other) != normalized_release("Movie.2024.1080p.WEB-DL-GROUP")
+    assert normalized_release("Movie.2024.GROUP").endswith("group")
+
+
+def test_opensubtitles_lost_link_response_stays_attempted_and_reserved(media, monkeypatch):
+    import requests
+
+    from seed_agent.media_import.subtitles.provider import OpenSubtitles
+    from seed_agent.media_import.subtitles.quota import DownloadBudget
+
+    engine = media[0]
+    provider = OpenSubtitles({"api_key": "fixture"})
+    budget = DownloadBudget(engine.store, provider.name, clock=engine.clock)
+    provider.download_gate = budget.reserve
+    provider.download_observer = budget.observe
+
+    def lost(*args, **kwargs):
+        raise requests.ReadTimeout("secret URL/body must never persist")
+
+    monkeypatch.setattr(requests.Session, "request", lost)
+    with pytest.raises(ProviderError) as error:
+        provider.download(Candidate(id="one", language="zh-Hans", file_id=1))
+    assert error.value.payload_attempted
+    assert error.value.evidence["origin"] == "transport_failure"
+    assert error.value.evidence["stage"] == "download_link"
+    assert error.value.evidence["exception_type"] == "ReadTimeout"
+    assert "secret" not in str(error.value.evidence)
+    with pytest.raises(ProviderError, match="daily_quota"):
+        DownloadBudget(engine.store, provider.name, clock=engine.clock).reserve()

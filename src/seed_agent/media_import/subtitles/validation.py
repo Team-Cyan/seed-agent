@@ -2,10 +2,18 @@
 
 import io
 import re
+import unicodedata
 import zipfile
 from pathlib import PurePosixPath
 
 MAX_BYTES = 2_000_000
+
+
+def normalized_release(value):
+    """Ignore format/separators only; retain every identity/version token."""
+    value = unicodedata.normalize("NFKC", value)
+    value = re.sub(r"(?i)\.(?:mkv|mp4|avi|m4v|ts|mov|webm|srt|ass|ssa|vtt)$", "", value)
+    return re.sub(r"[\W_]", "", value).casefold()
 
 
 def validate(payload: bytes, *, duration: float) -> tuple[bytes, str]:
@@ -107,12 +115,9 @@ def compatible(candidate, mapping, source, profile):
     if candidate.fps and probe.get("fps") and abs(candidate.fps - probe["fps"]) > 0.1:
         return None
 
-    def normalize(x):
-        return re.sub(r"[^\w]", "", x).casefold()
-
     release_match = bool(
         candidate.release
-        and normalize(candidate.release) == normalize(source["original_release"].rsplit(".", 1)[0])
+        and normalized_release(candidate.release) == normalized_release(source["original_release"])
     )
     # Work-only matches need operator preview; never auto-publish a random version.
     if not candidate.hash_match and not release_match:

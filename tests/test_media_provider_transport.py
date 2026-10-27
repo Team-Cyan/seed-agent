@@ -87,3 +87,57 @@ def test_redirect_to_plaintext_still_counts_existing_payload_attempt():
     assert error.value.payload_attempted
     assert reserved == [True]
     assert len(respx.calls) == 1
+
+
+@respx.mock
+def test_real_http_retry_evidence_and_transport_failure_are_distinct():
+    transport = Transport("https://api.example.test", "secret", payload_hosts=set())
+    respx.get("https://api.example.test/sub/search").mock(
+        return_value=httpx.Response(
+            429,
+            headers={
+                "Retry-After": "37",
+                "X-RateLimit-Reset": "2345678901",
+                "Set-Cookie": "secret",
+            },
+            json={"error": "secret"},
+        )
+    )
+    with pytest.raises(ProviderError) as error:
+        transport.get("/sub/search")
+    evidence = error.value.evidence
+    assert evidence["origin"] == "http_response" and evidence["stage"] == "search"
+    assert evidence["http_status"] == 429 and evidence["retry_after_seconds"] == 37
+    assert evidence["rate_limit_reset_value"] == 2345678901
+    assert "secret" not in str(evidence)
+    respx.get("https://api.example.test/sub/search").mock(side_effect=httpx.ReadTimeout("secret"))
+    with pytest.raises(ProviderError) as error:
+        transport.get("/sub/search")
+    assert error.value.evidence["origin"] == "transport_failure"
+    assert error.value.evidence["exception_type"] == "ReadTimeout"
+    assert "http_status" not in error.value.evidence
+    assert transport.last_response_evidence["http_status"] == 429
+
+
+def test_safe_evidence_rejects_messages_paths_nonfinite_and_unknown_fields():
+    from seed_agent.media_import.subtitles.evidence import response_evidence, safe_evidence
+
+    assert (
+        safe_evidence(
+            {
+                "origin": "private",
+                "stage": "/secret",
+                "http_status": True,
+                "api_code": float("nan"),
+                "exception_type": "contains secret!",
+                "url": "secret",
+                "body": "secret",
+            }
+        )
+        == {}
+    )
+    evidence = response_evidence(
+        503, {"Retry-After": "garbage", "X-RateLimit-Reset": "Infinity"}, "search"
+    )
+    assert evidence["retry_after_header_present"]
+    assert "retry_after_seconds" not in evidence and "rate_limit_reset_value" not in evidence
