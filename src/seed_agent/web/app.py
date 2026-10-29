@@ -59,6 +59,7 @@ from seed_agent.observability import (
 )
 from seed_agent.policies.intent_ranking import filter_releases
 from seed_agent.quality_tags import matching_quality_tag_groups
+from seed_agent.runtime_identity import verify_runtime_identity
 from seed_agent.search.base import SearchProvider
 from seed_agent.state import StateStore
 from seed_agent.web.settings import (
@@ -2430,6 +2431,7 @@ def _read_state_connection(state_path: Path, *, timeout: float = 5.0):
     retain database/WAL file descriptors after a response is sent.
     """
 
+    verify_runtime_identity()
     state_uri = f"file:{state_path.resolve()}?mode=ro&cache=private"
     conn = sqlite3.connect(state_uri, timeout=timeout, uri=True)
     try:

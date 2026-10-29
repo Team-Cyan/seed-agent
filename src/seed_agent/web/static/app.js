@@ -305,6 +305,10 @@ const copy = {
       noTags: "无标签",
       noWants: "暂无想看资源",
       noWantsHelp: "先刷新已配置来源，或打开来源配置接入豆瓣/IMDb；有条目后再搜索种子。",
+      noWantsMatch: "没有符合当前筛选条件的想看资源",
+      noWantsMatchHelp: "已有想看资源，调整或清除筛选即可查看。",
+      clearWantFilters: "清除筛选",
+      wantVisibleCount: "显示 {visible} / 共 {total} 项",
       notChecked: "尚未检查",
       notSaved: "尚未保存",
       operationComplete: "操作完成",
@@ -315,6 +319,8 @@ const copy = {
       previewThisPageYaml: "预览本页 YAML",
       provider: "来源",
       readingStatus: "状态读取",
+      unavailable: "不可用",
+      overviewInvalidResponse: "返回数据无效，请刷新后重试",
       releasePresets: "资源偏好模板",
       remove: "移除",
       refreshWants: "刷新列表",
@@ -634,6 +640,10 @@ const copy = {
       noTags: "No tags",
       noWants: "No wants yet",
       noWantsHelp: "Refresh configured sources first, or open Source config to connect Douban/IMDb. Search torrents after wants appear.",
+      noWantsMatch: "No wants match the current filters",
+      noWantsMatchHelp: "Your Want List has items. Adjust or clear the filters to view them.",
+      clearWantFilters: "Clear filters",
+      wantVisibleCount: "Showing {visible} / {total} items",
       notChecked: "Not checked",
       notSaved: "Not saved",
       operationComplete: "Operation completed",
@@ -644,6 +654,8 @@ const copy = {
       previewThisPageYaml: "Preview this page YAML",
       provider: "Source",
       readingStatus: "Status read",
+      unavailable: "Unavailable",
+      overviewInvalidResponse: "Invalid response; refresh to retry",
       releasePresets: "Release presets",
       remove: "Remove",
       refreshWants: "Refresh list",
@@ -1428,32 +1440,42 @@ async function loadConfig() {
 }
 
 async function loadOverview() {
-  try {
-    const [healthResponse, stateResponse, poolsResponse, opsResponse] = await Promise.all([
-      apiFetch("/api/health"),
-      apiFetch("/api/state/summary"),
-      apiFetch("/api/pools"),
-      apiFetch("/api/ops"),
-    ]);
-    if (!healthResponse.ok || !stateResponse.ok || !poolsResponse.ok || !opsResponse.ok) {
-      throw new Error(uiText("readingStatus"));
+  const sources = [
+    ["health", "heartbeat", () => apiFetch("/api/health")],
+    ["stateSummary", "stateDatabase", () => apiFetch("/api/state/summary")],
+    ["pools", "budgetPools", () => apiFetch("/api/pools")],
+    ["ops", "opsDashboard", () => apiFetch("/api/ops")],
+  ];
+  const results = await Promise.allSettled(sources.map(async ([key, , fetchSource]) => {
+    const response = await fetchSource();
+    let payload;
+    try { payload = await response.json(); }
+    catch { throw new Error("invalid overview response"); }
+    const record = value => value !== null && typeof value === "object" && !Array.isArray(value);
+    const object = record(payload);
+    // An unhealthy runtime is useful health evidence even when HTTP status is 503.
+    const validHealth = object && ["ok", "stale", "missing_heartbeat", "invalid_heartbeat", "state_database_unavailable", "unknown"].includes(payload.status);
+    if (!response.ok) {
+      return {data: key === "health" && validHealth ? payload : null, warning: `HTTP ${response.status}`};
     }
-    state.overview = {
-      health: await healthResponse.json(),
-      stateSummary: await stateResponse.json(),
-      pools: await poolsResponse.json(),
-      ops: await opsResponse.json(),
-      error: null,
-    };
-  } catch (error) {
-    state.overview = {
-      health: null,
-      stateSummary: null,
-      pools: null,
-      ops: null,
-      error: error.message,
-    };
-  }
+    if (!object || (key === "health" && !validHealth)
+        || (key === "pools" && (!Array.isArray(payload.budget_pools) || !payload.budget_pools.every(record)))
+        || (key === "stateSummary" && ![payload.candidates, payload.intents].every(value => record(value) && Number.isFinite(value.total) && value.total >= 0 && record(value.by_state)))
+        || (key === "ops" && (!record(payload.schedule_backoff) || ![payload.scheduler_runs, payload.tracker_api_events, payload.want_search_runs].every(Array.isArray)))) {
+      throw new Error("invalid overview response");
+    }
+    return {data: payload, warning: null};
+  }));
+  // Replace every source on each refresh; a failed read must never retain old success.
+  const overview = {health: null, stateSummary: null, pools: null, ops: null, error: null, errors: [], loaded: true};
+  results.forEach((result, index) => {
+    const [key, label] = sources[index];
+    if (result.status === "fulfilled") overview[key] = result.value.data;
+    const warning = result.status === "fulfilled" ? result.value.warning
+      : uiText(result.reason?.message === "invalid overview response" ? "overviewInvalidResponse" : "unavailable");
+    if (warning) overview.errors.push({label, message: warning});
+  });
+  state.overview = overview;
 }
 
 async function loadWants() {
@@ -1568,29 +1590,28 @@ function renderSection() {
 function renderOverviewPanel() {
   const panel = document.createElement("section");
   panel.className = "overview-dashboard";
-  const { health, stateSummary, pools, ops, error } = state.overview;
-  if (error) {
-    panel.append(renderMetricCard(uiText("readingStatus"), uiText("failed"), error, "warning"));
-    return panel;
-  }
-  if (!health || !stateSummary || !pools || !ops) {
+  const { health, stateSummary, pools, ops, loaded, errors = [] } = state.overview;
+  if (!loaded && !health && !stateSummary && !pools && !ops) {
     panel.append(renderMetricCard(uiText("readingStatus"), uiText("loading"), uiText("localApiLoading"), "info"));
     return panel;
   }
 
-  const candidateStates = stateSummary.candidates?.by_state || {};
-  const intentStates = stateSummary.intents?.by_state || {};
-  const budgetPools = pools.budget_pools || [];
+  for (const error of errors) {
+    panel.append(renderMetricCard(uiText(error.label), uiText("failed"), error.message, "warning"));
+  }
+  const candidateStates = stateSummary?.candidates?.by_state || {};
+  const intentStates = stateSummary?.intents?.by_state || {};
+  const budgetPools = pools?.budget_pools || [];
 
   const hero = document.createElement("div");
   hero.className = "overview-hero";
   const heartbeatCard = renderMetricCard(
     uiText("heartbeat"),
-    formatHealthStatus(health.status),
-    health.heartbeat_exists
+    health ? formatHealthStatus(health.status) : uiText("unavailable"),
+    !health ? uiText("unavailable") : health.heartbeat_exists
       ? `${health.age_minutes ?? "?"} ${uiText("minutesAgoCycle")} ${health.heartbeat?.cycle ?? "?"}`
       : uiText("heartbeatMissing"),
-    health.status === "ok" ? "ok" : "warning",
+    health?.status === "ok" ? "ok" : "warning",
   );
   heartbeatCard.classList.add("primary");
   hero.append(heartbeatCard);
@@ -1598,10 +1619,10 @@ function renderOverviewPanel() {
   const summaryStrip = document.createElement("div");
   summaryStrip.className = "overview-summary-strip";
   summaryStrip.append(
-    renderMetricCard(uiText("candidateTorrentsCount"), stateSummary.candidates?.total ?? 0, formatStateCounts(candidateStates), "info"),
+    renderMetricCard(uiText("candidateTorrentsCount"), stateSummary ? stateSummary.candidates?.total ?? 0 : uiText("unavailable"), stateSummary ? formatStateCounts(candidateStates) : uiText("unavailable"), "info"),
   );
-  summaryStrip.append(renderMetricCard(uiText("resourceIntents"), stateSummary.intents?.total ?? 0, formatStateCounts(intentStates), "info"));
-  summaryStrip.append(renderMetricCard(uiText("budgetPools"), budgetPools.length, uiText("configuredPools"), "info"));
+  summaryStrip.append(renderMetricCard(uiText("resourceIntents"), stateSummary ? stateSummary.intents?.total ?? 0 : uiText("unavailable"), stateSummary ? formatStateCounts(intentStates) : uiText("unavailable"), "info"));
+  summaryStrip.append(renderMetricCard(uiText("budgetPools"), pools ? budgetPools.length : uiText("unavailable"), pools ? uiText("configuredPools") : uiText("unavailable"), "info"));
   hero.append(summaryStrip);
   panel.append(hero);
 
@@ -1610,11 +1631,11 @@ function renderOverviewPanel() {
   detailGrid.innerHTML = `
     <article class="overview-detail-panel">
       <div class="section-title">${escapeHtml(uiText("budgetPools"))}</div>
-      ${renderBudgetPoolList(budgetPools)}
+      ${pools ? renderBudgetPoolList(budgetPools) : escapeHtml(uiText("unavailable"))}
     </article>
     <article class="overview-detail-panel">
       <div class="section-title">${escapeHtml(uiText("dashboardAttention"))}</div>
-      ${renderAttentionList(health, candidateStates, intentStates, budgetPools)}
+      ${health && stateSummary && pools ? renderAttentionList(health, candidateStates, intentStates, budgetPools) : escapeHtml(uiText("unavailable"))}
     </article>
     <article class="overview-detail-panel wide">
       <div class="section-title">${escapeHtml(uiText("opsDashboard"))}</div>
@@ -1622,18 +1643,18 @@ function renderOverviewPanel() {
     </article>
     <article class="overview-detail-panel wide">
       <div class="section-title">${escapeHtml(uiText("runtimeProvenance"))}</div>
-      ${renderRuntimeProvenance(health, stateSummary)}
+      ${renderRuntimeProvenance(health || {}, stateSummary || {})}
     </article>
     <article class="overview-detail-panel wide">
       <div class="section-title">${escapeHtml(uiText("status"))}</div>
       <div class="overview-state-groups">
         <div>
           <div class="metric-label">${escapeHtml(uiText("candidateTorrentsCount"))}</div>
-          ${renderStateChips(candidateStates)}
+          ${stateSummary ? renderStateChips(candidateStates) : escapeHtml(uiText("unavailable"))}
         </div>
         <div>
           <div class="metric-label">${escapeHtml(uiText("resourceIntents"))}</div>
-          ${renderStateChips(intentStates)}
+          ${stateSummary ? renderStateChips(intentStates) : escapeHtml(uiText("unavailable"))}
         </div>
       </div>
     </article>
@@ -1650,6 +1671,7 @@ function renderOverviewPanel() {
 }
 
 function renderSchedulerOperations(ops) {
+  if (!ops) return `<div class="status-item warning">${escapeHtml(uiText("unavailable"))}</div>`;
   const backoff = ops.schedule_backoff || {};
   const phase = ops.scheduler_control?.phase || "unavailable";
   const phaseLabel = phase === "running" ? uiText("schedulerRunning") : phase === "waiting" ? uiText("schedulerWaiting") : uiText("schedulerUnavailable");
@@ -2310,8 +2332,27 @@ function renderWantTable() {
     wrapper.innerHTML = `<div class="status-item warning">${escapeHtml(state.wants.error)}</div>`;
     return wrapper;
   }
+  const count = `<p class="field-help" role="status">${escapeHtml(
+    uiText("wantVisibleCount")
+      .replace("{visible}", String(items.length))
+      .replace("{total}", String(state.wants.items.length)),
+  )}</p>`;
+  if (items.length === 0 && state.wants.items.length > 0) {
+    wrapper.innerHTML = `
+      ${count}
+      <div class="empty-state action-empty-state">
+        <h3>${escapeHtml(uiText("noWantsMatch"))}</h3>
+        <p>${escapeHtml(uiText("noWantsMatchHelp"))}</p>
+        <div class="empty-state-actions">
+          <button class="secondary-button" type="button" data-want-action="clear-filters" aria-label="${escapeAttribute(uiText("clearWantFilters"))}">${escapeHtml(uiText("clearWantFilters"))}</button>
+        </div>
+      </div>
+    `;
+    return wrapper;
+  }
   if (items.length === 0) {
     wrapper.innerHTML = `
+      ${count}
       <div class="empty-state action-empty-state">
         <h3>${escapeHtml(uiText("noWants"))}</h3>
         <p>${escapeHtml(uiText("noWantsHelp"))}</p>
@@ -2324,6 +2365,7 @@ function renderWantTable() {
     return wrapper;
   }
   wrapper.innerHTML = `
+    ${count}
     <div class="want-table-desktop">
       <table class="want-table">
         <thead>
@@ -2834,6 +2876,11 @@ function formatWantCandidateError(payload, statusCode) {
 }
 
 async function handleWantAction(panel, action, event) {
+  if (action === "clear-filters") {
+    state.wants.filters = { source: "all", media_type: "all", status: "all" };
+    renderSection();
+    return;
+  }
   if (action === "sync") {
     await refreshWants(panel, event);
     return;

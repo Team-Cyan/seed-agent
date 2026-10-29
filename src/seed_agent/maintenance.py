@@ -11,8 +11,11 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+from seed_agent.runtime_identity import verify_runtime_identity
+
 
 def verify_sqlite_database(path: Path) -> dict[str, Any]:
+    verify_runtime_identity()
     if not path.is_file():
         error = "database file is missing"
         return {
@@ -66,6 +69,7 @@ def verify_sqlite_database(path: Path) -> dict[str, Any]:
 
 
 def backup_sqlite_database(source: Path, destination: Path) -> dict[str, Any]:
+    verify_runtime_identity()
     destination.parent.mkdir(parents=True, exist_ok=True)
     fd, temporary_name = tempfile.mkstemp(
         prefix=f".{destination.name}.", suffix=".tmp", dir=destination.parent
@@ -89,6 +93,7 @@ def restore_sqlite_database(
     *,
     execute: bool,
 ) -> dict[str, Any]:
+    verify_runtime_identity()
     lock_path = Path(f"{current}.access.lock")
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     with lock_path.open("a+b") as access_lock:

@@ -34,6 +34,12 @@ if [ "$(id -u)" = "0" ] && [ -n "$PUID" ] && [ "${SEED_AGENT_PRIVILEGES_DROPPED:
       "$0" "$@"
 fi
 
+# The marker is recursion control, not proof that privilege dropping succeeded.
+if [ -n "$PUID" ] && { [ "$(id -u)" != "$PUID" ] || [ "$(id -g)" != "$PGID" ]; }; then
+  echo "process identity differs from configured PUID/PGID" >&2
+  exit 2
+fi
+
 mkdir -p "${HOME:-/tmp/seed-agent}"
 
 if [ "${1:-}" = "seed-agent" ]; then

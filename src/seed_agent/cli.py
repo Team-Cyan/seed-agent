@@ -92,6 +92,11 @@ from seed_agent.observability import (
 )
 from seed_agent.policies.category_policy import PoolUsage, usage_by_pool
 from seed_agent.policies.quality import candidate_value_score, torrent_eviction_evidence
+from seed_agent.runtime_identity import (
+    RuntimeIdentityError,
+    runtime_identity_observation,
+    verify_runtime_identity,
+)
 from seed_agent.search.base import SearchProvider
 from seed_agent.search.mteam import (
     MTeamSearchProvider,
@@ -171,6 +176,12 @@ def main(
     ] = False,
 ) -> None:
     """Seed Agent CLI."""
+    if not version and ctx.invoked_subcommand is not None:
+        try:
+            verify_runtime_identity()
+        except RuntimeIdentityError as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(code=2) from exc
     configure_logging()
     if version:
         typer.echo(__version__)
@@ -877,6 +888,7 @@ def healthcheck(
         "config": str(config),
         "status": "ok",
         "state_database": state_health,
+        "process_identity": runtime_identity_observation(),
     }
     if heartbeat_file is not None:
         payload["heartbeat"] = _heartbeat_status(
@@ -3815,6 +3827,7 @@ def _heartbeat_status(
 def _state_database_health(state_path: Path) -> dict[str, Any]:
     """Verify that the durable state database accepts a lightweight read."""
 
+    verify_runtime_identity()
     if not state_path.is_file():
         raise typer.Exit(
             code=_print_error_payload(

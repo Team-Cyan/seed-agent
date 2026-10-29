@@ -33,7 +33,7 @@ def test_compose_media_role_has_one_common_parent_no_source_overlay():
     assert all("downloader" not in m and "qbittorrent" not in m for m in secret_mounts)
     assert media["healthcheck"]["test"] == [
         "CMD",
-        "seed-agent",
+        "/app/docker/entrypoint.sh",
         "healthcheck",
         "--role",
         "media",

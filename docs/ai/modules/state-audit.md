@@ -136,3 +136,37 @@ Persist local lifecycle knowledge and durable decision evidence.
 
 - `uv run pytest -q tests/test_state.py tests/test_audit.py`
 - `uv run pytest -q tests/test_observability.py tests/test_web_settings.py`
+
+## Configured runtime identity
+
+When PUID/PGID are configured, the shared runtime identity verifier checks the
+actual real/effective/saved IDs before CLI dispatch, StateStore construction
+and each connection. Direct seed health and Web read-only connectors check the
+same precondition. Mismatches and malformed pairs fail before creating parents,
+private files, access locks, changing modes, or opening SQLite. With neither
+variable configured, standalone usage retains its existing behavior.
+
+The shell entrypoint performs privilege/group/capability dropping and verifies
+its resulting IDs; the dropped marker is recursion control, never identity
+proof. Both container health roles use this entrypoint, including Compose and
+DockerMan templates. Health output includes the actual health process identity
+when its state read succeeds. PID1 identity alone is insufficient evidence.
+Read-only SQLite still participates in native WAL/SHM coordination; these
+checks do not establish the cause of an earlier native access failure.
+
+Validation includes `tests/test_runtime_identity.py` and the explicit Linux
+root-process harness `tests/linux/check_runtime_identity.py`. The harness needs
+an isolated root Linux container with the existing dependencies, setpriv, and a
+prior installed CLI (or exact prior source through IDENTITY_BASELINE_SOURCE)
+for its bypass baseline, plus the current repository
+mounted at `/workspace`. It records actual IDs at SQLite open, rejects forged
+markers/wrong identities before effects, and checks env-absent local callers.
+It reproduces an identity defect, not production errno behavior.
+
+The public SQLite maintenance backup, restore (including dry-run), and verify
+entries check the same identity before their own SQL, parent-directory, temporary
+backup, access-lock or publication work. Private schema/restore helpers have no
+separate production ingress; they retain their existing algorithms. Direct
+missing-fixture verify also rejects a mismatched configured caller at entry.
+`tests/test_maintenance_identity.py` and the explicit Linux maintenance harness
+cover zero effects and valid/configured or env-absent backup/restore round trips.

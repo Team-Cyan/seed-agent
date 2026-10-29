@@ -9,7 +9,7 @@ RUN python /build/build_sqlite_io.py /build/sqlite_io_native.so
 
 FROM ${AGENT_PYTHON_UV_BASE}
 
-ARG VERSION=0.26.0
+ARG VERSION=0.26.1
 ARG REVISION=unknown
 ARG BUILD_DATE=unknown
 

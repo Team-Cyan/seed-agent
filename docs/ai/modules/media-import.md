@@ -355,3 +355,22 @@ no real video (including attached-picture-only audio), source replacement and
 process failures are explicit unknown errors. Stored measured duration and TMDB
 reference duration remain distinct; a >600second difference is a UI warning,
 never an automatic edition name or subtitle synchronization proof.
+
+## SQLite actor identity prevention
+
+MediaStore verifies configured runtime identity before constructor filesystem
+work and again before every access-lock/private-file/connection operation.
+Direct role-health reads verify before their SQLite open as well. Health retains
+its bounded RO transaction and existing no-application-lock behavior; no new
+writer, schema initialization, journal negotiation or live immutable reads are
+introduced. Worker/heartbeat/media API concurrency and existing leases remain.
+
+Media health must run through the same privilege-dropping entrypoint as service
+startup. Direct CLI bypass with mismatched PUID/PGID exits nonzero before DB
+access; a marker cannot override actual IDs. Successful state observations
+include the health process UID/GID. Deployment requires both seed and worker
+health commands to change together with the identity-aware image. Existing
+image-only native plans must not silently change health settings. Local identity
+validation is separate from production sidecar attribution and physical media
+acceptance; source preservation, exact hardlink evidence and provider receipts
+remain required by a later authorized production plan.

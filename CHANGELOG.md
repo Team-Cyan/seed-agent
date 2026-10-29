@@ -4,6 +4,16 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.26.1 - 2026-10-29
+
+### Fixed
+
+- Keep valid Overview cards visible when another source fails, while marking the failed source unavailable and clearing stale results.
+- Distinguish a Want List filtered to zero rows from an empty source list; show visible/total counts and clear filters locally without triggering search or source refresh.
+
+- Verify configured runtime UID/GID before state constructors, public SQLite maintenance backup/restore/verify, and SQLite access; reject mismatched direct CLI and library callers before filesystem side effects.
+- Route seed and media container healthchecks through the privilege-dropping entrypoint and verify its resulting identity. This is preventive hardening; the previously observed native SQLite access failures remain unproven as to cause.
+
 ## 0.26.0 - 2026-10-27
 
 ### Added

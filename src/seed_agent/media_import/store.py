@@ -15,6 +15,7 @@ from pathlib import Path
 
 from seed_agent.media_import import sqlite_io
 from seed_agent.media_import.schema import SCHEMA
+from seed_agent.runtime_identity import verify_runtime_identity
 
 CONTROL_SCHEMA = """
 CREATE TABLE IF NOT EXISTS media_control (
@@ -112,6 +113,7 @@ class MediaStore:
     schema_version = 4
 
     def __init__(self, path: Path, *, initialize=True, read_only=False, timeout=0.25):
+        verify_runtime_identity()
         self.path = Path(path)
         self.read_only = read_only
         self.timeout = timeout
@@ -156,6 +158,7 @@ class MediaStore:
 
     @contextmanager
     def _connect(self, *, row_factory=None):
+        verify_runtime_identity()
         with bounded_lock(
             Path(str(self.path) + ".access.lock"),
             exclusive=self._initializing,

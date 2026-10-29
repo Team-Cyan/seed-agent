@@ -25,6 +25,7 @@ from seed_agent.models import (
     RankedRelease,
     ResourceIntent,
 )
+from seed_agent.runtime_identity import verify_runtime_identity
 
 STATE_PRIORITY = {
     LifecycleState.DISCOVERED.value: 0,
@@ -102,6 +103,7 @@ class StateStore:
         initialize: bool = True,
         read_only: bool = False,
     ) -> None:
+        verify_runtime_identity()
         if read_only and initialize:
             raise ValueError("read-only state stores cannot initialize the database")
         self.path = path
@@ -2729,6 +2731,7 @@ class StateStore:
 
     @contextmanager
     def _connect(self, *, row_factory: Any | None = None) -> Iterator[sqlite3.Connection]:
+        verify_runtime_identity()
         if not self.read_only:
             _ensure_private_file(self.path)
             _ensure_sqlite_sidecars_private(self.path)

@@ -42,7 +42,7 @@ services:
       test:
         [
           "CMD-SHELL",
-          "if [ \"$SEED_AGENT_WEB_ENABLED\" = \"true\" ]; then exec seed-agent healthcheck --config /app/config/config.yaml --heartbeat-file /state/schedule-heartbeat.json --max-staleness-minutes 90 --web-health-url http://127.0.0.1:8765/api/health; else exec seed-agent healthcheck --config /app/config/config.yaml --heartbeat-file /state/schedule-heartbeat.json --max-staleness-minutes 90; fi"
+          "if [ \"$SEED_AGENT_WEB_ENABLED\" = \"true\" ]; then exec /app/docker/entrypoint.sh healthcheck --config /app/config/config.yaml --heartbeat-file /state/schedule-heartbeat.json --max-staleness-minutes 90 --web-health-url http://127.0.0.1:8765/api/health; else exec /app/docker/entrypoint.sh healthcheck --config /app/config/config.yaml --heartbeat-file /state/schedule-heartbeat.json --max-staleness-minutes 90; fi"
         ]
       interval: 1m
       timeout: 20s
@@ -86,7 +86,7 @@ services:
       - ../local/secrets/assrt.json:/app/local/secrets/assrt.json:ro
       - ../local/secrets/subdl.json:/app/local/secrets/subdl.json:ro
     healthcheck:
-      test: ["CMD", "seed-agent", "healthcheck", "--role", "media", "--config", "/app/config/config.yaml"]
+      test: ["CMD", "/app/docker/entrypoint.sh", "healthcheck", "--role", "media", "--config", "/app/config/config.yaml"]
       interval: 30s
       timeout: 10s
       retries: 3

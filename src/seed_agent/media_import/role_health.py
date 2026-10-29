@@ -25,6 +25,7 @@ from seed_agent import __version__
 from seed_agent.config_views import load_view
 from seed_agent.media_import.runtime import media_state_path
 from seed_agent.media_import.store import MediaStore, validate_schema
+from seed_agent.runtime_identity import runtime_identity_observation, verify_runtime_identity
 
 WORKER_ROLE = "media-worker"
 MAX_STATUS_BYTES = 32_768
@@ -269,6 +270,7 @@ def _age(value, now):
 
 
 def _read_state(path):
+    verify_runtime_identity()
     # Avoid MediaStore._connect: its access-lock creation/chmod is a writer.
     # SQLite-native WAL/SHM coordination may occur; do not use immutable=1, which
     # hides uncheckpointed live observations.
@@ -330,6 +332,7 @@ def media_role_status(config_path: Path, *, max_staleness_seconds=60.0, now=None
         return result
     try:
         epoch, observations, queue = _read_state(media_state_path(view))
+        result["process_identity"] = runtime_identity_observation()
         result["state_epoch"] = epoch
         result["media_schema_version"] = MediaStore.schema_version
         result["checks"]["state"] = True

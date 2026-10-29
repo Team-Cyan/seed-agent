@@ -231,3 +231,19 @@ queues a single exact imported source through the persistent worker; default pre
 cannot download. `--execute` remains limited by existing subtitle policy, provider
 retry/allowance and source/plan/config/epoch fences. It never scans, confirms
 readiness, repairs a video or refreshes unrelated subtitle jobs.
+
+## Overview and Want List failure states
+
+Overview loads its four sources independently and replaces every source on each
+refresh. A failed or malformed source becomes unavailable without discarding
+valid siblings or retaining stale success. Structured unhealthy health evidence
+remains usable even with HTTP503. Loading, unavailable and valid zero values
+remain distinct.
+
+Want List distinguishes an actually empty list from existing items filtered to
+zero rows. Show visible/total counts and a local clear-filters action; this action
+does not refresh sources, search or enqueue. True empty state retains setup
+guidance. Both languages, loading/error states and no-network clear behavior are
+covered by the accepted R4/R5 Node-backed tests. These are two state-display fixes,
+not a UI redesign. Server-delivered static assets retain Cache-Control no-cache;
+real deployed asset/conditional-state acceptance is separate from local tests.
