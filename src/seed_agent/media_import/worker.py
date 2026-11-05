@@ -103,12 +103,16 @@ def execute_command(path, command, *, lifecycle=None):
             )
         }
     if action == "review":
+        projection = payload.get("publication_projection")
+        if projection is not None and engine.config.import_policy != "execute":
+            raise ValueError("projected review requires executable import policy")
         result = engine.review(
             payload["source_id"],
             payload["mapping"],
             fingerprint=payload["fingerprint"],
             ready=payload.get("ready", False),
             repair=payload.get("repair", False),
+            projection=projection,
         )
         if (
             payload.get("ready")

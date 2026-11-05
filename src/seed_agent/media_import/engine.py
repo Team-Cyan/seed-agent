@@ -12,7 +12,7 @@ from pathlib import Path
 import httpx
 
 from seed_agent.media_import import filesystem as fs
-from seed_agent.media_import import roots
+from seed_agent.media_import import review_projection, roots
 from seed_agent.media_import.metadata import Mapping, probe, render
 from seed_agent.media_import.routing import apply_descriptor, effective_profile, source_adapter
 
@@ -26,6 +26,22 @@ def encode(value):
 def rows(conn, sql, args=()):
     conn.row_factory = sqlite3.Row
     return [dict(r) for r in conn.execute(sql, args)]
+
+
+def link_fence(projection, receipt, *, from_target=False):
+    if not projection:
+        return {}
+    return {
+        "source_identity": projection.target_root_identity
+        if from_target
+        else projection.source_root_identity,
+        "target_identity": projection.target_root_identity,
+        "expected": receipt,
+    }
+
+
+def unlink_fence(projection):
+    return {"root_identity": projection.target_root_identity} if projection else {}
 
 
 class Engine:
@@ -43,13 +59,13 @@ class Engine:
         if self.config_guard is not None:
             self.config_guard.check(kind)
 
-    def _link(self, *args, kind="import"):
+    def _link(self, *args, kind="import", **fence):
         self.write_gate(kind)
-        fs.link(*args)
+        fs.link(*args, **fence)
 
-    def _unlink(self, *args, kind="import"):
+    def _unlink(self, *args, kind="import", **fence):
         self.write_gate(kind)
-        fs.unlink(*args)
+        fs.unlink(*args, **fence)
 
     @contextmanager
     def lease(self):
@@ -496,10 +512,15 @@ class Engine:
             if decisions and decisions[0]["fingerprint"] == source["fingerprint"]
             else None
         )
+        projection = review_projection.from_decision(decision)
         job = jobs[0] if jobs else None
         if job and job["status"] == "imported":
             p = self.for_plan(p, sid)
-            if Path(job["target"]).exists() and self.config.import_policy == "execute":
+            if (
+                not projection
+                and Path(job["target"]).exists()
+                and self.config.import_policy == "execute"
+            ):
                 self.retire_old(p, source, job["target"])
             if not Path(job["target"]).exists():
                 with self.store._connect() as conn:
@@ -510,6 +531,8 @@ class Engine:
             return
         if job and job["status"] == "target_missing":
             return
+        if projection:
+            projection.validate_source(self, p, source)
         if source["stable_count"] < 2 or self.clock() - path.stat().st_mtime < p.min_age_seconds:
             return
         ready = (
@@ -536,6 +559,8 @@ class Engine:
                 "WHERE s.profile=? AND s.path=? AND s.id!=? AND a.status='active'",
                 (p.name, source["path"], source["id"]),
             )
+        if projection and predecessors:
+            raise ValueError("review projection source has an active predecessor")
         replacement_needs_review = bool(predecessors and decision is None)
         if replacement_needs_review:
             mapping = None
@@ -585,6 +610,10 @@ class Engine:
 
             if decision_key(current_decision) != decision_key(decision):
                 raise ValueError("manual review changed during metadata resolution; retry")
+            if projection:
+                if destination is None:
+                    raise ValueError("review projection destination unavailable")
+                projection.validate_target(conn, sid, target, destination)
             conn.execute(
                 "UPDATE media_source_files SET probe_json=?,status=? WHERE id=?",
                 (encode(media), "ready" if mapping else "review_required", sid),
@@ -633,7 +662,7 @@ class Engine:
                     },
                 )
         if self.config.import_policy == "execute":
-            self.execute_link(p, source, target)
+            self.execute_link(p, source, target, projection=projection)
             if decision and predecessors:
                 with self.store._connect() as conn:
                     for predecessor in predecessors:
@@ -648,15 +677,16 @@ class Engine:
                         )
                         self.event(conn, sid, "replacement_predecessor_retirement", predecessor)
             # Repair switches only after verified creation. Shared sidecars require review.
-            self.retire_old(p, source, str(target))
+            if not projection:
+                self.retire_old(p, source, str(target))
 
-    def mkdirs(self, p, parent):
+    def mkdirs(self, p, parent, *, root_identity=None):
         root = Path(p.target_root)
         current = root
         for part in parent.relative_to(root).parts:
             current /= part
             try:
-                with fs.parent_fd(root, current) as (fd, name):
+                with fs.parent_fd(root, current, root_identity=root_identity) as (fd, name):
                     self.write_gate("import")
                     os.mkdir(name, dir_fd=fd)
             except FileExistsError:
@@ -672,7 +702,7 @@ class Engine:
                         (str(current), encode(self.describe(p))),
                     )
 
-    def execute_link(self, p, source, target):
+    def execute_link(self, p, source, target, *, projection=None):
         p = self.for_plan(p, source["id"])
         self.write_gate("import")
         self.health(p)
@@ -680,7 +710,13 @@ class Engine:
         root = Path(p.target_root)
         if fs.fingerprint(path) != source["fingerprint"]:
             raise ValueError("source fingerprint changed before link")
-        self.mkdirs(p, target.parent)
+        if projection:
+            projection.validate_source(self, p, source)
+            with self.store._connect() as conn:
+                projection.validate_target(conn, source["id"], target, p._historical_descriptor)
+        self.mkdirs(
+            p, target.parent, root_identity=projection.target_root_identity if projection else None
+        )
         with self.store._connect() as conn:
             existing = rows(
                 conn,
@@ -688,6 +724,8 @@ class Engine:
                 (str(target),),
             )
         if target.exists() or target.is_symlink():
+            if projection:
+                raise ValueError("review projection target became occupied")
             expected = fs.receipt(Path(p.source_root), path)
             actual = fs.receipt(root, target)
             if expected != actual:
@@ -714,6 +752,8 @@ class Engine:
         aid = uuid.uuid4().hex
         temp = target.parent / (".media-link-" + aid)
         receipt = fs.receipt(Path(p.source_root), path)
+        if projection:
+            projection.validate_receipt(receipt, source["fingerprint"])
         # Intent exists before the very first filesystem mutation. It includes exact temp identity.
         with self.store._connect() as conn:
             conn.execute(
@@ -726,15 +766,22 @@ class Engine:
                 (aid, source["id"], str(temp), str(target), encode(receipt)),
             )
             self.record_publication_fence(conn, aid, source["id"])
-        self._link(Path(p.source_root), path, root, temp)
+        self._link(Path(p.source_root), path, root, temp, **link_fence(projection, receipt))
         if fs.fingerprint(path) != source["fingerprint"] or fs.receipt(root, temp) != receipt:
             raise ValueError("source changed during temporary link")
         self.write_gate("import")
-        self._link(root, temp, root, target)
+        self._link(root, temp, root, target, **link_fence(projection, receipt, from_target=True))
         if fs.receipt(root, target) != receipt or fs.fingerprint(path) != source["fingerprint"]:
             raise ValueError("source changed during publication")
         self.finish_link(source, aid, target, receipt)
-        self._unlink(root, temp, receipt)
+        try:
+            self._unlink(root, temp, receipt, **unlink_fence(projection))
+        except OSError, ValueError:
+            if not projection:
+                raise
+            # The verified final link is committed. Recover the recorded temporary
+            # link separately, without replacing the imported job with a conflict.
+            return
         with self.store._connect() as conn:
             conn.execute("UPDATE media_publications SET status='done' WHERE artifact_id=?", (aid,))
 
@@ -842,6 +889,20 @@ class Engine:
                 conn, "SELECT * FROM media_source_files WHERE id=?", (item["source_id"],)
             )
         source = sources[0] if sources else None
+        projection = None
+        if item["kind"] == "video" and source:
+            with self.store._connect() as conn:
+                decision = rows(
+                    conn,
+                    "SELECT * FROM media_review_decisions WHERE source_id=?",
+                    (item["source_id"],),
+                )
+                projection = review_projection.from_decision(decision[0] if decision else None)
+                if projection and item["artifact_status"] != "active":
+                    projection.validate_source(self, p, source)
+                    projection.validate_receipt(receipt, source["fingerprint"])
+                    projection.validate_destination(target, p._historical_descriptor)
+                    projection.validate_claims(conn, source["id"], own_artifact=item["artifact_id"])
         if item["kind"] == "poster":
             from seed_agent.media_import.artwork import poster_parent
 
@@ -870,7 +931,7 @@ class Engine:
             pass
         if item["artifact_status"] == "active":
             if temp.exists() or temp.is_symlink():
-                self._unlink(root, temp, receipt, kind=kind)
+                self._unlink(root, temp, receipt, kind=kind, **unlink_fence(projection))
         elif not valid:
             # Source gone: clean only exact recorded temporary/final receipts.
             if temp.exists() or temp.is_symlink():
@@ -878,8 +939,8 @@ class Engine:
                     target.exists()
                     and fs.receipt(root, target, digest="digest" in receipt) == receipt
                 ):
-                    self._unlink(root, target, receipt, kind=kind)
-                self._unlink(root, temp, receipt, kind=kind)
+                    self._unlink(root, target, receipt, kind=kind, **unlink_fence(projection))
+                self._unlink(root, temp, receipt, kind=kind, **unlink_fence(projection))
             with self.store._connect() as conn:
                 conn.execute(
                     "UPDATE media_artifacts SET status='removed' WHERE id=?",
@@ -890,12 +951,24 @@ class Engine:
                 if target.exists() or item["kind"] != "video":
                     raise ValueError("publication requires review: missing temporary witness")
                 self._link(
-                    Path(p.source_root), Path(p.source_root) / source["path"], root, temp, kind=kind
+                    Path(p.source_root),
+                    Path(p.source_root) / source["path"],
+                    root,
+                    temp,
+                    kind=kind,
+                    **link_fence(projection, receipt),
                 )
             if fs.receipt(root, temp, digest="digest" in receipt) != receipt:
                 raise ValueError("publication temporary changed")
             if not target.exists():
-                self._link(root, temp, root, target, kind=kind)
+                self._link(
+                    root,
+                    temp,
+                    root,
+                    target,
+                    kind=kind,
+                    **link_fence(projection, receipt, from_target=True),
+                )
             if fs.receipt(root, target, digest="digest" in receipt) != receipt:
                 raise ValueError("publication target conflict")
             if item["kind"] == "video":
@@ -910,7 +983,7 @@ class Engine:
                         "INSERT OR IGNORE INTO media_artifact_sources VALUES(?,?)",
                         (item["artifact_id"], source["id"]),
                     )
-            self._unlink(root, temp, receipt, kind=kind)
+            self._unlink(root, temp, receipt, kind=kind, **unlink_fence(projection))
         with self.store._connect() as conn:
             conn.execute(
                 "UPDATE media_publications SET status='done' WHERE artifact_id=?",
@@ -1019,16 +1092,26 @@ class Engine:
                 )
         self.prune_dirs(p)
 
-    def review(self, source_id, mapping, *, fingerprint, ready=False, repair=False):
+    def review(
+        self, source_id, mapping, *, fingerprint, ready=False, repair=False, projection=None
+    ):
         if type(ready) is not bool or type(repair) is not bool:
             raise ValueError("ready and repair must be explicit booleans")
         chosen = Mapping.model_validate(mapping)
+        decision_mapping = chosen.model_dump()
+        if projection is not None:
+            if not ready or repair:
+                raise ValueError("projected review requires explicit ready without repair")
+            projection = review_projection.ReviewProjection.model_validate(projection)
+            decision_mapping[review_projection.KEY] = projection.model_dump()
         with self.lease(), self.store._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             source = rows(conn, "SELECT * FROM media_source_files WHERE id=?", (source_id,))
             if not source or source[0]["fingerprint"] != fingerprint or source[0]["missing_count"]:
                 raise ValueError("stale source review")
             p = self.profile(source[0]["profile"])
+            if projection:
+                projection.validate_source(self, p, source[0])
             if fs.fingerprint(Path(p.source_root) / source[0]["path"]) != fingerprint:
                 raise ValueError("source replaced during review")
             old = rows(conn, "SELECT * FROM media_import_jobs WHERE source_id=?", (source_id,))
@@ -1043,7 +1126,28 @@ class Engine:
                 + 1
             )
             p = self.for_mapping(p, chosen)
-            target = render(chosen, p, Path(source[0]["path"]).suffix)
+            suffix = Path(source[0]["path"]).suffix
+            target = render(chosen, p, suffix.lower() if projection else suffix)
+            if projection:
+                if (
+                    source[0]["status"] != projection.source_status
+                    or source[0]["readiness"] != projection.source_readiness
+                    or (old[0]["revision"] if old else 0) != projection.plan_revision
+                    or (prior_decision[0]["revision"] if prior_decision else 0)
+                    != projection.decision_revision
+                ):
+                    raise ValueError("review projection source or decision baseline changed")
+                if old and old[0]["status"] in {"imported", "target_missing"}:
+                    raise ValueError("projected review cannot change a published plan")
+                if conn.execute(
+                    "SELECT 1 FROM media_artifact_sources r JOIN media_artifacts a "
+                    "ON a.id=r.artifact_id WHERE r.source_id=? "
+                    "AND a.status IN ('active','publishing','deleting') LIMIT 1",
+                    (source_id,),
+                ).fetchone():
+                    raise ValueError("projected review requires an unpublished source")
+                projection.validate_target(conn, source_id, target, self.describe(p))
+                self.write_gate("import")
             old_mapping = json.loads(old[0]["mapping_json"] or "{}") if old else {}
             keys = ["media_type", "animation", "tmdb_id", "season", "episodes", "edition"]
             if old_mapping and any(old_mapping.get(k) != chosen.model_dump().get(k) for k in keys):
@@ -1062,7 +1166,7 @@ class Engine:
                 (
                     source_id,
                     fingerprint,
-                    chosen.model_dump_json(),
+                    encode(decision_mapping) if projection else chosen.model_dump_json(),
                     int(ready),
                     revision,
                     self.clock(),

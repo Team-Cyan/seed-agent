@@ -33,6 +33,16 @@ executes scans/providers on its independent clock. `media-status` reads paginate
 filenames default to metadata original titles. Existing torrent cleanup authority
 and tracker/RSS workflows remain separate.
 
+## Fenced operator review
+
+A durable review may carry a publication projection with the exact relative
+source path, generation, source and destination root identities, target path,
+effective configuration revision and restore epoch. The worker validates the
+projection before saving a ready decision, retains it with the decision for
+later scans, and rechecks it before planning and linking. Pending video
+publication recovery also checks the recorded source and destination identities.
+Ordinary reviews keep their existing contract.
+
 ## Inventory And Readiness
 
 `routing.py`/`sources.py` implement the mixed-source contract in
