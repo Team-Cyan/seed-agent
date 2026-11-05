@@ -49,7 +49,54 @@ jobs:
         run: docker compose --env-file deploy/seed-agent.env.example -f deploy/docker-compose.example.yml config
 
       - name: Build Docker image
-        run: docker build -t seed-agent:ci .
+        run: docker build --build-arg REVISION="${{ github.sha }}" -t seed-agent:ci .
+
+      - name: Verify candidate image and descriptor hardlinks
+        env:
+          EXPECTED_REVISION: ${{ github.sha }}
+        run: |
+          test "$(docker image inspect seed-agent:ci --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$EXPECTED_REVISION"
+          test "$(docker image inspect seed-agent:ci --format '{{index .Config.Labels "org.opencontainers.image.version"}}')" = "$(cat VERSION)"
+          docker image inspect seed-agent:ci --format 'image={{.Id}} os={{.Os}} architecture={{.Architecture}}'
+          docker run --rm -i --user 1000:100 --entrypoint python seed-agent:ci - <<'PYTHON'
+          import json
+          import os
+          import sys
+          import tempfile
+          from pathlib import Path
+          from seed_agent import __version__
+          from seed_agent.media_import import filesystem as fs
+
+          assert sys.platform == "linux"
+          assert (os.geteuid(), os.getegid()) == (1000, 100)
+          with tempfile.TemporaryDirectory() as temporary:
+              root = Path(temporary)
+              source_root, target_root = root / "source", root / "target"
+              source_root.mkdir()
+              target_root.mkdir()
+              source = source_root / "approved.mkv"
+              source.write_bytes(b"approved inode")
+              expected = fs.receipt(source_root, source)
+              target = target_root / "published.mkv"
+              original_link = os.link
+              def replace_name_before_link(src, dst, **kwargs):
+                  assert str(src).startswith("/proc/self/fd/")
+                  source.rename(source_root / "retained.mkv")
+                  source.write_bytes(b"replacement inode")
+                  original_link(src, dst, **kwargs)
+              os.link = replace_name_before_link
+              try:
+                  fs.link(source_root, source, target_root, target,
+                          source_identity=fs.identity(source_root),
+                          target_identity=fs.identity(target_root), expected=expected)
+              finally:
+                  os.link = original_link
+              assert fs.receipt(target_root, target) == expected
+              assert target.samefile(source_root / "retained.mkv")
+              assert not target.samefile(source)
+          print(json.dumps({"version": __version__, "uid": os.geteuid(),
+                            "gid": os.getegid(), "descriptor_link_verified": True}))
+          PYTHON
 
       - name: Docker smoke healthcheck with example config
         run: |
