@@ -221,7 +221,7 @@ particular user's enabled providers or working external credentials.
 | Subliminal | `src/subliminal/providers/`: OpenSubtitles.com, legacy OpenSubtitles.org adapter, Podnapisi, Addic7ed, Gestdown, TVsubtitles and others. Legacy adapter presence is not a recommendation or proof of service availability. |
 | MoviePilot | Current inspected `app/modules/subtitle/__init__.py` extracts subtitle links from configured site detail pages; search chains use configured site subtitle capabilities. Plugins may add sources; do not infer all plugins are built in or enabled. |
 | Sonarr | `Extras/Subtitles/` handles existing sidecar import/organization; it is a naming/import reference, not the automatic online subtitle provider implementation selected here. |
-| seed-agent local implementation | OpenSubtitles.com only, via Subliminal adapter. No Assrt/SubDL/Zimuku provider is currently integrated. |
+| seed-agent local implementation (updated 2026-11-06) | OpenSubtitles.com via Subliminal, original ASSRT/SubDL API adapters, and opt-in experimental Zimuku HTTP adapter. Local real-payload checks passed for the three APIs; Zimuku search remains challenged and its diagnostic RAR download is not normal publication acceptance. |
 
 The selected integration is the modern `.com` REST API, not legacy `.org` XML-RPC.
 Metadata provider TMDB and subtitle providers have independent credentials/lifecycles.
@@ -234,6 +234,20 @@ references and write fitting local implementations. Any proposed source reuse
 must explicitly resolve license obligations first. Retain notices for reused
 MIT material and inspect transitive dependency licenses before adoption.
 Reference discovery itself adds no runtime dependencies.
+
+### Provider References Rechecked On 2026-11-06
+
+| Local provider | Reference implementation and borrowed behavior |
+| --- | --- |
+| OpenSubtitles.com | [Subliminal](https://github.com/Diaoul/subliminal/blob/develop/src/subliminal/providers/opensubtitlescom.py): actual dependency for ID/language search and download-link API. Local transport retains bounds and independent quota evidence. |
+| ASSRT | [Bazarr](https://github.com/morpheus65535/bazarr/blob/master/custom_libs/subliminal_patch/providers/assrt.py) and [official API](https://assrt.net/api/doc): quota pacing, aliases, detail/file list. Local adapter retains stricter exact-release identity and single-file payload checks. |
+| SubDL | [Bazarr](https://github.com/morpheus65535/bazarr/blob/master/custom_libs/subliminal_patch/providers/subdl.py) and [v2 docs](https://subdl.com/developers): header auth, exact work/type, language and account/download limits. Live v2 results still supply CDN URLs; season packs remain unsupported locally. |
+| Zimuku | [MIT subfinder](https://github.com/ausaki/subfinder/blob/master/subfinder/subsearcher/zimuku.py), [Bazarr](https://github.com/morpheus65535/bazarr/blob/master/custom_libs/subliminal_patch/providers/zimuku.py), and [Kodi provider](https://github.com/qzydustin/service.subtitles.chinesesubtitles/blob/main/resources/lib/core/zimuku.py): work-page table flow, visible row titles, download anchors, session/Referer continuity and ordinary redirects. GPL implementations are behavior references, not vendored code. CAPTCHA/JS bypass is not adopted. |
+
+Reconstructed reference HTML tests are not current captured search-page fixtures.
+The real public Zimuku download produced a two-SRT RAR5, inspected only in ignored
+local acceptance storage. That is useful payload evidence, not complete provider
+search, normal RAR publication, cut identity or playback synchronization acceptance.
 
 ## Troubleshooting Guidance
 

@@ -27,7 +27,11 @@ def source_release_bound(release, mapping, source):
         return re.sub(r"[\W_]", "", str(value)).casefold()
 
     aliases = [mapping.get(k) for k in ["original_title", "localized_title", "english_title"]]
-    title = any(v and len(norm(v)) >= 3 and norm(v) in norm(original) for v in aliases)
+    normalized_aliases = [norm(value) for value in aliases if value]
+    title = any(
+        (len(alias) >= 3 or re.fullmatch(r"[\u3400-\u9fff]{2}", alias)) and alias in norm(original)
+        for alias in normalized_aliases
+    )
     technical = bool(re.search(r"(?i)\b(?:720p|1080p|2160p|bluray|web[ ._-]?dl|hdtv)\b", original))
     same = normalized_release(release) == normalized_release(original)
     if mapping["media_type"] == "movie":
@@ -60,14 +64,14 @@ def languages(item):
     return result or ["unknown"]
 
 
-def subtitles(body):
+def subtitles(body, limit=5):
     values = body.get("sub", {}).get("subs")
     # The live API serializes an empty PHP collection as {}.
     if values == {} or values is None:
         return []
     if not isinstance(values, list):
         raise ProviderError("retrying", 60, payload_attempted=False)
-    return values[:5]
+    return values[:limit]
 
 
 class Assrt:
@@ -116,47 +120,102 @@ class Assrt:
 
     def search(self, mapping, source, languages_requested):
         self.check_quota()
-        query = Path(source["original_release"]).stem
-        items = subtitles(self.api("/sub/search", {"q": query, "cnt": 5, "pos": 0}))
-        if not items:
-            query = (
-                (mapping.get("localized_title") or mapping["original_title"])
-                + " "
-                + str(mapping["year"])
-            )
-            if mapping["media_type"] != "movie":
-                query += f" S{mapping['season']:02d}E{mapping['episodes'][0]:02d}"
-            items = subtitles(self.api("/sub/search", {"q": query, "cnt": 5, "pos": 0}))
-        output = []
-        for item in items:
-            sid = str(item.get("id", ""))
-            if not re.fullmatch(r"\d{1,12}", sid):
+        suffix = (
+            str(mapping["year"])
+            if mapping["media_type"] == "movie"
+            else f"S{mapping['season']:02d}E{mapping['episodes'][0]:02d}"
+        )
+        release_query = Path(source["original_release"]).stem
+        queries = [(release_query, False), (release_query, True)]
+        queries.extend(
+            (f"{title.strip()} {suffix}", False)
+            for key in ("localized_title", "original_title", "english_title")
+            if isinstance((title := mapping.get(key)), str) and title.strip()
+        )
+        # Case-insensitive deduplication keeps the order and does not treat a
+        # title query as identity evidence. ASSRT requires at least 3 characters.
+        unique_queries = []
+        seen_queries = set()
+        for query, no_muxer in queries:
+            if len(query.strip()) < 3:
                 continue
-            release = str(item.get("videoname") or "")[:512]
-            bound = source_release_bound(release, mapping, source)
-            self.available[sid] = True  # Never retain signed download URLs.
-            for language in languages(item):
-                if not language_matches(language, languages_requested) and language not in {
-                    "zh",
-                    "unknown",
-                }:
+            key = (query.casefold(), no_muxer)
+            if key not in seen_queries:
+                seen_queries.add(key)
+                unique_queries.append((query, no_muxer))
+        output = []
+        seen_ids = set()
+        unrecognized_rows = False
+        page_query = None
+        requests = 0
+        # Search all aliases before spending the remaining budget on one page.
+        pending = [(query, mode, 0) for query, mode in unique_queries]
+        while pending and requests < 6:
+            query, no_muxer, pos = pending.pop(0)
+            params = {"q": query, "cnt": 15, "pos": pos}
+            if no_muxer:
+                params["no_muxer"] = 1
+            items = subtitles(
+                self.api("/sub/search", params),
+                limit=15,
+            )
+            requests += 1
+            if pos == 0 and len(items) == 15 and page_query is None:
+                page_query = (query, no_muxer)
+            exact_requested = False
+            for item in items:
+                if not isinstance(item, dict):
+                    unrecognized_rows = True
                     continue
-                output.append(
-                    Candidate(
-                        id=sid,
-                        provider=self.name,
-                        language=language,
-                        tmdb_id=mapping["tmdb_id"] if bound else None,
-                        season=mapping.get("season") if bound else None,
-                        episodes=tuple(mapping.get("episodes", [])) if bound else (),
-                        release=release,
-                        identity_basis="exact_source_release" if bound else "unverified_title",
-                        rating=item.get("vote_score")
-                        if isinstance(item.get("vote_score"), (int, float))
-                        else None,
+                sid = str(item.get("id", ""))
+                if not re.fullmatch(r"\d{1,12}", sid):
+                    unrecognized_rows = True
+                    continue
+                if sid in seen_ids:
+                    continue
+                seen_ids.add(sid)
+                release = str(item.get("videoname") or "")[:512]
+                bound = source_release_bound(release, mapping, source)
+                self.available[sid] = True  # Never retain signed download URLs.
+                for language in languages(item):
+                    if not language_matches(language, languages_requested) and language not in {
+                        "zh",
+                        "unknown",
+                    }:
+                        continue
+                    exact_requested |= bound and language_matches(language, languages_requested)
+                    output.append(
+                        Candidate(
+                            id=sid,
+                            provider=self.name,
+                            language=language,
+                            tmdb_id=mapping["tmdb_id"] if bound else None,
+                            season=mapping.get("season") if bound else None,
+                            episodes=tuple(mapping.get("episodes", [])) if bound else (),
+                            release=release,
+                            identity_basis="exact_source_release" if bound else "unverified_title",
+                            rating=item.get("vote_score")
+                            if isinstance(item.get("vote_score"), (int, float))
+                            else None,
+                        )
                     )
-                )
-        return output
+            if exact_requested or len(output) >= 100:
+                break
+            if not pending and page_query is not None:
+                pending.append((*page_query, 15))
+                page_query = None
+        if unrecognized_rows and not seen_ids:
+            raise ProviderError(
+                "retrying",
+                3600,
+                payload_attempted=False,
+                evidence={
+                    "origin": "adapter_failure",
+                    "stage": "search",
+                    "exception_type": "AssrtSchemaError",
+                },
+            )
+        return output[:100]
 
     def restore_candidate(self, candidate):
         # IDs/release proof were retained in the fenced per-source job. Fetch fresh

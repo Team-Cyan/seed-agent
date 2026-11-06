@@ -68,7 +68,7 @@ class Profile(BaseModel):
 
 class SubtitleProviderConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    name: Literal["opensubtitlescom", "assrt", "subdl"]
+    name: Literal["opensubtitlescom", "assrt", "subdl", "zimuku"]
     secret_ref: str | None = None
     enabled: bool = True
 
@@ -89,7 +89,7 @@ class MediaImportConfig(BaseModel):
     reconcile_policy: Literal["preview", "execute"] = "preview"
     tmdb_secret_ref: str | None = None
     opensubtitles_secret_ref: str | None = None
-    subtitle_providers: list[SubtitleProviderConfig] = Field(default_factory=list, max_length=3)
+    subtitle_providers: list[SubtitleProviderConfig] = Field(default_factory=list, max_length=4)
     subtitle_refresh_seconds: int = Field(default=86400, ge=60)
     retry_horizon_seconds: int = Field(default=604800, ge=60)
     provider_interval_seconds: int = Field(default=2, ge=1)

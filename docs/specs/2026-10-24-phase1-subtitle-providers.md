@@ -103,6 +103,22 @@ implemented locally, not production-accepted. Traditional Shooter becomes suppor
 only after real hash-match/payload validation; otherwise keep it disabled with an
 explicit limitation rather than blocking the reliable API providers.
 
+Local follow-up, 2026-11-06: bounded ASSRT discovery now includes raw/normalized
+release queries, distinct title aliases, fifteen-row pages and one optional extra
+page, with at most six search calls. These are discovery hints, not work identity.
+The user subsequently authorized an optional Zimuku HTTP-only adapter alongside
+ASSRT optimization. It is configurable as a fourth source without credentials,
+but absent from existing configurations. Its synthetic fixtures do not establish
+the current HTML contract or real download acceptance. No browser or CAPTCHA
+bypass is supported; page/access failures must not be reported as empty corpus.
+
+Live local follow-up tested all four configured integration points against mature
+reference code. OpenSubtitles, ASSRT and SubDL each supplied a valid Chinese control
+payload. Their tested Night King Chinese searches returned none. A known Zimuku
+download page yielded a readable two-SRT RAR5 via an ordinary redirect; its current
+search/detail challenge and normal RAR publication support remain unresolved.
+No subtitle was published to the library by these local diagnostic checks.
+
 Phase 2 retains further providers, expanded archive/numbering capabilities and
 subtitle synchronization improvements. No auto-translation, subscription purchase,
 subtitle upload or account creation is authorized by this scope expansion.

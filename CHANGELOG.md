@@ -4,6 +4,38 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.27.1 - 2026-11-06
+
+### Fixed
+
+- Follow Zimuku work pages and subtitle rows before detail/download pages, retain
+  in-memory session and Referer continuity, and allow the observed ordinary download
+  redirect. Keep challenge/layout failures explicit, including HTTP 404 challenges.
+- Keep English-only SubDL searches scoped to English and report wholly unknown
+  nonempty ASSRT search schemas as failures rather than empty subtitle collections.
+- Bound Zimuku HTML structure memory and retain already parsed candidates when
+  ordinary redirects consume the finite request budget.
+- Record current provider reference implementations and real local control-payload
+  checks; Zimuku search, RAR publication and source synchronization remain unaccepted.
+- Verify a real Night King subtitle archive locally and compare hashed embedded
+  cues in three windows; a 24/25 timing scale matches the sampled cues. Preserve
+  this as diagnostic evidence and local review artifacts, without automatic retiming.
+
+## 0.27.0 - 2026-11-06
+
+### Fixed
+
+- Continue bounded ASSRT discovery after unrelated results, trying raw and parsed
+  release queries plus distinct title aliases and one optional extra page while
+  preserving exact-release identity, request pacing and publication checks.
+
+### Added
+
+- Add an opt-in experimental HTTP-only Zimuku source without credentials or a
+  browser. Keep bounded requests, host restrictions and common publication gates;
+  challenges and unknown pages fail explicitly. Current site parsing and real
+  downloads remain unverified; existing configurations do not enable it.
+
 ## 0.26.1 - 2026-10-29
 
 ### Fixed

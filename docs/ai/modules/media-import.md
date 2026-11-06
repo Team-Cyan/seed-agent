@@ -112,8 +112,8 @@ assets remain conflicts. Old incompatible sidecars are retired and re-searched.
 ## Subtitles And Local Artwork
 
 `docs/specs/2026-10-24-phase1-subtitle-providers.md` defines Phase 1 provider scope.
-`subtitle_providers` is an ordered list of at most three unique fixed provider names
-(`opensubtitlescom`, `assrt`, `subdl`), each with `enabled` and `secret_ref`. The
+`subtitle_providers` is an ordered list of at most four unique fixed provider names
+(`opensubtitlescom`, `assrt`, `subdl`, `zimuku`), each with `enabled` and `secret_ref`. The
 legacy `opensubtitles_secret_ref` applies only when this list is absent/empty.
 Adapters share bounded orchestration while retaining independent auth/pacing/quota
 state. Missing credentials or an exhausted provider do not disable healthy providers.
@@ -307,6 +307,48 @@ normalizes Unicode formatting and separators, and retains year, episode, edition
 source, encode and release-group tokens, including extensionless groups. This does
 not authorize work-ID/FPS-only or fuzzy automatic subtitle publication.
 
+ASSRT discovery tries the raw source release, the same release with the documented
+`no_muxer=1` mode, then distinct localized/original/English titles with the movie
+year or TV episode. Nonempty unrelated results do not suppress alias discovery.
+One search uses at most six search requests, fifteen rows per page, and at most
+one additional page after first-page queries. Requests retain normal per-provider
+pacing; subtitle IDs are deduplicated and title-only candidates remain unverified.
+An exact source-release result in a requested language may stop discovery early.
+
+`subtitles/zimuku.py` is an opt-in experimental HTTP/HTML adapter. It has no
+browser, credential, CAPTCHA-solving or JavaScript execution dependency. Unknown
+layouts and access challenges fail explicitly instead of reporting `no_result`.
+Search follows reference projects' work-page flow: search links to `/subs/`,
+work tables link to `/detail/`, and the detail page links to `/dld/` before the
+ordinary download redirect. Each operation retains cookies and Referer only in
+memory. Search/detail fixtures reconstruct reference structures, not a captured
+current search page; public search still returns an HTTP 404 challenge. Existing
+configurations do not enable it. An explicit `{name: zimuku, enabled: true}` entry
+selects it without a secret. Search/detail work has a ten-request budget,
+downloads resolve fresh links, and every request uses the normal persistent pacer.
+Budget exhaustion after valid detail results preserves those bounded candidates.
+HTML parsing additionally caps nesting depth, total nodes and anchors, so a small
+deeply nested response cannot amplify ancestor snapshots without bound.
+This source has no documented daily quota; do not apply an invented account budget.
+Public HTTP failures, challenges, unknown layouts and HTML payloads remain visible
+failures. A path containing `/api/` is not evidence of a supported public API.
+
+Bounded development-host acceptance on 2026-11-06 downloaded and validated one
+Chinese Matrix control payload through each of OpenSubtitles, ASSRT and SubDL.
+Night King Chinese searches returned no candidates in those tested paths. The
+known Zimuku download page yielded a real RAR5 containing two readable SRT files;
+this diagnostic download does not bypass the adapter's blocked search/detail path.
+RAR remains unsupported by the normal publication validator. Local format and
+duration-bound checks do not establish edition/FPS compatibility or synchronization.
+For Night King only, a fenced read-only comparison of embedded subtitle packet
+hashes in three two-minute windows found 19 unique matching cues per script.
+External start times scaled by 24/25 matched those sampled video cues within one
+millisecond. Separate local review SRTs preserve the originals; they are not
+automatic retiming support, publication approval or full-film playback acceptance.
+SubDL retains exact TMDB/type checks and rejects unsupported episode packs; English
+only requests now send `EN`, without adding Chinese to the query. ASSRT nonempty
+rows lacking documented subtitle IDs are not reinterpreted as IDs or empty corpus.
+
 
 ### External Discovery State And Single-Source Commands
 
@@ -321,12 +363,15 @@ provider responses. Existing hash/release identity/version/episode gates remain.
 
 Provider histories/cache are source/job-specific and fenced by the existing source,
 plan, configuration and epoch path. Automatic retries visit only due providers;
-completed empty/review results are cached. At most three providers contribute at
+completed empty/review results are cached. At most four providers contribute at
 most100 each into a deterministic fair100-result output. Remaining compatible
 alternatives consume the same fenced candidate cache in bounded 60-second download
 turns, one actual payload attempt per source per cycle, until the shared configured
 external cap. They do not shorten the provider's search refresh. OpenSubtitles file
-IDs remain download locators; ASSRT fetches fresh official details under its quota.
+IDs remain download locators; ASSRT fetches fresh official details under its quota. Full-release ASSRT identity binding
+accepts two-character Han titles such as `夜王`, while still requiring identical
+normalized release, year/episode numbering and technical release evidence.
+Two-character Latin aliases retain the minimum-length restriction.
 SubDL reconstructs only API-proven canonical unsigned locators (a boolean plus its
 existing opaque ID, no URL). Signed or unknown cached locators request a fresh bounded
 search before a later download turn; uncertain paid links are never replayed. A

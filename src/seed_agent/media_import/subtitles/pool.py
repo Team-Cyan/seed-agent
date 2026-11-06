@@ -29,7 +29,9 @@ class ProviderPool:
     managed = True
 
     def __init__(self, providers):
-        self.providers = list(providers)[:3]
+        self.providers = list(providers)
+        if len(self.providers) > 4:
+            raise ValueError("at most four subtitle providers")
         if len({p.name for p in self.providers}) != len(self.providers):
             raise ValueError("duplicate subtitle provider")
         self.statuses = {}
@@ -232,7 +234,7 @@ class ProviderPool:
                 )
             groups.append(group)
         # All configured providers retain a finite share, including after a large
-        # first response. At most3*100 inspected candidates and100 returned.
+        # first response. At most4*100 inspected candidates and100 returned.
         output = [value for row in zip_longest(*groups) for value in row if value is not None][:100]
         if not output and not healthy:
             delays = [

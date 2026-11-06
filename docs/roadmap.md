@@ -629,3 +629,18 @@ fix passed independent review. New provider orchestration, poster runtime integr
 three-destination defaults and R3 role supervision passed final local integration review.
 Release/production mount, full-library and client acceptance remain outstanding. See the consolidated product plan for current status;
 no production completion is claimed by local tests.
+
+## Subtitle Provider Follow-up — 2026-11-06
+
+Local 0.27.1 adds opt-in HTTP-only Zimuku discovery and improves bounded ASSRT
+queries and SubDL language selection, using mature provider implementations as
+references. Real development-host tests validated Chinese Matrix control payloads
+from OpenSubtitles, ASSRT and SubDL. Their tested Night King Chinese paths returned
+no candidates; the real-file Shooter hash query returned its legacy no-match marker.
+
+A known Zimuku download page supplied a RAR5 containing two readable Night King
+SRTs. Public search still returns a challenge; normal RAR publication is unsupported.
+Fenced embedded-cue hash samples at three positions matched 19 unique cues per
+script after a 24/25 timestamp scale, within one millisecond at those points.
+Original and scaled review files remain local only. This does not establish
+full-film playback acceptance, automatic retiming, deployment or library publication.

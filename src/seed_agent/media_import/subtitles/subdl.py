@@ -80,6 +80,13 @@ class Subdl:
         return summary
 
     def search(self, mapping, source, languages):
+        language_codes = []
+        if any(value in {"zh", "zh-Hans", "zh-Hant"} for value in languages):
+            language_codes.append("ZH")
+        if "en" in languages:
+            language_codes.append("EN")
+        if not language_codes:
+            return []
         if not self.checked or time.monotonic() - self.checked >= 300:
             self.account()
         search = self.account_summary.get("search", {})
@@ -105,7 +112,7 @@ class Subdl:
         params = {
             "tmdb_id": mapping["tmdb_id"],
             "type": "movie" if mapping["media_type"] == "movie" else "tv",
-            "languages": ",".join(["ZH"] + (["EN"] if "en" in languages else [])),
+            "languages": ",".join(language_codes),
             "subs_per_page": 30,
             "releases": 1,
             "comment": 1,

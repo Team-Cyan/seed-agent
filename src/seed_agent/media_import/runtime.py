@@ -141,8 +141,14 @@ def build_subtitle_provider(options, root):
     from seed_agent.media_import.subtitles.pool import ProviderPool, Unavailable
     from seed_agent.media_import.subtitles.provider import ProviderError
     from seed_agent.media_import.subtitles.subdl import Subdl
+    from seed_agent.media_import.subtitles.zimuku import Zimuku
 
-    factories = {"opensubtitlescom": OpenSubtitles, "assrt": Assrt, "subdl": Subdl}
+    factories = {
+        "opensubtitlescom": OpenSubtitles,
+        "assrt": Assrt,
+        "subdl": Subdl,
+        "zimuku": Zimuku,
+    }
     configured = [(p.name, p.secret_ref) for p in options.subtitle_providers if p.enabled]
     if not options.subtitle_providers:
         if not options.opensubtitles_secret_ref:

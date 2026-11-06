@@ -4592,7 +4592,7 @@ function renderMediaPanel() {
       if (payload.candidate_reason_counts) details.append(mediaElement("p", `适配器返回候选的匹配结果：${Object.entries(payload.candidate_reason_counts).map(([key,count]) => `${{work_id_conflict:"影片身份冲突",missing_work_identity:"缺少身份依据",episode_conflict:"季集冲突",kind_conflict:"字幕类型不同",edition_conflict:"版本冲突",edition_unproven:"版本未证实",fps_conflict:"帧率冲突",version_unproven:"缺少此片源的版本依据",language_mismatch:"语言不符",hash_matched:"片源哈希匹配",release_matched:"片源版本名称匹配"}[key] || "其他"} ${count}`).join("；") || "无候选"}`));
       for (const [provider, info] of Object.entries(payload.providers || {})) {
         const history = (payload.provider_search || {})[provider] || {};
-        const providerLabel = {opensubtitlescom:"OpenSubtitles", assrt:"ASSRT（射手网·伪）", subdl:"SubDL"}[provider] || provider;
+        const providerLabel = {opensubtitlescom:"OpenSubtitles", assrt:"ASSRT（射手网·伪）", subdl:"SubDL", zimuku:"字幕库（网页来源）"}[provider] || provider;
         details.append(mediaElement("p", `${providerLabel}：${{no_result:"未找到候选",available:"已有搜索结果",rate_limited:"请求限速",daily_quota:"额度等待",retrying:"重试等待"}[info.status] || info.status}${info.search_cached ? "（沿用本文件结果）" : ""}；最近完成搜索 ${history.last_search_at ? new Date(history.last_search_at * 1000).toLocaleString("zh-CN") : "未知"}（${history.last_search_status === "no_result" ? "无候选" : history.candidate_count !== undefined ? `${history.candidate_count} 个候选` : "结果未记录"}）；本任务再次检查 ${history.next_search_at ? new Date(history.next_search_at * 1000).toLocaleString("zh-CN") : "未知"}`));
       }
       if ((payload.providers || {}).assrt) details.append(mediaElement("a", "字幕服务由 ASSRT 提供", {href:"https://assrt.net/", target:"_blank", rel:"noopener noreferrer"}));

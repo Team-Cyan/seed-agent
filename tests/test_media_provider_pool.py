@@ -124,6 +124,33 @@ def test_runtime_provider_config_keeps_missing_provider_local(tmp_path):
     assert pool.priority("assrt") < pool.priority("subdl")
 
 
+def test_fourth_html_source_access_failure_keeps_healthy_sources_running(media):
+    import_three(media)
+    engine = media[0]
+    good = [FakeProvider() for _ in range(3)]
+    for provider, name in zip(good, ["opensubtitlescom", "assrt", "subdl"], strict=True):
+        provider.name = name
+
+    class Blocked(FakeProvider):
+        name = "zimuku"
+
+        def search(self, *args):
+            raise ProviderError(
+                "retrying",
+                3600,
+                payload_attempted=False,
+                evidence={"origin": "http_response", "stage": "search", "http_status": 404},
+            )
+
+    pool = ProviderPool([*good, Blocked()])
+    jobs = SubtitleJobs(engine, pool)
+    jobs.run()
+    assert all(provider.calls > 0 for provider in good)
+    assert pool.statuses["zimuku"]["status"] == "retrying"
+    assert pool.statuses["zimuku"]["last_request"]["http_status"] == 404
+    assert all(pool.statuses[provider.name]["status"] == "available" for provider in good)
+
+
 def test_removed_language_requirement_is_not_dispatched_after_config_change(media):
     import_three(media)
     engine = media[0]

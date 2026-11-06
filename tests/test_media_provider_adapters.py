@@ -4,6 +4,41 @@ from seed_agent.media_import.subtitles.assrt import Assrt
 from seed_agent.media_import.subtitles.subdl import Subdl
 
 
+def test_assrt_two_character_han_title_requires_identical_technical_release():
+    from seed_agent.media_import.subtitles.assrt import source_release_bound
+
+    release = "夜王.156分未删减.导演剪辑版.2026.1080p.ViuTV.WEB-DL.H.264.AAC2.0-HamiltonShare.mkv"
+    mapping = dict(
+        media_type="movie",
+        year=2026,
+        original_title="夜王",
+        localized_title="夜王",
+        english_title="夜王",
+    )
+    source = {"original_release": release}
+    assert source_release_bound(release, mapping, source)
+    assert not source_release_bound("夜王.2026.1080p.BluRay.mkv", mapping, source)
+    assert not source_release_bound(release, mapping | {"year": 2025}, source)
+    assert not source_release_bound("夜王.2026.srt", mapping, {"original_release": "夜王.2026.mkv"})
+    assert not source_release_bound(
+        "It.2026.1080p.WEB-DL.mkv",
+        dict(media_type="movie", year=2026, original_title="It"),
+        {"original_release": "It.2026.1080p.WEB-DL.mkv"},
+    )
+    provider = Assrt({"token": "fixture"})
+    provider.checked = float("inf")
+    provider.http.get = lambda *args: {
+        "status": 0,
+        "sub": {
+            "subs": [{"id": "123", "videoname": release, "lang": {"langlist": {"langchs": True}}}]
+        },
+    }
+    candidates = provider.search(mapping | {"tmdb_id": 1602727}, source, ["zh-Hans"])
+    assert len(candidates) == 1
+    assert candidates[0].tmdb_id == 1602727
+    assert candidates[0].identity_basis == "exact_source_release"
+
+
 def test_subdl_response_identity_language_release_and_quota_contract():
     provider = Subdl({"api_key": "fixture"})
     calls, observations, reservations = [], [], []
@@ -110,6 +145,22 @@ def test_assrt_live_empty_collection_shape():
     from seed_agent.media_import.subtitles.assrt import subtitles
 
     assert subtitles({"sub": {"subs": {}}}) == []
+
+
+def test_subdl_english_only_search_does_not_request_chinese():
+    provider = Subdl({"api_key": "fixture"})
+    provider.checked = float("inf")
+    calls = []
+
+    def get(path, params):
+        calls.append(params)
+        return {"results": [], "subtitles": []}
+
+    provider.http.get = get
+    assert provider.search({"media_type": "movie", "tmdb_id": 603}, {}, ["en"]) == []
+    assert calls[0]["languages"] == "EN"
+    assert provider.search({"media_type": "movie", "tmdb_id": 603}, {}, []) == []
+    assert len(calls) == 1
 
 
 def test_subdl_search_quota_zero_does_not_contact_search(monkeypatch):
