@@ -131,7 +131,7 @@ const copy = {
       metrics: "监控指标",
       want_decision: "想看决策",
       wants: "想看列表",
-      media: "媒体整理",
+      media: "媒体库",
       release_preferences: "资源匹配",
       config_file: "配置文件",
     },
@@ -1528,6 +1528,7 @@ async function loadInitialData() {
 }
 
 function renderSection() {
+  document.querySelector(".content").dataset.section = state.currentSection;
   const title = document.querySelector(".page-header h1");
   const subtitle = document.querySelector(".page-header p");
   const groupKey = sectionGroupBySection[state.currentSection] || "operations";
@@ -1551,8 +1552,8 @@ function renderSection() {
     return;
   }
   if (state.currentSection === "media") {
-    title.textContent = "媒体整理";
-    subtitle.textContent = "来源清单、识别修复、硬链接、字幕与同步清理";
+    title.textContent = "媒体库";
+    subtitle.textContent = "让每一部好作品，都有清晰的归处。";
     addTrackerButton.hidden = true;
     trackerList.replaceChildren(renderMediaPanel());
     return;
@@ -4402,12 +4403,46 @@ async function loadMedia() {
   catch (error) { mediaSnapshot = {error: String(error), sources: []}; }
   finally { mediaLoading = false; if (state.currentSection === "media") renderSection(); }
 }
+function mediaJson(value) {
+  try { return value ? JSON.parse(value) || {} : {}; }
+  catch { return {}; }
+}
 function renderMediaPanel() {
   const panel = mediaElement("div", null, {class: "settings-panel media-library"});
-  const note = mediaElement("p", "扫描与下载器独立；导入、字幕、清理分别遵循配置中的 preview / execute 策略。来源文件不会被整理器删除。");
+  const note = mediaElement("p", "查看整理进度，处理需要确认的作品。原始文件始终保留。", {class: "media-notice", role: "status"});
+  const diagnostics = mediaElement("details", null, {class: "media-diagnostics"});
+  diagnostics.append(mediaElement("summary", "运行明细与字幕设置"));
+  const diagnosticBody = mediaElement("div", null, {class: "media-diagnostic-body"});
+  diagnostics.append(diagnosticBody);
+  const pageSources = mediaSnapshot?.sources || [];
+  const stats = mediaElement("div", null, {class: "media-stats", "aria-label": "媒体清单概况"});
+  const sourceProgress = mediaSnapshot?.source_progress;
+  const imported = sourceProgress?.imported ?? (mediaSnapshot && !mediaSnapshot.error ? pageSources.filter(item => item.import_status === "imported").length : "—");
+  const pending = sourceProgress ? sourceProgress.total - sourceProgress.imported - sourceProgress.missing : (mediaSnapshot && !mediaSnapshot.error ? pageSources.filter(item => item.import_status !== "imported" && item.status !== "removed").length : "—");
+  for (const [label, value, detail] of [["媒体清单", sourceProgress?.total ?? mediaSnapshot?.pagination?.total ?? "—", "全部来源文件"], ["已入库", imported, sourceProgress ? "全库 · 原片保留" : "当前页 · 原片保留"], ["待整理", pending, sourceProgress ? "全库 · 检查后继续" : "当前页 · 检查后继续"]]) {
+    const card = mediaElement("div", null, {class: "media-stat"});
+    card.append(mediaElement("span", label), mediaElement("strong", String(value)), mediaElement("small", detail));
+    stats.append(card);
+  }
+  panel.append(stats);
+  const subtitleProgress = mediaSnapshot?.subtitle_progress;
+  if (subtitleProgress) {
+    const enrichment = mediaElement("section", null, {class: "media-enrichment", "aria-label": "外部字幕处理进度"});
+    const heading = mediaElement("div", null);
+    const states = {processing: "正在处理", review: "有待确认项", waiting: "等待下一轮检查", no_sources: "暂无可处理作品"};
+    heading.append(mediaElement("strong", "外部字幕"), mediaElement("span", states[subtitleProgress.state] || "进度待核验"));
+    const metrics = mediaElement("div", null, {class: "media-enrichment-metrics"});
+    for (const [label, value] of [["有外部字幕的文件", subtitleProgress.sources_with_managed_external], ["已完成搜索的任务", subtitleProgress.discovery_completed_jobs], ["等待的任务", subtitleProgress.waiting], ["需确认的任务", subtitleProgress.review]]) {
+      const metric = mediaElement("div", null);
+      metric.append(mediaElement("strong", String(value ?? "—")), mediaElement("small", label));
+      metrics.append(metric);
+    }
+    enrichment.append(heading, metrics, mediaElement("p", "内嵌字幕覆盖与外部字幕分开统计。没有匹配版本、来源限流或待确认时，会继续保留真实状态。"));
+    panel.append(enrichment);
+  }
   panel.append(note);
   const toolbar = mediaElement("div", null, {class: "panel-actions"});
-  for (const [label, route] of [["刷新状态", null], ["扫描并按策略执行", "/api/media/scan"], ["刷新字幕候选", "/api/media/subtitles"]]) {
+  for (const [label, route] of [["刷新", null], ["扫描媒体库", "/api/media/scan"], ["查找外部字幕", "/api/media/subtitles"]]) {
     const button = mediaElement("button", label, {type: "button", class: "secondary-button"});
     button.addEventListener("click", async () => {
       button.disabled = true;
@@ -4453,22 +4488,22 @@ function renderMediaPanel() {
       finally { save.disabled = false; }
     });
     settings.append(label, save);
-    panel.append(settings);
+    diagnosticBody.append(settings);
   }
   for (const health of (mediaSnapshot?.domain_health || []).filter(h => h.status !== "healthy")) {
     if (health.provider) {
-      panel.append(mediaElement("p", `字幕来源 ${health.provider} · ${health.status}${health.quota_per_minute ? " · 每分钟请求额度 " + health.quota_per_minute : ""}`));
-      for (const [kind, quota] of Object.entries(health.account_quota || {})) panel.append(mediaElement("p", `${kind === "downloads" ? "下载" : "搜索"}剩余 ${quota.remaining ?? "未知"} / ${quota.limit ?? "未知"} · 重置 ${quota.reset_at ? new Date(quota.reset_at).toLocaleString("zh-CN") : "未知"}`));
+      diagnosticBody.append(mediaElement("p", `字幕来源 ${health.provider} · ${health.status}${health.quota_per_minute ? " · 每分钟请求额度 " + health.quota_per_minute : ""}`));
+      for (const [kind, quota] of Object.entries(health.account_quota || {})) diagnosticBody.append(mediaElement("p", `${kind === "downloads" ? "下载" : "搜索"}剩余 ${quota.remaining ?? "未知"} / ${quota.limit ?? "未知"} · 重置 ${quota.reset_at ? new Date(quota.reset_at).toLocaleString("zh-CN") : "未知"}`));
     } else {
-      panel.append(mediaElement("p", `挂载/归属检查：${health.root || health.path || health.source_id} · ${health.status} · ${health.reason || "请检查挂载，现有产物已保留"}`));
+      diagnosticBody.append(mediaElement("p", `挂载/归属检查：${health.root || health.path || health.source_id} · ${health.status} · ${health.reason || "请检查挂载，现有产物已保留"}`));
     }
   }
   for (const poster of (mediaSnapshot?.posters || [])) {
-    panel.append(mediaElement("p", `海报：${poster.path || poster.id} · ${poster.status}${poster.next_attempt ? " · 下次检查 " + new Date(poster.next_attempt * 1000).toLocaleString("zh-CN") : ""}`));
+    diagnosticBody.append(mediaElement("p", `海报：${poster.path || poster.id} · ${poster.status}${poster.next_attempt ? " · 下次检查 " + new Date(poster.next_attempt * 1000).toLocaleString("zh-CN") : ""}`));
   }
   if (mediaSnapshot?.pagination) {
     const page = mediaSnapshot.pagination;
-    panel.append(mediaElement("p", `媒体总数 ${page.total} · 当前 ${page.offset + 1}–${Math.min(page.offset + page.limit, page.total)}`));
+    panel.append(mediaElement("p", `${page.total} 个文件 · 当前显示 ${page.total ? page.offset + 1 : 0}–${Math.min(page.offset + page.limit, page.total)}`, {class: "media-page-caption"}));
     for (const [label, offset] of [["上一页", Math.max(0, mediaOffset - 100)], ["下一页", mediaOffset + 100]]) {
       const button = mediaElement("button", label, {type:"button"});
       button.disabled = offset === mediaOffset || offset >= page.total;
@@ -4476,7 +4511,7 @@ function renderMediaPanel() {
       toolbar.append(button);
     }
     for (const command of (mediaSnapshot.commands || []).slice(0, 5)) {
-      panel.append(mediaElement("p", `任务 ${command.action} · ${command.status} · ${command.id}`));
+      diagnosticBody.append(mediaElement("p", `任务 ${command.action} · ${command.status} · ${command.id}`));
     }
   }
   if (!mediaSnapshot) {
@@ -4486,8 +4521,11 @@ function renderMediaPanel() {
   }
   if (mediaSnapshot.error) panel.append(mediaElement("p", mediaSnapshot.error, {role: "alert"}));
   for (const scan of (mediaSnapshot.scans || []).slice(0, 10)) {
-    panel.append(mediaElement("p", `${scan.profile} · 扫描 ${scan.status} · ${scan.count ?? "—"} 个文件${scan.error ? " · " + scan.error : ""}`));
+    diagnosticBody.append(mediaElement("p", `${scan.profile} · 扫描 ${scan.status} · ${scan.count ?? "—"} 个文件${scan.error ? " · " + scan.error : ""}`));
   }
+  const libraryGrid = mediaElement("div", null, {class: "media-grid", "aria-label": "作品列表"});
+  panel.append(libraryGrid, diagnostics);
+  let visibleCount = 0;
   const labels = {stabilizing: "等待文件稳定", ready: "可入库", completion_unverified: "完成状态未确认", imported: "视频已入库", review_required: "需要识别确认", planned: "待执行", conflict: "冲突", target_missing: "媒体库文件缺失，可修复", missing_pending: "源消失，等待宽限期", removed: "已同步移除", changed: "源文件已替换"};
   for (const source of mediaSnapshot.sources || []) {
     const status = source.missing_count || source.status === "removed" ? source.status : (source.readiness === "completion_unverified" ? "completion_unverified" : (source.import_status || source.status));
@@ -4495,28 +4533,41 @@ function renderMediaPanel() {
     if (mediaFilter === "conflict" && !["conflict", "changed", "target_missing"].includes(status)) continue;
     if (mediaFilter === "review" && !["review_required", "completion_unverified"].includes(source.readiness === "completion_unverified" ? source.readiness : status)) continue;
     if (mediaFilter === "pending" && ["imported", "removed"].includes(status)) continue;
-    const details = mediaElement("details", null, {class: "media-source"});
-    details.append(mediaElement("summary", `${source.original_release} · ${labels[status] || status}`));
-    details.append(mediaElement("p", `来源 ${source.profile} / ${source.path} · 内容 ${source.content_type || "待确认"} · 动画 ${source.animation === true ? "是" : source.animation === false ? "否" : "待确认"} · 路由 ${source.route || "待确认"}`));
-    if (source.classification_evidence) details.append(mediaElement("p", `分类依据：${source.classification_evidence}`));
-    if (source.review_error) details.append(mediaElement("p", source.review_error));
-    let mapping = source.review_mapping_json ? JSON.parse(source.review_mapping_json) : (source.mapping_json ? JSON.parse(source.mapping_json) : {});
+    visibleCount++;
+    const details = mediaElement("details", null, {class: "media-source", "data-status": status});
+    const summary = mediaElement("summary", null);
+    const savedMapping = mediaJson(source.review_mapping_json || source.mapping_json);
+    const baseTitle = savedMapping.localized_title || savedMapping.original_title || source.original_release || source.path;
+    const episodic = ["tv", "anime"].includes(savedMapping.media_type);
+    const episodeLabel = episodic && Number.isInteger(savedMapping.season) && Array.isArray(savedMapping.episodes)
+      ? ` S${String(savedMapping.season).padStart(2, "0")} ${savedMapping.episodes.map(episode => `E${String(episode).padStart(2, "0")}`).join("–")}` : "";
+    const displayTitle = baseTitle + episodeLabel;
+    const emblem = mediaElement("span", savedMapping.animation === true || savedMapping.media_type === "anime" ? "ANIM" : episodic ? "TV" : savedMapping.media_type === "movie" ? "FILM" : "—", {class: "media-cover-mark", "aria-hidden": "true"});
+    const heading = mediaElement("span", null, {class: "media-source-heading"});
+    heading.append(mediaElement("strong", displayTitle), mediaElement("small", [savedMapping.year, episodic ? "剧集" : savedMapping.media_type === "movie" ? "电影" : "待识别", source.profile].filter(Boolean).join(" · ")));
+    summary.append(emblem, heading, mediaElement("span", labels[status] || status, {class: "media-status-pill"}));
+    details.append(summary);
+    const detailBody = mediaElement("div", null, {class: "media-source-body"});
+    detailBody.append(mediaElement("p", `来源 ${source.profile} / ${source.path} · 内容 ${source.content_type || "待确认"} · 动画 ${source.animation === true ? "是" : source.animation === false ? "否" : "待确认"} · 路由 ${source.route || "待确认"}`));
+    if (source.classification_evidence) detailBody.append(mediaElement("p", `分类依据：${source.classification_evidence}`));
+    if (source.review_error) detailBody.append(mediaElement("p", source.review_error));
+    let mapping = mediaJson(source.review_mapping_json || source.mapping_json);
     const profile = (mediaSnapshot.profiles || []).find(p => p.name === source.profile);
     const evidence = {"源路径": profile ? `${profile.source_root}/${source.path}` : source.path, "代次": source.generation, "完成依据": source.readiness,
       "原始片名": mapping.original_title, "中文片名": mapping.localized_title,
       "TMDB": mapping.tmdb_id, "年份": mapping.year, "季": mapping.season,
       "集": mapping.episodes, "版本": mapping.edition || "未声明",
-      "实测时长（秒，ffprobe）": source.probe_json ? JSON.parse(source.probe_json).duration : null,
+      "实测时长（秒，ffprobe）": source.probe_json ? mediaJson(source.probe_json).duration : null,
       "资料库参考时长（秒）": mapping.reference_duration || null,
       "当前目标路径": source.target, "已保存的修正目标":source.review_target, "首次消失时间": source.missing_since ? new Date(source.missing_since * 1000).toLocaleString("zh-CN") : null,
       "清理到期时间": source.missing_since && profile ? new Date((source.missing_since + profile.grace_seconds) * 1000).toLocaleString("zh-CN") : null,
       "健康缺失观察次数": source.missing_count, "错误": source.error};
     const dl = mediaElement("dl", null);
     Object.entries(evidence).forEach(([key, value]) => {dl.append(mediaElement("dt", key), mediaElement("dd", Array.isArray(value) ? value.join(", ") : String(value ?? "—")));});
-    details.append(dl);
-    const measuredDuration = source.probe_json ? JSON.parse(source.probe_json).duration : null;
+    detailBody.append(dl);
+    const measuredDuration = source.probe_json ? mediaJson(source.probe_json).duration : null;
     if (Number.isFinite(measuredDuration) && mapping.reference_duration && Math.abs(measuredDuration - mapping.reference_duration) > 600) {
-      details.append(mediaElement("p", `实测 ${Math.round(measuredDuration / 60 * 100) / 100} 分钟，与资料库参考相差 ${Math.round(Math.abs(measuredDuration - mapping.reference_duration) / 60 * 100) / 100} 分钟；需核验字幕版本，时长差不自动证明剪辑版。`, {role: "status"}));
+      detailBody.append(mediaElement("p", `实测 ${Math.round(measuredDuration / 60 * 100) / 100} 分钟，与资料库参考相差 ${Math.round(Math.abs(measuredDuration - mapping.reference_duration) / 60 * 100) / 100} 分钟；需核验字幕版本，时长差不自动证明剪辑版。`, {role: "status"}));
     }
     const form = mediaElement("form", null);
     const fields = {};
@@ -4570,7 +4621,7 @@ function renderMediaPanel() {
       } catch (error) {feedback.textContent = String(error);}
       finally {save.disabled = false;}
     });
-    details.append(form);
+    detailBody.append(form);
     if (status === "imported") {
       const searchOne = mediaElement("button", "为此文件搜索额外字幕", {type:"button"});
       searchOne.addEventListener("click", async () => {
@@ -4580,24 +4631,24 @@ function renderMediaPanel() {
           searchOne.textContent = "已提交；按现有额度和版本要求处理";
         } catch (error) {searchOne.textContent = String(error); searchOne.disabled = false;}
       });
-      details.append(searchOne);
+      detailBody.append(searchOne);
     }
     for (const job of (mediaSnapshot.subtitles || []).filter(j => j.source_id === source.id)) {
-      const payload = JSON.parse(job.payload_json);
-      details.append(mediaElement("h4", `字幕 ${job.requirement}`));
+      const payload = mediaJson(job.payload_json);
+      detailBody.append(mediaElement("h4", `字幕 ${job.requirement}`));
       const searchLabels = {not_searched:"尚未搜索",legacy_unknown:"旧记录未保留独立搜索状态",complete:"搜索周期已完成",partial:"部分供应商等待",waiting:"供应商等待"};
       const outcomeLabels = {no_result:"未找到候选",no_compatible:"候选不符合身份或版本要求",version_review:"候选版本待核验",candidates_available:"有兼容候选"};
-      details.append(mediaElement("p", `现有覆盖：${payload.coverage_satisfied ? "有内嵌或旁挂轨，质量与同步未核验" : "未发现匹配轨"}；外部字幕 ${payload.external_count ?? "待核验"} 份（该语言任务网站下载 ${(payload.downloaded || []).length} 份）。内嵌覆盖仍会搜索额外字幕。`));
-      details.append(mediaElement("p", `外部搜索：${searchLabels[payload.search_state] || "旧记录未保留独立搜索状态"} · ${outcomeLabels[payload.search_outcome] || payload.search_outcome || "结果未知"}；最近搜索 ${payload.last_search_at ? new Date(payload.last_search_at * 1000).toLocaleString("zh-CN") : "旧记录未保留时间"}；下次处理 ${new Date(job.next_attempt * 1000).toLocaleString("zh-CN")}`));
-      if (payload.candidate_reason_counts) details.append(mediaElement("p", `适配器返回候选的匹配结果：${Object.entries(payload.candidate_reason_counts).map(([key,count]) => `${{work_id_conflict:"影片身份冲突",missing_work_identity:"缺少身份依据",episode_conflict:"季集冲突",kind_conflict:"字幕类型不同",edition_conflict:"版本冲突",edition_unproven:"版本未证实",fps_conflict:"帧率冲突",version_unproven:"缺少此片源的版本依据",language_mismatch:"语言不符",hash_matched:"片源哈希匹配",release_matched:"片源版本名称匹配"}[key] || "其他"} ${count}`).join("；") || "无候选"}`));
+      detailBody.append(mediaElement("p", `现有覆盖：${payload.coverage_satisfied ? "有内嵌或旁挂轨，质量与同步未核验" : "未发现匹配轨"}；外部字幕 ${payload.external_count ?? "待核验"} 份（该语言任务网站下载 ${(payload.downloaded || []).length} 份）。内嵌覆盖仍会搜索额外字幕。`));
+      detailBody.append(mediaElement("p", `外部搜索：${searchLabels[payload.search_state] || "旧记录未保留独立搜索状态"} · ${outcomeLabels[payload.search_outcome] || payload.search_outcome || "结果未知"}；最近搜索 ${payload.last_search_at ? new Date(payload.last_search_at * 1000).toLocaleString("zh-CN") : "旧记录未保留时间"}；下次处理 ${new Date(job.next_attempt * 1000).toLocaleString("zh-CN")}`));
+      if (payload.candidate_reason_counts) detailBody.append(mediaElement("p", `适配器返回候选的匹配结果：${Object.entries(payload.candidate_reason_counts).map(([key,count]) => `${{work_id_conflict:"影片身份冲突",missing_work_identity:"缺少身份依据",episode_conflict:"季集冲突",kind_conflict:"字幕类型不同",edition_conflict:"版本冲突",edition_unproven:"版本未证实",fps_conflict:"帧率冲突",version_unproven:"缺少此片源的版本依据",language_mismatch:"语言不符",hash_matched:"片源哈希匹配",release_matched:"片源版本名称匹配"}[key] || "其他"} ${count}`).join("；") || "无候选"}`));
       for (const [provider, info] of Object.entries(payload.providers || {})) {
         const history = (payload.provider_search || {})[provider] || {};
         const providerLabel = {opensubtitlescom:"OpenSubtitles", assrt:"ASSRT（射手网·伪）", subdl:"SubDL", zimuku:"字幕库（网页来源）"}[provider] || provider;
-        details.append(mediaElement("p", `${providerLabel}：${{no_result:"未找到候选",available:"已有搜索结果",rate_limited:"请求限速",daily_quota:"额度等待",retrying:"重试等待"}[info.status] || info.status}${info.search_cached ? "（沿用本文件结果）" : ""}；最近完成搜索 ${history.last_search_at ? new Date(history.last_search_at * 1000).toLocaleString("zh-CN") : "未知"}（${history.last_search_status === "no_result" ? "无候选" : history.candidate_count !== undefined ? `${history.candidate_count} 个候选` : "结果未记录"}）；本任务再次检查 ${history.next_search_at ? new Date(history.next_search_at * 1000).toLocaleString("zh-CN") : "未知"}`));
+        detailBody.append(mediaElement("p", `${providerLabel}：${{no_result:"未找到候选",available:"已有搜索结果",rate_limited:"请求限速",daily_quota:"额度等待",retrying:"重试等待"}[info.status] || info.status}${info.search_cached ? "（沿用本文件结果）" : ""}；最近完成搜索 ${history.last_search_at ? new Date(history.last_search_at * 1000).toLocaleString("zh-CN") : "未知"}（${history.last_search_status === "no_result" ? "无候选" : history.candidate_count !== undefined ? `${history.candidate_count} 个候选` : "结果未记录"}）；本任务再次检查 ${history.next_search_at ? new Date(history.next_search_at * 1000).toLocaleString("zh-CN") : "未知"}`));
       }
-      if ((payload.providers || {}).assrt) details.append(mediaElement("a", "字幕服务由 ASSRT 提供", {href:"https://assrt.net/", target:"_blank", rel:"noopener noreferrer"}));
+      if ((payload.providers || {}).assrt) detailBody.append(mediaElement("a", "字幕服务由 ASSRT 提供", {href:"https://assrt.net/", target:"_blank", rel:"noopener noreferrer"}));
       for (const c of payload.candidates || []) {
-        details.append(mediaElement("p", `${c.language === "zh" ? "中文（字形未标注）" : c.language} · ${c.provider || payload.provider || "未知来源"} · ${c.release} · ${c.match_basis} · 评分 ${c.rating ?? "未知"} / 下载 ${c.downloads ?? "未知"} · ${c.kind} · ${c.format}`));
+        detailBody.append(mediaElement("p", `${c.language === "zh" ? "中文（字形未标注）" : c.language} · ${c.provider || payload.provider || "未知来源"} · ${c.release} · ${c.match_basis} · 评分 ${c.rating ?? "未知"} / 下载 ${c.downloads ?? "未知"} · ${c.kind} · ${c.format}`));
         if (c.match_basis === "needs_preview") {
           const selectCandidate = mediaElement("button", "确认此版本字幕候选", {type:"button"});
           selectCandidate.addEventListener("click", async () => {
@@ -4605,22 +4656,33 @@ function renderMediaPanel() {
             try {await mediaRequest("/api/media/subtitle-select", {job_id:job.id, candidate_id:c.id, execute: true}); selectCandidate.textContent = "已确认；按字幕策略执行";}
             catch (error) {selectCandidate.textContent = String(error); selectCandidate.disabled = false;}
           });
-          details.append(selectCandidate);
+          detailBody.append(selectCandidate);
         }
       }
-      for (const c of payload.unverified_candidates || []) details.append(mediaElement("p", `未确认身份：${c.provider || "未知来源"} · ${c.language === "zh" ? "中文（字形未标注）" : c.language} · ${c.release}；未开放自动发布`));
-      for (const c of payload.coverage || []) details.append(mediaElement("p", `现有覆盖：${c.language === "zh" ? "中文（字形未标注）" : c.language} · ${c.kind} · ${c.source}`));
-      if (job.error) details.append(mediaElement("p", job.error));
+      for (const c of payload.unverified_candidates || []) detailBody.append(mediaElement("p", `未确认身份：${c.provider || "未知来源"} · ${c.language === "zh" ? "中文（字形未标注）" : c.language} · ${c.release}；未开放自动发布`));
+      for (const c of payload.coverage || []) detailBody.append(mediaElement("p", `现有覆盖：${c.language === "zh" ? "中文（字形未标注）" : c.language} · ${c.kind} · ${c.source}`));
+      if (job.error) detailBody.append(mediaElement("p", job.error));
     }
-    for (const cleanup of (mediaSnapshot.cleanup || []).filter(a => a.source_id === source.id)) details.append(mediaElement("pre", `清理 ${cleanup.status}\n${cleanup.manifest_json}\n${cleanup.result_json || ""}`));
+    for (const cleanup of (mediaSnapshot.cleanup || []).filter(a => a.source_id === source.id)) detailBody.append(mediaElement("pre", `清理 ${cleanup.status}\n${cleanup.manifest_json}\n${cleanup.result_json || ""}`));
     const artifactIds = new Set((mediaSnapshot.artifact_sources || []).filter(r => r.source_id === source.id).map(r => r.artifact_id));
     for (const artifact of (mediaSnapshot.artifacts || []).filter(a => artifactIds.has(a.id))) {
-      details.append(mediaElement("p", `库文件 ${artifact.kind} · ${artifact.status} · ${artifact.owned ? "程序拥有" : "已有文件，禁止清理"} · ${artifact.path}`));
+      detailBody.append(mediaElement("p", `库文件 ${artifact.kind} · ${artifact.status} · ${artifact.owned ? "程序拥有" : "已有文件，禁止清理"} · ${artifact.path}`));
     }
     for (const publication of (mediaSnapshot.publications || []).filter(p => p.source_id === source.id && p.status === "conflict")) {
-      details.append(mediaElement("pre", `发布恢复冲突（需检查）：\n${publication.temporary}\n→ ${publication.target}`));
+      detailBody.append(mediaElement("pre", `发布恢复冲突（需检查）：\n${publication.temporary}\n→ ${publication.target}`));
     }
-    panel.append(details);
+    details.append(detailBody);
+    libraryGrid.append(details);
+  }
+  if (!visibleCount && !mediaSnapshot.error) {
+    const empty = mediaElement("div", null, {class: "media-empty"});
+    empty.append(mediaElement("h3", mediaFilter === "all" ? "这里还没有媒体文件" : "当前页没有符合筛选的作品"), mediaElement("p", mediaFilter === "all" ? "配置媒体来源后，扫描即可建立清单。" : "试试其他筛选，或翻到下一页。筛选仅作用于当前页。"));
+    if (mediaFilter !== "all") {
+      const clear = mediaElement("button", "显示本页全部", {type: "button", class: "secondary-button"});
+      clear.addEventListener("click", () => {mediaFilter = "all"; renderSection();});
+      empty.append(clear);
+    }
+    libraryGrid.append(empty);
   }
   return panel;
 }

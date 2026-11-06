@@ -440,3 +440,15 @@ image-only native plans must not silently change health settings. Local identity
 validation is separate from production sidecar attribution and physical media
 acceptance; source preservation, exact hardlink evidence and provider receipts
 remain required by a later authorized production plan.
+
+## Library workspace presentation
+
+The Media Library prioritizes media cards and persisted source/subtitle progress.
+Global source counts come from source_progress; older runtimes fall back to counts
+explicitly labeled as current-page counts. Subtitle coverage never stands in for
+managed external artifacts or completed discovery. Filters remain page-local and
+filtered empty states explain that boundary. Request failures retain an error state
+instead of claiming an empty library. Native details keep source evidence, guarded
+review forms, subtitle choices and operational diagnostics reachable; collapsing
+diagnostics does not remove mount/provider failures. TV and legacy anime summaries
+retain explicit season/episode identities.

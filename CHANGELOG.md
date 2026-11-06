@@ -4,8 +4,13 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.28.0 - 2026-11-07
+
 ### Added
 
+- Redesign the shared navigation and media library with compact cards, explicit
+  full-library progress, readable episode identities, responsive controls and
+  collapsible operational details. Preserve existing guarded review actions.
 - Queue reviewed, hash-bound plain local SRT previews and explicitly approved
   imports through the normal media worker and common fenced subtitle publisher.
   Retain original/normalized byte digests and verify explicitly precomputed timing

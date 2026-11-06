@@ -3040,7 +3040,7 @@ def test_http_root_serves_static_ui(tmp_path: Path) -> None:
 
     assert response.status == 200
     assert response.getheader("Cache-Control") == "no-cache"
-    assert "Seed Agent Settings" in body
+    assert "seed-agent · 媒体与自动化" in body
     assert "/static/app.js" in body
 
 
