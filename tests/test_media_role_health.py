@@ -260,6 +260,8 @@ def test_heartbeat_fatal_token_fence_stops_without_retry(lifecycle_fixture):
         while not old._background_failed and time.monotonic() < deadline:
             time.sleep(0.01)
         assert old._background_failed
+        # The failure flag is set before the heartbeat thread finishes logging.
+        old._thread.join(timeout=1)
         assert not old._thread.is_alive()
         assert new.instance_id != old.instance_id
         with pytest.raises(RuntimeError, match="heartbeat failed"):

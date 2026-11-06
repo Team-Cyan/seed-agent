@@ -670,3 +670,165 @@ def test_metadata_timeout_is_retryable_and_does_not_block_reconciliation(media):
     )
     assert next(s for s in state["sources"] if s["path"] == "Episode3.mkv")["status"] == "removed"
     assert len(list(target.rglob("*.mkv"))) == 2
+
+
+@pytest.mark.parametrize(
+    "drift",
+    [
+        None,
+        "path",
+        "target_root",
+        "claimed",
+        "link_root",
+        "recovery_claim",
+        "receipt",
+        "cleanup",
+        "newer_decision",
+    ],
+)
+def test_projected_review_stays_fenced_across_later_scans(media, drift, monkeypatch):
+    from seed_agent.media_import import filesystem as fs
+    from seed_agent.media_import.metadata import render
+
+    engine, source, root, metadata = media
+    profile = engine.profile("tv")
+    profile.readiness = "manual"
+    video = source / "Episode1.mkv"
+    video.write_bytes(b"projection")
+    engine.scan("tv", force=True)
+    engine.scan("tv", force=True)
+    row = engine.snapshot()["sources"][0]
+    mapping = metadata.identify(video, profile)[0]
+    target = render(mapping, profile, ".mkv")
+    projection = {
+        "path": row["path"],
+        "generation": row["generation"],
+        "target": str(target),
+        "source_root_identity": fs.root_health(source, ".media-volume", "fixture"),
+        "target_root_identity": fs.root_health(root, ".media-volume", "fixture"),
+        "epoch": engine.store_epoch,
+        "config_revision": engine.configuration_revision(),
+        "source_status": row["status"],
+        "source_readiness": row["readiness"],
+        "plan_revision": 0,
+        "decision_revision": 0,
+    }
+    if drift == "newer_decision":
+        engine.review(row["id"], mapping, fingerprint=row["fingerprint"], ready=False)
+        with pytest.raises(ValueError, match="decision baseline changed"):
+            engine.review(
+                row["id"],
+                mapping,
+                fingerprint=row["fingerprint"],
+                ready=True,
+                projection=projection,
+            )
+        assert not target.exists()
+        return
+    engine.review(
+        row["id"], mapping, fingerprint=row["fingerprint"], ready=True, projection=projection
+    )
+    link = fs.link
+    unlink = fs.unlink
+
+    def replace_root():
+        root.rename(root.with_name("old-library"))
+        root.mkdir()
+        (root / ".media-volume").write_text("fixture")
+
+    def claim_target():
+        with engine.store._connect() as conn:
+            conn.execute(
+                "INSERT INTO media_import_jobs(source_id,revision,status,target,updated) "
+                "VALUES('other',1,'planned',?,0)",
+                (str(target),),
+            )
+
+    if drift == "path":
+        video.rename(source / "Relocated1.mkv")
+    elif drift == "target_root":
+        replace_root()
+    elif drift == "claimed":
+        claim_target()
+    elif drift == "link_root":
+
+        def link_after_replacement(*args, **kwargs):
+            replace_root()
+            target.parent.mkdir(parents=True)
+            link(*args, **kwargs)
+
+        monkeypatch.setattr(fs, "link", link_after_replacement)
+    elif drift == "recovery_claim":
+
+        def crash_before_final_link(*args, **kwargs):
+            if args[3] == target:
+                raise KeyboardInterrupt
+            link(*args, **kwargs)
+
+        monkeypatch.setattr(fs, "link", crash_before_final_link)
+        with pytest.raises(KeyboardInterrupt):
+            engine.scan("tv", force=True)
+        monkeypatch.setattr(fs, "link", link)
+        claim_target()
+    elif drift == "receipt":
+        receipt = fs.receipt
+
+        def changed_source_receipt(base, path, **kwargs):
+            value = receipt(base, path, **kwargs)
+            return {**value, "ino": value["ino"] + 1} if path == video else value
+
+        monkeypatch.setattr(fs, "receipt", changed_source_receipt)
+    elif drift == "cleanup":
+
+        def cleanup_fails(*args, **kwargs):
+            raise OSError("test temporary cleanup failure")
+
+        monkeypatch.setattr(fs, "unlink", cleanup_fails)
+        engine.scan("tv", force=True)
+        assert engine.snapshot()["sources"][0]["import_status"] == "imported"
+        monkeypatch.setattr(fs, "unlink", unlink)
+    engine.scan("tv", force=True)
+    engine.scan("tv", force=True)
+    if drift in {None, "cleanup"}:
+        assert target.samefile(video)
+        assert not list(target.parent.glob(".media-link-*"))
+    else:
+        assert not target.exists()
+
+
+def test_projected_linux_link_uses_opened_inode_when_source_name_changes(tmp_path, monkeypatch):
+    import sys
+
+    from seed_agent.media_import import filesystem as fs
+
+    if sys.platform != "linux":
+        pytest.skip("Linux procfs descriptor linking")
+    source_root = tmp_path / "source"
+    target_root = tmp_path / "target"
+    source_root.mkdir()
+    target_root.mkdir()
+    original = source_root / "source.mkv"
+    original.write_bytes(b"approved source")
+    expected = fs.receipt(source_root, original)
+    target = target_root / "published.mkv"
+    link = os.link
+
+    def replace_named_source(src, dst, **kwargs):
+        assert str(src).startswith("/proc/self/fd/")
+        original.rename(source_root / "retained.mkv")
+        original.write_bytes(b"replacement source")
+        link(src, dst, **kwargs)
+
+    monkeypatch.setattr(os, "link", replace_named_source)
+    fs.link(
+        source_root,
+        original,
+        target_root,
+        target,
+        source_identity=fs.identity(source_root),
+        target_identity=fs.identity(target_root),
+        expected=expected,
+    )
+    assert fs.receipt(target_root, target) == expected
+    assert target.samefile(source_root / "retained.mkv")
+    assert not target.samefile(original)

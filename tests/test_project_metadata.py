@@ -42,7 +42,19 @@ def test_ci_workflow_has_python_and_docker_smoke_gates() -> None:
     assert "uv run pytest -q" in step_text
     assert "uv run --with pip-audit pip-audit --strict --local" in step_text
     assert "docker compose --env-file deploy/seed-agent.env.example" in step_text
-    assert "docker build -t seed-agent:ci ." in step_text
+    build_step = next(step for step in job_steps if step["name"] == "Build Docker image")
+    assert (
+        'docker build --build-arg REVISION="${{ github.sha }}" -t seed-agent:ci .'
+        in build_step["run"]
+    )
+    image_step = next(
+        step
+        for step in job_steps
+        if step["name"] == "Verify candidate image and descriptor hardlinks"
+    )
+    assert image_step["env"]["EXPECTED_REVISION"] == "${{ github.sha }}"
+    assert "--user 1000:100" in image_step["run"]
+    assert "descriptor_link_verified" in image_step["run"]
     assert "--entrypoint python" in step_text
     assert "from pathlib import Path" in step_text
     assert "StateStore(" in step_text

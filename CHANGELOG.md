@@ -36,6 +36,12 @@ All notable project changes are tracked here.
   challenges and unknown pages fail explicitly. Current site parsing and real
   downloads remain unverified; existing configurations do not enable it.
 
+## 0.26.2 - 2026-11-05
+
+### Fixed
+
+- Keep fenced media reviews bound to the approved source path, target and volume identities through worker execution and publication recovery.
+
 ## 0.26.1 - 2026-10-29
 
 ### Fixed
