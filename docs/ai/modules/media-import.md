@@ -350,6 +350,17 @@ known Zimuku download page yielded a real RAR5 containing two readable SRT files
 this diagnostic download does not bypass the adapter's blocked search/detail path.
 RAR remains unsupported by the normal publication validator. Local format and
 duration-bound checks do not establish edition/FPS compatibility or synchronization.
+
+Reviewed plain local SRTs may enter through the `subtitle-import` durable command,
+implemented in `subtitles/local_import.py`. It requires a fixed hash-named inbox,
+an immutable per-source preview and explicit compatibility acknowledgment before
+the normal worker uses the common publisher. Original and published digests plus
+bounded provenance are retained. An explicit precomputed timing transform must
+match its original staged SRT; no transform is guessed or generated automatically.
+See [Reviewed Local Subtitle Delivery](../../operations/reviewed-local-subtitles.md).
+`subtitle_progress` provides read-only whole-library totals independent of source
+pagination, separating partial/all configured coverage, discovery, gates and active
+managed external receipts. Existing bounded fair scheduling is unchanged.
 For Night King only, a fenced read-only comparison of embedded subtitle packet
 hashes in three two-minute windows found 19 unique matching cues per script.
 External start times scaled by 24/25 matched those sampled video cues within one

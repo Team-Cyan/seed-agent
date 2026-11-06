@@ -644,3 +644,9 @@ Fenced embedded-cue hash samples at three positions matched 19 unique cues per
 script after a 24/25 timestamp scale, within one millisecond at those points.
 Original and scaled review files remain local only. This does not establish
 full-film playback acceptance, automatic retiming, deployment or library publication.
+
+The follow-up adds a normal-worker reviewed-local-SRT preview/execute path and a
+read-only library-wide subtitle progress summary. It preserves per-source approval,
+input/output hashes, common publication fencing, provider gates and shared choice
+limits. Challenge bypass and generic RAR extraction remain outside this delivery
+slice; it does not claim deployed files or full-library/client acceptance.

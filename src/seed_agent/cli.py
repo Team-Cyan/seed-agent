@@ -7055,6 +7055,22 @@ def media_subtitle_search(
     )
 
 
+@app.command(name="media-subtitle-import")
+def media_subtitle_import(
+    request: Annotated[Path, typer.Option("--request", exists=True, dir_okay=False)],
+    config: Annotated[Path, typer.Option("--config")] = Path("config/example.yaml"),
+    execute: bool = typer.Option(False, "--execute"),
+) -> None:
+    """Queue preview or approved local SRT delivery; worker reads a hash-named inbox object."""
+    from seed_agent.media_import.commands import MAX_PAYLOAD, submit
+
+    with request.open("rb") as stream:
+        raw = stream.read(MAX_PAYLOAD + 1)
+    if len(raw) > MAX_PAYLOAD:
+        raise typer.BadParameter("subtitle request exceeds command limit")
+    _print_json(submit(config, "subtitle-import", json.loads(raw), execute=execute))
+
+
 @app.command(name="media-status")
 def media_status(
     config: Annotated[Path, typer.Option("--config")] = Path("config/example.yaml"),

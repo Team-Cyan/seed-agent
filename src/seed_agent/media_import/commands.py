@@ -15,6 +15,7 @@ ACTIONS = {
     "scan",
     "subtitles",
     "subtitle-search",
+    "subtitle-import",
     "review",
     "subtitle-select",
     "series-preview",
@@ -57,7 +58,7 @@ def baseline(store, action, payload):
                 "SELECT revision,fingerprint FROM media_review_decisions WHERE source_id=?",
             ]:
                 record = conn.execute(sql, (source_id,)).fetchone()
-                if action == "subtitle-search":
+                if action in {"subtitle-search", "subtitle-import"}:
                     if sql.startswith("SELECT fingerprint") and (
                         not record
                         or record[0] != payload["fingerprint"]
@@ -71,6 +72,15 @@ def baseline(store, action, payload):
                     ):
                         raise ValueError("subtitle source is not imported")
                 evidence.append(record)
+            if action == "subtitle-import" and payload.get("preview_id") is not None:
+                preview = conn.execute(
+                    "SELECT payload_json FROM media_events WHERE id=? AND source_id=? "
+                    "AND event='subtitle_local_preview'",
+                    (payload["preview_id"], source_id),
+                ).fetchone()
+                if not preview:
+                    raise ValueError("unknown local subtitle preview")
+                evidence.append(preview)
         return hashlib.sha256(json.dumps(evidence, sort_keys=True).encode()).hexdigest()
 
 
@@ -102,6 +112,10 @@ def submit(path: Path, action, payload=None, *, execute=False):
             or not isinstance(payload["fingerprint"], str)
         ):
             raise ValueError("invalid subtitle source fence")
+    if action == "subtitle-import":
+        from seed_agent.media_import.subtitles.local_import import validate_request
+
+        validate_request(payload, execute=execute)
     view, store = command_store(path)
     if not view.config.media_import.enabled:
         raise ValueError("media is disabled")

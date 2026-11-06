@@ -1606,6 +1606,8 @@ class Engine:
 
     def snapshot(self, *, limit=None, offset=0):
         from seed_agent.media_import.artwork import PosterJobs
+        from seed_agent.media_import.source_progress import source_progress
+        from seed_agent.media_import.subtitles.progress import subtitle_progress
 
         if limit is not None:
             limit = min(250, max(1, int(limit)))
@@ -1646,6 +1648,7 @@ class Engine:
                 if self.config.destinations
                 else None,
                 "sources": sources,
+                "source_progress": source_progress(self),
                 "scans": rows(conn, "SELECT * FROM media_scan_runs ORDER BY id DESC LIMIT 100"),
                 "artifacts": (
                     rows(
@@ -1657,6 +1660,7 @@ class Engine:
                 "artifact_sources": refs,
                 "publications": related("media_publications"),
                 "subtitles": related("media_subtitle_jobs"),
+                "subtitle_progress": subtitle_progress(self),
                 "cleanup": related("media_reconcile_actions"),
                 "events": rows(conn, "SELECT * FROM media_events ORDER BY id DESC LIMIT 200"),
                 **(

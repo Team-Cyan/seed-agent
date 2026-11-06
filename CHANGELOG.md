@@ -4,6 +4,17 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+### Added
+
+- Queue reviewed, hash-bound plain local SRT previews and explicitly approved
+  imports through the normal media worker and common fenced subtitle publisher.
+  Retain original/normalized byte digests and verify explicitly precomputed timing
+  transformations without guessing or automatically retiming subtitles.
+- Expose read-only library-wide subtitle progress separately from source pagination,
+  embedded coverage, discovery, quota waits and active managed external receipts.
+- Count latest-generation library sources in mutually exclusive import/review/
+  conflict/block/missing/pending/unknown states, independent of source pagination.
+
 ## 0.27.1 - 2026-11-06
 
 ### Fixed

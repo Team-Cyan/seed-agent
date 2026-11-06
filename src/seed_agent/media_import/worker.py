@@ -135,6 +135,11 @@ def execute_command(path, command, *, lifecycle=None):
         return result
     if action == "subtitle-select":
         return SubtitleJobs(engine).select(payload["job_id"], payload["candidate_id"])
+    if action == "subtitle-import":
+        from seed_agent.media_import.subtitles.local_import import LocalSubtitleImport
+
+        request = {key: value for key, value in payload.items() if key != "_baseline"}
+        return LocalSubtitleImport(engine).run(request, execute="preview_id" in request)
     if action == "series-preview":
         return engine.series_preview(payload["source_id"], payload["mapping"])
     if action == "series-review":
