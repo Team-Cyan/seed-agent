@@ -14,7 +14,7 @@ from functools import lru_cache
 from pathlib import Path
 
 from seed_agent.media_import import sqlite_io
-from seed_agent.media_import.schema import SCHEMA
+from seed_agent.media_import.schema import EXTRAS_SCHEMA, SCHEMA, VARIANTS_SCHEMA
 from seed_agent.runtime_identity import verify_runtime_identity
 
 CONTROL_SCHEMA = """
@@ -63,7 +63,7 @@ def expected_signature():
     from seed_agent.maintenance import _schema_signature
 
     with closing(sqlite3.connect(":memory:")) as conn:
-        conn.executescript(SCHEMA + CONTROL_SCHEMA)
+        conn.executescript(SCHEMA + CONTROL_SCHEMA + EXTRAS_SCHEMA + VARIANTS_SCHEMA)
         return _schema_signature(conn)
 
 
@@ -110,7 +110,7 @@ def _restrict_sidecar(path: Path):
 
 
 class MediaStore:
-    schema_version = 4
+    schema_version = 5
 
     def __init__(self, path: Path, *, initialize=True, read_only=False, timeout=0.25):
         verify_runtime_identity()
@@ -129,6 +129,16 @@ class MediaStore:
         if initialize:
             self._initialize()
         self._initializing = False
+        if not initialize:
+            with self._connect() as conn:
+                version = conn.execute(
+                    "SELECT schema_version FROM media_control WHERE id=1"
+                ).fetchone()
+                if not version or version[0] != self.schema_version:
+                    raise ValueError(
+                        "unsupported media schema version; explicit migration required"
+                    )
+                validate_schema(conn)
 
     def _initialize(self):
         with self._connect() as conn:
@@ -150,7 +160,7 @@ class MediaStore:
             if existing:
                 validate_schema(conn)
             conn.execute("PRAGMA journal_mode=WAL")
-            conn.executescript(SCHEMA + CONTROL_SCHEMA)
+            conn.executescript(SCHEMA + CONTROL_SCHEMA + EXTRAS_SCHEMA + VARIANTS_SCHEMA)
             conn.execute(
                 "INSERT OR IGNORE INTO media_control VALUES(1,?,?)",
                 (uuid.uuid4().hex, self.schema_version),

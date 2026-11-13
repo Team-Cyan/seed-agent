@@ -165,8 +165,11 @@ class Engine:
         )
         if not value:
             raise ValueError("publication source plan missing")
+        from seed_agent.media_import.variants import selection_fence
+
         return {
             **value[0],
+            "variant_selection": selection_fence(conn, source_id),
             "epoch": self.store_epoch,
             "config_revision": self.configuration_revision(),
         }
@@ -242,7 +245,7 @@ class Engine:
             )
         return observed
 
-    def scan(self, name, *, force=False):
+    def scan(self, name, *, force=False, should_yield=None, on_item=None):
         p = self.profile(name)
         with self.lease():
             with self.store._connect() as conn:
@@ -275,12 +278,26 @@ class Engine:
                         (self.clock(), type(exc).__name__ + ": " + str(exc), run),
                     )
                 return {"profile": name, "status": "failed", "error": str(exc)}
-            self.recover(p)
-            self.process_pending(p)
+            if should_yield and should_yield():
+                return {"profile": name, "status": "yielded", "run_id": run}
+            if self.recover(p, should_yield=should_yield):
+                return {"profile": name, "status": "yielded", "run_id": run}
+            from seed_agent.media_import.extras import recover as recover_extras
+
+            if recover_extras(self, p, should_yield=should_yield):
+                return {"profile": name, "status": "yielded", "run_id": run}
+            from seed_agent.media_import.variants import recover as recover_variants
+
+            if recover_variants(self, should_yield=should_yield):
+                return {"profile": name, "status": "yielded", "run_id": run}
+            if self.process_pending(p, should_yield=should_yield, on_item=on_item):
+                return {"profile": name, "status": "yielded", "run_id": run}
+            if should_yield and should_yield():
+                return {"profile": name, "status": "yielded", "run_id": run}
             self.reconcile(p)
             return {"profile": name, "status": "complete", "count": len(inventory), "run_id": run}
 
-    def process_pending(self, p):
+    def process_pending(self, p, *, should_yield=None, on_item=None):
         with self.store._connect() as conn:
             cursor = conn.execute(
                 "SELECT source_id FROM media_work_cursor WHERE profile=?", (p.name,)
@@ -299,7 +316,9 @@ class Engine:
                     "AND missing_count=0 AND status!='removed' ORDER BY id LIMIT ?",
                     (p.name, self.config.work_batch_size),
                 )
-        for source in sources:
+        for index, source in enumerate(sources):
+            if should_yield and should_yield():
+                return True
             self.process_source(p, source)
             with self.store._connect() as conn:
                 conn.execute(
@@ -307,8 +326,40 @@ class Engine:
                     "DO UPDATE SET source_id=excluded.source_id",
                     (p.name, source["id"]),
                 )
+            if on_item:
+                on_item(index + 1, len(sources))
+            if should_yield and should_yield():
+                return True
+        return False
 
     def process_source(self, p, source):
+        with self.store._connect() as conn:
+            if conn.execute(
+                "SELECT 1 FROM media_extra_attachments WHERE source_id=?", (source["id"],)
+            ).fetchone():
+                return
+            predecessor = conn.execute(
+                "SELECT 1 FROM media_source_files current JOIN media_source_files prior "
+                "ON prior.profile=current.profile AND prior.path=current.path "
+                "AND prior.id!=current.id "
+                "LEFT JOIN media_extra_attachments e ON e.source_id=prior.id "
+                "LEFT JOIN media_variant_members m ON m.source_id=prior.id "
+                "LEFT JOIN media_variant_selections v ON v.work_key=m.work_key "
+                "WHERE current.id=? AND (e.source_id IS NOT NULL OR "
+                "(m.source_id IS NOT NULL AND v.source_id!=prior.id)) LIMIT 1",
+                (source["id"],),
+            ).fetchone()
+            if predecessor:
+                conn.execute(
+                    "UPDATE media_source_files SET status='review_required' WHERE id=?",
+                    (source["id"],),
+                )
+                return
+            from seed_agent.media_import.variants import selection_fence
+
+            selection = selection_fence(conn, source["id"])
+            if selection and selection["selected_source_id"] != source["id"]:
+                return
         try:
             self.plan_import(p, source)
         except httpx.HTTPError:
@@ -507,6 +558,11 @@ class Engine:
         with self.store._connect() as conn:
             decisions = rows(conn, "SELECT * FROM media_review_decisions WHERE source_id=?", (sid,))
             jobs = rows(conn, "SELECT * FROM media_import_jobs WHERE source_id=?", (sid,))
+            completion = conn.execute(
+                "SELECT 1 FROM media_completion_reviews WHERE source_id=? AND generation=? "
+                "AND fingerprint=? AND basis='operator'",
+                (sid, source["generation"], source["fingerprint"]),
+            ).fetchone()
         decision = (
             decisions[0]
             if decisions and decisions[0]["fingerprint"] == source["fingerprint"]
@@ -538,7 +594,11 @@ class Engine:
         ready = (
             "completed_folder"
             if p.readiness == "completed_folder"
-            else ("operator" if decision and decision["ready"] else "completion_unverified")
+            else (
+                "operator"
+                if completion or (decision and decision["ready"])
+                else "completion_unverified"
+            )
         )
         with self.store._connect() as conn:
             conn.execute("UPDATE media_source_files SET readiness=? WHERE id=?", (ready, sid))
@@ -805,7 +865,7 @@ class Engine:
             )
             self.event(conn, source["id"], "video_imported", {"artifact": aid})
 
-    def recover(self, p):
+    def recover(self, p, *, should_yield=None):
         with self.store._connect() as conn:
             pending = rows(
                 conn,
@@ -815,6 +875,8 @@ class Engine:
                 (p.name,),
             )
         for item in pending:
+            if should_yield and should_yield():
+                return True
             policy = (
                 self.config.import_policy
                 if item["kind"] in {"video", "poster"}
@@ -841,6 +903,8 @@ class Engine:
                             "error": str(exc),
                         },
                     )
+
+        return False
 
     def recover_publication(self, p, item):
         with self.store._connect() as conn:
@@ -1580,7 +1644,50 @@ class Engine:
             "ORDER BY s.path,s.generation LIMIT ? OFFSET ?",
             (limit if limit is not None else -1, offset),
         )
+        ids = [source["id"] for source in sources]
+        marks = ",".join("?" for _ in ids) or "NULL"
+        attachments = {
+            item["source_id"]: item
+            for item in rows(
+                conn,
+                f"SELECT source_id,status FROM media_extra_attachments "
+                f"WHERE source_id IN ({marks})",
+                ids,
+            )
+        }
+        from seed_agent.media_import.variants import selection_snapshot
+
+        variants = {item["source_id"]: item for item in selection_snapshot(conn, ids)}
         for source in sources:
+            extra = attachments.get(source["id"])
+            variant = variants.get(source["id"])
+            source["source_role"] = "featurette" if extra else ("variant" if variant else "primary")
+            source["extra_status"] = extra["status"] if extra else None
+            source["variant_selection"] = variant
+            if source["missing_count"] or source["status"] == "removed":
+                reason = "source_missing"
+            elif extra:
+                reason = "featurette_" + extra["status"]
+            elif variant and variant["selected_source_id"] != source["id"]:
+                reason = "retained_not_selected"
+            elif source["readiness"] == "completion_unverified":
+                reason = "completion_evidence_missing"
+            elif source["stable_count"] < 2:
+                reason = "source_stabilizing"
+            elif source["error"] and "metadata provider unavailable" in source["error"]:
+                reason = "metadata_provider_unavailable"
+            elif (
+                source["import_status"] == "review_required"
+                or source["status"] == "review_required"
+            ):
+                reason = "review_required"
+            elif source["error"]:
+                reason = "processing_error"
+            elif source["import_status"] == "imported":
+                reason = "imported"
+            else:
+                reason = "pending_or_unknown"
+            source["progress_reason"] = reason
             mapping = json.loads(source["mapping_json"] or "{}")
             source["content_type"] = (
                 "movie" if mapping.get("media_type") == "movie" else ("tv" if mapping else None)
@@ -1659,6 +1766,10 @@ class Engine:
                 ),
                 "artifact_sources": refs,
                 "publications": related("media_publications"),
+                "extra_attachments": [
+                    {key: value for key, value in item.items() if key != "baseline_json"}
+                    for item in related("media_extra_attachments")
+                ],
                 "subtitles": related("media_subtitle_jobs"),
                 "subtitle_progress": subtitle_progress(self),
                 "cleanup": related("media_reconcile_actions"),

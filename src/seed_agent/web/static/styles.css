@@ -1958,6 +1958,14 @@ button:focus-visible, summary:focus-visible, select:focus-visible, input:focus-v
 .media-source-body form label { color: var(--muted); font-size: 11px; gap: 6px; }
 .media-source-body form label:has(input[type="checkbox"]), .media-source-body form pre { grid-column: 1 / -1; }
 .media-source-body input { background: var(--input); border: 1px solid var(--line); color: var(--text); padding: 8px 10px; }
+.media-source-body select { min-width: 0; max-width: 100%; background: var(--input); color: var(--text); border: 1px solid var(--line); padding: 8px 10px; }
+.media-reviewed-action, .media-identity-review, .media-file-evidence { margin: 12px 0; border-top: 1px solid var(--line); padding-top: 12px; }
+.media-source-body details > summary { cursor: pointer; color: var(--text); font-size: 13px; padding: 6px 0; }
+.media-reviewed-action form { margin-top: 12px; }
+.media-reviewed-action form > label { display: flex; flex-direction: column; align-self: start; }
+.media-action-search { display: flex; flex-direction: column; gap: 6px; align-self: start; color: var(--muted); font-size: 11px; }
+.media-reviewed-action form > label:has(input[type="checkbox"]) { flex-direction: row; align-items: center; }
+.media-reviewed-action pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 .media-source-body button { border: 1px solid var(--line); border-radius: 7px; color: var(--text); background: var(--panel-subtle); padding: 9px 13px; cursor: pointer; }
 .media-diagnostics { border: 1px solid var(--line); border-radius: 9px; color: var(--muted); background: var(--panel); order: 2; }
 .media-diagnostics > summary { padding: 15px 18px; cursor: pointer; font-size: 12px; }

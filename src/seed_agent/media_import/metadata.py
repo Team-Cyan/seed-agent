@@ -101,7 +101,7 @@ def identity_hints(path, source_root):
         value = unicodedata.normalize("NFKC", path.stem if depth == 0 else current.name)
         technical = re.search(
             r"(?i)(?:^|[ ._\[(-])(?:\d{3,4}p|Blu[ ._-]?Ray|BDRip|WEB[ ._-]?(?:DL|Rip)|"
-            r"REMUX|HEVC|H[ .]?26[45]|x26[45])(?:$|[ ._\])-])",
+            r"REMUX|UHD|[48]K|\d{3,4}x\d{3,4}|HEVC|H[ .]?26[45]|x26[45])(?:$|[ ._\])-])",
             value,
         )
         head = value[: technical.start()] if technical else value
@@ -119,12 +119,17 @@ def identity_hints(path, source_root):
             if latin and re.search(r"[\u3400-\u9fff]", choice[: latin.start()]):
                 choices.extend([choice[: latin.start()], choice[latin.start() :]])
         for choice in choices:
-            choice = re.sub(r"[._]", " ", choice)
+            # Search spelling matters to provider retrieval even when exact-title
+            # comparison ignores punctuation. Keep bounded acronym/decimal aliases.
+            acronym = re.fullmatch(r"(?:[A-Za-z]\.){1,5}[A-Za-z]\.?", choice.strip())
+            search_aliases = [choice.rstrip(".") + "."] if acronym else []
+            choice = re.sub(r"(?<=[a-z])(?=[A-Z])", " ", choice)
+            choice = re.sub(r"(?<!\d)\.|\.(?!\d)|_", " ", choice)
             choice = re.sub(r"第[零一二三四五六七八九十百\d]+季", " ", choice)
             choice = re.sub(
                 r"\d+分(?:钟)?(?:未删减)?|导演剪辑版|未删减版?|加长版", " ", choice
             ).strip(" -()[]：:")
-            variants = re.split(r"(?i)\s+aka\s+", choice)
+            variants = [*search_aliases, *re.split(r"(?i)\s+aka\s+", choice)]
             # A mixed-script string is only a search hint; its separated aliases
             # must also be independently confirmed by the provider.
             for query in variants:
@@ -135,7 +140,7 @@ def identity_hints(path, source_root):
                     continue
                 if not re.search(r"[^\W\d_]", query):
                     continue
-                if identity_normalize(query) not in {identity_normalize(q) for q in queries}:
+                if query.casefold() not in {q.casefold() for q in queries}:
                     queries.append(query)
         current = current.parent
     return queries[:4], year, episode

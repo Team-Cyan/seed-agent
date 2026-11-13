@@ -522,7 +522,7 @@ def test_populated_media_state_backup_restore_includes_all_receipts(media):
         conn.execute("DELETE FROM media_artifact_sources")
     assert restore_media_database(engine.store.path, backup, execute=True)["status"] == "restored"
     assert engine.snapshot() == before
-    assert verify_media_database(engine.store.path)["schema_version"] == 4
+    assert verify_media_database(engine.store.path)["schema_version"] == 5
 
 
 def test_partial_inventory_failure_never_publishes_missing(media, monkeypatch):

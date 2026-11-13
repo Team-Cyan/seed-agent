@@ -79,6 +79,33 @@ def execute_command(path, command, *, lifecycle=None):
             enrichment=action != "scan",
             enrichment_limit=1,
         )
+    if action == "completion-confirm":
+        from seed_agent.media_import.completion import confirm
+
+        return confirm(
+            engine,
+            payload["source_id"],
+            payload["generation"],
+            payload["fingerprint"],
+            completion_confirmed=payload["completion_confirmed"],
+        )
+    if action in {"variant-preview", "variant-switch"}:
+        from seed_agent.media_import import variants
+
+        if action == "variant-preview":
+            return variants.preview(
+                engine,
+                payload["source_id"],
+                payload["new_source_id"],
+                completion_confirmed=payload.get("completion_confirmed"),
+            )
+        return variants.execute(engine, payload["preview_id"])
+    if action in {"featurette-preview", "featurette-publish"}:
+        from seed_agent.media_import import extras
+
+        if action == "featurette-preview":
+            return extras.preview(engine, payload)
+        return extras.execute(engine, payload["preview_id"])
     if action == "subtitle-search":
         from seed_agent.media_import.runtime import build_subtitle_provider
 
@@ -192,6 +219,7 @@ def serve(path, *, max_cycles=None, poll_seconds=2, stop=None):
             lifecycle.phase("recovery", deadline_seconds=60)
             recover_commands(path)
             while not stop or not stop.is_set():
+                yielded = False
                 view = load_view(path, "media", require_identity=True)
                 lifecycle.apply(view)
                 if view.config.media_import.enabled:
@@ -220,15 +248,32 @@ def serve(path, *, max_cycles=None, poll_seconds=2, stop=None):
                         # video commands first; every idle quantum admits at most
                         # one poster/subtitle job under its existing provider gates.
                         scan_due = time.monotonic() >= next_scan
-                        run_engine(
-                            engine, path, lifecycle=lifecycle, scan=scan_due, enrichment_limit=1
+
+                        def queued_command():
+                            with store._connect() as conn:
+                                return bool(
+                                    conn.execute(
+                                        "SELECT 1 FROM media_commands WHERE status='queued' LIMIT 1"
+                                    ).fetchone()
+                                )
+
+                        result = run_engine(
+                            engine,
+                            path,
+                            lifecycle=lifecycle,
+                            scan=scan_due,
+                            enrichment_limit=1,
+                            should_yield=queued_command,
                         )
+                        yielded = result.get("status") == "yielded"
                         lifecycle.progress(completed=1, total=1)
                         if scan_due:
                             next_scan = time.monotonic() + min(30, engine.config.interval_seconds)
                 cycles += 1
                 if max_cycles is not None and cycles >= max_cycles:
                     return
+                if yielded:
+                    continue
                 lifecycle.phase("idle", deadline_seconds=max(60, poll_seconds + 30))
                 if stop:
                     stop.wait(poll_seconds)

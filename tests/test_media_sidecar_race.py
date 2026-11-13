@@ -74,19 +74,18 @@ def test_nonregular_sidecar_is_rejected_without_blocking(tmp_path, kind):
 
 def test_store_connection_preserves_existing_sqlite_read_lock(tmp_path):
     path = tmp_path / "state.db"
+    MediaStore(path)
     reader = sqlite3.connect(path)
     try:
-        reader.execute("CREATE TABLE t(n)")
-        reader.execute("INSERT INTO t VALUES(0)")
-        reader.commit()
+        reader.execute("PRAGMA journal_mode=DELETE")
         reader.execute("BEGIN")
-        reader.execute("SELECT * FROM t").fetchall()
+        reader.execute("SELECT * FROM media_control").fetchall()
         store = MediaStore(path, initialize=False)
         with store._connect() as conn:
-            assert conn.execute("SELECT * FROM t").fetchone() == (0,)
+            assert conn.execute("SELECT schema_version FROM media_control").fetchone() == (5,)
         child = (
             "import sqlite3,sys; c=sqlite3.connect(sys.argv[1],timeout=.05); "
-            'c.execute("UPDATE t SET n=1"); c.commit()'
+            'c.execute("UPDATE media_control SET epoch=epoch"); c.commit()'
         )
         result = subprocess.run(
             [sys.executable, "-c", child, str(path)], capture_output=True, text=True, timeout=5
@@ -121,7 +120,7 @@ def test_real_sqlite_concurrent_connection_close_sidecars(tmp_path):
     def read_repeatedly(_):
         for _ in range(100):
             with store._connect() as conn:
-                assert conn.execute("SELECT schema_version FROM media_control").fetchone() == (4,)
+                assert conn.execute("SELECT schema_version FROM media_control").fetchone() == (5,)
 
     with ThreadPoolExecutor(max_workers=8) as pool:
         list(pool.map(read_repeatedly, range(8)))

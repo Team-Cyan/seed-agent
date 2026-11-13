@@ -3,6 +3,34 @@
 This roadmap is intentionally a single vertical list: completed work is ordered
 by completion period, and unfinished work is ordered by current priority.
 
+## Current Media Delivery Evidence (2026-11-13)
+
+- Release 0.28.0 was merged to main, published and deployed. Its navigation and
+  media UI were visually checked. Local tests alone are not this deployment proof.
+- Night King has two reviewed local SRT files physically published and verified.
+  This does not establish automated archive extraction, general provider delivery,
+  full-film timing or client playback acceptance.
+- A fresh production readback records 537 sources: 518 imported, 19 still outside
+  ordinary import. The latest bounded completion-reviewed operation imported 26
+  files with verified hardlink receipts, including the selected Joker 2 2160p.
+  Original source files were retained.
+- The 19 remaining sources comprise 12 unresolved identities, six Inland Empire
+  featurettes and the retained, unselected Joker 2 1080p source. The current schema
+  cannot yet represent the latter two categories independently of ordinary imports.
+- Root causes are distinct: downloader completion evidence was not connected to
+  source readiness; metadata retrieval lost acronym/word/decimal spelling; extras
+  lacked parent attachment; alternate encodes lacked persisted selection. Several
+  title/year collisions are real ambiguity. The operator confirms that `movie/`
+  may contain both movies and TV; its name is not authoritative type evidence.
+- The 0.29.0 implementation adds extras, variant switching, explicit schema migration,
+  completion facts independent of identity, retrieval regressions and clearer progress
+  reasons. Local integration tests and independent review have completed; registry
+  publication, controlled migration and production acceptance remain pending.
+  See the extras-and-variants specification.
+- Finishing this finite file cohort does not complete the entire roadmap or media
+  delivery acceptance: provider search/download evidence, client visibility and
+  playback, subtitle compatibility and production stability remain separate checks.
+
 ## Timeline And Priority List
 
 - Completed locally 2026-10 - Want List workflow repair (live rollout pending)

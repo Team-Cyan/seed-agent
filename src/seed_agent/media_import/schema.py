@@ -63,3 +63,34 @@ CREATE TABLE IF NOT EXISTS media_provider_state (
  provider TEXT PRIMARY KEY, next_request REAL NOT NULL, status TEXT NOT NULL
 );
 """
+
+# Added only to independent MediaStore schema 5. Legacy shared-state schema remains
+# unchanged; an existing independent store requires explicit offline migration.
+EXTRAS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS media_extra_attachments (
+ source_id TEXT PRIMARY KEY, generation INTEGER NOT NULL, fingerprint TEXT NOT NULL,
+ parent_source_id TEXT NOT NULL, baseline_json TEXT NOT NULL, target TEXT NOT NULL,
+ artifact_id TEXT NOT NULL UNIQUE, status TEXT NOT NULL, created REAL NOT NULL
+);
+"""
+
+VARIANTS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS media_variant_selections (
+ work_key TEXT PRIMARY KEY, source_id TEXT NOT NULL, revision INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS media_variant_members (
+ source_id TEXT PRIMARY KEY, work_key TEXT NOT NULL, generation INTEGER NOT NULL,
+ fingerprint TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS media_variant_switches (
+ id TEXT PRIMARY KEY, work_key TEXT NOT NULL, payload_json TEXT NOT NULL,
+ status TEXT NOT NULL, created REAL NOT NULL
+);
+"""
+
+VARIANTS_SCHEMA += """
+CREATE TABLE IF NOT EXISTS media_completion_reviews (
+ source_id TEXT PRIMARY KEY, generation INTEGER NOT NULL, fingerprint TEXT NOT NULL,
+ basis TEXT NOT NULL, created REAL NOT NULL
+);
+"""

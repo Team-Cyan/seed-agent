@@ -4,6 +4,27 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.29.0 - 2026-11-13
+
+### Added
+
+- Explicit movie featurette attachment with reviewed parent, filename and completion
+  confirmation, fenced hardlink publication and recovery independent of film matching.
+- Persisted same-work, episode and edition source selection, reviewed source switching
+  and retained alternate sources. Preserve original media, shared artwork and extras.
+- Web and CLI review/preview/execute actions, cross-page parent and variant candidates,
+  separate progress reasons and request reconciliation after a lost submission response.
+- Explicit offline schema 4 to 5 migration; existing stores never migrate on startup.
+- Completion-only confirmation bound to a source generation and fingerprint, so
+  unresolved identity no longer requires fabricated metadata to record completion.
+
+### Fixed
+
+- Preserve dotted acronyms, decimal titles and camel-case word boundaries in metadata
+  search hints; stop at UHD/4K/resolution suffixes without weakening exact identity checks.
+- Yield between completed idle scan/recovery units when manual commands are queued,
+  retaining the single writer and leaving an in-progress filesystem call undisturbed.
+
 ## 0.28.0 - 2026-11-07
 
 ### Added

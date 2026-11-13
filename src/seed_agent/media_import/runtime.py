@@ -68,6 +68,7 @@ def run_engine(
     lifecycle=None,
     enrichment=True,
     enrichment_limit=None,
+    should_yield=None,
 ):
     root = engine.config_view.workspace
     if not engine.config.enabled:
@@ -89,13 +90,26 @@ def run_engine(
                 total=len(profiles),
             )
         if scan:
-            result = engine.scan(p.name, force=force)
+            options = {}
+            if should_yield:
+                options["should_yield"] = should_yield
+                if lifecycle:
+                    options["on_item"] = lambda done, total: lifecycle.progress(
+                        completed=done, total=total
+                    )
+            result = engine.scan(p.name, force=force, **options)
             scans.append(result)
+            if result["status"] == "yielded":
+                return {"status": "yielded", "scans": scans}
             if result["status"] == "not_due":
                 with engine.lease():
-                    engine.process_pending(p)
+                    yielded = engine.process_pending(p, **options)
+                if yielded:
+                    return {"status": "yielded", "scans": scans}
         if lifecycle:
             lifecycle.progress(completed=index + 1, total=len(profiles))
+    if should_yield and should_yield():
+        return {"status": "yielded", "scans": scans}
     if not enrichment:
         return {
             "status": "complete",
@@ -115,6 +129,8 @@ def run_engine(
     poster_results = PosterJobs(engine, TmdbPosters(token) if token else None).run(
         profile=profile, limit=limit
     )
+    if should_yield and should_yield():
+        return {"status": "yielded", "scans": scans, "posters": poster_results}
     provider = build_subtitle_provider(engine.config, root) if subtitles else None
     subtitle_results = (
         SubtitleJobs(engine, provider).run(

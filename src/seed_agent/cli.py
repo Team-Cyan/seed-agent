@@ -7071,6 +7071,64 @@ def media_subtitle_import(
     _print_json(submit(config, "subtitle-import", json.loads(raw), execute=execute))
 
 
+def _media_reviewed_request(config, request, action, *, execute=False):
+    from seed_agent.media_import.commands import MAX_PAYLOAD, submit
+
+    with request.open("rb") as stream:
+        raw = stream.read(MAX_PAYLOAD + 1)
+    if len(raw) > MAX_PAYLOAD:
+        raise typer.BadParameter("media request exceeds command limit")
+    _print_json(submit(config, action, json.loads(raw), execute=execute))
+
+
+@app.command(name="media-featurette-preview")
+def media_featurette_preview(
+    request: Annotated[Path, typer.Option("--request", exists=True, dir_okay=False)],
+    config: Annotated[Path, typer.Option("--config")] = Path("config/example.yaml"),
+) -> None:
+    """Queue an explicit parent/filename review; never publishes the featurette."""
+    _media_reviewed_request(config, request, "featurette-preview")
+
+
+@app.command(name="media-completion-confirm")
+def media_completion_confirm(
+    request: Annotated[Path, typer.Option("--request", exists=True, dir_okay=False)],
+    config: Annotated[Path, typer.Option("--config")] = Path("config/example.yaml"),
+    execute: bool = typer.Option(False, "--execute"),
+) -> None:
+    """Queue exact completion evidence independent of identity; requires --execute."""
+    _media_reviewed_request(config, request, "completion-confirm", execute=execute)
+
+
+@app.command(name="media-featurette-publish")
+def media_featurette_publish(
+    request: Annotated[Path, typer.Option("--request", exists=True, dir_okay=False)],
+    config: Annotated[Path, typer.Option("--config")] = Path("config/example.yaml"),
+    execute: bool = typer.Option(False, "--execute"),
+) -> None:
+    """Queue publication of one exact reviewed preview through the media worker."""
+    _media_reviewed_request(config, request, "featurette-publish", execute=execute)
+
+
+@app.command(name="media-variant-preview")
+def media_variant_preview(
+    request: Annotated[Path, typer.Option("--request", exists=True, dir_okay=False)],
+    config: Annotated[Path, typer.Option("--config")] = Path("config/example.yaml"),
+) -> None:
+    """Queue a same-work/episode/edition source selection preview."""
+    _media_reviewed_request(config, request, "variant-preview")
+
+
+@app.command(name="media-variant-switch")
+def media_variant_switch(
+    request: Annotated[Path, typer.Option("--request", exists=True, dir_okay=False)],
+    config: Annotated[Path, typer.Option("--config")] = Path("config/example.yaml"),
+    execute: bool = typer.Option(False, "--execute"),
+) -> None:
+    """Queue a reviewed source switch, retaining every original source file."""
+    _media_reviewed_request(config, request, "variant-switch", execute=execute)
+
+
 @app.command(name="media-status")
 def media_status(
     config: Annotated[Path, typer.Option("--config")] = Path("config/example.yaml"),
@@ -7154,6 +7212,55 @@ def media_state_backup(
     from seed_agent.media_import.runtime import media_state_path
 
     _print_json(backup_media_database(media_state_path(load_view(config, "media")), output))
+
+
+@app.command(name="media-state-migrate-v5")
+def media_state_migrate_v5(
+    config: Annotated[Path, typer.Option("--config")],
+    backup: Annotated[Path, typer.Option("--backup", exists=True, dir_okay=False)],
+    backup_sha256: Annotated[str, typer.Option("--backup-sha256")],
+    expected_epoch: Annotated[str, typer.Option("--expected-epoch")],
+    execute: Annotated[bool, typer.Option("--execute")] = False,
+) -> None:
+    """Explicit offline schema migration; stop all roles and verify the backup first."""
+    import re
+
+    from seed_agent.config_views import load_view
+    from seed_agent.media_import.extra_migration import migrate_schema4
+    from seed_agent.media_import.runtime import media_state_path
+
+    if not re.fullmatch(r"[a-f0-9]{64}", backup_sha256):
+        raise typer.BadParameter("backup SHA256 must be 64 lowercase hex characters")
+    if not re.fullmatch(r"[a-f0-9]{32}", expected_epoch):
+        raise typer.BadParameter("expected epoch must be 32 lowercase hex characters")
+    state = media_state_path(load_view(config, "media"))
+    if not execute:
+        _print_json(
+            {
+                "status": "preview",
+                "schema_from": 4,
+                "schema_to": 5,
+                "expected_epoch": expected_epoch,
+                "backup_sha256": backup_sha256,
+                "database_validated": False,
+                "requires_stopped_roles": True,
+            }
+        )
+        return
+    migrate_schema4(
+        state, expected_epoch=expected_epoch, backup=backup, expected_backup_sha256=backup_sha256
+    )
+    from seed_agent.media_import.store import MediaStore
+
+    store = MediaStore(state, initialize=False, read_only=True)
+    _print_json(
+        {
+            "status": "migrated",
+            "schema_version": store.schema_version,
+            "previous_epoch": expected_epoch,
+            "epoch": store.epoch(),
+        }
+    )
 
 
 @app.command(name="media-state-restore")

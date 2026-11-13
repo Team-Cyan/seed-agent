@@ -20,6 +20,11 @@ ACTIONS = {
     "subtitle-select",
     "series-preview",
     "series-review",
+    "featurette-preview",
+    "featurette-publish",
+    "variant-preview",
+    "variant-switch",
+    "completion-confirm",
 }
 MAX_PENDING = 100
 MAX_PAYLOAD = 32_000
@@ -31,6 +36,31 @@ def baseline(store, action, payload):
     with store._connect() as conn:
         source_id = payload.get("source_id")
         evidence = []
+        if action == "variant-switch":
+            found = conn.execute(
+                "SELECT payload_json FROM media_events WHERE id=? AND event='variant_preview'",
+                (payload.get("preview_id"),),
+            ).fetchone()
+            if not found:
+                raise ValueError("unknown variant preview")
+            evidence.append(found)
+        if action == "variant-preview":
+            for sql in (
+                "SELECT fingerprint,generation,missing_count,status "
+                "FROM media_source_files WHERE id=?",
+                "SELECT revision,target,status,mapping_json FROM media_import_jobs "
+                "WHERE source_id=?",
+                "SELECT revision,fingerprint FROM media_review_decisions WHERE source_id=?",
+            ):
+                evidence.append(conn.execute(sql, (payload.get("new_source_id"),)).fetchone())
+        if action == "featurette-publish":
+            found = conn.execute(
+                "SELECT payload_json FROM media_events WHERE id=? AND event='featurette_preview'",
+                (payload.get("preview_id"),),
+            ).fetchone()
+            if not found:
+                raise ValueError("unknown featurette preview")
+            evidence.append(found)
         if action == "subtitle-select":
             found = conn.execute(
                 "SELECT source_id,generation,payload_json,plan_revision,target "
@@ -102,6 +132,22 @@ def submit(path: Path, action, payload=None, *, execute=False):
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     if len(encoded.encode()) > MAX_PAYLOAD:
         raise ValueError("media command body exceeds limit")
+    if action == "completion-confirm":
+        required = {"source_id", "generation", "fingerprint", "completion_confirmed"}
+        if (
+            not execute
+            or not required <= payload.keys()
+            or set(payload) - required - {"client_request_id"}
+        ):
+            raise ValueError("completion confirmation requires explicit execution and exact source")
+        if (
+            type(payload["generation"]) is not int
+            or payload["generation"] < 1
+            or not isinstance(payload["source_id"], str)
+            or not isinstance(payload["fingerprint"], str)
+            or payload["completion_confirmed"] is not True
+        ):
+            raise ValueError("invalid completion confirmation")
     if action == "subtitle-search":
         if set(payload) != {"source_id", "generation", "fingerprint"}:
             raise ValueError("subtitle search requires exact source ID/generation/fingerprint")

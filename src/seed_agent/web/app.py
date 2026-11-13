@@ -165,6 +165,31 @@ def make_handler(config_path: Path) -> type[BaseHTTPRequestHandler]:
                         status=HTTPStatus.SERVICE_UNAVAILABLE,
                     )
                 return
+            if request_path in {
+                "/api/media/featurette-parents",
+                "/api/media/variants",
+                "/api/media/requests",
+            }:
+                from urllib.parse import parse_qs
+
+                from seed_agent.media_import.runtime import build_engine
+                from seed_agent.web.media_actions import reviewed_request_status, variant_candidates
+
+                try:
+                    engine, _ = build_engine(resolved_config_path, read_only=True)
+                    query = parse_qs(urlparse(self.path).query)
+                    if request_path.endswith("featurette-parents"):
+                        from seed_agent.media_import.extras import parents
+
+                        payload = parents(engine, query=query.get("query", [""])[0])
+                    elif request_path.endswith("requests"):
+                        payload = reviewed_request_status(engine, query.get("id", [""])[0])
+                    else:
+                        payload = variant_candidates(engine, query.get("source_id", [""])[0])
+                    self._send_json(payload)
+                except (OSError, ValueError, sqlite3.DatabaseError) as exc:
+                    self._send_json({"error": safe_error_text(exc)}, status=HTTPStatus.BAD_REQUEST)
+                return
             if request_path == "/api/media":
                 from seed_agent.media_import.runtime import build_engine
 
@@ -368,6 +393,11 @@ def make_handler(config_path: Path) -> type[BaseHTTPRequestHandler]:
                 "/api/media/subtitle-select",
                 "/api/media/series-preview",
                 "/api/media/series-review",
+                "/api/media/featurette-preview",
+                "/api/media/featurette-publish",
+                "/api/media/variant-preview",
+                "/api/media/variant-switch",
+                "/api/media/completion-confirm",
             }:
                 from seed_agent.media_import.commands import submit
 

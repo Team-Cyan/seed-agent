@@ -12,6 +12,9 @@ def source_progress(engine):
         "total": 0,
         "present": 0,
         "imported": 0,
+        "extras": 0,
+        "extras_by_status": {},
+        "retained_not_selected": 0,
         "pending": 0,
         "review": 0,
         "conflict": 0,
@@ -30,7 +33,7 @@ def source_progress(engine):
         "FROM media_source_files "
         f"WHERE profile IN ({placeholders}) GROUP BY profile,path), "
         "current AS (SELECT s.status AS source_status,s.readiness,s.missing_count, "
-        "j.status AS import_status, "
+        "j.status AS import_status, e.status AS extra_status, "
         "CASE WHEN s.missing_count>0 THEN 'missing_pending' "
         "WHEN s.status='removed' THEN 'removed' "
         "WHEN j.status IN ('blocked_source','blocked_destination') THEN j.status "
@@ -40,9 +43,12 @@ def source_progress(engine):
         "WHEN s.status='review_required' THEN s.status "
         "ELSE COALESCE(j.status,s.status) END AS effective_status "
         "FROM latest l JOIN media_source_files s ON s.profile=l.profile AND s.path=l.path "
-        "AND s.generation=l.generation LEFT JOIN media_import_jobs j ON j.source_id=s.id), "
+        "AND s.generation=l.generation LEFT JOIN media_import_jobs j ON j.source_id=s.id "
+        "LEFT JOIN media_extra_attachments e ON e.source_id=s.id), "
         "classified AS (SELECT *,CASE "
         "WHEN missing_count>0 OR source_status='removed' THEN 'missing' "
+        "WHEN extra_status IS NOT NULL THEN 'extras' "
+        "WHEN source_status='retained_not_selected' THEN 'retained_not_selected' "
         "WHEN import_status IN ('blocked_source','blocked_destination') THEN 'blocked' "
         "WHEN source_status IN ('changed','conflict','target_missing') "
         "OR import_status IN ('changed','conflict','target_missing') THEN 'conflict' "
@@ -63,10 +69,19 @@ def source_progress(engine):
             latest + "SELECT category,COUNT(*) FROM classified GROUP BY category", names
         ):
             result[category] = count
+        result["extras_by_status"] = dict(
+            conn.execute(
+                latest + "SELECT extra_status,COUNT(*) FROM classified "
+                "WHERE category='extras' GROUP BY extra_status",
+                names,
+            )
+        )
         result["total"] = sum(
             result[key]
             for key in (
                 "imported",
+                "extras",
+                "retained_not_selected",
                 "pending",
                 "review",
                 "conflict",

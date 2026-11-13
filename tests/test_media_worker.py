@@ -309,7 +309,10 @@ def test_idle_enrichment_clock_preserves_scan_deadline_and_command_priority(tmp_
     monkeypatch.setattr(
         worker,
         "run_engine",
-        lambda *a, **kw: runs.append((ticks[0], kw["scan"], kw["enrichment_limit"])),
+        lambda *a, **kw: (
+            runs.append((ticks[0], kw["scan"], kw["enrichment_limit"])),
+            {"status": "complete"},
+        )[1],
     )
     commands = []
 

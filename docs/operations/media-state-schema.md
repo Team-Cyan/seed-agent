@@ -1,6 +1,6 @@
 # Independent Media State Schema
 
-This schema belongs only to the media store, not seed StateStore. Schema version: 4.
+This schema belongs only to the media store, not seed StateStore. Schema version: 5.
 Plans, artifact and directory roots retain historical route/marker/identity/revision. Publication fences retain source/plan/config/restore baselines.
 
 ## SQLite Tables
@@ -197,3 +197,46 @@ Historical output parents remain excluded before traversal after route/config ch
 
 - `profile`
 - `source_id`
+
+
+`media_extra_attachments`
+
+- `source_id`
+- `generation`
+- `fingerprint`
+- `parent_source_id`
+- `baseline_json`
+- `target`
+- `artifact_id`
+- `status`
+- `created`
+
+`media_variant_selections`
+
+- `work_key`
+- `source_id`
+- `revision`
+
+`media_variant_members`
+
+- `source_id`
+- `work_key`
+- `generation`
+- `fingerprint`
+
+`media_variant_switches`
+
+- `id`
+- `work_key`
+- `payload_json`
+- `status`
+- `created`
+
+
+`media_completion_reviews`
+
+- `source_id`
+- `generation`
+- `fingerprint`
+- `basis`
+- `created`

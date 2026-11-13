@@ -452,3 +452,40 @@ instead of claiming an empty library. Native details keep source evidence, guard
 review forms, subtitle choices and operational diagnostics reachable; collapsing
 diagnostics does not remove mount/provider failures. TV and legacy anime summaries
 retain explicit season/episode identities.
+
+
+## Featurette attachments (schema 5)
+
+Explicit featurette previews bind a stable source generation and fingerprint, operator
+completion confirmation, imported movie parent and receipt, historical target descriptor,
+configuration and restore epoch. A durable worker command may publish the reviewed
+source exclusively under the parent's `Featurettes` folder. Preview persists the reviewed
+role before ordinary matching can run; it does not authorize publication. Attachment
+state and exact
+publication receipts survive interruption; pending hardlinks and cleanup are recovered
+under the media lease with unchanged fences. Occupied or modified paths conflict. These
+sources bypass ordinary film processing and never create subtitle jobs. Snapshot
+`extra_attachments` follows source pagination; `source_progress.extras` is a separate
+whole-source category. This implementation does not support version selection.
+
+Schema 4 requires an explicit offline `extra_migration.migrate_schema4` call after
+stopping roles and validating a backup. It takes worker, filesystem and access locks,
+validates the exact old schema, rejects active commands, claims and incomplete
+publication/reconciliation, applies a transaction and rotates the epoch. Normal startup rejects schema 4 and does not migrate it.
+Production migration, deployment and client acceptance remain separate.
+
+## Independent completion evidence and variant selection
+
+`completion-confirm` records an explicit operator completion fact for one exact source
+ID, generation and fingerprint after source-root, stable observation and age checks.
+It performs no metadata search or publication; subsequent normal worker processing
+can identify the work independently. A replacement generation cannot inherit the
+fact. Existing mapping review readiness remains supported.
+
+Variant previews explicitly associate reviewed work/episode/edition identities and
+persist selection revision; encoding quality is not an edition. Worker switches use
+a source-qualified target, verify the new link before selection CAS, cancel old
+subtitle claims, and retire only exact owned version assets after managed backups.
+Original sources, shared posters and extras remain. Ambiguous interrupted filesystem
+names become conflicts, not ownership. Config, epoch, source/root, plan and selection
+fences are rechecked; actual provider and playback acceptance remain separate.

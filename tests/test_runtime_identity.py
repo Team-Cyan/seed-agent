@@ -41,14 +41,21 @@ def test_connection_rechecks_identity_before_lock_or_privacy(tmp_path, monkeypat
     monkeypatch.delenv("PUID", raising=False)
     monkeypatch.delenv("PGID", raising=False)
     path = tmp_path / "state.db"
-    path.write_bytes(b"untouched")
+    if store is MediaStore:
+        store(path)
+    else:
+        path.write_bytes(b"untouched")
     obj = store(path, initialize=False)
+    before = path.read_bytes()
+    lock = path.with_name("state.db.access.lock")
+    lock_before = lock.stat().st_mtime_ns if lock.exists() else None
     path.chmod(0o664)
     mismatch(monkeypatch)
     with pytest.raises(RuntimeIdentityError), obj._connect():
         pytest.fail("connection must not open")
     assert stat.S_IMODE(path.stat().st_mode) == 0o664
-    assert not path.with_name("state.db.access.lock").exists()
+    assert path.read_bytes() == before
+    assert (lock.stat().st_mtime_ns if lock.exists() else None) == lock_before
 
 
 @pytest.mark.parametrize(

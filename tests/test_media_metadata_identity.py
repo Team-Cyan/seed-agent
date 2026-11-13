@@ -89,6 +89,42 @@ def test_bilingual_and_edition_hints_remain_separate(filename, query):
     assert "movie" not in queries
 
 
+@pytest.mark.parametrize(
+    "filename,title,query",
+    [
+        ("I.S.S.2023.1080p.mkv", "I.S.S.", "I.S.S."),
+        ("KungFu.Stuntmen.2023.4K.WEB-DL.mkv", "Kung Fu Stuntmen", "Kung Fu Stuntmen"),
+    ],
+)
+def test_provider_retrieval_preserves_acronyms_and_word_boundaries(
+    monkeypatch, filename, title, query
+):
+    mapping, _, calls = identify(
+        monkeypatch, "/media/movie/" + filename, [record(title, 2023, queries=[query])]
+    )
+    assert mapping.tmdb_id == 1
+    assert any(params.get("query") == query for _, params in calls)
+
+
+def test_decimal_title_survives_technical_suffix_without_inventing_year():
+    queries, year, episode = identity_hints(
+        Path("/media/movie/EVANGELION.3.333 YOU CAN (NOT) REDO.UHD.HEVC.3840x2160.mkv"),
+        "/media",
+    )
+    assert queries == ["EVANGELION 3.333 YOU CAN (NOT) REDO"]
+    assert year is None and episode is None
+
+
+def test_movie_directory_does_not_resolve_movie_tv_ambiguity(monkeypatch):
+    mapping, candidates, _ = identify(
+        monkeypatch,
+        "/media/movie/The.Flash.2023.1080p.mkv",
+        [record("The Flash", 2023), record("The Flash", 2023, kind="tv", identity=2)],
+    )
+    assert mapping is None
+    assert {c["content_type"] for c in candidates if "content_type" in c} == {"movie", "tv"}
+
+
 def test_accent_normalization_matches_without_fuzzy_guess(monkeypatch):
     mapping, _, _ = identify(
         monkeypatch,
