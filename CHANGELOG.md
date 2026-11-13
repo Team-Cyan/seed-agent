@@ -4,6 +4,15 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.29.2 - 2026-11-14
+
+### Fixed
+
+- Check controller-reviewed source generations and fingerprints, capture the
+  command baseline and enqueue within one SQLite transaction. Recheck the same
+  reviewed sources before worker execution, preserving existing command callers
+  and coalescing behavior.
+
 ## 0.29.1 - 2026-11-13
 
 ### Fixed

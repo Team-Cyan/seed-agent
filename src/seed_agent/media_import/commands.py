@@ -2,9 +2,11 @@
 
 import hashlib
 import json
+import re
 import sqlite3
 import time
 import uuid
+from contextlib import nullcontext
 from pathlib import Path
 
 from seed_agent.config_views import load_view
@@ -30,12 +32,27 @@ MAX_PENDING = 100
 MAX_PAYLOAD = 32_000
 
 
-def baseline(store, action, payload):
-    if action in {"scan", "subtitles"}:
+def baseline(store, action, payload, *, connection=None):
+    expected = payload.get("_expected_sources")
+    prior_baseline = payload.get("_baseline")
+    if expected is None and isinstance(prior_baseline, dict):
+        expected = prior_baseline.get("source_fences")
+    if action in {"scan", "subtitles"} and not expected:
         return None
-    with store._connect() as conn:
+    with nullcontext(connection) if connection is not None else store._connect() as conn:
         source_id = payload.get("source_id")
         evidence = []
+        if expected:
+            for item in expected:
+                evidence.append(
+                    conn.execute(
+                        "SELECT s.generation,s.fingerprint,s.missing_count,s.status,"
+                        "(SELECT MAX(generation) FROM media_source_files "
+                        "WHERE profile=s.profile AND path=s.path) "
+                        "FROM media_source_files s WHERE s.id=?",
+                        (item["source_id"],),
+                    ).fetchone()
+                )
         if action == "variant-switch":
             found = conn.execute(
                 "SELECT payload_json FROM media_events WHERE id=? AND event='variant_preview'",
@@ -111,7 +128,8 @@ def baseline(store, action, payload):
                 if not preview:
                     raise ValueError("unknown local subtitle preview")
                 evidence.append(preview)
-        return hashlib.sha256(json.dumps(evidence, sort_keys=True).encode()).hexdigest()
+        digest = hashlib.sha256(json.dumps(evidence, sort_keys=True).encode()).hexdigest()
+        return {"source_fences": expected, "digest": digest} if expected else digest
 
 
 def command_store(path: Path, *, read_only=False):
@@ -119,7 +137,9 @@ def command_store(path: Path, *, read_only=False):
     return view, MediaStore(media_state_path(view), initialize=False, read_only=read_only)
 
 
-def submit(path: Path, action, payload=None, *, execute=False):
+def submit(
+    path: Path, action, payload=None, *, execute=False, expected_sources=None, expected_context=None
+):
     if type(execute) is not bool:
         raise ValueError("execute must be boolean")
     if action not in ACTIONS:
@@ -162,24 +182,91 @@ def submit(path: Path, action, payload=None, *, execute=False):
         from seed_agent.media_import.subtitles.local_import import validate_request
 
         validate_request(payload, execute=execute)
+    if expected_sources is not None:
+        if not isinstance(expected_sources, list) or not 1 <= len(expected_sources) <= 6:
+            raise ValueError("expected sources must contain 1 to 6 source fences")
+        ids = set()
+        for item in expected_sources:
+            if (
+                not isinstance(item, dict)
+                or set(item) != {"source_id", "generation", "fingerprint"}
+                or not isinstance(item["source_id"], str)
+                or not item["source_id"]
+                or type(item["generation"]) is not int
+                or item["generation"] < 1
+                or not isinstance(item["fingerprint"], str)
+                or not item["fingerprint"]
+                or item["source_id"] in ids
+            ):
+                raise ValueError("invalid or duplicate expected source fence")
+            ids.add(item["source_id"])
+        expected_sources = sorted(
+            (dict(item) for item in expected_sources), key=lambda item: item["source_id"]
+        )
+    if expected_context is not None:
+        if (
+            not isinstance(expected_context, dict)
+            or set(expected_context) != {"source_id", "config_revision", "epoch"}
+            or not isinstance(expected_context["source_id"], str)
+            or not expected_context["source_id"]
+            or not isinstance(expected_context["config_revision"], str)
+            or not re.fullmatch(r"[0-9a-fA-F]{64}", expected_context["config_revision"])
+            or not isinstance(expected_context["epoch"], str)
+            or not re.fullmatch(r"[0-9a-fA-F]{32}", expected_context["epoch"])
+        ):
+            raise ValueError("invalid expected media context")
+        expected_context = dict(expected_context)
     view, store = command_store(path)
+    if expected_context is not None and (
+        view.source_id != expected_context["source_id"]
+        or view.effective_revision != expected_context["config_revision"]
+    ):
+        raise ValueError("expected media configuration changed")
     if not view.config.media_import.enabled:
         raise ValueError("media is disabled")
-    payload = {**payload, "_baseline": baseline(store, action, payload)}
-    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     modes = {
         kind: getattr(view.config.media_import, kind + "_policy") if execute else "preview"
         for kind in ["import", "subtitle", "reconcile"]
     }
-    epoch = store.epoch()
-    key = hashlib.sha256(
-        json.dumps(
-            [action, encoded, modes, view.source_id, view.effective_revision, epoch, execute],
-            sort_keys=True,
-        ).encode()
-    ).hexdigest()
     with store._connect() as conn:
         conn.execute("BEGIN IMMEDIATE")
+        epoch_row = conn.execute("SELECT epoch FROM media_control WHERE id=1").fetchone()
+        if not epoch_row:
+            raise ValueError("media restore epoch missing")
+        epoch = epoch_row[0]
+        if expected_context is not None and epoch != expected_context["epoch"]:
+            raise ValueError("expected media restore epoch changed")
+        for item in expected_sources or []:
+            current = conn.execute(
+                "SELECT s.generation,s.fingerprint,s.missing_count,s.status,"
+                "(SELECT MAX(generation) FROM media_source_files "
+                "WHERE profile=s.profile AND path=s.path) "
+                "FROM media_source_files s WHERE s.id=?",
+                (item["source_id"],),
+            ).fetchone()
+            if (
+                not current
+                or current[0] != item["generation"]
+                or current[1] != item["fingerprint"]
+                or current[2] != 0
+                or current[3] == "removed"
+                or current[4] != item["generation"]
+            ):
+                raise ValueError("expected source baseline changed")
+        baseline_payload = {**payload, "_expected_sources": expected_sources}
+        payload = {
+            **payload,
+            "_baseline": baseline(store, action, baseline_payload, connection=conn),
+        }
+        encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+        if len(encoded.encode()) > MAX_PAYLOAD:
+            raise ValueError("media command body exceeds limit")
+        key = hashlib.sha256(
+            json.dumps(
+                [action, encoded, modes, view.source_id, view.effective_revision, epoch, execute],
+                sort_keys=True,
+            ).encode()
+        ).hexdigest()
         prior = conn.execute(
             "SELECT id,status FROM media_commands WHERE coalesce_key=? "
             "AND status IN ('queued','running') ORDER BY created LIMIT 1",

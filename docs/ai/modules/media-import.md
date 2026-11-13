@@ -33,6 +33,12 @@ executes scans/providers on its independent clock. `media-status` reads paginate
 filenames default to metadata original titles. Existing torrent cleanup authority
 and tracker/RSS workflows remain separate.
 
+Trusted controllers may supply `expected_sources` to `commands.submit`. Reviewed
+source generation/fingerprint checks, baseline capture, restore epoch and command
+insertion then share one `BEGIN IMMEDIATE` connection. The worker rechecks these
+source fences before execution. Internal fences remain inside the reserved
+baseline, not public domain request fields; existing callers remain valid.
+
 ## Fenced operator review
 
 A durable review may carry a publication projection with the exact relative
