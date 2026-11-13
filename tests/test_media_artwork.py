@@ -82,7 +82,7 @@ def test_shared_show_poster_once_all_episode_refs_and_last_source_cleanup(media)
 def test_manual_or_modified_poster_is_preserved(media):
     import_three(media)
     engine, _, target, _ = media
-    parent = next(target.iterdir())
+    parent = next(path for path in target.iterdir() if path.is_dir())
     manual = parent / "poster.png"
     manual.write_bytes(b"manual")
     provider = Posters()

@@ -53,8 +53,9 @@ def migrate_schema4(path, *, expected_epoch=None, backup=None, expected_backup_s
             "SELECT 1 FROM media_publications WHERE status='pending' LIMIT 1",
             "SELECT 1 FROM media_artifacts WHERE status IN "
             "('publishing','deleting','retiring') LIMIT 1",
-            "SELECT 1 FROM media_subtitle_jobs WHERE status='running' "
-            "OR claim_token IS NOT NULL LIMIT 1",
+            # Finished jobs retain claim tokens as stale-publisher fences.
+            # Only running state denotes work that must be reconciled offline.
+            "SELECT 1 FROM media_subtitle_jobs WHERE status='running' LIMIT 1",
             "SELECT 1 FROM media_reconcile_actions WHERE status='executing' LIMIT 1",
             "SELECT 1 FROM media_scan_runs WHERE status='running' LIMIT 1",
         ):

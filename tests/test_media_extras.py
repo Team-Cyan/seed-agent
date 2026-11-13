@@ -270,6 +270,26 @@ def test_migration_rejects_active_work_without_mutation(tmp_path, case):
         assert list(conn.iterdump()) == before
 
 
+@pytest.mark.parametrize("status", ["satisfied", "missing", "review_required"])
+def test_migration_preserves_finished_subtitle_claim_fences(tmp_path, status):
+    path = tmp_path / "old.db"
+    with sqlite3.connect(path) as conn:
+        conn.executescript(SCHEMA + CONTROL_SCHEMA)
+        conn.execute("INSERT INTO media_control VALUES(1,'old',4)")
+        conn.execute(
+            "INSERT INTO media_subtitle_jobs(id,source_id,generation,requirement,status,"
+            "next_attempt,first_attempt,payload_json,claim_token) "
+            "VALUES('j','s',1,'zh',?,0,0,'{}','retained-fence')",
+            (status,),
+        )
+    migrate_schema4(path, expected_epoch="old")
+    with sqlite3.connect(path) as conn:
+        assert conn.execute("SELECT status,claim_token FROM media_subtitle_jobs").fetchone() == (
+            status,
+            "retained-fence",
+        )
+
+
 def test_same_inode_manual_target_race_is_not_adopted(setup_extra, monkeypatch):
     engine, source, _, parent = setup_extra
     sid = add_source(engine, source, "extra.mkv")

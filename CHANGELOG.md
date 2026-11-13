@@ -4,6 +4,16 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+## 0.29.1 - 2026-11-13
+
+### Fixed
+
+- Preserve completed subtitle claim tokens during explicit offline migration.
+  Reject currently running subtitle work without mistaking historical fences
+  for active producers.
+- Select the actual library directory in the manual-poster preservation fixture
+  instead of depending on filesystem directory order.
+
 ## 0.29.0 - 2026-11-13
 
 ### Added
